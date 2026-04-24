@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String, Text, func
+from sqlalchemy import DateTime, Enum, ForeignKey, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -26,7 +26,7 @@ class Contrato(Base):
     arquivo_path: Mapped[str | None] = mapped_column(String(500))  # path local do PDF original (legado)
     arquivo_assinado_path: Mapped[str | None] = mapped_column(String(500))  # PDF assinado
     # Lista de arquivos: [{"filename": str, "path": str, "clicksign_key": str|null}]
-    arquivos: Mapped[list] = mapped_column(JSONB, default=list, server_default="'[]'::jsonb")
+    arquivos: Mapped[list] = mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))
 
     status: Mapped[str] = mapped_column(
         Enum(
