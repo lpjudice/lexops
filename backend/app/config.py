@@ -32,6 +32,11 @@ class Settings(BaseSettings):
 
     @property
     def database_url(self) -> str:
+        import os
+        # Fly.io sets DATABASE_URL; normalize postgres:// → postgresql://
+        raw = os.environ.get("DATABASE_URL", "")
+        if raw:
+            return raw.replace("postgres://", "postgresql://", 1)
         return (
             f"postgresql://{self.db_user}:{self.db_password}"
             f"@{self.db_host}:{self.db_port}/{self.db_name}"
