@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { type Usuario, usuariosApi } from '../api/usuarios'
 
 const TOKEN_KEY = 'gestor_jwt'

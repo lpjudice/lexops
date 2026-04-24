@@ -65,7 +65,7 @@ function SyncBanner({ result, ultimoAndamentoPre }: {
   )
 }
 
-export default function AndamentosSection({ processoId, tribunal, ultimoAndamentoData, ultimoCheck }: Props) {
+export default function AndamentosSection({ processoId, ultimoAndamentoData, ultimoCheck }: Props) {
   const qc = useQueryClient()
   const [fonte, setFonte] = useState<Fonte>('datajud')
   const [offset, setOffset] = useState(0)

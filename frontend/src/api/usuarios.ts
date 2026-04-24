@@ -12,6 +12,7 @@ export interface Usuario {
   clientes_restritos: boolean
   created_at: string
   clientes_ids: string[]
+  primeiro_acesso: boolean
 }
 
 export interface LoginRequest {

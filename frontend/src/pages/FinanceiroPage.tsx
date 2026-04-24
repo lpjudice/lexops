@@ -139,7 +139,7 @@ export default function FinanceiroPage() {
   })
 
   const atualizarTudo = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<HonorarioCreate & { status: StatusHonorario }> }) =>
+    mutationFn: ({ id, data }: { id: string; data: Partial<HonorarioCreate & { status: StatusHonorario; contrato_orfao: boolean }> }) =>
       financeiroApi.atualizarHonorario(id, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['honorarios'] })
