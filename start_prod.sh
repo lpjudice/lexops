@@ -1,16 +1,31 @@
 #!/bin/sh
 set -e
 
-# Start FastAPI in background
-cd /app/backend
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 2 &
+echo "[START] Starting Gestor Juridico..."
 
-# Wait for API to be ready
-echo "Waiting for API..."
-for i in $(seq 1 30); do
-  curl -sf http://127.0.0.1:8000/health && break
+# Start FastAPI, capturing output
+cd /app/backend
+echo "[START] Launching uvicorn..."
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1 2>&1 &
+UVICORN_PID=$!
+
+echo "[START] Waiting for API to be ready (PID=$UVICORN_PID)..."
+TRIES=0
+until curl -sf http://127.0.0.1:8000/health > /dev/null 2>&1; do
+  TRIES=$((TRIES+1))
+  if [ $TRIES -ge 60 ]; then
+    echo "[START] ERROR: API did not start after 60s"
+    # Print any uvicorn output
+    wait $UVICORN_PID || true
+    exit 1
+  fi
+  # Check if uvicorn died
+  if ! kill -0 $UVICORN_PID 2>/dev/null; then
+    echo "[START] ERROR: uvicorn process died"
+    exit 1
+  fi
   sleep 1
 done
 
-# Start nginx in foreground
+echo "[START] API is ready. Starting nginx..."
 nginx -g 'daemon off;'
