@@ -1,0 +1,350 @@
+/* ─── Lista ──────────────────────────────────────────────────────────── */
+.lista {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ─── Card ───────────────────────────────────────────────────────────── */
+.card {
+  background: var(--white);
+  border: 1px solid var(--gray-border);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.card:hover {
+  border-color: var(--teal);
+  box-shadow: var(--shadow-card-hover);
+}
+
+/* ─── Card top ───────────────────────────────────────────────────────── */
+.cardTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 17px 20px;
+  cursor: pointer;
+  gap: 16px;
+}
+
+.cardTitulo {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--dark);
+  line-height: 1.3;
+}
+
+.cardMeta {
+  font-size: 12px;
+  color: var(--gray-mid);
+  margin-top: 3px;
+}
+
+.cardTotal {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--dark);
+  margin-right: 12px;
+  white-space: nowrap;
+}
+
+.cardActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.btnExpand {
+  background: var(--light);
+  border: 1px solid var(--gray-border);
+  border-radius: 6px;
+  padding: 4px 9px;
+  font-size: 11px;
+  cursor: pointer;
+  color: var(--gray-mid);
+  font-family: inherit;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.btnExpand:hover {
+  background: var(--teal-light);
+  border-color: var(--teal);
+  color: var(--teal);
+}
+
+/* ─── Card body ──────────────────────────────────────────────────────── */
+.cardBody {
+  border-top: 1px solid var(--gray-border);
+  padding: 20px 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  background: #fafafa;
+}
+
+.sectionTitle {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--teal);
+  margin-bottom: 10px;
+}
+
+/* ─── Status badges ──────────────────────────────────────────────────── */
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+}
+
+.status_rascunho {
+  background: #f3f4f6;
+  color: var(--gray-mid);
+}
+
+.status_aguardando_pagamento {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.status_enviado {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.status_pago {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+/* ─── Tabela de itens ────────────────────────────────────────────────── */
+.itensTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.itensTable th {
+  text-align: left;
+  padding: 7px 10px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--gray-mid);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--gray-border);
+  background: var(--light);
+}
+
+.itensTable td {
+  padding: 9px 10px;
+  border-bottom: 1px solid #f5f5f5;
+  color: #3a3a3a;
+}
+
+.itensTable tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.tdValor {
+  text-align: right;
+  font-weight: 600;
+  color: var(--dark);
+  white-space: nowrap;
+}
+
+.totalRow td {
+  padding-top: 11px;
+  border-top: 2px solid var(--gray-border);
+  border-bottom: none;
+  font-weight: 700;
+  color: var(--dark);
+}
+
+/* ─── Form novo item ─────────────────────────────────────────────────── */
+.itemForm {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.itemForm input,
+.itemForm select {
+  flex: 1;
+  min-width: 120px;
+}
+
+.itemForm .inputValor {
+  max-width: 120px;
+}
+
+/* ─── Ações ──────────────────────────────────────────────────────────── */
+.acoes {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  padding-top: 4px;
+}
+
+/* ─── Email row ──────────────────────────────────────────────────────── */
+.emailRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.emailRow input {
+  flex: 1;
+  min-width: 200px;
+}
+
+/* ─── Button variants ────────────────────────────────────────────────── */
+.btnPdf {
+  background: #1d4ed8 !important;
+}
+
+.btnPdf:hover {
+  background: #1e40af !important;
+  box-shadow: 0 4px 14px rgba(29, 78, 216, 0.28) !important;
+}
+
+.btnEmail {
+  background: #059669 !important;
+}
+
+.btnEmail:hover {
+  background: #047857 !important;
+  box-shadow: 0 4px 14px rgba(5, 150, 105, 0.28) !important;
+}
+
+.btnPago {
+  background: var(--teal) !important;
+}
+
+.btnPago:hover {
+  background: #009478 !important;
+  box-shadow: 0 4px 14px rgba(0, 176, 144, 0.28) !important;
+}
+
+.btnDrive {
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 18px;
+  border-radius: 8px;
+  border: 1px solid #4285f4;
+  background: #e8f0fe;
+  color: #1a73e8;
+  text-decoration: none;
+  transition: all 0.15s;
+}
+.btnDrive:hover {
+  background: #1a73e8;
+  color: #fff;
+}
+
+/* ─── Status cancelado ───────────────────────────────────────────────── */
+.status_cancelado {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.cardCancelado {
+  opacity: 0.7;
+  border-color: #fca5a5;
+}
+
+/* ─── Cancel / Duplicate buttons ─────────────────────────────────────── */
+.btnCancelar {
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 18px;
+  border-radius: 8px;
+  border: 1px solid #fca5a5;
+  background: #fee2e2;
+  color: #b91c1c;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.btnCancelar:hover { background: #fecaca; border-color: #f87171; }
+.btnCancelar:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btnDuplicar {
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 18px;
+  border-radius: 8px;
+  border: 1px solid #c7d2fe;
+  background: #eef2ff;
+  color: #4338ca;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.btnDuplicar:hover { background: #e0e7ff; border-color: #a5b4fc; }
+.btnDuplicar:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ─── Comprovante line in table ──────────────────────────────────────── */
+.comprovanteLine {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btnRemoveComprovante {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #9ca3af;
+  font-size: 14px;
+  padding: 0 2px;
+  line-height: 1;
+}
+.btnRemoveComprovante:hover { color: #dc2626; }
+
+.btnAnexar {
+  cursor: pointer;
+  font-size: 12px;
+  color: #6b7280;
+  white-space: nowrap;
+}
+.btnAnexar:hover { color: #00b090; }
+
+/* ─── File picker in item form ───────────────────────────────────────── */
+.filePickerLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 8px 12px;
+  border: 1px dashed #d1d5db;
+  border-radius: 8px;
+  cursor: pointer;
+  color: #6b7280;
+  background: #fff;
+  white-space: nowrap;
+  min-width: 130px;
+  font-family: inherit;
+  transition: border-color 0.15s, color 0.15s;
+}
+.filePickerLabel:hover { border-color: #00b090; color: #00b090; }

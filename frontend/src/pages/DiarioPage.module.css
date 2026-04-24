@@ -1,0 +1,556 @@
+.authBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  padding: 10px 16px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: #92400e;
+  font-weight: 500;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.btnAuth {
+  background: #00b090;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.btnAuth:hover { background: #009b7e; }
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.daysControl {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+
+.daysLabel {
+  font-size: 11px;
+  color: #9ca3af;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.daysInput {
+  width: 40px;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 700;
+  color: #374151;
+  text-align: center;
+  outline: none;
+  font-family: inherit;
+  -moz-appearance: textfield;
+}
+.daysInput::-webkit-outer-spin-button,
+.daysInput::-webkit-inner-spin-button { -webkit-appearance: none; }
+
+.btnGmail {
+  background: #00b090;
+  color: #fff;
+  border: none;
+  padding: 7px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  font-family: inherit;
+}
+.btnGmail:hover { background: #009b7e; }
+.btnGmail:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btnTribunais {
+  background: #e8f7f4;
+  color: #00b090;
+  border: 1.5px solid #00b090;
+  padding: 6px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
+}
+.btnTribunais:hover { background: #c8ede7; }
+.btnTribunais:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #ef4444;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 999px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.syncMsg {
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  color: #15803d;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.filtros {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.filtroBtn {
+  padding: 5px 14px;
+  border-radius: 999px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  color: #6b7280;
+  transition: all 0.15s;
+}
+.filtroBtn:hover { border-color: #a78bfa; color: #7c3aed; }
+.filtroAtivo {
+  background: #ede9fe;
+  border-color: #a78bfa;
+  color: #7c3aed;
+  font-weight: 600;
+}
+
+.feed {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-left: 3px solid #a78bfa;
+  border-radius: 8px;
+  padding: 16px;
+  transition: border-color 0.15s;
+}
+.card:hover { border-color: #8b5cf6; }
+.cardLida {
+  border-left-color: #d1d5db;
+  opacity: 0.75;
+}
+.cardSemPub {
+  border-left-color: #e5e7eb;
+  opacity: 0.6;
+  background: #fafafa;
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cardMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cardActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fonte {
+  font-size: 11px;
+  font-weight: 700;
+  background: #e8f7f4;
+  color: #00796b;
+  border: 1px solid #80cbc4;
+  padding: 2px 7px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  display: inline-flex;
+  align-items: center;
+}
+
+.fonteLink {
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.fonteLink:hover { background: #c8ede7; }
+
+.tribunal {
+  font-size: 11px;
+  background: #f3f4f6;
+  color: #374151;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.data {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+/* tipo de ato */
+.tipoAto {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+.tipoSentenca  { background: #fef3c7; color: #92400e; }
+.tipoAcordao   { background: #dbeafe; color: #1d4ed8; }
+.tipoDecisao   { background: #ede9fe; color: #6d28d9; }
+.tipoIntimacao { background: #fee2e2; color: #b91c1c; }
+.tipoCitacao   { background: #fce7f3; color: #be185d; }
+.tipoDespacho  { background: #ecfdf5; color: #065f46; }
+.tipoOutro     { background: #f3f4f6; color: #6b7280; }
+
+.cnj {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.vinculado {
+  font-size: 12px;
+  color: #16a34a;
+  font-weight: 600;
+}
+
+.btnVincular {
+  font-size: 11px;
+  color: #7c3aed;
+  background: none;
+  border: 1px dashed #a78bfa;
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.btnVincular:hover { background: #ede9fe; }
+
+.vincularForm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.btnCancelar {
+  font-size: 13px;
+  background: none;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  color: #6b7280;
+}
+.btnCancelar:hover { background: #f9fafb; }
+
+.btnLida {
+  font-size: 12px;
+  background: #ecfdf5;
+  color: #16a34a;
+  border: 1px solid #86efac;
+  border-radius: 4px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.btnLida:hover { background: #d1fae5; }
+
+.btnVer {
+  font-size: 12px;
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.btnVer:hover { background: #e5e7eb; }
+
+.resumo {
+  font-size: 13px;
+  color: #374151;
+  line-height: 1.6;
+  margin-top: 4px;
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── Painel IA ──────────────────────────────────────────────────────────── */
+.iaPanel {
+  margin-top: 10px;
+  border-top: 1px solid #f3f4f6;
+  padding-top: 10px;
+}
+
+.btnAnalisar {
+  font-size: 12px;
+  font-weight: 600;
+  background: #ede9fe;
+  color: #6d28d9;
+  border: 1px solid #a78bfa;
+  border-radius: 6px;
+  padding: 5px 14px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btnAnalisar:hover { background: #ddd6fe; }
+.btnAnalisar:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btnAnalisarSmall {
+  font-size: 11px;
+  background: none;
+  color: #9ca3af;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  padding: 3px 7px;
+  cursor: pointer;
+}
+.btnAnalisarSmall:hover { color: #00b090; border-color: #00b090; }
+
+.iaErro {
+  font-size: 12px;
+  color: #b91c1c;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.iaResultado {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.iaGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  color: #374151;
+}
+
+.iaLabel {
+  font-weight: 700;
+  color: #9ca3af;
+  margin-right: 4px;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+}
+
+.iaSemResposta {
+  font-size: 12px;
+  color: #16a34a;
+  font-weight: 600;
+}
+
+.iaResumo {
+  font-size: 13px;
+  color: #374151;
+  line-height: 1.6;
+  background: #f8f9fa;
+  border-left: 3px solid #00b090;
+  padding: 8px 12px;
+  border-radius: 0 6px 6px 0;
+  margin: 0;
+}
+
+.iaAcoes {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.btnCriarPrazo {
+  font-size: 12px;
+  font-weight: 600;
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fbbf24;
+  border-radius: 6px;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.btnCriarPrazo:hover { background: #fde68a; }
+.btnCriarPrazo:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btnCriarTese {
+  font-size: 12px;
+  font-weight: 600;
+  background: #ede9fe;
+  color: #6d28d9;
+  border: 1px solid #a78bfa;
+  border-radius: 6px;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.btnCriarTese:hover { background: #ddd6fe; }
+.btnCriarTese:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.acaoMsg {
+  font-size: 12px;
+  color: #15803d;
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  border-radius: 5px;
+  padding: 5px 10px;
+}
+
+/* ── Termos de monitoramento ─────────────────────────────────────────────── */
+.termosBox {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 8px 14px;
+  margin-bottom: 16px;
+}
+
+.termosInline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.termosLabel {
+  font-size: 11px;
+  font-weight: 700;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.termosInfo {
+  font-size: 10px;
+  font-weight: 500;
+  color: #9ca3af;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: default;
+}
+
+.termosChips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.termoChipCustom {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: #e8f7f4;
+  color: #00796b;
+  border: 1px solid #80cbc4;
+  border-radius: 999px;
+  padding: 2px 8px 2px 10px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.termoRemove {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0;
+  opacity: 0.7;
+  font-family: inherit;
+}
+.termoRemove:hover { opacity: 1; }
+
+.termoAddInline {
+  display: inline-flex;
+}
+
+.termoInputInline {
+  border: 1px dashed #d1d5db;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  background: transparent;
+  color: #374151;
+  width: 150px;
+  transition: border-color 0.15s, width 0.2s;
+}
+.termoInputInline:focus {
+  border-color: #00b090;
+  border-style: solid;
+  width: 200px;
+}
+.termoInputInline::placeholder { color: #9ca3af; }
+
+.textoCompleto {
+  font-size: 12px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 12px;
+  margin-top: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 400px;
+  overflow-y: auto;
+  color: #374151;
+  line-height: 1.6;
+}

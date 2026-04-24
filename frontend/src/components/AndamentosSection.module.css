@@ -1,0 +1,365 @@
+.wrap {
+  margin-top: 16px;
+  border-top: 1px solid #f3f4f6;
+  padding-top: 14px;
+}
+
+/* ── Header ────────────────────────────────────────────────────────── */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.titleGroup {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #374151;
+}
+
+.ultimoCheck {
+  font-size: 10.5px;
+  color: #9ca3af;
+}
+
+.headerActions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* ── Buttons ────────────────────────────────────────────────────────── */
+.btnSync {
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.12s;
+  white-space: nowrap;
+}
+.btnSync:hover:not(:disabled) { border-color: #00b090; color: #00b090; }
+.btnSync:disabled { opacity: 0.6; cursor: default; background: #f9fafb; }
+
+.syncingLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btnLer {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 1px solid #dbeafe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.12s;
+}
+.btnLer:hover:not(:disabled) { background: #dbeafe; }
+.btnLer:disabled { opacity: 0.5; cursor: default; }
+
+.semSupporte {
+  font-size: 11px;
+  color: #9ca3af;
+  cursor: default;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px dashed #e5e7eb;
+}
+
+/* ── Spinner ────────────────────────────────────────────────────────── */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.spinner {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border: 2px solid #d1d5db;
+  border-top-color: #00b090;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+/* ── Progress bar ───────────────────────────────────────────────────── */
+@keyframes progress {
+  0%   { left: -40%; width: 40%; }
+  50%  { left: 30%; width: 50%; }
+  100% { left: 110%; width: 40%; }
+}
+
+.progressBar {
+  position: relative;
+  height: 3px;
+  background: #e5e7eb;
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.progressFill {
+  position: absolute;
+  height: 100%;
+  background: #00b090;
+  border-radius: 2px;
+  animation: progress 1.4s ease-in-out infinite;
+}
+
+/* ── Sync result banners ────────────────────────────────────────────── */
+.banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12.5px;
+  border-radius: 7px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+
+.bannerIcon {
+  flex-shrink: 0;
+  font-style: normal;
+  font-weight: 700;
+  margin-top: 1px;
+}
+
+.bannerSucesso { background: #dcfce7; border: 1px solid #bbf7d0; color: #166534; }
+.bannerNeutro  { background: #f3f4f6; border: 1px solid #e5e7eb; color: #4b5563; }
+.bannerAviso   { background: #fef9c3; border: 1px solid #fde68a; color: #854d0e; }
+.bannerErro    { background: #fee2e2; border: 1px solid #fca5a5; color: #b91c1c; }
+
+/* ── Empty state ────────────────────────────────────────────────────── */
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 20px 0 10px;
+  text-align: center;
+}
+
+.emptyIcon {
+  font-size: 24px;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.emptyMsg {
+  font-size: 13px;
+  color: #374151;
+  margin: 0;
+  font-weight: 500;
+}
+
+.emptyHint {
+  font-size: 11.5px;
+  color: #9ca3af;
+  margin: 0;
+}
+
+.empty {
+  font-size: 13px;
+  color: #9ca3af;
+  margin: 8px 0;
+}
+
+/* ── Cards ──────────────────────────────────────────────────────────── */
+.lista {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.card {
+  background: #fafafa;
+  border: 1px solid #f3f4f6;
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+.cardNaoLido {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.cardMeta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+
+.data {
+  font-size: 11px;
+  font-weight: 700;
+  color: #374151;
+  font-variant-numeric: tabular-nums;
+}
+
+.grauBadge {
+  font-size: 10px;
+  font-weight: 600;
+  background: #e8f7f4;
+  color: #00b090;
+  border: 1px solid #a7f3d0;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.tipo {
+  font-size: 10.5px;
+  color: #6b7280;
+  font-style: italic;
+}
+
+.novoBadge {
+  font-size: 10px;
+  font-weight: 700;
+  background: #1d4ed8;
+  color: #fff;
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.descricao {
+  font-size: 12.5px;
+  color: #374151;
+  line-height: 1.5;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+/* ── jus.br token renew button ──────────────────────────────────────── */
+.btnTokenReset {
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid #bbf7d0;
+  background: #dcfce7;
+  color: #166534;
+  cursor: pointer;
+  line-height: 1;
+  transition: all 0.12s;
+}
+.btnTokenReset:hover { background: #bbf7d0; }
+
+/* ── Fonte toggle (DataJud | jus.br) ────────────────────────────────── */
+.fonteToggle {
+  display: flex;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.fonteBtn {
+  font-size: 11.5px;
+  padding: 3px 10px;
+  background: #fff;
+  border: none;
+  color: #6b7280;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.1s;
+}
+.fonteBtn:hover { background: #f3f4f6; color: #374151; }
+.fonteBtnActive {
+  background: #00b090;
+  color: #fff;
+  font-weight: 600;
+}
+.fonteBtnActive:hover { background: #009a7d; color: #fff; }
+
+/* ── JusBR token indicator ──────────────────────────────────────────── */
+.btnTokenSet {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid #bbf7d0;
+  background: #dcfce7;
+  color: #166534;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.12s;
+  white-space: nowrap;
+}
+.btnTokenSet:hover { background: #bbf7d0; }
+
+/* ── JusBR info bar ─────────────────────────────────────────────────── */
+.jusBRInfo {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 11.5px;
+  color: #1d4ed8;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 7px;
+  padding: 7px 12px;
+  margin-bottom: 4px;
+  line-height: 1.5;
+}
+
+.jusBRInfoIcon {
+  flex-shrink: 0;
+  font-weight: 700;
+  font-style: normal;
+  margin-top: 1px;
+}
+
+/* ── JusBR source badge on cards ────────────────────────────────────── */
+.jusBRBadge {
+  font-size: 9.5px;
+  font-weight: 600;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+/* ── Pagination ─────────────────────────────────────────────────────── */
+.paginacao {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.btnPage {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.12s;
+}
+.btnPage:hover:not(:disabled) { border-color: #00b090; color: #00b090; }
+.btnPage:disabled { opacity: 0.5; cursor: default; }
+
+.pageInfo {
+  font-size: 11px;
+  color: #9ca3af;
+}

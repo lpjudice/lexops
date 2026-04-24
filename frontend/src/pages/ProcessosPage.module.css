@@ -1,0 +1,290 @@
+.twoCol {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.formErro {
+  background: #fee2e2;
+  border: 1px solid #fca5a5;
+  color: #b91c1c;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+/* ── Lista de processos como cards ── */
+.lista {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.cardInfo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  flex: 1;
+}
+
+.cnj {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1d1e20;
+  background: #f3f4f6;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.clienteNome {
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.chip {
+  font-size: 11px;
+  background: #e8f7f4;
+  color: #00b090;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.materia {
+  font-size: 12px;
+  color: #6b7280;
+  font-style: italic;
+}
+
+.cardActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* ── Info panel (detalhes do processo) ── */
+.infoPanel {
+  border-top: 1px solid #f3f4f6;
+  padding: 14px 16px;
+  background: #fafafa;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 28px;
+}
+
+.infoField {
+  display: flex;
+  flex-direction: column;
+  min-width: 140px;
+}
+
+.infoFieldFull {
+  flex-basis: 100%;
+}
+
+.infoLabel {
+  font-size: 10px;
+  font-weight: 700;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin-bottom: 2px;
+}
+
+.infoValue {
+  font-size: 13px;
+  color: #1d1e20;
+  font-weight: 500;
+}
+
+.litisChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.litisChip {
+  font-size: 12px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-weight: 500;
+}
+
+/* ── Edit panel ── */
+.editPanel {
+  border-top: 1px solid #f3f4f6;
+  padding: 16px;
+  background: #fafafa;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* ── Docs panel ── */
+.docsPanel {
+  border-top: 1px solid #f3f4f6;
+  padding: 16px;
+}
+
+/* ── Polo chips ── */
+.poloChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.poloChip {
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid #d1d5db;
+  background: #f9fafb;
+  font-size: 12px;
+  font-weight: 500;
+  color: #4b5563;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.poloChip:hover {
+  border-color: #00b090;
+  color: #00b090;
+}
+.poloChipActive {
+  background: #1d1e20;
+  border-color: #1d1e20;
+  color: #fff;
+}
+
+/* ── Polo tag on card ── */
+.poloTag {
+  font-size: 11px;
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+/* ── Header actions (title + sync button) ── */
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── Último andamento chip ── */
+.ultimoAndamento {
+  font-size: 10.5px;
+  color: #6b7280;
+  background: #f3f4f6;
+  padding: 1px 7px;
+  border-radius: 4px;
+  cursor: default;
+}
+
+/* ── Não-lidos badge on card button ── */
+.naoLidosBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 17px;
+  font-size: 10px;
+  font-weight: 700;
+  background: #1d4ed8;
+  color: #fff;
+  border-radius: 999px;
+  padding: 0 4px;
+  margin-left: 4px;
+  line-height: 1;
+}
+
+/* ── Litisconsorte tag on card ── */
+.litisTag {
+  font-size: 10.5px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+/* ── Litisconsórcio row in form ── */
+.litisRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+.litisRow > * { flex: 1; min-width: 0; }
+.litisRow > button { flex: 0 0 auto; }
+
+/* ── Filters ── */
+.filtros {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.filtroSelect {
+  font-size: 12px;
+  padding: 5px 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.filtroBtn {
+  font-size: 12px;
+  padding: 5px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.1s;
+}
+.filtroBtn:hover { border-color: #00b090; color: #00b090; }
+.filtroBtnActive { background: #00b090; color: #fff; border-color: #00b090; }
+.filtroBtnActive:hover { background: #009a7d; color: #fff; }
+
+@media (max-width: 640px) {
+  .twoCol { grid-template-columns: 1fr; }
+  .cardHeader { flex-direction: column; align-items: flex-start; }
+  .cardActions { width: 100%; justify-content: flex-end; }
+  .headerActions { flex-direction: column; align-items: flex-end; }
+}

@@ -1,0 +1,314 @@
+.uploadCard, .resultadoCard {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 1100px;
+}
+
+.uploadSection {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.uploadLabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.req { color: #ef4444; }
+
+.fileInput {
+  font-size: 13px;
+  color: #374151;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  background: #f9fafb;
+}
+
+.uploadHint {
+  font-size: 11px;
+  color: #9ca3af;
+  margin: 0;
+}
+
+.comoFunciona {
+  font-size: 12px;
+  color: #6b7280;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px 14px;
+  line-height: 1.6;
+}
+
+.erro {
+  font-size: 13px;
+  color: #dc2626;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+
+.observacoes {
+  font-size: 13px;
+  color: #374151;
+  background: #f0fdf9;
+  border: 1px solid #a7f3d0;
+  border-radius: 8px;
+  padding: 12px 14px;
+  line-height: 1.6;
+}
+
+.faltando {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.faltandoTitulo {
+  font-size: 13px;
+  font-weight: 600;
+  color: #92400e;
+  margin-bottom: 6px;
+}
+
+.faltandoLista {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 12px;
+  color: #78350f;
+  line-height: 1.8;
+}
+
+.tabelaTitulo {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.tabela {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.tabelaHeader, .tabelaRow {
+  display: grid;
+  grid-template-columns: 30px 1fr 1.4fr 1fr 48px 100px 56px;
+  align-items: start;
+  gap: 10px;
+  padding: 8px 12px;
+}
+
+.tabelaHeader {
+  align-items: center;
+  background: #f3f4f6;
+  font-size: 11px;
+  font-weight: 700;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.tabelaRow {
+  background: #fff;
+  font-size: 12px;
+  border-bottom: 1px solid #f3f4f6;
+}
+.tabelaRow:last-child { border-bottom: none; }
+.tabelaRow:hover { background: #f9fafb; }
+
+.colOrdem { color: #9ca3af; font-weight: 700; text-align: center; }
+
+.colOriginal {
+  color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.colMotivo {
+  color: #6b7280;
+  font-size: 11px;
+  white-space: normal;
+  line-height: 1.45;
+  overflow: visible;
+}
+
+.inputNome {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  color: #1d1e20;
+  width: 100%;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.inputNome:focus { border-color: #00b090; }
+
+.colAcoes {
+  display: flex;
+  gap: 2px;
+}
+
+.btnMover {
+  background: none;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  width: 24px;
+  height: 24px;
+  font-size: 12px;
+  cursor: pointer;
+  color: #6b7280;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.12s;
+}
+.btnMover:hover { background: #f3f4f6; border-color: #9ca3af; }
+.btnMover:disabled { opacity: 0.3; cursor: not-allowed; }
+
+.acoes {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+/* ── Pasta selector ────────────────────────────────────────── */
+.pastaSelector {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.pastaSelectorRow {
+  display: flex;
+  gap: 14px;
+  align-items: flex-end;
+}
+
+.pastaSelectorField {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1;
+}
+
+.pastaPath {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pastaPathLabel {
+  font-size: 11px;
+  color: #9ca3af;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.pastaPathCode {
+  font-size: 11px;
+  font-family: monospace;
+  color: #374151;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 5px;
+  padding: 3px 8px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btnCopiarPath {
+  font-size: 11px;
+  color: #6b7280;
+  background: none;
+  border: 1px solid #e5e7eb;
+  border-radius: 5px;
+  padding: 3px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  font-family: inherit;
+  transition: all 0.12s;
+}
+.btnCopiarPath:hover { border-color: #00b090; color: #00b090; }
+
+.pastaIndisponivel {
+  font-size: 11px;
+  color: #d97706;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 4px;
+  padding: 2px 8px;
+}
+
+.sucessoMsg {
+  font-size: 13px;
+  color: #15803d;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+
+/* ── Cenário badge ─────────────────────────────────────────── */
+.cenarioBadgeWrap {
+  display: flex;
+  align-items: center;
+}
+
+.cenarioBadge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: #1d4ed8;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  padding: 3px 12px;
+  letter-spacing: 0.02em;
+}
+
+/* ── Colunas novas ─────────────────────────────────────────── */
+.colPag {
+  text-align: center;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: #6b7280;
+}
+
+.colContexto {
+  font-size: 11px;
+  font-style: italic;
+  color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

@@ -1,0 +1,340 @@
+.twoCol {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.filtrosWrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.filtrosTop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.filtroSelect {
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  color: #374151;
+  background: #fff;
+  cursor: pointer;
+  min-width: 160px;
+  transition: border-color 0.15s;
+}
+.filtroSelect:focus { border-color: #00b090; }
+
+.filtroData {
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  color: #374151;
+  background: #fff;
+  transition: border-color 0.15s;
+}
+.filtroData:focus { border-color: #00b090; }
+
+.filtroSep {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.filtroLimpar {
+  font-size: 12px;
+  background: none;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 5px 12px;
+  color: #6b7280;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.12s;
+}
+.filtroLimpar:hover { border-color: #ef4444; color: #ef4444; }
+
+.filtros {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.filtroBtn {
+  padding: 5px 14px;
+  border-radius: 999px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  color: #6b7280;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.filtroBtn:hover {
+  border-color: #00b090;
+  color: #00b090;
+}
+.filtroBtnActive {
+  background: #1d1e20;
+  border-color: #1d1e20;
+  color: #fff;
+}
+
+.lista {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.cardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cardLeft {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.tipoIcon {
+  font-size: 20px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.cardTitulo {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1d1e20;
+  margin-bottom: 2px;
+}
+
+.clienteLink {
+  font-size: 12px;
+  color: #00b090;
+  text-decoration: none;
+  font-weight: 500;
+}
+.clienteLink:hover { text-decoration: underline; }
+
+.cardRight {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.data {
+  font-size: 12px;
+  color: #9ca3af;
+  white-space: nowrap;
+}
+
+.cardMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.tarefasBadge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.chevron {
+  font-size: 10px;
+  color: #9ca3af;
+}
+
+/* ── Collapsible body ────────────────────────────────────────── */
+.cardBody {
+  padding: 0 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-top: 1px solid #f3f4f6;
+  margin-top: 4px;
+}
+
+.cardTexto {
+  font-size: 13px;
+  color: #374151;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  margin: 0;
+  padding-top: 12px;
+}
+
+/* ── Linked tasks ────────────────────────────────────────────── */
+.tarefasSection {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid #f3f4f6;
+}
+
+.tarefasSectionTitle {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #9ca3af;
+  margin-bottom: 4px;
+}
+
+.tarefaItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.tarefaStatus {
+  font-size: 13px;
+  color: #d1d5db;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+
+.tarefaConcluida {
+  color: #16a34a;
+}
+
+.tarefaInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.tarefaTitulo {
+  font-size: 13px;
+  color: #374151;
+  font-weight: 500;
+}
+
+.tarefaData {
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+/* ── Tasks block (Reunião + To Do) ─────── */
+.tasksBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.tasksHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.tasksTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.btnAddTask {
+  font-size: 12px;
+  background: none;
+  border: 1px dashed #d1d5db;
+  border-radius: 6px;
+  padding: 3px 10px;
+  cursor: pointer;
+  color: #6b7280;
+  font-family: inherit;
+}
+.btnAddTask:hover { border-color: #00b090; color: #00b090; }
+
+.taskRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.taskFields {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 6px;
+  flex: 1;
+}
+
+.btnRemoveTask {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #9ca3af;
+  font-size: 18px;
+  padding: 0 4px;
+  line-height: 1;
+  margin-top: 6px;
+}
+.btnRemoveTask:hover { color: #dc2626; }
+
+/* ── Edit button on card ────────────────────────────────────────── */
+.btnEdit {
+  background: none;
+  border: 1px solid #e5e7eb;
+  border-radius: 5px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  color: #6b7280;
+  font-family: inherit;
+  transition: all 0.12s;
+}
+.btnEdit:hover { border-color: #3b82f6; color: #3b82f6; }
+
+/* ── Inline edit form ─────────────────────────────────────────── */
+.editForm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.editAcoes {
+  display: flex;
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .twoCol { grid-template-columns: 1fr; }
+  .taskFields { grid-template-columns: 1fr; }
+}

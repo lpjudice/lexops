@@ -1,0 +1,253 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.config import settings
+from app.database import Base, engine
+from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, feriados, financeiro, jurisprudencia, organizador, pje, prazos, processos, reembolsos, system, tarefas, teses, usuarios
+
+# Cria as tabelas (Alembic gerencia em produção; aqui facilita o dev)
+Base.metadata.create_all(bind=engine)
+
+# Migrations manuais para colunas novas em tabelas existentes
+def _run_migrations() -> None:
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        conn.execute(text(
+            "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS analise_ia TEXT"
+        ))
+        conn.execute(text(
+            "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS cliente_nome_pub VARCHAR(500)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS url_fonte TEXT"
+        ))
+        conn.execute(text(
+            "ALTER TABLE contratos ADD COLUMN IF NOT EXISTS arquivos JSONB DEFAULT '[]'::jsonb"
+        ))
+        conn.execute(text(
+            "ALTER TABLE conversas_ia ADD COLUMN IF NOT EXISTS parent_conversa_id UUID"
+        ))
+        conn.execute(text(
+            "ALTER TABLE itens_reembolso ADD COLUMN IF NOT EXISTS comprovante_path VARCHAR(1000)"
+        ))
+        # Add "aguardando_pagamento" to the reembolso status enum (idempotent)
+        conn.execute(text(
+            "ALTER TYPE status_reembolso ADD VALUE IF NOT EXISTS 'aguardando_pagamento'"
+        ))
+        # Campos extras para honorários de êxito
+        conn.execute(text(
+            "ALTER TABLE honorarios ADD COLUMN IF NOT EXISTS valor_causa NUMERIC(14,2)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE honorarios ADD COLUMN IF NOT EXISTS percentual_exito NUMERIC(5,2)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE honorarios ADD COLUMN IF NOT EXISTS data_estimada_sentenca DATE"
+        ))
+        conn.execute(text(
+            "ALTER TABLE reembolsos ADD COLUMN IF NOT EXISTS drive_link VARCHAR(1000)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE signatarios ADD COLUMN IF NOT EXISTS clicksign_request_key VARCHAR(255)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE conversas_ia ADD COLUMN IF NOT EXISTS processo_id UUID"
+        ))
+        conn.execute(text(
+            "ALTER TABLE honorarios ADD COLUMN IF NOT EXISTS contrato_id UUID"
+        ))
+        conn.execute(text(
+            "ALTER TABLE honorarios ADD COLUMN IF NOT EXISTS pendente_assinatura BOOLEAN NOT NULL DEFAULT false"
+        ))
+        conn.execute(text(
+            "ALTER TABLE tarefas ADD COLUMN IF NOT EXISTS cliente_id UUID"
+        ))
+        conn.execute(text(
+            "ALTER TABLE tarefas ADD COLUMN IF NOT EXISTS processo_id UUID"
+        ))
+        conn.execute(text(
+            "ALTER TYPE status_reembolso ADD VALUE IF NOT EXISTS 'cancelado'"
+        ))
+        conn.execute(text(
+            "ALTER TABLE contratos ADD COLUMN IF NOT EXISTS assinatura_manual BOOLEAN NOT NULL DEFAULT false"
+        ))
+        conn.execute(text(
+            "ALTER TABLE tarefas ADD COLUMN IF NOT EXISTS google_event_id VARCHAR(500)"
+        ))
+        # Andamentos sync fields on processos
+        conn.execute(text(
+            "ALTER TABLE processos ADD COLUMN IF NOT EXISTS ultimo_andamento_data DATE"
+        ))
+        conn.execute(text(
+            "ALTER TABLE processos ADD COLUMN IF NOT EXISTS ultimo_andamento_desc VARCHAR(500)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE processos ADD COLUMN IF NOT EXISTS ultimo_check TIMESTAMPTZ"
+        ))
+        conn.execute(text(
+            "ALTER TABLE processos ADD COLUMN IF NOT EXISTS tentativas_falha INTEGER NOT NULL DEFAULT 0"
+        ))
+        conn.execute(text(
+            "ALTER TABLE processos ADD COLUMN IF NOT EXISTS andamentos_nao_lidos INTEGER NOT NULL DEFAULT 0"
+        ))
+        # Andamentos tables
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS andamentos_processo (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                processo_id UUID NOT NULL REFERENCES processos(id) ON DELETE CASCADE,
+                data_andamento DATE,
+                descricao TEXT NOT NULL,
+                tipo VARCHAR(255),
+                fonte VARCHAR(100),
+                grau VARCHAR(10),
+                hash_unico VARCHAR(64) NOT NULL,
+                lido BOOLEAN NOT NULL DEFAULT true,
+                notificado BOOLEAN NOT NULL DEFAULT false,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_andamentos_processo_id ON andamentos_processo(processo_id)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_andamentos_hash ON andamentos_processo(hash_unico)"
+        ))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS sincronizacao_logs (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                processo_id UUID NOT NULL REFERENCES processos(id) ON DELETE CASCADE,
+                tribunal VARCHAR(20),
+                status VARCHAR(20) NOT NULL DEFAULT 'ok',
+                novos_andamentos INTEGER DEFAULT 0,
+                mensagem TEXT,
+                iniciado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+                finalizado_em TIMESTAMPTZ
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_sincronizacao_processo_id ON sincronizacao_logs(processo_id)"
+        ))
+        # Controle de acesso — usuários
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS usuarios (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                email VARCHAR(255) UNIQUE NOT NULL,
+                nome VARCHAR(150) NOT NULL,
+                senha_hash VARCHAR(255) NOT NULL,
+                role VARCHAR(20) NOT NULL DEFAULT 'membro',
+                ativo BOOLEAN NOT NULL DEFAULT true,
+                pode_ver_financeiro BOOLEAN NOT NULL DEFAULT true,
+                pode_ver_contratos BOOLEAN NOT NULL DEFAULT true,
+                pode_ver_tarefas_outros BOOLEAN NOT NULL DEFAULT true,
+                clientes_restritos BOOLEAN NOT NULL DEFAULT false,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_usuarios_email ON usuarios(email)"
+        ))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS user_clientes (
+                usuario_id UUID NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+                cliente_id UUID NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+                PRIMARY KEY (usuario_id, cliente_id)
+            )
+        """))
+        # Magic link + first-access fields on usuarios
+        conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS invite_token VARCHAR(128)"))
+        conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS invite_token_expires TIMESTAMPTZ"))
+        conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS primeiro_acesso BOOLEAN NOT NULL DEFAULT false"))
+        # senha_hash is now nullable (set on invite acceptance)
+        conn.execute(text("ALTER TABLE usuarios ALTER COLUMN senha_hash DROP NOT NULL"))
+        conn.commit()
+
+
+def _seed_super_admin() -> None:
+    """Ensure Super Admin exists (idempotent)."""
+    from app.database import SessionLocal
+    from app.models.usuario import Usuario
+    from app.services.auth_service import hash_senha
+
+    SUPER_ADMIN_EMAIL = "pj@pimentajudice.com.br"
+    SUPER_ADMIN_NOME = "Pimenta Judice"
+    SUPER_ADMIN_SENHA = "admin2024"  # change after first login
+
+    db = SessionLocal()
+    try:
+        existing = db.query(Usuario).filter(Usuario.email == SUPER_ADMIN_EMAIL).first()
+        if not existing:
+            admin = Usuario(
+                email=SUPER_ADMIN_EMAIL,
+                nome=SUPER_ADMIN_NOME,
+                senha_hash=hash_senha(SUPER_ADMIN_SENHA),
+                role="super_admin",
+                ativo=True,
+            )
+            db.add(admin)
+            db.commit()
+    finally:
+        db.close()
+
+
+_run_migrations()
+_seed_super_admin()
+
+app = FastAPI(
+    title="Gestor Jurídico",
+    version="0.1.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins_list,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(auth.router)
+app.include_router(clientes.router)
+app.include_router(anotacoes.router)
+app.include_router(contratos.router)
+app.include_router(processos.router)
+app.include_router(prazos.router)
+app.include_router(feriados.router)
+app.include_router(diario.router)
+app.include_router(teses.router)
+app.include_router(reembolsos.router)
+app.include_router(financeiro.router)
+app.include_router(tarefas.router)
+app.include_router(conversas_ia.router)
+app.include_router(organizador.router)
+app.include_router(jurisprudencia.router)
+app.include_router(pje.router)
+app.include_router(system.router)
+app.include_router(andamentos.router)
+app.include_router(usuarios.router)
+
+
+@app.on_event("startup")
+def _startup():
+    try:
+        from app.scheduler import start_scheduler
+        start_scheduler()
+    except ModuleNotFoundError:
+        import logging
+        logging.getLogger(__name__).warning("apscheduler não instalado — scheduler desativado")
+
+
+@app.on_event("shutdown")
+def _shutdown():
+    try:
+        from app.scheduler import stop_scheduler
+        stop_scheduler()
+    except Exception:
+        pass
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}

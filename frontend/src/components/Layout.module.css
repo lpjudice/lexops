@@ -1,0 +1,438 @@
+/* ─── Shell ──────────────────────────────────────────────────────────── */
+.shell {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  background: var(--light);
+  color: var(--dark);
+  overflow: hidden;
+  position: relative;
+}
+
+/* ─── Mobile overlay ─────────────────────────────────────────────────── */
+.overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 9;
+}
+
+/* ─── Sidebar ────────────────────────────────────────────────────────── */
+.sidebar {
+  width: 220px;
+  min-width: 220px;
+  background: var(--dark);
+  color: rgba(255, 255, 255, 0.5);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 10;
+  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.18);
+  overflow-y: auto;
+  transition: transform 0.25s ease;
+}
+
+.sidebarTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  flex-shrink: 0;
+}
+
+.sidebarClose {
+  display: none;
+  color: rgba(255, 255, 255, 0.5);
+  padding: 2px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.sidebarClose:hover { color: rgba(255, 255, 255, 0.9); }
+
+/* ─── Logo ───────────────────────────────────────────────────────────── */
+.logo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.logoMain {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.92);
+  line-height: 1.2;
+}
+
+.logoSub {
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+/* ─── Nav ────────────────────────────────────────────────────────────── */
+.nav {
+  flex: 1;
+  padding: 8px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+
+.navGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: 4px;
+}
+
+.navGroupLabel {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--teal);
+  padding: 0 8px;
+  margin-bottom: 2px;
+  margin-top: 4px;
+}
+
+.navGroup:first-child .navGroupLabel {
+  margin-top: 0;
+}
+
+.navLink {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.48);
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  transition: background 0.14s ease, color 0.14s ease;
+  position: relative;
+  border-left: 2px solid transparent;
+}
+
+.navLink:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.navLink.active {
+  background: rgba(0, 176, 144, 0.12);
+  color: var(--teal);
+  font-weight: 600;
+  border-left-color: var(--teal);
+}
+
+.navIcon {
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.navBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 17px;
+  font-size: 10px;
+  font-weight: 700;
+  background: #ef4444;
+  color: #fff;
+  border-radius: 999px;
+  padding: 0 4px;
+  margin-left: auto;
+  line-height: 1;
+}
+
+.navLink.active .navIcon {
+  opacity: 1;
+}
+
+/* ─── Sidebar footer ─────────────────────────────────────────────────── */
+.sidebarFooter {
+  padding: 14px 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  color: rgba(255, 255, 255, 0.2);
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+/* ─── Main wrapper (topbar + content) ───────────────────────────────── */
+.mainWrapper {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ─── Topbar ─────────────────────────────────────────────────────────── */
+.topbar {
+  height: 56px;
+  background: var(--white);
+  border-bottom: 1px solid var(--gray-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 28px;
+  flex-shrink: 0;
+  z-index: 5;
+  gap: 12px;
+}
+
+.topbarLeft {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.hamburger {
+  display: none;
+  color: var(--gray-mid);
+  padding: 4px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+.hamburger:hover { color: var(--dark); background: var(--light); }
+
+.topbarTitle {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--dark);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbarUser {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.userBadge {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--teal);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+.userName {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--gray-mid);
+  white-space: nowrap;
+}
+
+.logoutBtn {
+  color: var(--gray-mid);
+  padding: 6px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.logoutBtn:hover { color: #dc2626; background: #fee2e2; }
+
+/* ─── Main content ───────────────────────────────────────────────────── */
+.main {
+  flex: 1;
+  overflow-y: auto;
+  padding: 28px 32px;
+  background: var(--light);
+}
+
+/* ─── Tablet (sidebar collapses to icon strip) ───────────────────────── */
+@media (max-width: 900px) {
+  .sidebar {
+    width: 56px;
+    min-width: 56px;
+  }
+
+  .sidebarTop {
+    padding: 12px 0;
+    justify-content: center;
+  }
+
+  .logo {
+    display: none;
+  }
+
+  .sidebarClose {
+    display: none !important;
+  }
+
+  .navGroupLabel,
+  .sidebarFooter {
+    display: none;
+  }
+
+  .navLink {
+    justify-content: center;
+    padding: 8px 0;
+    border-left: none;
+    border-radius: 8px;
+  }
+
+  .navLink span:not([class]) {
+    display: none;
+  }
+
+  .navBadge {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    margin-left: 0;
+    min-width: 14px;
+    height: 14px;
+    font-size: 9px;
+  }
+
+  .navIcon {
+    opacity: 1;
+  }
+
+  .nav {
+    padding: 8px 6px;
+    gap: 2px;
+  }
+
+  .navGroup {
+    margin-bottom: 4px;
+  }
+
+  .hamburger {
+    display: none;
+  }
+
+  .main {
+    padding: 20px 16px;
+  }
+
+  .topbar {
+    padding: 0 20px;
+  }
+
+  .userName {
+    display: none;
+  }
+}
+
+/* ─── Mobile (hamburger → slide-over sidebar) ────────────────────────── */
+@media (max-width: 640px) {
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 240px;
+    min-width: 240px;
+    transform: translateX(-100%);
+    z-index: 10;
+  }
+
+  .sidebarOpen {
+    transform: translateX(0);
+  }
+
+  .sidebarTop {
+    padding: 14px 16px 10px;
+    justify-content: space-between;
+  }
+
+  .logo {
+    display: flex;
+  }
+
+  .sidebarClose {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .navLink {
+    justify-content: flex-start;
+    padding: 8px 10px;
+    border-left: 2px solid transparent;
+    border-radius: 6px;
+    gap: 10px;
+  }
+
+  .navLink span:not([class]) {
+    display: inline;
+  }
+
+  .navLink.active {
+    border-left-color: var(--teal);
+  }
+
+  .navBadge {
+    position: static;
+    margin-left: auto;
+    min-width: 17px;
+    height: 17px;
+    font-size: 10px;
+  }
+
+  .navGroupLabel,
+  .sidebarFooter {
+    display: block;
+  }
+
+  .overlay {
+    display: block;
+  }
+
+  .hamburger {
+    display: flex;
+  }
+
+  .userName {
+    display: none;
+  }
+
+  .main {
+    padding: 16px 14px;
+  }
+
+  .topbar {
+    padding: 0 14px;
+  }
+}
+
+@media (max-width: 480px) {
+  .main {
+    padding: 12px 10px;
+  }
+
+  .topbar {
+    padding: 0 12px;
+    height: 52px;
+  }
+}

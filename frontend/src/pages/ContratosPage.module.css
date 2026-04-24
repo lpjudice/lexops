@@ -1,0 +1,429 @@
+/* ─── Lista ──────────────────────────────────────────────────────────── */
+.lista {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ─── Card ───────────────────────────────────────────────────────────── */
+.card {
+  background: var(--white);
+  border: 1px solid var(--gray-border);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.card:hover {
+  border-color: var(--teal);
+  box-shadow: var(--shadow-card-hover);
+}
+
+/* ─── Card top ───────────────────────────────────────────────────────── */
+.cardTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 17px 20px;
+  cursor: pointer;
+  gap: 16px;
+}
+
+.cardTitulo {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--dark);
+  line-height: 1.3;
+}
+
+.cardMeta {
+  font-size: 12px;
+  color: var(--gray-mid);
+  margin-top: 3px;
+}
+
+.cardActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.btnExpand {
+  background: var(--light);
+  border: 1px solid var(--gray-border);
+  border-radius: 6px;
+  padding: 4px 9px;
+  font-size: 11px;
+  cursor: pointer;
+  color: var(--gray-mid);
+  font-family: inherit;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.btnExpand:hover {
+  background: var(--teal-light);
+  border-color: var(--teal);
+  color: var(--teal);
+}
+
+/* ─── Card body ──────────────────────────────────────────────────────── */
+.cardBody {
+  border-top: 1px solid var(--gray-border);
+  padding: 20px 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  background: #fafafa;
+}
+
+.section {}
+
+.sectionTitle {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--teal);
+  margin-bottom: 10px;
+}
+
+/* ─── Status badges ──────────────────────────────────────────────────── */
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+}
+
+.status_rascunho {
+  background: #f3f4f6;
+  color: var(--gray-mid);
+}
+
+.status_aguardando_assinatura {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.status_parcialmente_assinado {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.status_assinado {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.status_cancelado {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.badgeManual {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.03em;
+  background: #f3e8ff;
+  color: #7c3aed;
+  border: 1px solid #ddd6fe;
+}
+
+/* ─── Upload ─────────────────────────────────────────────────────────── */
+.arquivoInfo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.arquivoNome {
+  font-size: 13px;
+  color: #3a3a3a;
+}
+
+.downloadLink {
+  font-size: 13px;
+  color: var(--teal);
+  text-decoration: none;
+  font-weight: 600;
+  transition: opacity 0.15s;
+}
+
+.downloadLink:hover {
+  opacity: 0.75;
+}
+
+.uploadArea {
+  display: flex;
+  align-items: center;
+}
+
+.btnUpload {
+  background: var(--white);
+  border: 1.5px dashed var(--gray-border);
+  border-radius: 8px;
+  padding: 9px 18px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--gray-mid);
+  font-family: inherit;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.btnUpload:hover {
+  border-color: var(--teal);
+  color: var(--teal);
+  background: var(--teal-light);
+}
+
+.btnUpload:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ─── Signatários ────────────────────────────────────────────────────── */
+.sigTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-bottom: 14px;
+}
+
+.sigTable th {
+  text-align: left;
+  padding: 7px 10px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--gray-mid);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--gray-border);
+  background: var(--light);
+}
+
+.sigTable td {
+  padding: 9px 10px;
+  border-bottom: 1px solid #f5f5f5;
+  color: #3a3a3a;
+}
+
+.sigTable tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.sigStatus {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+
+.sig_pendente {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.sig_assinado {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.sig_recusado {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+/* ─── Sig form ───────────────────────────────────────────────────────── */
+.sigForm {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.sigForm input,
+.sigForm select {
+  flex: 1;
+  min-width: 140px;
+}
+
+/* ─── Ações ──────────────────────────────────────────────────────────── */
+.acoes {
+  display: flex;
+  gap: 10px;
+  padding-top: 4px;
+  flex-wrap: wrap;
+}
+
+/* ─── Enviar ClickSign ───────────────────────────────────────────────── */
+.btnEnviar {
+  background: #059669 !important;
+}
+
+.btnEnviar:hover {
+  background: #047857 !important;
+  box-shadow: 0 4px 16px rgba(5, 150, 105, 0.3) !important;
+}
+
+/* ─── Novos estilos ──────────────────────────────────────────────────── */
+.twoCol {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.sectionActions {
+  display: flex;
+  gap: 6px;
+}
+
+.btnSmall {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.btnSmall:hover { background: #f3f4f6; border-color: #9ca3af; }
+
+.hint {
+  font-size: 12px;
+  color: #9ca3af;
+  font-style: italic;
+  margin: 0;
+}
+
+.arquivoList {
+  list-style: none;
+  margin: 0 0 8px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.arquivoItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+}
+
+.arquivoLink {
+  flex: 1;
+  font-size: 12px;
+  color: #1d1e20;
+  text-decoration: none;
+  font-weight: 500;
+}
+.arquivoLink:hover { color: #00b090; }
+
+.btnRemove {
+  background: none;
+  border: none;
+  color: #ef4444;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+  opacity: 0.6;
+}
+.btnRemove:hover { opacity: 1; }
+
+.btnDownload {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #00b090;
+  text-decoration: none;
+  padding: 4px 10px;
+  border: 1px solid #00b090;
+  border-radius: 6px;
+  margin-top: 6px;
+}
+.btnDownload:hover { background: #e8f7f4; }
+
+/* Gerar contrato form */
+.gerarForm {
+  background: #f0fdf9;
+  border: 1px solid #a7f3d0;
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.gerarAcoes {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+/* Chips objeto */
+.chipRow {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.chip {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.chip:hover { border-color: #00b090; color: #00b090; }
+.chipAtivo { background: #00b090; color: #fff; border-color: #00b090; }
+
+/* Atalhos signatários */
+.sigAtalhos {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.btnAtalho {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid #00b090;
+  background: #e8f7f4;
+  color: #00b090;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.btnAtalho:hover { background: #ccf0e8; }

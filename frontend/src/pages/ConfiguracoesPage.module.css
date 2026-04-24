@@ -1,0 +1,465 @@
+.secoes {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.secao {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.secaoHeader {
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.secaoTitulo {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1d1e20;
+  margin: 0 0 4px;
+}
+
+.secaoDesc {
+  font-size: 13px;
+  color: #6b7280;
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* ── Google item ── */
+.item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 24px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.itemLeft {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.itemIcon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: #1d1e20;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.itemNome {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1d1e20;
+  margin-bottom: 2px;
+}
+
+.itemStatus {
+  font-size: 12px;
+}
+
+.statusOk {
+  color: #16a34a;
+  font-weight: 500;
+}
+
+.statusOff {
+  color: #9ca3af;
+  font-weight: 500;
+}
+
+.contaEmail {
+  display: inline-block;
+  font-size: 12px;
+  color: #065f46;
+  background: #d1fae5;
+  border: 1px solid #6ee7b7;
+  border-radius: 20px;
+  padding: 2px 10px;
+  margin-top: 5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.btnReconectar {
+  padding: 8px 18px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  color: #4b5563;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.12s, color 0.12s;
+}
+.btnReconectar:hover {
+  border-color: #00b090;
+  color: #00b090;
+}
+
+/* ── Modelos de IA ── */
+.modelosGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  padding: 20px 24px;
+}
+
+.modeloCard {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.modeloNome {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1d1e20;
+  margin-bottom: 4px;
+}
+
+.modeloModelo {
+  font-size: 11px;
+  background: #e8f7f4;
+  color: #00796b;
+  padding: 2px 8px;
+  border-radius: 4px;
+  display: inline-block;
+  font-family: monospace;
+  margin-bottom: 8px;
+}
+
+.modeloUso {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.4;
+}
+
+/* ── Info grid ── */
+.infoGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.infoItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  border-bottom: 1px solid #f3f4f6;
+}
+.infoItem:last-child {
+  border-bottom: none;
+}
+
+.infoLabel {
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.infoValor {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1d1e20;
+}
+
+@media (max-width: 640px) {
+  .modelosGrid { grid-template-columns: 1fr; }
+}
+
+/* ── Controle de Acesso ── */
+.usuariosList {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.usuarioCard {
+  border-bottom: 1px solid #f3f4f6;
+  padding: 16px 24px 12px;
+}
+.usuarioCard:last-child { border-bottom: none; }
+
+.usuarioInativo .usuarioBadge,
+.usuarioInativo .usuarioInfo { opacity: 0.55; }
+
+.usuarioHeader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.usuarioBadge {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--teal);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.usuarioInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.usuarioNome {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1d1e20;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.usuarioEmail {
+  font-size: 12px;
+  color: #6b7280;
+  margin-top: 1px;
+}
+
+.voceTag {
+  font-size: 10px;
+  font-weight: 600;
+  background: #e8f7f4;
+  color: #00796b;
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.inativoTag {
+  font-size: 10px;
+  font-weight: 600;
+  background: #fee2e2;
+  color: #991b1b;
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.roleTag {
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+
+.roleSuperAdmin {
+  background: #1d1e20;
+  color: #fff;
+}
+
+.roleAdmin {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.roleMembro {
+  background: #f3f4f6;
+  color: #4b5563;
+}
+
+.usuarioAcoes {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.btnEdit {
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+  color: #4b5563;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.12s, color 0.12s;
+}
+.btnEdit:hover { border-color: #00b090; color: #00b090; }
+
+.permChips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  margin-left: 48px;
+}
+
+.chipOn {
+  font-size: 11px;
+  font-weight: 500;
+  background: #d1fae5;
+  color: #065f46;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.chipOff {
+  font-size: 11px;
+  font-weight: 500;
+  background: #f3f4f6;
+  color: #9ca3af;
+  border-radius: 999px;
+  padding: 2px 8px;
+  text-decoration: line-through;
+}
+
+.chipWarn {
+  font-size: 11px;
+  font-weight: 500;
+  background: #fef3c7;
+  color: #92400e;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+/* Form de novo membro */
+.novoForm {
+  border-top: 1px solid #e5e7eb;
+  background: #f9fafb;
+  padding: 20px 24px 0;
+}
+
+.novoFormTitulo {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1d1e20;
+  margin-bottom: 14px;
+}
+
+.novoFormGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.novoFormField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.novoFormLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--teal);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.permissoesRow {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 0 0 16px;
+}
+
+.permLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #374151;
+  cursor: pointer;
+}
+
+.permLabel input[type="checkbox"] {
+  accent-color: var(--teal);
+  width: 14px;
+  height: 14px;
+}
+
+.editInline {
+  background: #f9fafb;
+  border-top: 1px solid #e5e7eb;
+  padding: 16px 24px 0;
+  margin-top: 12px;
+}
+
+@media (max-width: 640px) {
+  .novoFormGrid { grid-template-columns: 1fr; }
+  .usuarioHeader { gap: 8px; }
+  .permChips { margin-left: 0; }
+}
+
+.btnAbrirPasta {
+  padding: 8px 18px;
+  border-radius: 8px;
+  border: 1px solid #00b090;
+  background: #f0fdf9;
+  font-size: 13px;
+  font-weight: 500;
+  color: #00b090;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.12s, color 0.12s;
+}
+.btnAbrirPasta:hover {
+  background: #00b090;
+  color: #fff;
+}
+
+/* Convite banner */
+.conviteBanner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: #ecfdf5;
+  border: 1px solid #6ee7b7;
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 8px;
+}
+
+.conviteBannerIcon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #00b090;
+  color: #fff;
+  font-weight: 800;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.conviteBannerTexto {
+  flex: 1;
+  font-size: 13px;
+  color: #065f46;
+  line-height: 1.5;
+}
+
+.conviteBannerTexto code {
+  font-family: monospace;
+  background: rgba(0,0,0,0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+}

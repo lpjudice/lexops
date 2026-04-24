@@ -1,0 +1,166 @@
+.twoCol {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* urgência */
+.ok      { color: #16a34a; }
+.atencao { color: #ca8a04; }
+.urgente { color: #dc2626; }
+.vencido { color: #9ca3af; }
+
+/* ── Lista de prazos como cards ── */
+.lista {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-left: 4px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+
+.card.ok      { border-left-color: #86efac; }
+.card.atencao { border-left-color: #fde047; }
+.card.urgente { border-left-color: #f87171; background: #fff9f9; }
+.card.vencido { border-left-color: #d1d5db; opacity: 0.7; }
+
+.cardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.cardInfo {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cardTop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.clienteNome {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1d1e20;
+}
+
+.cnj {
+  font-size: 12px;
+  background: #f3f4f6;
+  padding: 1px 7px;
+  border-radius: 4px;
+  color: #374151;
+}
+
+.materia {
+  font-size: 12px;
+  color: #6b7280;
+  font-style: italic;
+}
+
+.cardBottom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* tipo badges */
+.tipo_contestacao   { background: #fef3c7; color: #92400e; }
+.tipo_recurso       { background: #dbeafe; color: #1d4ed8; }
+.tipo_contrarrazoes { background: #ede9fe; color: #6d28d9; }
+.tipo_manifestacao  { background: #ecfdf5; color: #065f46; }
+.tipo_audiencia     { background: #fce7f3; color: #be185d; }
+.tipo_pericia       { background: #e0f2fe; color: #0369a1; }
+.tipo_outro         { background: #f3f4f6; color: #6b7280; }
+
+.pecaChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  background: #f0fdf9;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.pecaChipEdit {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 11px;
+  color: #6b7280;
+  padding: 0 2px;
+  line-height: 1;
+}
+.pecaChipEdit:hover { color: #00b090; }
+
+.btnAddPeca {
+  font-size: 11px;
+  color: #6b7280;
+  background: none;
+  border: 1px dashed #d1d5db;
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.btnAddPeca:hover { border-color: #00b090; color: #00b090; }
+
+.datas {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.restam {
+  font-weight: 700;
+}
+
+.pecaEditor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.cardActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.statusSelect {
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  background: #fff;
+}
+.statusSelect:focus { outline: none; border-color: #00b090; }
+
+@media (max-width: 640px) {
+  .twoCol { grid-template-columns: 1fr; }
+  .cardHeader { flex-direction: column; }
+  .cardActions { width: 100%; justify-content: flex-end; }
+}

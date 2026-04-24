@@ -1,0 +1,246 @@
+/* ─── Page header ────────────────────────────────────────────────────── */
+.pageHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 28px;
+  gap: 16px;
+}
+
+.pageTitle {
+  font-family: 'Archivo', sans-serif;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--dark);
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+
+.pageTitle strong {
+  font-weight: 800;
+}
+
+/* ─── Buttons ────────────────────────────────────────────────────────── */
+.btnPrimary {
+  background: var(--dark);
+  color: #fff;
+  border: none;
+  padding: 9px 20px;
+  border-radius: var(--radius-btn);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  font-family: 'Archivo', sans-serif;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btnPrimary:hover {
+  background: var(--teal);
+  box-shadow: 0 4px 16px rgba(0, 176, 144, 0.28);
+}
+
+.btnPrimary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btnDanger {
+  background: transparent;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+  padding: 5px 12px;
+  border-radius: var(--radius-btn);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'Archivo', sans-serif;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  white-space: nowrap;
+}
+
+.btnDanger:hover {
+  background: #fee2e2;
+  border-color: #fca5a5;
+}
+
+/* ─── Form card ──────────────────────────────────────────────────────── */
+.form {
+  background: var(--white);
+  border-radius: var(--radius-card);
+  padding: 24px 28px;
+  margin-bottom: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-width: 580px;
+  box-shadow: var(--shadow-card);
+}
+
+.formRow {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 16px;
+}
+
+.formLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--teal);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  display: block;
+  margin-bottom: 5px;
+}
+
+.input {
+  padding: 9px 12px;
+  border: 1px solid var(--gray-border);
+  border-radius: var(--radius-input);
+  font-size: 13px;
+  font-family: 'Archivo', sans-serif;
+  color: var(--dark);
+  background: var(--white);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  width: 100%;
+  box-sizing: border-box;
+  appearance: none;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--teal);
+  box-shadow: 0 0 0 3px rgba(0, 176, 144, 0.1);
+}
+
+.input::placeholder {
+  color: #c0c5c5;
+}
+
+/* ─── Table wrapper / card ───────────────────────────────────────────── */
+.tableCard {
+  background: var(--white);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+}
+
+/* ─── Table ──────────────────────────────────────────────────────────── */
+.table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.table thead th {
+  background: var(--light);
+  padding: 10px 14px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--gray-mid);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  border-bottom: 1px solid var(--gray-border);
+  white-space: nowrap;
+}
+
+.table tbody tr {
+  background: var(--white);
+  transition: background 0.12s ease;
+}
+
+.table tbody tr:hover {
+  background: #f9fffe;
+}
+
+.table tbody td {
+  padding: 12px 14px;
+  border-bottom: 1px solid #f5f5f5;
+  font-size: 13px;
+  color: #3a3a3a;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* ─── Badge base ─────────────────────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: var(--teal-light);
+  color: var(--teal);
+  white-space: nowrap;
+}
+
+/* ─── Status modifiers ───────────────────────────────────────────────── */
+.status_ativo {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.status_suspenso {
+  background: #fef9c3;
+  color: #a16207;
+}
+
+.status_arquivado {
+  background: #f3f4f6;
+  color: var(--gray-mid);
+}
+
+.status_encerrado {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+/* ─── Table action button ────────────────────────────────────────────── */
+.btnTable {
+  background: var(--light);
+  border: 1px solid var(--gray-border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--gray-mid);
+  cursor: pointer;
+  font-family: 'Archivo', sans-serif;
+  transition: background 0.13s ease, border-color 0.13s ease, color 0.13s ease;
+  white-space: nowrap;
+}
+
+.btnTable:hover {
+  background: var(--teal-light);
+  border-color: var(--teal);
+  color: var(--teal);
+}
+
+/* ─── Empty state ────────────────────────────────────────────────────── */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  color: #9ca3af;
+  font-size: 14px;
+  text-align: center;
+  gap: 8px;
+}
+
+.empty::before {
+  content: '—';
+  font-size: 22px;
+  color: var(--gray-border);
+  display: block;
+}

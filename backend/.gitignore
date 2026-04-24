@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.env
+uploads/*
+!uploads/.gitkeep
+google_tokens.json
+app/google_tokens.json

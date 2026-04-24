@@ -1,0 +1,39 @@
+# Environment
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Uploads / user data (keep the folder, not the files)
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# DB / runtime
+*.db
+*.sqlite
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Google OAuth tokens (sensitive)
+backend/app/google_tokens.json
+backend/google_tokens.json
+*_tokens.json
+
+# Fly generated (keep fly.toml if present)

@@ -1,0 +1,88 @@
+/* ─── Design Tokens ────────────────────────────────────────────────────── */
+:root {
+  --teal:        #00b090;
+  --teal-light:  #e8f7f4;
+  --teal-glow:   rgba(0, 176, 144, 0.12);
+  --dark:        #1d1e20;
+  --dark-2:      #2a2a2a;
+  --gray-mid:    #6a7070;
+  --gray-border: #e8e8e8;
+  --light:       #f2f3f6;
+  --white:       #ffffff;
+
+  --shadow-card: 0 4px 24px rgba(0, 176, 144, 0.07), 0 1px 4px rgba(0, 0, 0, 0.04);
+  --shadow-card-hover: 0 8px 32px rgba(0, 176, 144, 0.13), 0 2px 8px rgba(0, 0, 0, 0.06);
+
+  --radius-card: 15px;
+  --radius-btn:  100px;
+  --radius-input: 8px;
+
+  --transition: 0.15s ease;
+}
+
+/* ─── Reset ────────────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* ─── Base ─────────────────────────────────────────────────────────────── */
+html, body {
+  width: 100%;
+  height: 100%;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: 'Archivo', system-ui, -apple-system, sans-serif;
+  background: var(--light);
+  color: var(--dark);
+  line-height: 1.55;
+}
+
+#root {
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ─── Global link ──────────────────────────────────────────────────────── */
+a {
+  color: var(--teal);
+  text-decoration: none;
+  transition: opacity var(--transition);
+}
+a:hover {
+  opacity: 0.8;
+}
+
+/* ─── Button reset ─────────────────────────────────────────────────────── */
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  transition: background var(--transition), color var(--transition),
+              border-color var(--transition), box-shadow var(--transition);
+}
+
+/* ─── Input reset ──────────────────────────────────────────────────────── */
+input, select, textarea {
+  font-family: inherit;
+}
+
+/* ─── Scrollbar ────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--gray-border); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #d0d0d0; }

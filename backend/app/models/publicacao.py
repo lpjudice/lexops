@@ -1,0 +1,64 @@
+import uuid
+from datetime import date, datetime
+
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, String, Text, func
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.database import Base
+
+
+class Publicacao(Base):
+    __tablename__ = "publicacoes"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+
+    # Origem
+    fonte: Mapped[str] = mapped_column(
+        Enum("gmail", "scraping_tjes", "scraping_tjsp", "scraping_tjam", "scraping_tjrj", "manual", name="fonte_publicacao"),
+        nullable=False,
+    )
+    data_publicacao: Mapped[date] = mapped_column(Date, nullable=False)
+
+    # Conteúdo extraído
+    numero_cnj: Mapped[str | None] = mapped_column(String(25))
+    tipo_ato: Mapped[str | None] = mapped_column(
+        Enum(
+            "despacho", "decisao", "sentenca", "acordao",
+            "intimacao", "citacao", "outro",
+            name="tipo_ato_publicacao",
+        )
+    )
+    tribunal: Mapped[str | None] = mapped_column(String(20))
+    vara: Mapped[str | None] = mapped_column(String(255))
+    texto_resumo: Mapped[str | None] = mapped_column(Text)
+    texto_completo: Mapped[str | None] = mapped_column(Text)
+
+    # Vínculo com processo (opcional — pode ser vinculado manualmente depois)
+    processo_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("processos.id"), nullable=True
+    )
+
+    # Controle
+    lida: Mapped[bool] = mapped_column(Boolean, default=False)
+    gera_prazo: Mapped[bool] = mapped_column(Boolean, default=False)
+    prazo_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("prazos.id"), nullable=True
+    )
+
+    # IA
+    analise_ia: Mapped[str | None] = mapped_column(Text)          # JSON do Claude
+    cliente_nome_pub: Mapped[str | None] = mapped_column(String(500))  # extraído da IA
+
+    # Rastreabilidade
+    email_message_id: Mapped[str | None] = mapped_column(String(255), unique=True)
+    url_fonte: Mapped[str | None] = mapped_column(Text)  # link para o email ou página do diário
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    processo: Mapped["Processo | None"] = relationship("Processo")  # noqa: F821
+    prazo: Mapped["Prazo | None"] = relationship("Prazo")  # noqa: F821

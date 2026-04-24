@@ -1,0 +1,244 @@
+/* ─── Layout two-col ─────────────────────────────────────────────────── */
+.layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ─── Panels ─────────────────────────────────────────────────────────── */
+.inputPanel,
+.resultPanel {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+
+.panelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #fafafa;
+}
+
+.panelTitle {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #00b090;
+}
+
+.headerActions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* ─── Textarea ───────────────────────────────────────────────────────── */
+.textarea {
+  width: 100%;
+  border: none;
+  padding: 16px 18px;
+  font-size: 13px;
+  font-family: inherit;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+  color: #1d1e20;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.textarea::placeholder {
+  color: #b0b5b5;
+}
+
+/* ─── Input footer ───────────────────────────────────────────────────── */
+.inputFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  border-top: 1px solid #e5e7eb;
+  background: #fafafa;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.modeloRow {
+  display: flex;
+  gap: 4px;
+}
+
+.btnModelo {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btnModelo:hover { border-color: #00b090; color: #00b090; }
+.btnModeloAtivo {
+  background: #00b090;
+  color: #fff;
+  border-color: #00b090;
+}
+
+.btnAnalisar {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 20px;
+  border-radius: 8px;
+  border: none;
+  background: #6d28d9;
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.btnAnalisar:hover { background: #5b21b6; }
+.btnAnalisar:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ─── Upload / Limpar ────────────────────────────────────────────────── */
+.btnUpload {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.btnUpload:hover { background: #f3f4f6; border-color: #9ca3af; }
+
+.btnLimpar {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #9ca3af;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.btnLimpar:hover { color: #ef4444; background: #fee2e2; }
+
+/* ─── Result panel content ───────────────────────────────────────────── */
+.vazio {
+  padding: 40px 24px;
+  text-align: center;
+  font-size: 13px;
+  color: #b0b5b5;
+  font-style: italic;
+}
+
+.erro {
+  padding: 16px 18px;
+  color: #b91c1c;
+  background: #fee2e2;
+  border-bottom: 1px solid #fecaca;
+  font-size: 13px;
+}
+
+.analiseContent {
+  padding: 20px 22px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #1d1e20;
+}
+
+.secao {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #6d28d9;
+  margin: 20px 0 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #ede9fe;
+}
+
+.secao:first-child {
+  margin-top: 0;
+}
+
+.boldLine {
+  font-weight: 600;
+  margin: 4px 0;
+}
+
+.item {
+  margin: 4px 0 4px 18px;
+  list-style: disc;
+  display: list-item;
+}
+
+.linha {
+  margin: 4px 0;
+}
+
+/* ─── Cliente bar ────────────────────────────────────────────────────── */
+.clienteBar {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.clienteBarField {
+  flex: 1;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.clienteLabel {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--teal);
+}
+
+/* ─── Salvar button ──────────────────────────────────────────────────── */
+.btnSalvar {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 14px;
+  border-radius: 6px;
+  border: 1px solid #00b090;
+  background: #f0fdf9;
+  color: #00b090;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.btnSalvar:hover { background: #00b090; color: #fff; }
+.btnSalvar:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.salvoOk {
+  padding: 10px 18px;
+  color: #15803d;
+  background: #dcfce7;
+  border-bottom: 1px solid #86efac;
+  font-size: 12px;
+  font-weight: 600;
+}
