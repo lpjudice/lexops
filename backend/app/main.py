@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import Base, engine
+from app.models import email_cliente  # noqa: F401 — ensures EmailCliente table is registered
 from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, feriados, financeiro, jurisprudencia, organizador, pje, prazos, processos, reembolsos, system, tarefas, teses, usuarios
 
 # Cria as tabelas (Alembic gerencia em produção; aqui facilita o dev)
@@ -160,6 +161,29 @@ def _run_migrations() -> None:
         conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS primeiro_acesso BOOLEAN NOT NULL DEFAULT false"))
         # senha_hash is now nullable (set on invite acceptance)
         conn.execute(text("ALTER TABLE usuarios ALTER COLUMN senha_hash DROP NOT NULL"))
+        # Per-user Google OAuth tokens (JSONB)
+        conn.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS google_tokens JSONB"))
+        # Emails per client — synced from Gmail accounts
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS emails_cliente (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                cliente_id UUID NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+                gmail_message_id VARCHAR(255) NOT NULL UNIQUE,
+                conta_google VARCHAR(36) NOT NULL,
+                conta_email VARCHAR(255),
+                remetente VARCHAR(500),
+                destinatarios TEXT,
+                assunto VARCHAR(1000),
+                snippet TEXT,
+                thread_id VARCHAR(255),
+                data TIMESTAMPTZ,
+                lido BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_emails_cliente_id ON emails_cliente(cliente_id)"
+        ))
         conn.commit()
 
 

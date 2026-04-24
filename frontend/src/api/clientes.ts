@@ -47,6 +47,21 @@ export interface ChatMessage {
   content: string
 }
 
+export interface EmailCliente {
+  id: string
+  gmail_message_id: string
+  conta_google: string
+  conta_email: string | null
+  remetente: string | null
+  destinatarios: string | null
+  assunto: string | null
+  snippet: string | null
+  thread_id: string | null
+  data: string | null
+  lido: boolean
+  created_at: string
+}
+
 export const clientesApi = {
   listar: () => api.get<Cliente[]>('/clientes/').then((r) => r.data),
   criar: (data: ClienteCreate) => api.post<Cliente>('/clientes/', data).then((r) => r.data),
@@ -73,4 +88,13 @@ export const clientesApi = {
 
   pastaArquivos: (clienteId: string) =>
     api.get<PastaArquivo[]>(`/clientes/${clienteId}/pasta-arquivos/refresh`).then(r => r.data),
+
+  listarEmails: (clienteId: string) =>
+    api.get<EmailCliente[]>(`/clientes/${clienteId}/emails`).then(r => r.data),
+
+  sincronizarEmails: (clienteId: string, conta_google: string) =>
+    api.post<{ synced: number; new: number; error: string | null }>(
+      `/clientes/${clienteId}/emails/sync`,
+      { conta_google },
+    ).then(r => r.data),
 }

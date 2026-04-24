@@ -228,7 +228,9 @@ function MembrosSection() {
 export default function ConfiguracoesPage() {
   const [searchParams] = useSearchParams()
   const conviteBanner = searchParams.get('convite') === '1'
+  const googleUserResult = searchParams.get('google_user') // 'conectado' | 'erro' | null
   const { data: googleStatus } = useGoogleStatus()
+  const { usuario: me } = useAuth()
   const [pastaClientes, setPastaClientes] = usePastaClientes()
   const [editandoPasta, setEditandoPasta] = useState(false)
   const [pastaEdit, setPastaEdit] = useState(pastaClientes)
@@ -238,6 +240,17 @@ export default function ConfiguracoesPage() {
 
   const handleConnectGoogle = () => {
     window.location.href = '/api/auth/google'
+  }
+
+  const handleConnectPersonalGoogle = () => {
+    if (!me) return
+    window.location.href = `/api/auth/google/user?usuario_id=${me.id}`
+  }
+
+  const handleDisconnectPersonalGoogle = async () => {
+    if (!me) return
+    await api.delete(`/auth/google/user?usuario_id=${me.id}`)
+    window.location.reload()
   }
 
   const copiarPasta = () => {
@@ -263,6 +276,22 @@ export default function ConfiguracoesPage() {
           <button className={styles.btnPrimary} style={{ whiteSpace: 'nowrap', fontSize: 13 }} onClick={() => { window.location.href = '/api/auth/google' }}>
             Conectar Google →
           </button>
+        </div>
+      )}
+      {googleUserResult === 'conectado' && (
+        <div className={`${cfg.conviteBanner} ${cfg.bannerSucesso}`}>
+          <div className={cfg.conviteBannerTexto}>
+            <strong>Conta Google pessoal conectada com sucesso!</strong>
+            <span> Agora você pode sincronizar emails dos seus clientes.</span>
+          </div>
+        </div>
+      )}
+      {googleUserResult === 'erro' && (
+        <div className={`${cfg.conviteBanner} ${cfg.bannerErro}`}>
+          <div className={cfg.conviteBannerTexto}>
+            <strong>Erro ao conectar conta Google.</strong>
+            <span> Tente novamente.</span>
+          </div>
         </div>
       )}
 
@@ -302,6 +331,45 @@ export default function ConfiguracoesPage() {
             >
               {conectado ? 'Reconectar' : 'Conectar Google'}
             </button>
+          </div>
+        </div>
+
+        {/* Seção: Google pessoal */}
+        <div className={cfg.secao}>
+          <div className={cfg.secaoHeader}>
+            <h2 className={cfg.secaoTitulo}>Minha Conta Google</h2>
+            <p className={cfg.secaoDesc}>
+              Conecte sua conta pessoal do escritório para sincronizar emails trocados com clientes.
+              Cada membro pode conectar a sua própria conta.
+            </p>
+          </div>
+          <div className={cfg.item}>
+            <div className={cfg.itemLeft}>
+              <div className={cfg.itemIcon}>G</div>
+              <div>
+                <div className={cfg.itemNome}>Conta pessoal</div>
+                <div className={cfg.itemStatus}>
+                  {me?.google_email ? (
+                    <>
+                      <span className={cfg.statusOk}>● Conectado</span>
+                      <div className={cfg.contaEmail}>{me.google_email}</div>
+                    </>
+                  ) : (
+                    <span className={cfg.statusOff}>● Não conectado</span>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button className={me?.google_email ? cfg.btnReconectar : styles.btnPrimary} onClick={handleConnectPersonalGoogle}>
+                {me?.google_email ? 'Reconectar' : 'Conectar minha conta'}
+              </button>
+              {me?.google_email && (
+                <button className={styles.btnDanger} onClick={handleDisconnectPersonalGoogle}>
+                  Desconectar
+                </button>
+              )}
+            </div>
           </div>
         </div>
 

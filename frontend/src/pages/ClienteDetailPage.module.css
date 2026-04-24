@@ -369,6 +369,28 @@
   line-height: 1.6;
 }
 
+.emailSyncBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.contaTag {
+  font-size: 10px;
+  font-weight: 600;
+  background: #ede9fe;
+  color: #5b21b6;
+  border-radius: 999px;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+
 /* ── Aba header ─────────────────────────────────────────────────────────── */
 .abaHeader {
   display: flex;

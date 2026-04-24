@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { clientesApi } from '../api/clientes'
+import { clientesApi, type EmailCliente } from '../api/clientes'
+import { useAuth } from '../contexts/AuthContext'
 import { processosApi } from '../api/processos'
 import { anotacoesApi } from '../api/anotacoes'
 import { financeiroApi } from '../api/financeiro'
@@ -68,7 +69,7 @@ export default function ClienteDetailPage() {
   const { data: timeline = [], isLoading: loadingTimeline } = useQuery({
     queryKey: ['timeline', id],
     queryFn: () => anotacoesApi.timeline(id!),
-    enabled: aba === 'timeline' || aba === 'emails',
+    enabled: aba === 'timeline',
     staleTime: 5 * 60 * 1000,   // re-usa o cache por 5 min ao trocar de aba
     gcTime: 15 * 60 * 1000,
   })
@@ -95,6 +96,22 @@ export default function ClienteDetailPage() {
     queryKey: ['contratos-cliente', id],
     queryFn: () => contratosApi.listar({ cliente_id: id }),
     enabled: aba === 'contratos',
+  })
+
+  const { usuario: me } = useAuth()
+
+  const { data: emailsGmail = [], isLoading: loadingEmails } = useQuery({
+    queryKey: ['emails-gmail', id],
+    queryFn: () => clientesApi.listarEmails(id!),
+    enabled: aba === 'emails',
+    staleTime: 60_000,
+  })
+
+  const [syncContaGoogle, setSyncContaGoogle] = useState<string>('master')
+
+  const sincronizarEmails = useMutation({
+    mutationFn: () => clientesApi.sincronizarEmails(id!, syncContaGoogle),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['emails-gmail', id] }),
   })
 
   // Financeiro form
@@ -182,8 +199,6 @@ export default function ClienteDetailPage() {
     }
   }
 
-  const emailsTimeline = timeline.filter((i) => i.tipo === 'email')
-
   if (clienteLoading) return <p className={styles.empty}>Carregando...</p>
   if (clienteError || !cliente) return <p className={styles.empty}>Erro ao carregar cliente. <a href="/clientes">← Voltar</a></p>
 
@@ -240,7 +255,7 @@ export default function ClienteDetailPage() {
           >
             {a === 'timeline' ? 'Timeline' :
              a === 'anotacoes' ? 'Anotações' :
-             a === 'emails' ? `Emails${emailsTimeline.length ? ` (${emailsTimeline.length})` : ''}` :
+             a === 'emails' ? `Emails${emailsGmail.length ? ` (${emailsGmail.length})` : ''}` :
              a === 'processos' ? 'Processos' :
              a === 'financeiro' ? `Financeiro${honorarios.length ? ` (${honorarios.length})` : ''}` :
              a === 'contratos' ? `Contratos${contratos.length ? ` (${contratos.length})` : ''}` :
@@ -436,73 +451,96 @@ export default function ClienteDetailPage() {
       {/* ── Emails ── */}
       {aba === 'emails' && (
         <div>
-          {!cliente.email ? (
-            <div>
-              <p className={styles.empty}>Cliente sem email cadastrado.</p>
-              {!showEmailForm ? (
-                <div style={{ textAlign: 'center', marginTop: '8px' }}>
-                  <button className={styles.btnPrimary} onClick={() => setShowEmailForm(true)}>
-                    + Cadastrar Email
-                  </button>
-                </div>
-              ) : (
-                <div className={detailStyles.emailFormInline}>
-                  <input
-                    className={styles.input}
-                    type="email"
-                    placeholder="email@exemplo.com"
-                    value={emailInput}
-                    onChange={(e) => setEmailInput(e.target.value)}
-                    autoFocus
-                  />
-                  <button className={styles.btnPrimary}
-                    disabled={!emailInput || atualizarCliente.isPending}
-                    onClick={() => atualizarCliente.mutate({ email: emailInput })}>
-                    Salvar
-                  </button>
-                  <button className={styles.btnTable} onClick={() => { setShowEmailForm(false); setEmailInput('') }}>
-                    Cancelar
-                  </button>
-                </div>
+          {/* Email cadastro */}
+          {!cliente.email && !showEmailForm && (
+            <div style={{ textAlign: 'center', marginBottom: 12 }}>
+              <p className={styles.empty}>Cliente sem email cadastrado. Adicione para sincronizar emails.</p>
+              <button className={styles.btnPrimary} onClick={() => setShowEmailForm(true)}>+ Cadastrar Email</button>
+            </div>
+          )}
+          {showEmailForm && (
+            <div className={detailStyles.emailFormInline}>
+              <input className={styles.input} type="email" placeholder="email@exemplo.com"
+                value={emailInput} onChange={(e) => setEmailInput(e.target.value)} autoFocus />
+              <button className={styles.btnPrimary} disabled={!emailInput || atualizarCliente.isPending}
+                onClick={() => atualizarCliente.mutate({ email: emailInput })}>Salvar</button>
+              <button className={styles.btnTable} onClick={() => { setShowEmailForm(false); setEmailInput('') }}>Cancelar</button>
+            </div>
+          )}
+
+          {/* Sync toolbar */}
+          {cliente.email && (
+            <div className={detailStyles.emailSyncBar}>
+              <select
+                className={styles.input}
+                style={{ flex: 1, maxWidth: 260, fontSize: 12 }}
+                value={syncContaGoogle}
+                onChange={(e) => setSyncContaGoogle(e.target.value)}
+              >
+                <option value="master">Conta master (escritório)</option>
+                {me?.google_email && <option value={me.id}>Minha conta ({me.google_email})</option>}
+              </select>
+              <button
+                className={styles.btnPrimary}
+                style={{ fontSize: 12, padding: '6px 14px' }}
+                onClick={() => sincronizarEmails.mutate()}
+                disabled={sincronizarEmails.isPending}
+              >
+                {sincronizarEmails.isPending ? '⏳ Sincronizando...' : '⟳ Sincronizar Gmail'}
+              </button>
+              {sincronizarEmails.data && (
+                <span style={{ fontSize: 11, color: '#6b7280' }}>
+                  {sincronizarEmails.data.new > 0
+                    ? `${sincronizarEmails.data.new} novo(s) de ${sincronizarEmails.data.synced} encontrado(s)`
+                    : `Nenhum novo (${sincronizarEmails.data.synced} verificado(s))`}
+                </span>
               )}
             </div>
-          ) : loadingTimeline ? (
-            <p className={styles.empty}>Carregando emails...</p>
-          ) : emailsTimeline.length === 0 ? (
-            <p className={styles.empty}>Nenhum email encontrado para {cliente.email}.</p>
+          )}
+
+          {/* Email list */}
+          {loadingEmails ? (
+            <p className={styles.empty}>Carregando...</p>
+          ) : emailsGmail.length === 0 ? (
+            <p className={styles.empty}>
+              {cliente.email
+                ? 'Nenhum email sincronizado. Clique em "⟳ Sincronizar Gmail" para buscar.'
+                : 'Cadastre o email do cliente para sincronizar.'}
+            </p>
           ) : (
             <div className={detailStyles.emailsList}>
-              {emailsTimeline.map((e, i) => (
-                <div key={`email-${i}`} className={detailStyles.emailCard}
-                  onClick={() => setExpandido(expandido === `email-${i}` ? null : `email-${i}`)}>
+              {emailsGmail.map((e: EmailCliente) => (
+                <div key={e.id} className={detailStyles.emailCard}
+                  onClick={() => setExpandido(expandido === e.id ? null : e.id)}>
                   <div className={detailStyles.emailHeader}>
-                    <div>
-                      <strong>{e.titulo}</strong>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <strong style={{ fontSize: 13 }}>{e.assunto || '(sem assunto)'}</strong>
+                        {e.conta_email && (
+                          <span className={detailStyles.contaTag} title={`Conta: ${e.conta_email}`}>
+                            {e.conta_email.split('@')[0]}
+                          </span>
+                        )}
+                      </div>
                       <div className={detailStyles.emailMeta}>
-                        {e.subtitulo} → {String(e.meta.para ?? '')}
+                        De: {e.remetente || '—'}
+                        {e.destinatarios && <> · Para: {e.destinatarios}</>}
                       </div>
                     </div>
                     <div className={detailStyles.emailHeaderRight}>
-                      <span className={detailStyles.anotacaoData}>{formatDate(e.data)}</span>
-                      {e.referencia_id && (
-                        <a
-                          href={`https://mail.google.com/mail/u/0/#all/${e.referencia_id}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className={detailStyles.btnGmail}
-                          onClick={(ev) => ev.stopPropagation()}
-                        >
-                          Gmail ↗
-                        </a>
-                      )}
+                      <span className={detailStyles.anotacaoData}>{e.data ? formatDate(e.data) : '—'}</span>
+                      <a
+                        href={`https://mail.google.com/mail/u/0/#all/${e.gmail_message_id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={detailStyles.btnGmail}
+                        onClick={(ev) => ev.stopPropagation()}
+                      >
+                        Gmail ↗
+                      </a>
                     </div>
                   </div>
-                  {expandido === `email-${i}` && !!e.meta.corpo && (
-                    <pre className={detailStyles.emailCorpo}>{String(e.meta.corpo)}</pre>
-                  )}
-                  {expandido !== `email-${i}` && (
-                    <p className={detailStyles.emailSnippet}>{e.texto}</p>
-                  )}
+                  {e.snippet && <p className={detailStyles.emailSnippet}>{e.snippet}</p>}
                 </div>
               ))}
             </div>

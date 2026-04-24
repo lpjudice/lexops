@@ -13,6 +13,7 @@ export interface Usuario {
   created_at: string
   clientes_ids: string[]
   primeiro_acesso: boolean
+  google_email?: string | null
 }
 
 export interface LoginRequest {

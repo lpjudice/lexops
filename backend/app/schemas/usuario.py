@@ -37,6 +37,7 @@ class UsuarioOut(UsuarioBase):
     created_at: datetime
     primeiro_acesso: bool = False
     clientes_ids: list[uuid.UUID] = []
+    google_email: str | None = None
 
     model_config = {"from_attributes": True}
 

@@ -30,6 +30,8 @@ def _usuario_to_out(u: Usuario, db: Session) -> UsuarioOut:
     ).fetchall()
     out = UsuarioOut.model_validate(u)
     out.clientes_ids = [r.cliente_id for r in rows]
+    if isinstance(u.google_tokens, dict):
+        out.google_email = u.google_tokens.get("email")
     return out
 
 

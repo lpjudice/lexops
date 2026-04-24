@@ -448,6 +448,86 @@ def chat_cliente(
     return {"resposta": resposta}
 
 
+# ── Emails ────────────────────────────────────────────────────────────────────
+
+class EmailSyncRequest(BaseModel):
+    conta_google: str = "master"  # "master" or str(usuario_id)
+
+
+class EmailOut(BaseModel):
+    id: uuid.UUID
+    gmail_message_id: str
+    conta_google: str
+    conta_email: str | None
+    remetente: str | None
+    destinatarios: str | None
+    assunto: str | None
+    snippet: str | None
+    thread_id: str | None
+    data: str | None  # ISO datetime string
+    lido: bool
+    created_at: str
+
+    model_config = {"from_attributes": True}
+
+
+@router.get("/{cliente_id}/emails", response_model=list[EmailOut])
+def listar_emails(cliente_id: uuid.UUID, db: Session = Depends(get_db)):
+    from app.models.email_cliente import EmailCliente
+    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+    emails = (
+        db.query(EmailCliente)
+        .filter(EmailCliente.cliente_id == cliente_id)
+        .order_by(EmailCliente.data.desc().nullslast())
+        .all()
+    )
+    return [
+        {
+            "id": e.id,
+            "gmail_message_id": e.gmail_message_id,
+            "conta_google": e.conta_google,
+            "conta_email": e.conta_email,
+            "remetente": e.remetente,
+            "destinatarios": e.destinatarios,
+            "assunto": e.assunto,
+            "snippet": e.snippet,
+            "thread_id": e.thread_id,
+            "data": e.data.isoformat() if e.data else None,
+            "lido": e.lido,
+            "created_at": e.created_at.isoformat(),
+        }
+        for e in emails
+    ]
+
+
+@router.post("/{cliente_id}/emails/sync")
+def sincronizar_emails(cliente_id: uuid.UUID, body: EmailSyncRequest, db: Session = Depends(get_db)):
+    from app.services.gmail_sync import sync_emails_for_client
+
+    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+    # Collect client email addresses to search Gmail for
+    emails_cliente: list[str] = []
+    if cliente.email:
+        emails_cliente.append(cliente.email)
+
+    result = sync_emails_for_client(
+        cliente_id=str(cliente_id),
+        conta_google=body.conta_google,
+        db_session=db,
+        emails_cliente=emails_cliente,
+    )
+
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    return result
+
+
 @router.post("/{cliente_id}/pasta-arquivos/refresh")
 def refresh_pasta_arquivos(cliente_id: uuid.UUID, db: Session = Depends(get_db)):
     """Returns all files in the client's Dropbox folder (including manually added)."""

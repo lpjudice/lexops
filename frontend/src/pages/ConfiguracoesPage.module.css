@@ -463,3 +463,15 @@
   padding: 1px 5px;
   border-radius: 4px;
 }
+
+.bannerSucesso {
+  background: #ecfdf5;
+  border-color: #6ee7b7;
+}
+.bannerSucesso .conviteBannerTexto { color: #065f46; }
+
+.bannerErro {
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+.bannerErro .conviteBannerTexto { color: #991b1b; }
