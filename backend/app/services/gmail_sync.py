@@ -161,10 +161,18 @@ def _search_messages(tokens: dict, query: str, max_results: int = 50) -> list[st
 
 def _fetch_message(tokens: dict, message_id: str) -> dict | None:
     headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+    # Pass metadataHeaders as repeated params — comma-separated string is NOT supported by the API
     r = httpx.get(
         f"{GMAIL_API}/messages/{message_id}",
         headers=headers,
-        params={"format": "metadata", "metadataHeaders": "From,To,Cc,Subject,Date"},
+        params=[
+            ("format", "metadata"),
+            ("metadataHeaders", "From"),
+            ("metadataHeaders", "To"),
+            ("metadataHeaders", "Cc"),
+            ("metadataHeaders", "Subject"),
+            ("metadataHeaders", "Date"),
+        ],
         timeout=10,
     )
     if not r.is_success:
@@ -226,6 +234,13 @@ def sync_emails_for_client(
         subject = _header(hdrs, "Subject")
         date_str = _header(hdrs, "Date")
 
+        # internalDate is epoch-ms (string) — more reliable than the Date header
+        internal_ms = int(raw.get("internalDate") or 0)
+        if internal_ms:
+            data = datetime.fromtimestamp(internal_ms / 1000, tz=timezone.utc)
+        else:
+            data = _parse_date(date_str)
+
         destinatarios = ", ".join(filter(None, [to_raw, cc_raw]))
 
         email_record = EmailCliente(
@@ -238,7 +253,7 @@ def sync_emails_for_client(
             assunto=subject,
             snippet=raw.get("snippet"),
             thread_id=raw.get("threadId"),
-            data=_parse_date(date_str),
+            data=data,
             lido=True,
         )
         db_session.add(email_record)

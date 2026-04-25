@@ -90,6 +90,10 @@ def google_status():
 # ── Per-user personal Google account (gmail.readonly) ─────────────────────────
 
 def _user_redirect_uri() -> str:
+    # Derive from GOOGLE_REDIRECT_URI (already registered + correct domain/path prefix)
+    master = os.getenv("GOOGLE_REDIRECT_URI", "")
+    if master and "/auth/google/callback" in master:
+        return master.replace("/auth/google/callback", "/auth/google/user/callback")
     backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
     return f"{backend_url}/auth/google/user/callback"
 
