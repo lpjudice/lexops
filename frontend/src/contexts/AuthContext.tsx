@@ -11,6 +11,7 @@ interface AuthContextValue {
   loginComToken: (token: string, usuario: Usuario) => void
   logout: () => void
   clearPrimeiroAcesso: () => void
+  refreshMe: () => Promise<void>
   isSuperAdmin: boolean
   isAdmin: boolean
   canSeeFinanceiro: boolean
@@ -57,8 +58,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (usuario) setUsuario({ ...usuario, primeiro_acesso: false })
   }
 
+  const refreshMe = async () => {
+    const saved = localStorage.getItem(TOKEN_KEY)
+    if (!saved) return
+    try {
+      const u = await usuariosApi.me(saved)
+      setUsuario(u)
+    } catch {
+      // silently ignore
+    }
+  }
+
   const value: AuthContextValue = {
-    usuario, token, loading, login, loginComToken, logout, clearPrimeiroAcesso,
+    usuario, token, loading, login, loginComToken, logout, clearPrimeiroAcesso, refreshMe,
     isSuperAdmin: usuario?.role === 'super_admin',
     isAdmin: usuario?.role === 'super_admin' || usuario?.role === 'admin',
     canSeeFinanceiro: usuario?.pode_ver_financeiro ?? false,

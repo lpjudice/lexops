@@ -81,7 +81,7 @@ export default function AceitarConvitePage() {
         <div className={styles.welcomeBox}>
           <p className={styles.welcomeHi}>Olá, {info?.nome}!</p>
           <p className={styles.welcomeDesc}>
-            Você foi convidado para o Gestor Jurídico. Defina uma senha para ativar sua conta.
+            Você foi convidado para o Sui. Defina uma senha para ativar sua conta.
           </p>
           <p className={styles.welcomeEmail}>{info?.email}</p>
         </div>

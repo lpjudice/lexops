@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import api from '../api/client'
@@ -230,7 +230,15 @@ export default function ConfiguracoesPage() {
   const conviteBanner = searchParams.get('convite') === '1'
   const googleUserResult = searchParams.get('google_user') // 'conectado' | 'erro' | null
   const { data: googleStatus } = useGoogleStatus()
-  const { usuario: me } = useAuth()
+  const { usuario: me, isSuperAdmin, refreshMe } = useAuth()
+
+  // Refresh me after Google OAuth callback so google_email updates immediately
+  useEffect(() => {
+    if (googleUserResult === 'conectado') {
+      refreshMe()
+    }
+  }, [googleUserResult]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const [pastaClientes, setPastaClientes] = usePastaClientes()
   const [editandoPasta, setEditandoPasta] = useState(false)
   const [pastaEdit, setPastaEdit] = useState(pastaClientes)
@@ -250,7 +258,7 @@ export default function ConfiguracoesPage() {
   const handleDisconnectPersonalGoogle = async () => {
     if (!me) return
     await api.delete(`/auth/google/user?usuario_id=${me.id}`)
-    window.location.reload()
+    await refreshMe()
   }
 
   const copiarPasta = () => {
@@ -312,7 +320,7 @@ export default function ConfiguracoesPage() {
             <div className={cfg.itemLeft}>
               <div className={cfg.itemIcon}>G</div>
               <div>
-                <div className={cfg.itemNome}>Conta Google</div>
+                <div className={cfg.itemNome}>Conta Google Master</div>
                 <div className={cfg.itemStatus}>
                   {conectado ? (
                     <>
@@ -320,17 +328,19 @@ export default function ConfiguracoesPage() {
                       {googleEmail && <div className={cfg.contaEmail}>{googleEmail}</div>}
                     </>
                   ) : (
-                    <span className={cfg.statusOff}>● Desconectado — clique para autorizar</span>
+                    <span className={cfg.statusOff}>● Desconectado</span>
                   )}
                 </div>
               </div>
             </div>
-            <button
-              className={conectado ? cfg.btnReconectar : styles.btnPrimary}
-              onClick={handleConnectGoogle}
-            >
-              {conectado ? 'Reconectar' : 'Conectar Google'}
-            </button>
+            {isSuperAdmin && (
+              <button
+                className={conectado ? cfg.btnReconectar : styles.btnPrimary}
+                onClick={handleConnectGoogle}
+              >
+                {conectado ? 'Reconectar' : 'Conectar Google'}
+              </button>
+            )}
           </div>
         </div>
 
@@ -469,7 +479,7 @@ export default function ConfiguracoesPage() {
           <div className={cfg.infoGrid}>
             <div className={cfg.infoItem}>
               <span className={cfg.infoLabel}>Versão</span>
-              <span className={cfg.infoValor}>Gestor Jurídico v1.0</span>
+              <span className={cfg.infoValor}>Sui v1.0</span>
             </div>
             <div className={cfg.infoItem}>
               <span className={cfg.infoLabel}>Escritório</span>

@@ -218,7 +218,7 @@ _run_migrations()
 _seed_super_admin()
 
 app = FastAPI(
-    title="Gestor Jurídico",
+    title="Sui",
     version="0.1.0",
     docs_url="/docs",
     redoc_url="/redoc",

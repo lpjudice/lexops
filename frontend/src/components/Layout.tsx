@@ -112,7 +112,7 @@ const PAGE_TITLES: Record<string, string> = {
 function Topbar({ onMenuToggle }: { onMenuToggle: () => void }) {
   const location = useLocation()
   const base = '/' + location.pathname.split('/')[1]
-  const title = PAGE_TITLES[base] ?? 'Gestor Jurídico'
+  const title = PAGE_TITLES[base] ?? 'Sui'
   const { usuario, logout } = useAuth()
 
   const initials = usuario?.nome
@@ -184,7 +184,7 @@ export default function Layout() {
           ))}
         </div>
 
-        <div className={styles.sidebarFooter}>Gestor Jurídico v1.0</div>
+        <div className={styles.sidebarFooter}>Sui v1.0</div>
       </nav>
 
       <div className={styles.mainWrapper}>

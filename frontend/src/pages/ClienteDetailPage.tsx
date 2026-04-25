@@ -98,7 +98,7 @@ export default function ClienteDetailPage() {
     enabled: aba === 'contratos',
   })
 
-  const { usuario: me } = useAuth()
+  const { usuario: me, isSuperAdmin } = useAuth()
 
   const { data: emailsGmail = [], isLoading: loadingEmails } = useQuery({
     queryKey: ['emails-gmail', id],
@@ -108,6 +108,13 @@ export default function ClienteDetailPage() {
   })
 
   const [syncContaGoogle, setSyncContaGoogle] = useState<string>('master')
+
+  // Non-super-admins only see emails from master + their own account
+  const visibleEmails = isSuperAdmin
+    ? emailsGmail
+    : emailsGmail.filter((e: EmailCliente) =>
+        e.conta_google === 'master' || (me && e.conta_google === me.id)
+      )
 
   const sincronizarEmails = useMutation({
     mutationFn: () => clientesApi.sincronizarEmails(id!, syncContaGoogle),
@@ -255,7 +262,7 @@ export default function ClienteDetailPage() {
           >
             {a === 'timeline' ? 'Timeline' :
              a === 'anotacoes' ? 'Anotações' :
-             a === 'emails' ? `Emails${emailsGmail.length ? ` (${emailsGmail.length})` : ''}` :
+             a === 'emails' ? `Emails${visibleEmails.length ? ` (${visibleEmails.length})` : ''}` :
              a === 'processos' ? 'Processos' :
              a === 'financeiro' ? `Financeiro${honorarios.length ? ` (${honorarios.length})` : ''}` :
              a === 'contratos' ? `Contratos${contratos.length ? ` (${contratos.length})` : ''}` :
@@ -501,7 +508,7 @@ export default function ClienteDetailPage() {
           {/* Email list */}
           {loadingEmails ? (
             <p className={styles.empty}>Carregando...</p>
-          ) : emailsGmail.length === 0 ? (
+          ) : visibleEmails.length === 0 ? (
             <p className={styles.empty}>
               {cliente.email
                 ? 'Nenhum email sincronizado. Clique em "⟳ Sincronizar Gmail" para buscar.'
@@ -509,7 +516,7 @@ export default function ClienteDetailPage() {
             </p>
           ) : (
             <div className={detailStyles.emailsList}>
-              {emailsGmail.map((e: EmailCliente) => (
+              {visibleEmails.map((e: EmailCliente) => (
                 <div key={e.id} className={detailStyles.emailCard}
                   onClick={() => setExpandido(expandido === e.id ? null : e.id)}>
                   <div className={detailStyles.emailHeader}>
