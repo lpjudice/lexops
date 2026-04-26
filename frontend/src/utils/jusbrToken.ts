@@ -13,7 +13,7 @@ function decodePayload(token: string): Record<string, unknown> | null {
 }
 
 function extractJsonField(raw: string, field: string): string {
-  const match = raw.match(new RegExp(`"${field}"\s*:\s*"([^"]+)"`, 'i'))
+  const match = raw.match(new RegExp(`"${field}"\\s*:\\s*"([^"]+)"`, "i"))
   return match?.[1]?.trim() ?? ''
 }
 
