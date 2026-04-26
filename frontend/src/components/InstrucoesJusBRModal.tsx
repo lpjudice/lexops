@@ -101,6 +101,8 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
       setClipboardMsg(
         kind === 'token_json'
           ? 'JSON de token detectado. Esse é o formato preferido para manter a sessão do jus.br.'
+          : kind === 'process_response'
+          ? 'Resposta de /processos detectada. Ela ajuda no diagnóstico, mas não conecta a sessão. Cole o JSON da requisição token.'
           : kind === 'curl'
           ? 'cURL detectado. O token será extraído automaticamente.'
           : kind === 'headers'
@@ -126,7 +128,7 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
             <span className={styles.headerIcon}>🔑</span>
             <div>
               <h2 className={styles.title}>Conectar jus.br</h2>
-              <p className={styles.subtitle}>v3: prefira o JSON de token; o app renova a sessão automaticamente quando puder</p>
+              <p className={styles.subtitle}>v4: use o JSON de token para conectar a sessão; resposta de /processos não substitui o token</p>
             </div>
           </div>
           <button className={styles.btnClose} onClick={onClose}>×</button>
@@ -160,7 +162,7 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
               <span className={styles.networkHintIcon}>💡</span>
               <span>
                 O melhor formato agora é o <strong>JSON da resposta de token</strong> com <strong>access_token</strong> e <strong>refresh_token</strong>.
-                Se preferir, você ainda pode colar o <strong>cURL inteiro</strong>, headers ou um token puro.
+                A resposta de <strong>/processos</strong> nao conecta a sessao sozinha; ela serve apenas para diagnostico.
               </span>
             </div>
           )}
@@ -201,13 +203,15 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
               </p>
             )}
             <p className={styles.tokenHint}>
-              Quando houver <strong>refresh_token</strong>, o app tenta renovar a sessão automaticamente para reutilizar em todos os processos.
+              Quando houver <strong>refresh_token</strong>, o app tenta renovar a sessão automaticamente para reutilizar em todos os processos. Se você colar uma resposta de <strong>/processos</strong>, o botão continuará desabilitado de propósito.
             </p>
             {inputKind !== 'unknown' && (
               <p className={styles.tokenHint}>
                 Entrada detectada: {
                   inputKind === 'token_json'
                     ? 'JSON de token'
+                    : inputKind === 'process_response'
+                    ? 'Resposta de /processos'
                     : inputKind === 'curl'
                     ? 'cURL'
                     : inputKind === 'headers'

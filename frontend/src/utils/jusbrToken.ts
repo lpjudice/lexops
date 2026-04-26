@@ -45,10 +45,11 @@ export function extractJusbrTokenFromText(raw: string): string {
   return ''
 }
 
-export function detectJusbrInputKind(raw: string): 'token_json' | 'token' | 'curl' | 'headers' | 'unknown' {
+export function detectJusbrInputKind(raw: string): 'token_json' | 'process_response' | 'token' | 'curl' | 'headers' | 'unknown' {
   const text = raw.trim()
   if (!text) return 'unknown'
   if (extractJsonField(text, 'access_token')) return 'token_json'
+  if (/"numeroProcesso"\s*:/i.test(text) || /"content"\s*:\s*\[/i.test(text)) return 'process_response'
   if (/^curl\s/i.test(text)) return 'curl'
   if (/authorization:/i.test(text) || /request headers/i.test(text)) return 'headers'
   if (sanitizeJusbrToken(text).split('.').length === 3) return 'token'

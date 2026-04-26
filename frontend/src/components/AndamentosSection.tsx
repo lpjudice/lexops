@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import axios from 'axios'
 import { andamentosApi } from '../api/andamentos'
 import type { Andamento, JusbrSessionStatus, SincronizacaoResult } from '../api/andamentos'
 import InstrucoesJusBRModal from './InstrucoesJusBRModal'
@@ -31,6 +32,17 @@ function formatDateTime(iso: string | null | undefined): string {
     day: '2-digit', month: '2-digit', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   })
+}
+
+
+function extractApiErrorMessage(error: unknown, fallback: string): string {
+  if (axios.isAxiosError(error)) {
+    const detail = error.response?.data?.detail
+    if (typeof detail === 'string' && detail.trim()) return detail
+    if (typeof error.message === 'string' && error.message.trim()) return error.message
+  }
+  if (error instanceof Error && error.message.trim()) return error.message
+  return fallback
 }
 
 function SyncBanner({ result, ultimoAndamentoPre }: {
@@ -128,7 +140,20 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
   })
 
   const isSyncing = syncDataJud.isPending || syncJusBR.isPending
-  const syncData = fonte === 'datajud' ? syncDataJud.data : syncJusBR.data
+  const syncData = useMemo(() => {
+    const data = fonte === 'datajud' ? syncDataJud.data : syncJusBR.data
+    if (data) return data
+    const error = fonte === 'datajud' ? syncDataJud.error : syncJusBR.error
+    if (!error) return null
+    return {
+      processo_id: processoId,
+      tribunal: null,
+      status: 'erro' as const,
+      novos_andamentos: 0,
+      mensagem: extractApiErrorMessage(error, 'Falha ao sincronizar andamentos.'),
+      ultimo_andamento_data: ultimoAndamentoPre ?? null,
+    }
+  }, [fonte, processoId, syncDataJud.data, syncDataJud.error, syncJusBR.data, syncJusBR.error, ultimoAndamentoPre])
   const temMais = (count?.total ?? 0) > offset + PAGE
   const jusbrAtivo = !!jusbrSession?.active
 
@@ -188,9 +213,9 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
             <button
               className={`${styles.fonteBtn} ${fonte === 'jusbr' ? styles.fonteBtnActive : ''}`}
               onClick={() => handleFonte('jusbr')}
-              title="jus.br — sessão compartilhada do portal com suporte a JSON de token"
+              title="jus.br — sessão compartilhada do portal com diagnostico melhorado"
             >
-              jus.br v3
+              jus.br v4
             </button>
           </div>
 
@@ -218,7 +243,7 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
             {isSyncing ? (
               <span className={styles.syncingLabel}><span className={styles.spinner} /> Buscando…</span>
             ) : fonte === 'jusbr' && !jusbrAtivo ? (
-              '🔑 Conectar jus.br v3'
+              '🔑 Conectar jus.br v4'
             ) : (
               '⟳ Sincronizar'
             )}
@@ -229,13 +254,13 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
       {/* jus.br token info bar */}
       {fonte === 'jusbr' && !jusbrAtivo && !isSyncing && !syncData && (
         <div className={styles.jusBRInfo}>
-          <span>O modo <strong>jus.br v3</strong> usa uma sessão compartilhada do portal. Prefira colar o <strong>JSON de token</strong> uma vez para reutilizar em todos os processos.</span>
+          <span>O modo <strong>jus.br v4</strong> usa uma sessão compartilhada do portal. Conecte com o <strong>JSON de token</strong>; colar a resposta de <strong>/processos</strong> não ativa o botão.</span>
         </div>
       )}
       {fonte === 'jusbr' && jusbrAtivo && !isSyncing && !syncData && (
         <div className={styles.jusBRInfo}>
           <span>
-            Sessão do <strong>jus.br v3</strong> ativa no backend e reutilizada automaticamente para todos os processos.
+            Sessão do <strong>jus.br v4</strong> ativa no backend e reutilizada automaticamente para todos os processos.
             {tokenExpiry ? ` Expira em ${tokenExpiry}.` : ''}
           </span>
           <button

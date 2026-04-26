@@ -152,7 +152,7 @@ export default function SincronizarModal({ processos, onClose }: Props) {
               onClick={() => handleFonteChange('jusbr')}
               title="jus.br — sessão compartilhada com preferência por JSON de token"
             >
-              jus.br v3
+              jus.br v4
             </button>
           </div>
           {fonte === 'jusbr' && jusbrAtivo && (
@@ -169,7 +169,7 @@ export default function SincronizarModal({ processos, onClose }: Props) {
         {/* JusBR info */}
         {fonte === 'jusbr' && (
           <div className={styles.avisoJusBR}>
-            <strong>jus.br v3</strong> retorna nomes reais dos documentos e dados completos via PDPJ, com preferência por <strong>JSON de token</strong> e sessão compartilhada do app inteiro.
+            <strong>jus.br v4</strong> retorna nomes reais dos documentos e dados completos via PDPJ, com preferência por <strong>JSON de token</strong> e sessão compartilhada do app inteiro.
             {jusbrAtivo
               ? ` Sessão ativa no backend.${tokenExpiry ? ` Expira em ${tokenExpiry}.` : ''}`
               : ' Clique em "Sincronizar" para conectar uma vez, de preferência com o JSON de token, e reutilizar nos outros processos.'}
@@ -250,7 +250,7 @@ export default function SincronizarModal({ processos, onClose }: Props) {
                 {isSyncing
                   ? `Sincronizando ${selecionados.size}...`
                   : fonte === 'jusbr' && !jusbrAtivo
-                  ? `🔑 Conectar jus.br v3 e sincronizar ${selecionados.size}`
+                  ? `🔑 Conectar jus.br v4 e sincronizar ${selecionados.size}`
                   : `Sincronizar ${selecionados.size} processo(s)`}
               </button>
             </div>
