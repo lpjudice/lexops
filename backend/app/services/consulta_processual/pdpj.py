@@ -8,6 +8,8 @@ known endpoint patterns from the portal and the cabecalho-processual service.
 """
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import re
 from datetime import date, datetime
@@ -15,6 +17,7 @@ from datetime import date, datetime
 import httpx
 
 from .base import Andamento
+from .cnj import candidatos_tribunal, inferir_tribunal_pelo_cnj, normalizar_cnj, normalizar_tribunal
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +27,8 @@ _BASES = [
     "https://portaldeservicos.pdpj.jus.br/api/v1",
     "https://gateway.cloud.pje.jus.br/cabecalho-processual/api/v1",
     "https://gateway.cloud.pje.jus.br/cabecalho-processual/api",
+    "https://gateway.cloud.pje.jus.br/cabecalho-processual",
 ]
-
-
-def _normalizar_cnj(numero: str) -> str:
-    return re.sub(r"\D", "", numero)
 
 
 def _parse_data(raw: str | None) -> date | None:
@@ -52,6 +52,55 @@ def _movimento_desc(m: dict) -> str:
     return " — ".join(dict.fromkeys(p for p in partes if p))
 
 
+def _jwt_exp(token: str) -> datetime | None:
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return None
+        payload = parts[1]
+        payload += "=" * (-len(payload) % 4)
+        data = json.loads(base64.urlsafe_b64decode(payload.encode()).decode())
+        exp = data.get("exp")
+        if isinstance(exp, (int, float)):
+            return datetime.fromtimestamp(exp)
+    except Exception:
+        return None
+    return None
+
+
+def _items_from_response(data: object) -> list[dict]:
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict)]
+    if isinstance(data, dict):
+        for key in ("content", "processos", "data", "items", "resultado"):
+            value = data.get(key)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
+        return [data]
+    return []
+
+
+def _tribunal_matches(item: dict, tribunal: str | None) -> bool:
+    if not tribunal:
+        return True
+    esperado = normalizar_tribunal(tribunal)
+    candidatos = [
+        item.get("tribunal"),
+        item.get("siglaTribunal"),
+        item.get("orgaoJulgador"),
+        item.get("orgao"),
+    ]
+    return any(esperado in normalizar_tribunal(str(valor)) for valor in candidatos if valor)
+
+
+def _extract_inline_movimentos(data: dict) -> list[dict]:
+    for key in ("movimentos", "andamentos", "movements"):
+        value = data.get(key)
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, dict)]
+    return []
+
+
 async def buscar_via_pdpj(numero_cnj: str, tribunal: str, token: str) -> list[Andamento]:
     """Fetch process movements from PDPJ using an authenticated Bearer token.
 
@@ -62,8 +111,13 @@ async def buscar_via_pdpj(numero_cnj: str, tribunal: str, token: str) -> list[An
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
         "Accept": "application/json",
+        "Origin": "https://portaldeservicos.pdpj.jus.br",
+        "Referer": "https://portaldeservicos.pdpj.jus.br/",
     }
-    numero_norm = _normalizar_cnj(numero_cnj)
+    numero_norm = normalizar_cnj(numero_cnj)
+    tribunal_norm = normalizar_tribunal(tribunal)
+    tribunal_inferido = inferir_tribunal_pelo_cnj(numero_cnj)
+    tribunais_candidatos = candidatos_tribunal(numero_cnj, tribunal)
 
     # ── Candidate search endpoints ────────────────────────────────────────────
     # Each tuple: (method, url, params, json_body)
@@ -72,6 +126,9 @@ async def buscar_via_pdpj(numero_cnj: str, tribunal: str, token: str) -> list[An
         candidates += [
             ("GET", f"{base}/processos",                   {"numeroProcesso": numero_cnj},  None),
             ("GET", f"{base}/processos",                   {"numeroProcesso": numero_norm}, None),
+            ("GET", f"{base}/processos",                   {"numeroProcesso": numero_cnj, "retornarMovimentos": "true"},  None),
+            ("GET", f"{base}/processos",                   {"numeroProcesso": numero_norm, "retornarMovimentos": "true"}, None),
+            ("GET", f"{base}/processos",                   {"numeroProcesso": numero_norm, "incluirMovimentos": "true"}, None),
             ("GET", f"{base}/processos",                   {"numero": numero_cnj},          None),
             ("GET", f"{base}/processos",                   {"numero": numero_norm},         None),
             ("GET", f"{base}/processos/{numero_cnj}",      {},                              None),
@@ -80,10 +137,16 @@ async def buscar_via_pdpj(numero_cnj: str, tribunal: str, token: str) -> list[An
             ("GET", f"{base}/consulta/processos",          {"numeroProcesso": numero_cnj},  None),
             ("GET", f"{base}/consulta/processos",          {"numeroProcesso": numero_norm}, None),
         ]
+        for candidato in tribunais_candidatos:
+            candidates += [
+                ("GET", f"{base}/processos", {"numeroProcesso": numero_norm, "tribunal": candidato}, None),
+                ("GET", f"{base}/processos", {"numeroProcesso": numero_norm, "siglaTribunal": candidato}, None),
+            ]
 
     async with httpx.AsyncClient(timeout=20) as client:
         processo_data: dict | None = None
         matched_base = ""
+        inline_movimentos: list[dict] = []
 
         for method, url, params, body in candidates:
             try:
@@ -100,9 +163,12 @@ async def buscar_via_pdpj(numero_cnj: str, tribunal: str, token: str) -> list[An
             logger.info("PDPJ probe %s %s params=%s → %s", method, url, params, resp.status_code)
 
             if resp.status_code in (401, 403):
+                exp = _jwt_exp(token)
+                extra = f" Token expira em {exp.strftime('%d/%m/%Y %H:%M:%S')}." if exp else ""
                 raise PermissionError(
                     "Token expirado ou sem permissão. "
                     "Abra o portal jus.br, faça login e capture um novo token pela aba Network."
+                    f"{extra}"
                 )
             if resp.status_code == 404:
                 continue
@@ -116,19 +182,21 @@ async def buscar_via_pdpj(numero_cnj: str, tribunal: str, token: str) -> list[An
                 continue
 
             # Unwrap paginated response
-            items = (
-                data if isinstance(data, list)
-                else data.get("content")
-                or data.get("processos")
-                or data.get("data")
-                or ([data] if isinstance(data, dict) and data else [])
-            )
+            items = _items_from_response(data)
 
             for item in items:
                 n_raw = (item.get("numeroProcesso") or item.get("numero") or "")
+                if re.sub(r"\D", "", n_raw) != numero_norm:
+                    continue
+                if tribunal_norm and not _tribunal_matches(item, tribunal_norm):
+                    if tribunal_inferido and _tribunal_matches(item, tribunal_inferido):
+                        pass
+                    elif item.get("tribunal") or item.get("siglaTribunal"):
+                        continue
                 if re.sub(r"\D", "", n_raw) == numero_norm:
                     processo_data = item
                     matched_base = url.rsplit("/", 2)[0]  # strip /processos
+                    inline_movimentos = _extract_inline_movimentos(item)
                     break
 
             if processo_data:
@@ -144,68 +212,69 @@ async def buscar_via_pdpj(numero_cnj: str, tribunal: str, token: str) -> list[An
             or numero_norm
         )
 
+        if inline_movimentos:
+            items = inline_movimentos
+        else:
         # ── Fetch movimentos ──────────────────────────────────────────────────
-        mov_candidates = [
-            f"{matched_base}/processos/{processo_id}/movimentos",
-            f"{matched_base}/processos/{numero_cnj}/movimentos",
-            f"{matched_base}/processos/{numero_norm}/movimentos",
-            f"{matched_base}/processos/{processo_id}/andamentos",
-            f"{matched_base}/movimentos?processoId={processo_id}",
-            f"{matched_base}/movimentos?numeroProcesso={numero_norm}",
-        ]
+            mov_candidates = [
+                f"{matched_base}/processos/{processo_id}/movimentos",
+                f"{matched_base}/processos/{numero_cnj}/movimentos",
+                f"{matched_base}/processos/{numero_norm}/movimentos",
+                f"{matched_base}/processos/{processo_id}/andamentos",
+                f"{matched_base}/movimentos?processoId={processo_id}",
+                f"{matched_base}/movimentos?numeroProcesso={numero_norm}",
+            ]
 
-        for url in mov_candidates:
-            try:
-                mr = await client.get(url, headers=headers)
-            except Exception:
-                continue
+            items = []
+            for url in mov_candidates:
+                try:
+                    mr = await client.get(url, headers=headers)
+                except Exception:
+                    continue
 
-            logger.info("PDPJ movimentos probe %s → %s", url, mr.status_code)
+                logger.info("PDPJ movimentos probe %s → %s", url, mr.status_code)
 
-            if mr.status_code in (401, 403):
-                raise PermissionError("Token expirado ao buscar movimentos. Renove o token.")
-            if mr.status_code != 200:
-                continue
+                if mr.status_code in (401, 403):
+                    raise PermissionError("Token expirado ao buscar movimentos. Renove o token.")
+                if mr.status_code != 200:
+                    continue
 
-            try:
-                md = mr.json()
-            except Exception:
-                continue
+                try:
+                    md = mr.json()
+                except Exception:
+                    continue
 
-            items = md if isinstance(md, list) else (
-                md.get("content")
-                or md.get("movimentos")
-                or md.get("andamentos")
-                or md.get("data")
-                or []
+                items = _items_from_response(md)
+                if not items and isinstance(md, dict):
+                    items = _extract_inline_movimentos(md)
+                if items:
+                    break
+
+        andamentos: list[Andamento] = []
+        for m in items:
+            dt = _parse_data(
+                m.get("dataHora") or m.get("dataMovimento") or m.get("data") or m.get("datahora")
             )
+            desc = _movimento_desc(m)
+            tipo = m.get("nome") or m.get("tipo") or m.get("descricao")
 
-            andamentos: list[Andamento] = []
-            for m in items:
-                dt = _parse_data(
-                    m.get("dataHora") or m.get("dataMovimento") or m.get("data") or m.get("datahora")
-                )
-                desc = _movimento_desc(m)
-                tipo = m.get("nome") or m.get("tipo") or m.get("descricao")
+            for doc_key in ("documento", "doc", "arquivo"):
+                doc = m.get(doc_key)
+                if isinstance(doc, dict):
+                    doc_nome = doc.get("nome") or doc.get("nomeArquivo") or doc.get("filename") or ""
+                    if doc_nome:
+                        desc = f"{desc} — {doc_nome}" if desc else doc_nome
+                    break
 
-                # Enrich with document name if available
-                for doc_key in ("documento", "doc", "arquivo"):
-                    doc = m.get(doc_key)
-                    if isinstance(doc, dict):
-                        doc_nome = doc.get("nome") or doc.get("nomeArquivo") or doc.get("filename") or ""
-                        if doc_nome:
-                            desc = f"{desc} — {doc_nome}" if desc else doc_nome
-                        break
+            if desc:
+                andamentos.append(Andamento(
+                    data_andamento=dt,
+                    descricao=desc[:2000],
+                    tipo=tipo,
+                    grau=m.get("grau"),
+                ))
 
-                if desc:
-                    andamentos.append(Andamento(
-                        data_andamento=dt,
-                        descricao=desc[:2000],
-                        tipo=tipo,
-                        grau=m.get("grau"),
-                    ))
-
-            if andamentos:
-                return andamentos
+        if andamentos:
+            return andamentos
 
     return []

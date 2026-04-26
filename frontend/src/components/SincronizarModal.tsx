@@ -5,6 +5,13 @@ import type { SincronizacaoResult } from '../api/andamentos'
 import type { Processo } from '../api/processos'
 import InstrucoesJusBRModal from './InstrucoesJusBRModal'
 import styles from './SincronizarModal.module.css'
+import {
+  clearStoredJusbrToken,
+  formatTokenExpiry,
+  loadStoredJusbrToken,
+  saveStoredJusbrToken,
+} from '../utils/jusbrToken'
+import { inferTribunalFromCnj } from '../utils/cnj'
 
 interface Props {
   processos: Processo[]
@@ -15,14 +22,15 @@ type Fonte = 'datajud' | 'jusbr'
 
 // All tribunals covered by DataJud
 const DATAJUD_SUPORTADOS = new Set([
-  'TJES', 'TJSP', 'TJAM', 'TRF2', 'TJRJ', 'TJMG', 'TJRS', 'TJPR', 'TJSC',
+  'TJES', 'TJSP', 'TJAM', 'TRF2', 'TJRJ', 'TJMG', 'TJRS', 'TJPR', 'TJSC', 'TJDFT',
   'TJBA', 'TJGO', 'TJPE', 'TJCE', 'TJMA', 'TJPA', 'TJPB', 'TJPI', 'TJAL',
   'TJSE', 'TJRN', 'TJMT', 'TJMS', 'TJRO', 'TJTO', 'TJAC', 'TJAP', 'TJRR',
   'TRF1', 'TRF3', 'TRF4', 'TRF5', 'TRF6', 'STJ', 'TST', 'TSE', 'STM',
 ])
 
 function suportaDataJud(p: Processo) {
-  return p.tribunal && DATAJUD_SUPORTADOS.has(p.tribunal.toUpperCase())
+  const tribunal = (p.tribunal || inferTribunalFromCnj(p.numero_cnj) || '').toUpperCase()
+  return !!tribunal && DATAJUD_SUPORTADOS.has(tribunal)
 }
 
 // Any tribunal with a CNJ number can theoretically be found in jus.br
@@ -33,9 +41,10 @@ function suportaJusBR(p: Processo) {
 export default function SincronizarModal({ processos, onClose }: Props) {
   const qc = useQueryClient()
   const [fonte, setFonte] = useState<Fonte>('datajud')
-  const [jusBRToken, setJusBRToken] = useState('')
+  const [jusBRToken, setJusBRToken] = useState(() => loadStoredJusbrToken())
   const [showInstrucoes, setShowInstrucoes] = useState(false)
   const [resultados, setResultados] = useState<SincronizacaoResult[] | null>(null)
+  const tokenExpiry = jusBRToken ? formatTokenExpiry(jusBRToken) : null
 
   const disponiveis = processos.filter(fonte === 'datajud' ? suportaDataJud : suportaJusBR)
   const [selecionados, setSelecionados] = useState<Set<string>>(
@@ -93,6 +102,7 @@ export default function SincronizarModal({ processos, onClose }: Props) {
 
   function handleJusBRToken(token: string) {
     setJusBRToken(token)
+    saveStoredJusbrToken(token)
     syncJusBR.mutate(token)
   }
 
@@ -148,8 +158,22 @@ export default function SincronizarModal({ processos, onClose }: Props) {
             <strong>jus.br</strong> retorna nomes reais dos documentos e dados completos via PDPJ,
             mas requer um <strong>token de sessão</strong> obtido após login manual.
             {jusBRToken
-              ? ' Token configurado.'
+              ? ` Token carregado automaticamente.${tokenExpiry ? ` Expira em ${tokenExpiry}.` : ''}`
               : ' Clique em "Sincronizar" para abrir as instruções.'}
+            {jusBRToken && (
+              <>
+                {' '}
+                <button
+                  className={styles.btnToggleAll}
+                  onClick={() => {
+                    clearStoredJusbrToken()
+                    setJusBRToken('')
+                  }}
+                >
+                  Limpar token
+                </button>
+              </>
+            )}
           </div>
         )}
 

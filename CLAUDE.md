@@ -16,3 +16,7 @@ Plataforma integrada para gestão da rotina jurídica: leitura de diários ofici
 ## Status
 
 Projeto em fase de planejamento. Aguardando coordenadas do usuário.
+
+## Notas operacionais
+
+- Para a intervencao em `Processos/Andamentos` com foco em `DataJud` e `jus.br`, ver `PROCESSOS_ANDAMENTOS_NOTAS.md`.

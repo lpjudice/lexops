@@ -4,6 +4,12 @@ import { andamentosApi } from '../api/andamentos'
 import type { Andamento, SincronizacaoResult } from '../api/andamentos'
 import InstrucoesJusBRModal from './InstrucoesJusBRModal'
 import styles from './AndamentosSection.module.css'
+import {
+  clearStoredJusbrToken,
+  formatTokenExpiry,
+  loadStoredJusbrToken,
+  saveStoredJusbrToken,
+} from '../utils/jusbrToken'
 
 interface Props {
   processoId: string
@@ -69,10 +75,11 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
   const qc = useQueryClient()
   const [fonte, setFonte] = useState<Fonte>('datajud')
   const [offset, setOffset] = useState(0)
-  const [jusBRToken, setJusBRToken] = useState('')
+  const [jusBRToken, setJusBRToken] = useState(() => loadStoredJusbrToken())
   const [showTokenModal, setShowTokenModal] = useState(false)
   const [ultimoAndamentoPre, setUltimoAndamentoPre] = useState<string | null | undefined>(ultimoAndamentoData)
   const PAGE = 10
+  const tokenExpiry = jusBRToken ? formatTokenExpiry(jusBRToken) : null
 
   const fonteParam = fonte === 'datajud' ? 'datajud' : 'jusbr'
 
@@ -142,6 +149,7 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
 
   function handleToken(token: string) {
     setJusBRToken(token)
+    saveStoredJusbrToken(token)
     syncJusBR.mutate(token)
   }
 
@@ -211,6 +219,23 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
       {fonte === 'jusbr' && !jusBRToken && !isSyncing && !syncData && (
         <div className={styles.jusBRInfo}>
           <span>O modo <strong>jus.br</strong> requer um token de sessão obtido no portal. Clique em <strong>"🔑 Configurar token"</strong> para começar.</span>
+        </div>
+      )}
+      {fonte === 'jusbr' && jusBRToken && !isSyncing && !syncData && (
+        <div className={styles.jusBRInfo}>
+          <span>
+            Token do <strong>jus.br</strong> carregado automaticamente neste navegador.
+            {tokenExpiry ? ` Expira em ${tokenExpiry}.` : ''}
+          </span>
+          <button
+            className={styles.btnLer}
+            onClick={() => {
+              clearStoredJusbrToken()
+              setJusBRToken('')
+            }}
+          >
+            Limpar token
+          </button>
         </div>
       )}
 

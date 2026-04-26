@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.processo import Processo, processo_clientes as assoc_table
 from app.schemas.processo import ProcessoClienteIn, ProcessoClienteOut, ProcessoCreate, ProcessoOut, ProcessoUpdate
+from app.services.consulta_processual.cnj import inferir_tribunal_pelo_cnj, normalizar_tribunal
 
 UPLOADS_DIR = Path("/app/uploads/processos")
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
@@ -54,6 +55,21 @@ def _enrich_litisconsorcio(processo: Processo, db: Session) -> list[ProcessoClie
     return result
 
 
+def _normalizar_payload_processo(fields: dict) -> dict:
+    numero_cnj = fields.get("numero_cnj")
+    tribunal = fields.get("tribunal")
+
+    tribunal_norm = normalizar_tribunal(tribunal) if tribunal else ""
+    tribunal_inferido = inferir_tribunal_pelo_cnj(numero_cnj) if numero_cnj else None
+
+    if tribunal_norm:
+        fields["tribunal"] = tribunal_norm
+    elif tribunal_inferido:
+        fields["tribunal"] = tribunal_inferido
+
+    return fields
+
+
 @router.get("/", response_model=list[ProcessoOut])
 def listar_processos(
     cliente_id: uuid.UUID | None = Query(None),
@@ -80,6 +96,7 @@ def listar_processos(
 def criar_processo(data: ProcessoCreate, db: Session = Depends(get_db)):
     litis_in = data.clientes_litisconsorcio
     dump = data.model_dump(exclude={"clientes_litisconsorcio"})
+    dump = _normalizar_payload_processo(dump)
     processo = Processo(**dump)
     db.add(processo)
     db.commit()
@@ -116,6 +133,7 @@ def atualizar_processo(
         raise HTTPException(status_code=404, detail="Processo não encontrado")
     fields = data.model_dump(exclude_unset=True)
     litis_in = fields.pop("clientes_litisconsorcio", None)
+    fields = _normalizar_payload_processo(fields)
     for field, value in fields.items():
         setattr(processo, field, value)
     db.commit()

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import styles from './InstrucoesJusBRModal.module.css'
+import { formatTokenExpiry, sanitizeJusbrToken } from '../utils/jusbrToken'
 
 interface Props {
   onClose: () => void
@@ -86,11 +87,13 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
   const networkStepIdx = allSteps.findIndex(s => s.includes('authorization'))
 
   function handleConfirm() {
-    const t = token.trim().replace(/^Bearer\s+/i, '')
+    const t = sanitizeJusbrToken(token)
     if (!t) return
     onToken(t)
     onClose()
   }
+
+  const tokenExpiry = token.trim() ? formatTokenExpiry(sanitizeJusbrToken(token)) : null
 
   return (
     <div className={styles.overlay} onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
@@ -171,6 +174,11 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
             <p className={styles.tokenHint}>
               O token expira em ~5 minutos. Se a sincronização falhar com erro de autenticação, repita o processo.
             </p>
+            {tokenExpiry && (
+              <p className={styles.tokenHint}>
+                Expiração detectada no token colado: {tokenExpiry}
+              </p>
+            )}
           </div>
         </div>
 

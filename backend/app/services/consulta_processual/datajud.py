@@ -1,25 +1,14 @@
 """DataJud scraper — CNJ public API.
 
-Covers all tribunais in a single API:
-  https://api-publica.datajud.cnj.jus.br/api_publica_{sigla}/_search
-
-The process number must be submitted WITHOUT dashes/dots (pure digits).
-e.g. "5026724-11.2025.8.08.0024" → "50267241120258080024"
-
-Tribunal index mapping (lowercase sigla):
-  TJES  → api_publica_tjes
-  TJSP  → api_publica_tjsp
-  TJAM  → api_publica_tjam
-  TRF2  → api_publica_trf2
-  TJRJ  → api_publica_tjrj
-  TJMG  → api_publica_tjmg
-  (any tribunal: lowercase and prepend api_publica_)
+Faz consulta por processo tentando:
+- tribunal informado no cadastro;
+- tribunal inferido a partir do numero CNJ;
+- variantes de query para reduzir falsos negativos.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from datetime import date, datetime
 
 import httpx
@@ -27,15 +16,11 @@ import httpx
 from app.config import settings
 
 from .base import Andamento
+from .cnj import candidatos_tribunal, normalizar_cnj
 
 logger = logging.getLogger(__name__)
 
 DATAJUD_BASE = "https://api-publica.datajud.cnj.jus.br"
-
-
-def _normalizar_cnj(numero: str) -> str:
-    """Strip all non-digits from CNJ number for DataJud query."""
-    return re.sub(r"\D", "", numero)
 
 
 def _tribunal_to_index(tribunal: str) -> str:
@@ -88,69 +73,46 @@ def _movimento_descricao(m: dict) -> str:
     return " — ".join(p for p in partes if p).strip()
 
 
-async def buscar_via_datajud(numero_cnj: str, tribunal: str) -> list[Andamento]:
-    """Query DataJud and return list of Andamento objects."""
-    api_key = settings.datajud_api_key
-    if not api_key:
-        raise ValueError(
-            "DATAJUD_API_KEY não configurada. "
-            "Adicione a chave pública do DataJud/CNJ no arquivo .env como DATAJUD_API_KEY=suachave"
-        )
+def _build_payloads(numero_norm: str) -> list[dict]:
+    source_fields = [
+        "numeroProcesso",
+        "movimentos",
+        "dataHoraUltimaAtualizacao",
+        "tribunal",
+        "orgaoJulgador",
+    ]
+    return [
+        {
+            "query": {"term": {"numeroProcesso.keyword": numero_norm}},
+            "_source": source_fields,
+            "size": 3,
+        },
+        {
+            "query": {"term": {"numeroProcesso": numero_norm}},
+            "_source": source_fields,
+            "size": 3,
+        },
+        {
+            "query": {"match_phrase": {"numeroProcesso": numero_norm}},
+            "_source": source_fields,
+            "size": 3,
+        },
+        {
+            "query": {"match": {"numeroProcesso": {"query": numero_norm, "operator": "and"}}},
+            "_source": source_fields,
+            "size": 3,
+        },
+    ]
 
-    numero_norm = _normalizar_cnj(numero_cnj)
-    index = _tribunal_to_index(tribunal)
-    url = f"{DATAJUD_BASE}/{index}/_search"
 
-    payload = {
-        "query": {"match": {"numeroProcesso": numero_norm}},
-        "_source": ["numeroProcesso", "movimentos", "dataHoraUltimaAtualizacao"],
-        "size": 1,
-    }
+def _hit_matches_numero(hit: dict, numero_norm: str) -> bool:
+    source = hit.get("_source", {})
+    numero_hit = normalizar_cnj(source.get("numeroProcesso", ""))
+    return numero_hit == numero_norm
 
-    headers = {
-        "Authorization": f"ApiKey {api_key}",
-        "Content-Type": "application/json",
-    }
 
-    last_exc: Exception | None = None
-    for attempt in range(3):
-        if attempt:
-            await asyncio.sleep(2 ** attempt)   # 2s, 4s
-        try:
-            async with httpx.AsyncClient(timeout=45) as client:
-                resp = await client.post(url, json=payload, headers=headers)
-            last_exc = None
-            break
-        except httpx.RequestError as exc:
-            last_exc = exc
-            logger.warning("DataJud tentativa %d falhou: %s", attempt + 1, exc)
-    else:
-        raise ConnectionError(
-            f"DataJud não respondeu após 3 tentativas. "
-            f"Verifique sua conexão ou tente novamente em instantes. ({last_exc})"
-        )
-
-    if resp.status_code == 401:
-        raise PermissionError(
-            "Chave de API do DataJud inválida ou expirada. "
-            "Verifique DATAJUD_API_KEY no .env."
-        )
-    if resp.status_code == 404:
-        raise ValueError(
-            f"Índice '{index}' não encontrado no DataJud. "
-            f"Verifique se o tribunal '{tribunal}' está correto."
-        )
-    if resp.status_code != 200:
-        raise RuntimeError(
-            f"DataJud retornou status {resp.status_code}: {resp.text[:200]}"
-        )
-
-    data = resp.json()
-    hits = data.get("hits", {}).get("hits", [])
-    if not hits:
-        return []
-
-    source = hits[0].get("_source", {})
+def _parse_hit(hit: dict) -> list[Andamento]:
+    source = hit.get("_source", {})
     movimentos_raw = source.get("movimentos", [])
 
     andamentos: list[Andamento] = []
@@ -167,5 +129,85 @@ async def buscar_via_datajud(numero_cnj: str, tribunal: str) -> list[Andamento]:
                     grau=None,
                 )
             )
-
     return andamentos
+
+
+async def buscar_via_datajud(numero_cnj: str, tribunal: str) -> list[Andamento]:
+    """Query DataJud and return list of Andamento objects."""
+    api_key = settings.datajud_api_key
+    if not api_key:
+        raise ValueError(
+            "DATAJUD_API_KEY não configurada. "
+            "Adicione a chave pública do DataJud/CNJ no arquivo .env como DATAJUD_API_KEY=suachave"
+        )
+
+    numero_norm = normalizar_cnj(numero_cnj)
+    tribunais = candidatos_tribunal(numero_cnj, tribunal)
+    if not tribunais:
+        tribunais = [tribunal]
+
+    headers = {
+        "Authorization": f"ApiKey {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    last_exc: Exception | None = None
+    payloads = _build_payloads(numero_norm)
+
+    async with httpx.AsyncClient(timeout=45) as client:
+        for tribunal_sigla in tribunais:
+            index = _tribunal_to_index(tribunal_sigla)
+            url = f"{DATAJUD_BASE}/{index}/_search"
+
+            for payload in payloads:
+                for attempt in range(3):
+                    if attempt:
+                        await asyncio.sleep(2 ** attempt)
+                    try:
+                        resp = await client.post(url, json=payload, headers=headers)
+                        last_exc = None
+                        break
+                    except httpx.RequestError as exc:
+                        last_exc = exc
+                        logger.warning(
+                            "DataJud tentativa %d falhou para %s: %s",
+                            attempt + 1,
+                            tribunal_sigla,
+                            exc,
+                        )
+                else:
+                    continue
+
+                if resp.status_code == 401:
+                    raise PermissionError(
+                        "Chave de API do DataJud inválida ou expirada. "
+                        "Verifique DATAJUD_API_KEY no .env."
+                    )
+                if resp.status_code == 404:
+                    logger.info("Indice DataJud nao encontrado para %s", tribunal_sigla)
+                    break
+                if resp.status_code != 200:
+                    logger.info(
+                        "DataJud %s respondeu %s para %s",
+                        tribunal_sigla,
+                        resp.status_code,
+                        numero_cnj,
+                    )
+                    continue
+
+                data = resp.json()
+                hits = data.get("hits", {}).get("hits", [])
+                for hit in hits:
+                    if not _hit_matches_numero(hit, numero_norm):
+                        continue
+                    andamentos = _parse_hit(hit)
+                    if andamentos:
+                        return andamentos
+
+    if last_exc is not None:
+        raise ConnectionError(
+            f"DataJud não respondeu após múltiplas tentativas. "
+            f"Verifique sua conexão ou tente novamente em instantes. ({last_exc})"
+        )
+
+    return []
