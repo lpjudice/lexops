@@ -146,9 +146,7 @@ def _parse_capture(raw_capture: str) -> dict:
             "capture_kind": "token_json",
         }
 
-    normalized = raw_capture.replace("\
-", " ").replace("\
-", " ").strip()
+    normalized = raw_capture.replace("\\r\\n", " ").replace("\\n", " ").strip()
     parts = shlex.split(normalized)
 
     detected_url = ""
@@ -268,6 +266,31 @@ def _refresh_session(data: dict) -> dict | None:
     _ensure_parent()
     SESSION_FILE.write_text(json.dumps(merged, ensure_ascii=False))
     return merged
+
+
+def refresh_session_if_needed(buffer_minutes: int = 60) -> dict | None:
+    if not SESSION_FILE.exists():
+        return None
+    try:
+        data = json.loads(SESSION_FILE.read_text())
+        if not isinstance(data, dict) or not data.get("token"):
+            return None
+        expires_at = data.get("expires_at")
+        if expires_at:
+            try:
+                exp_dt = datetime.fromisoformat(expires_at)
+                now = datetime.now(timezone.utc)
+                if exp_dt <= now:
+                    return _refresh_session(data) or None
+                if (exp_dt - now).total_seconds() <= buffer_minutes * 60:
+                    refreshed = _refresh_session(data)
+                    if refreshed:
+                        return refreshed
+            except Exception:
+                pass
+        return data
+    except Exception:
+        return None
 
 
 def load_session() -> dict | None:
