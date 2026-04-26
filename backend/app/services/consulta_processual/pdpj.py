@@ -48,9 +48,30 @@ def _movimento_desc(m: dict) -> str:
     partes: list[str] = []
     for key in ("nome", "descricao", "tipo", "complemento", "tituloDocumento"):
         v = m.get(key)
-        if v and isinstance(v, str):
+        if isinstance(v, str) and v:
             partes.append(v.strip())
+        elif key == "tipo" and isinstance(v, dict):
+            nested = v.get("nome") or v.get("descricao")
+            if isinstance(nested, str) and nested:
+                partes.append(nested.strip())
     return " — ".join(dict.fromkeys(p for p in partes if p))
+
+
+def _movimento_tipo(m: dict) -> str | None:
+    nome = m.get("nome")
+    if isinstance(nome, str) and nome:
+        return nome
+    tipo = m.get("tipo")
+    if isinstance(tipo, str) and tipo:
+        return tipo
+    if isinstance(tipo, dict):
+        nested = tipo.get("nome") or tipo.get("descricao")
+        if isinstance(nested, str) and nested:
+            return nested.strip()[:255]
+    descricao = m.get("descricao")
+    if isinstance(descricao, str) and descricao:
+        return descricao[:255]
+    return None
 
 
 def _jwt_exp(token: str) -> datetime | None:
@@ -295,7 +316,7 @@ async def buscar_via_pdpj(
                 m.get("dataHora") or m.get("dataMovimento") or m.get("data") or m.get("datahora")
             )
             desc = _movimento_desc(m)
-            tipo = m.get("nome") or m.get("tipo") or m.get("descricao")
+            tipo = _movimento_tipo(m)
 
             for doc_key in ("documento", "doc", "arquivo"):
                 doc = m.get(doc_key)
