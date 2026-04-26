@@ -131,14 +131,14 @@ export default function SincronizarModal({ processos, onClose }: Props) {
               onClick={() => handleFonteChange('datajud')}
               title="DataJud — CNJ (automático, sem login)"
             >
-              DataJud
+              DataJud v1
             </button>
             <button
               className={`${styles.fonteBtn} ${fonte === 'jusbr' ? styles.fonteBtnActive : ''}`}
               onClick={() => handleFonteChange('jusbr')}
               title="jus.br — dados completos com nomes reais dos documentos (requer token de sessão)"
             >
-              jus.br
+              jus.br v1
             </button>
           </div>
           {fonte === 'jusbr' && jusBRToken && (

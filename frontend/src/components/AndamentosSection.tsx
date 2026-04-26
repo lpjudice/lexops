@@ -172,14 +172,14 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
               onClick={() => handleFonte('datajud')}
               title="DataJud — sincronização automática via CNJ (sem login)"
             >
-              DataJud
+              DataJud v1
             </button>
             <button
               className={`${styles.fonteBtn} ${fonte === 'jusbr' ? styles.fonteBtnActive : ''}`}
               onClick={() => handleFonte('jusbr')}
               title="jus.br — dados do portal autenticado (requer token)"
             >
-              jus.br
+              jus.br v1
             </button>
           </div>
 
