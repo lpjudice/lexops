@@ -12,6 +12,11 @@ function decodePayload(token: string): Record<string, unknown> | null {
   }
 }
 
+function extractJsonField(raw: string, field: string): string {
+  const match = raw.match(new RegExp(`"${field}"\s*:\s*"([^"]+)"`, 'i'))
+  return match?.[1]?.trim() ?? ''
+}
+
 export function sanitizeJusbrToken(raw: string): string {
   return raw.trim().replace(/^Bearer\s+/i, '')
 }
@@ -19,6 +24,9 @@ export function sanitizeJusbrToken(raw: string): string {
 export function extractJusbrTokenFromText(raw: string): string {
   const text = raw.trim()
   if (!text) return ''
+
+  const jsonToken = extractJsonField(text, 'access_token')
+  if (jsonToken) return sanitizeJusbrToken(jsonToken)
 
   const patterns = [
     /authorization:\s*bearer\s+([A-Za-z0-9\-_=]+\.[A-Za-z0-9\-_=]+\.[A-Za-z0-9\-_=]+)/i,
@@ -37,9 +45,10 @@ export function extractJusbrTokenFromText(raw: string): string {
   return ''
 }
 
-export function detectJusbrInputKind(raw: string): 'token' | 'curl' | 'headers' | 'unknown' {
+export function detectJusbrInputKind(raw: string): 'token_json' | 'token' | 'curl' | 'headers' | 'unknown' {
   const text = raw.trim()
   if (!text) return 'unknown'
+  if (extractJsonField(text, 'access_token')) return 'token_json'
   if (/^curl\s/i.test(text)) return 'curl'
   if (/authorization:/i.test(text) || /request headers/i.test(text)) return 'headers'
   if (sanitizeJusbrToken(text).split('.').length === 3) return 'token'

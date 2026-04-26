@@ -188,9 +188,9 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
             <button
               className={`${styles.fonteBtn} ${fonte === 'jusbr' ? styles.fonteBtnActive : ''}`}
               onClick={() => handleFonte('jusbr')}
-              title="jus.br — dados do portal autenticado (requer token)"
+              title="jus.br — sessão compartilhada do portal com suporte a JSON de token"
             >
-              jus.br v1
+              jus.br v3
             </button>
           </div>
 
@@ -205,7 +205,7 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
             <button
               className={styles.btnTokenReset}
               onClick={() => setShowTokenModal(true)}
-              title="Sessão configurada — clique para renovar"
+              title="Sessão ativa — clique para renovar"
             >
               🔑
             </button>
@@ -218,7 +218,7 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
             {isSyncing ? (
               <span className={styles.syncingLabel}><span className={styles.spinner} /> Buscando…</span>
             ) : fonte === 'jusbr' && !jusbrAtivo ? (
-              '🔑 Conectar jus.br'
+              '🔑 Conectar jus.br v3'
             ) : (
               '⟳ Sincronizar'
             )}
@@ -229,13 +229,13 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
       {/* jus.br token info bar */}
       {fonte === 'jusbr' && !jusbrAtivo && !isSyncing && !syncData && (
         <div className={styles.jusBRInfo}>
-          <span>O modo <strong>jus.br</strong> requer uma sessão ativa do portal. Clique em <strong>"🔑 Conectar jus.br"</strong> para conectar uma vez e reutilizar em todos os processos.</span>
+          <span>O modo <strong>jus.br v3</strong> usa uma sessão compartilhada do portal. Prefira colar o <strong>JSON de token</strong> uma vez para reutilizar em todos os processos.</span>
         </div>
       )}
       {fonte === 'jusbr' && jusbrAtivo && !isSyncing && !syncData && (
         <div className={styles.jusBRInfo}>
           <span>
-            Sessão do <strong>jus.br</strong> ativa no backend e reutilizada automaticamente para todos os processos.
+            Sessão do <strong>jus.br v3</strong> ativa no backend e reutilizada automaticamente para todos os processos.
             {tokenExpiry ? ` Expira em ${tokenExpiry}.` : ''}
           </span>
           <button

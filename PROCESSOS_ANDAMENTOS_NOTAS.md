@@ -88,3 +88,10 @@ Se for continuar depois:
 1. criar um diagnostico persistente por sync, registrando quais indices/queries do DataJud foram tentados;
 2. revisar a deduplicacao com um identificador de movimento por fonte;
 3. decidir se o `jus.br` vai seguir com token humano assistido ou se vai ganhar um conector autenticado de verdade.
+
+
+## Sessao jus.br v4
+- o fluxo principal do jus.br agora aceita o JSON de token (`access_token`, `refresh_token`, `expires_in`) como entrada preferida.
+- a sessao compartilhada tenta renovar automaticamente o `access_token` usando `refresh_token` quando possivel.
+- `cURL`, headers e token puro continuam aceitos como fallback.
+- a interface passou a sinalizar `jus.br v3` no toggle para refletir a sessao compartilhada ativa.

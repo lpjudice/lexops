@@ -20,3 +20,5 @@ Projeto em fase de planejamento. Aguardando coordenadas do usuário.
 ## Notas operacionais
 
 - Para a intervencao em `Processos/Andamentos` com foco em `DataJud` e `jus.br`, ver `PROCESSOS_ANDAMENTOS_NOTAS.md`.
+
+- jus.br: o fluxo preferido agora e colar o JSON de token do portal; a sessao compartilhada tenta refresh automatico quando houver `refresh_token`.

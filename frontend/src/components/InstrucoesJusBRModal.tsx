@@ -27,10 +27,10 @@ const STEPS: Record<OS, Record<Browser, StepGroup>> = {
         'Abra o Chrome e acesse o portal:<br><strong>portaldeservicos.pdpj.jus.br</strong><br>(botão abaixo já abre)',
         'Faça login com <strong>Certificado Digital</strong> ou <strong>gov.br</strong> e aguarde carregar o portal.',
         'Abra as ferramentas do desenvolvedor:<br><kbd>Cmd ⌘</kbd> + <kbd>Option ⌥</kbd> + <kbd>I</kbd>',
-        'Clique na aba <strong>Network</strong> (Rede).',
-        'No portal, <strong>faça qualquer ação</strong> — pesquise um processo, clique em um menu. Isso dispara chamadas de API.',
-        'Na lista de requisições, clique com o botão direito em qualquer item que contenha <strong>"api/"</strong> na URL.',
-        'Escolha <strong>Copy → Copy as cURL</strong> e cole o conteúdo inteiro no campo abaixo.<br>O app extrai o token automaticamente.',
+        'Clique na aba <strong>Network</strong> (Rede) e marque <strong>Preserve log</strong>.',
+        'No portal, faça uma ação que carregue seus dados. O melhor alvo agora é a requisição de <strong>token</strong> ou qualquer chamada autenticada do portal.',
+        'Na lista de requisições, procure primeiro por <strong>token</strong>. Se não achar, use uma requisição autenticada do portal e copie o <strong>cURL</strong>. Não precisa mais procurar manualmente por Bearer.',
+        'Você pode colar abaixo o <strong>JSON do token</strong>, o <strong>cURL</strong>, os <strong>headers</strong> ou o <strong>token puro</strong>. O app extrai tudo automaticamente.',
       ],
       after: [],
     },
@@ -39,10 +39,10 @@ const STEPS: Record<OS, Record<Browser, StepGroup>> = {
         'Abra o Firefox e acesse o portal:<br><strong>portaldeservicos.pdpj.jus.br</strong><br>(botão abaixo já abre)',
         'Faça login com <strong>Certificado Digital</strong> ou <strong>gov.br</strong> e aguarde carregar o portal.',
         'Abra as ferramentas do desenvolvedor:<br><kbd>Cmd ⌘</kbd> + <kbd>Option ⌥</kbd> + <kbd>I</kbd>',
-        'Clique na aba <strong>Rede</strong>.',
-        'No portal, <strong>faça qualquer ação</strong> — pesquise um processo, clique em um menu.',
-        'Na lista de requisições, clique com o botão direito em qualquer item que contenha <strong>"api/"</strong> na URL.',
-        'Use <strong>Copiar → Copiar como cURL</strong> e cole o conteúdo inteiro no campo abaixo.<br>O app extrai o token automaticamente.',
+        'Clique na aba <strong>Rede</strong> e marque <strong>Persistir logs</strong>, se disponível.',
+        'No portal, faça uma ação que carregue seus dados. O melhor alvo agora é a requisição de <strong>token</strong> ou qualquer chamada autenticada do portal.',
+        'Na lista de requisições, procure primeiro por <strong>token</strong>. Se não achar, use uma requisição autenticada do portal e copie o <strong>cURL</strong>. Não precisa mais procurar manualmente por Bearer.',
+        'Você pode colar abaixo o <strong>JSON do token</strong>, o <strong>cURL</strong>, os <strong>headers</strong> ou o <strong>token puro</strong>. O app extrai tudo automaticamente.',
       ],
       after: [],
     },
@@ -53,10 +53,10 @@ const STEPS: Record<OS, Record<Browser, StepGroup>> = {
         'Abra o Chrome e acesse o portal:<br><strong>portaldeservicos.pdpj.jus.br</strong><br>(botão abaixo já abre)',
         'Faça login com <strong>Certificado Digital</strong> ou <strong>gov.br</strong> e aguarde carregar o portal.',
         'Abra as ferramentas do desenvolvedor:<br><kbd>F12</kbd> ou <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd>',
-        'Clique na aba <strong>Network</strong> (Rede).',
-        'No portal, <strong>faça qualquer ação</strong> — pesquise um processo, clique em um menu. Isso dispara chamadas de API.',
-        'Na lista de requisições, clique com o botão direito em qualquer item que contenha <strong>"api/"</strong> na URL.',
-        'Escolha <strong>Copy → Copy as cURL</strong> e cole o conteúdo inteiro no campo abaixo.<br>O app extrai o token automaticamente.',
+        'Clique na aba <strong>Network</strong> (Rede) e marque <strong>Preserve log</strong>.',
+        'No portal, faça uma ação que carregue seus dados. O melhor alvo agora é a requisição de <strong>token</strong> ou qualquer chamada autenticada do portal.',
+        'Na lista de requisições, procure primeiro por <strong>token</strong>. Se não achar, use uma requisição autenticada do portal e copie o <strong>cURL</strong>. Não precisa mais procurar manualmente por Bearer.',
+        'Você pode colar abaixo o <strong>JSON do token</strong>, o <strong>cURL</strong>, os <strong>headers</strong> ou o <strong>token puro</strong>. O app extrai tudo automaticamente.',
       ],
       after: [],
     },
@@ -65,10 +65,10 @@ const STEPS: Record<OS, Record<Browser, StepGroup>> = {
         'Abra o Firefox e acesse o portal:<br><strong>portaldeservicos.pdpj.jus.br</strong><br>(botão abaixo já abre)',
         'Faça login com <strong>Certificado Digital</strong> ou <strong>gov.br</strong> e aguarde carregar o portal.',
         'Abra as ferramentas do desenvolvedor:<br><kbd>F12</kbd> ou <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd>',
-        'Clique na aba <strong>Rede</strong>.',
-        'No portal, <strong>faça qualquer ação</strong> — pesquise um processo, clique em um menu.',
-        'Na lista de requisições, clique com o botão direito em qualquer item que contenha <strong>"api/"</strong> na URL.',
-        'Use <strong>Copiar → Copiar como cURL</strong> e cole o conteúdo inteiro no campo abaixo.<br>O app extrai o token automaticamente.',
+        'Clique na aba <strong>Rede</strong> e marque <strong>Persistir logs</strong>, se disponível.',
+        'No portal, faça uma ação que carregue seus dados. O melhor alvo agora é a requisição de <strong>token</strong> ou qualquer chamada autenticada do portal.',
+        'Na lista de requisições, procure primeiro por <strong>token</strong>. Se não achar, use uma requisição autenticada do portal e copie o <strong>cURL</strong>. Não precisa mais procurar manualmente por Bearer.',
+        'Você pode colar abaixo o <strong>JSON do token</strong>, o <strong>cURL</strong>, os <strong>headers</strong> ou o <strong>token puro</strong>. O app extrai tudo automaticamente.',
       ],
       after: [],
     },
@@ -84,8 +84,7 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
   const { before, after } = STEPS[os][browser]
   const allSteps = [...before, ...after]
 
-  // Index after which to show the reference image hint
-  const networkStepIdx = allSteps.findIndex(s => s.includes('cURL'))
+  const networkStepIdx = allSteps.findIndex(s => s.includes('token'))
 
   function handleConfirm() {
     const t = extractJusbrTokenFromText(token)
@@ -100,13 +99,15 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
       setToken(text)
       const kind = detectJusbrInputKind(text)
       setClipboardMsg(
-        kind === 'curl'
+        kind === 'token_json'
+          ? 'JSON de token detectado. Esse é o formato preferido para manter a sessão do jus.br.'
+          : kind === 'curl'
           ? 'cURL detectado. O token será extraído automaticamente.'
           : kind === 'headers'
           ? 'Headers detectados. O token será extraído automaticamente.'
           : kind === 'token'
           ? 'Token detectado.'
-          : 'Conteúdo colado. Se houver um Bearer válido, ele será extraído automaticamente.'
+          : 'Conteúdo colado. Se houver uma sessão válida do jus.br, ela será extraída automaticamente.'
       )
     } catch {
       setClipboardMsg('Não foi possível ler a área de transferência. Cole manualmente no campo abaixo.')
@@ -120,19 +121,17 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
   return (
     <div className={styles.overlay} onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className={styles.modal}>
-        {/* Header */}
         <div className={styles.header}>
           <div className={styles.headerTitle}>
             <span className={styles.headerIcon}>🔑</span>
             <div>
-              <h2 className={styles.title}>Sincronizar via jus.br</h2>
-              <p className={styles.subtitle}>v2: cole o cURL, headers ou token e o app extrai o Bearer</p>
+              <h2 className={styles.title}>Conectar jus.br</h2>
+              <p className={styles.subtitle}>v3: prefira o JSON de token; o app renova a sessão automaticamente quando puder</p>
             </div>
           </div>
           <button className={styles.btnClose} onClick={onClose}>×</button>
         </div>
 
-        {/* OS + Browser tabs */}
         <div className={styles.tabsRow}>
           <div className={styles.tabGroup}>
             <span className={styles.tabLabel}>Sistema:</span>
@@ -146,7 +145,6 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
           </div>
         </div>
 
-        {/* Body */}
         <div className={styles.body}>
           <ol className={styles.stepList}>
             {allSteps.map((step, i) => (
@@ -157,18 +155,16 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
             ))}
           </ol>
 
-          {/* Visual hint for where to find the token */}
           {networkStepIdx >= 0 && (
             <div className={styles.networkHint}>
               <span className={styles.networkHintIcon}>💡</span>
               <span>
-                A forma mais fácil agora é copiar o <strong>cURL inteiro</strong> da requisição.
-                Se preferir, você ainda pode colar só o token Bearer ou um bloco de headers.
+                O melhor formato agora é o <strong>JSON da resposta de token</strong> com <strong>access_token</strong> e <strong>refresh_token</strong>.
+                Se preferir, você ainda pode colar o <strong>cURL inteiro</strong>, headers ou um token puro.
               </span>
             </div>
           )}
 
-          {/* Portal button */}
           <a
             href="https://portaldeservicos.pdpj.jus.br"
             target="_blank"
@@ -178,17 +174,20 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
             Abrir portal jus.br ↗
           </a>
 
-          {/* Token input */}
           <div className={styles.tokenSection}>
             <label className={styles.tokenLabel}>
-              Cole aqui o <strong>cURL</strong>, os <strong>headers</strong> ou o <strong>token</strong>:
+              Cole aqui o <strong>JSON do token</strong>, o <strong>cURL</strong>, os <strong>headers</strong> ou o <strong>token</strong>:
             </label>
             <textarea
               className={styles.tokenInput}
-              placeholder={`curl 'https://portaldeservicos.pdpj.jus.br/api/...'\n  -H 'authorization: Bearer eyJ...' ...`}
+              placeholder={`{
+  "access_token": "eyJ...",
+  "refresh_token": "eyJ...",
+  "expires_in": 28799
+}`}
               value={token}
               onChange={(e) => setToken(e.target.value)}
-              rows={5}
+              rows={6}
               spellCheck={false}
               autoCorrect="off"
               autoCapitalize="off"
@@ -202,22 +201,29 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
               </p>
             )}
             <p className={styles.tokenHint}>
-              O token expira em poucos minutos. Depois da primeira captura, o app tenta reutilizá-lo automaticamente enquanto ainda estiver válido.
+              Quando houver <strong>refresh_token</strong>, o app tenta renovar a sessão automaticamente para reutilizar em todos os processos.
             </p>
             {inputKind !== 'unknown' && (
               <p className={styles.tokenHint}>
-                Entrada detectada: {inputKind === 'curl' ? 'cURL' : inputKind === 'headers' ? 'Headers' : 'Token'}.
+                Entrada detectada: {
+                  inputKind === 'token_json'
+                    ? 'JSON de token'
+                    : inputKind === 'curl'
+                    ? 'cURL'
+                    : inputKind === 'headers'
+                    ? 'Headers'
+                    : 'Token'
+                }.
               </p>
             )}
             {tokenExpiry && (
               <p className={styles.tokenHint}>
-                Expiração detectada no token extraído: {tokenExpiry}
+                Expiração detectada no access token: {tokenExpiry}
               </p>
             )}
           </div>
         </div>
 
-        {/* Footer */}
         <div className={styles.footer}>
           <button className={styles.btnCancel} onClick={onClose}>Cancelar</button>
           <button
@@ -225,7 +231,7 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
             onClick={handleConfirm}
             disabled={!extractedToken}
           >
-            Sincronizar com o token extraído
+            Conectar sessão do jus.br
           </button>
         </div>
       </div>

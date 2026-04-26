@@ -150,9 +150,9 @@ export default function SincronizarModal({ processos, onClose }: Props) {
             <button
               className={`${styles.fonteBtn} ${fonte === 'jusbr' ? styles.fonteBtnActive : ''}`}
               onClick={() => handleFonteChange('jusbr')}
-              title="jus.br — dados completos com nomes reais dos documentos (requer token de sessão)"
+              title="jus.br — sessão compartilhada com preferência por JSON de token"
             >
-              jus.br v1
+              jus.br v3
             </button>
           </div>
           {fonte === 'jusbr' && jusbrAtivo && (
@@ -169,11 +169,10 @@ export default function SincronizarModal({ processos, onClose }: Props) {
         {/* JusBR info */}
         {fonte === 'jusbr' && (
           <div className={styles.avisoJusBR}>
-            <strong>jus.br</strong> retorna nomes reais dos documentos e dados completos via PDPJ,
-            mas agora pode reutilizar uma <strong>sessão compartilhada</strong> do app inteiro.
+            <strong>jus.br v3</strong> retorna nomes reais dos documentos e dados completos via PDPJ, com preferência por <strong>JSON de token</strong> e sessão compartilhada do app inteiro.
             {jusbrAtivo
               ? ` Sessão ativa no backend.${tokenExpiry ? ` Expira em ${tokenExpiry}.` : ''}`
-              : ' Clique em "Sincronizar" para conectar uma vez e reutilizar nos outros processos.'}
+              : ' Clique em "Sincronizar" para conectar uma vez, de preferência com o JSON de token, e reutilizar nos outros processos.'}
             {jusbrAtivo && (
               <>
                 {' '}
@@ -251,7 +250,7 @@ export default function SincronizarModal({ processos, onClose }: Props) {
                 {isSyncing
                   ? `Sincronizando ${selecionados.size}...`
                   : fonte === 'jusbr' && !jusbrAtivo
-                  ? `🔑 Conectar jus.br e sincronizar ${selecionados.size}`
+                  ? `🔑 Conectar jus.br v3 e sincronizar ${selecionados.size}`
                   : `Sincronizar ${selecionados.size} processo(s)`}
               </button>
             </div>

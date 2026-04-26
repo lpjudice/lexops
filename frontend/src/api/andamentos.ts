@@ -31,6 +31,8 @@ export interface JusbrSessionStatus {
   active: boolean
   expires_at: string | null
   detected_url: string | null
+  capture_kind: string | null
+  has_refresh_token: boolean
 }
 
 export const andamentosApi = {
