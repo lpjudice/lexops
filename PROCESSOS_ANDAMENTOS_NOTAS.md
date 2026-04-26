@@ -50,6 +50,13 @@ Arquivo:
 - a tela mostra expiracao detectada e permite limpar/renovar o token;
 - o modal de sincronizacao em lote nao esconde mais processos apenas por falta de tribunal preenchido, se o CNJ ja permitir inferencia.
 
+### Sessao compartilhada jus.br (v3)
+
+- o backend agora consegue persistir uma sessao compartilhada do `jus.br` em arquivo local do app;
+- a sessao e configurada uma vez a partir de uma captura (`cURL`, headers ou token);
+- as sincronizacoes de `jus.br` passam a reutilizar essa sessao automaticamente, sem exigir token por processo;
+- o conector `PDPJ` agora considera `api/v2` e tambem bases detectadas a partir da captura salva.
+
 Arquivos:
 
 - `frontend/src/utils/jusbrToken.ts`
@@ -57,6 +64,10 @@ Arquivos:
 - `frontend/src/components/AndamentosSection.tsx`
 - `frontend/src/components/InstrucoesJusBRModal.tsx`
 - `frontend/src/components/SincronizarModal.tsx`
+- `backend/app/services/consulta_processual/jusbr_session.py`
+- `backend/app/services/consulta_processual/pdpj.py`
+- `backend/app/services/consulta_processual/orchestrator.py`
+- `backend/app/routers/andamentos.py`
 
 ## O que ficou de fora de proposito
 

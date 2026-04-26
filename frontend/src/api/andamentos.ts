@@ -27,6 +27,12 @@ export interface AndamentoCount {
   nao_lidos: number
 }
 
+export interface JusbrSessionStatus {
+  active: boolean
+  expires_at: string | null
+  detected_url: string | null
+}
+
 export const andamentosApi = {
   listar: (processoId: string, limit = 10, offset = 0, fonte?: string) =>
     api
@@ -49,15 +55,24 @@ export const andamentosApi = {
       .post<SincronizacaoResult[]>('/andamentos/sincronizar-batch', { processo_ids: processoIds })
       .then((r) => r.data),
 
-  sincronizarJusBR: (processoId: string, token: string) =>
+  sincronizarJusBR: (processoId: string, token?: string) =>
     api
       .post<SincronizacaoResult>(`/andamentos/processo/${processoId}/sincronizar-jusbr`, { token })
       .then((r) => r.data),
 
-  sincronizarBatchJusBR: (processoIds: string[], token: string) =>
+  sincronizarBatchJusBR: (processoIds: string[], token?: string) =>
     api
       .post<SincronizacaoResult[]>('/andamentos/sincronizar-batch-jusbr', { processo_ids: processoIds, token })
       .then((r) => r.data),
+
+  obterSessaoJusBR: () =>
+    api.get<JusbrSessionStatus>('/andamentos/jusbr/session').then((r) => r.data),
+
+  configurarSessaoJusBR: (capture: string) =>
+    api.post<JusbrSessionStatus>('/andamentos/jusbr/session', { capture }).then((r) => r.data),
+
+  limparSessaoJusBR: () =>
+    api.delete('/andamentos/jusbr/session').then((r) => r.data),
 
   importarJusBR: (processoId: string, payload: string) =>
     api

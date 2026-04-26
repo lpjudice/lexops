@@ -29,12 +29,16 @@ class ImportarJusBRBody(BaseModel):
 
 
 class JusBRSyncBody(BaseModel):
-    token: str
+    token: str | None = None
 
 
 class BatchJusBRSyncBody(BaseModel):
     processo_ids: list[str]
-    token: str
+    token: str | None = None
+
+
+class JusBRSessionBody(BaseModel):
+    capture: str
 
 
 # ── List andamentos for a process ────────────────────────────────────────────
@@ -147,12 +151,17 @@ async def sincronizar_jusbr(
     db: Session = Depends(get_db),
 ):
     from app.services.consulta_processual.orchestrator import sincronizar_processo_jusbr as _sync
+    from app.services.consulta_processual.jusbr_session import load_session
 
     p = db.query(Processo).filter(Processo.id == processo_id).first()
     if not p:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
 
-    log = await _sync(p, db, body.token)
+    session_data = load_session() if not body.token else None
+    if not body.token and not session_data:
+        raise HTTPException(status_code=400, detail="Sessao do jus.br nao configurada.")
+
+    log = await _sync(p, db, token=body.token, session_data=session_data)
     db.refresh(p)
     return SincronizacaoResult(
         processo_id=str(log.processo_id),
@@ -172,6 +181,11 @@ async def sincronizar_batch_jusbr(
     db: Session = Depends(get_db),
 ):
     from app.services.consulta_processual.orchestrator import sincronizar_processo_jusbr as _sync
+    from app.services.consulta_processual.jusbr_session import load_session
+
+    session_data = load_session() if not body.token else None
+    if not body.token and not session_data:
+        raise HTTPException(status_code=400, detail="Sessao do jus.br nao configurada.")
 
     results = []
     for pid in body.processo_ids:
@@ -190,7 +204,7 @@ async def sincronizar_batch_jusbr(
                 novos_andamentos=0, mensagem="Processo não encontrado",
             ))
             continue
-        log = await _sync(p, db, body.token)
+        log = await _sync(p, db, token=body.token, session_data=session_data)
         db.refresh(p)
         results.append(SincronizacaoResult(
             processo_id=str(log.processo_id),
@@ -201,6 +215,37 @@ async def sincronizar_batch_jusbr(
             ultimo_andamento_data=p.ultimo_andamento_data,
         ))
     return results
+
+
+@router.get("/jusbr/session")
+def obter_sessao_jusbr():
+    from app.services.consulta_processual.jusbr_session import session_status
+
+    return session_status()
+
+
+@router.post("/jusbr/session")
+def configurar_sessao_jusbr(body: JusBRSessionBody):
+    from app.services.consulta_processual.jusbr_session import save_session_from_capture
+
+    try:
+        data = save_session_from_capture(body.capture)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    return {
+        "active": True,
+        "expires_at": data.get("expires_at"),
+        "detected_url": data.get("detected_url"),
+    }
+
+
+@router.delete("/jusbr/session")
+def limpar_sessao_jusbr():
+    from app.services.consulta_processual.jusbr_session import clear_session
+
+    clear_session()
+    return {"ok": True}
 
 
 # ── JusBR import from pasted Response JSON ───────────────────────────────────

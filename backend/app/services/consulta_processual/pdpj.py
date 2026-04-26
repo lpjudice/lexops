@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 # Known PDPJ API bases to probe
 _BASES = [
+    "https://portaldeservicos.pdpj.jus.br/api/v2",
     "https://portaldeservicos.pdpj.jus.br/api",
     "https://portaldeservicos.pdpj.jus.br/api/v1",
     "https://gateway.cloud.pje.jus.br/cabecalho-processual/api/v1",
@@ -101,19 +102,34 @@ def _extract_inline_movimentos(data: dict) -> list[dict]:
     return []
 
 
-async def buscar_via_pdpj(numero_cnj: str, tribunal: str, token: str) -> list[Andamento]:
+async def buscar_via_pdpj(
+    numero_cnj: str,
+    tribunal: str,
+    token: str | None = None,
+    session_data: dict | None = None,
+) -> list[Andamento]:
     """Fetch process movements from PDPJ using an authenticated Bearer token.
 
     Tries multiple known endpoint patterns. Raises PermissionError on 401/403.
     Returns [] if process not found after exhausting all patterns.
     """
+    session_data = session_data or {}
+    token = token or session_data.get("token") or ""
+    if not token:
+        raise PermissionError("Sessao do jus.br nao configurada.")
+
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
         "Accept": "application/json",
         "Origin": "https://portaldeservicos.pdpj.jus.br",
-        "Referer": "https://portaldeservicos.pdpj.jus.br/",
+        "Referer": session_data.get("referer") or "https://portaldeservicos.pdpj.jus.br/",
     }
+    extra_headers = session_data.get("extra_headers") or {}
+    if isinstance(extra_headers, dict):
+        headers.update({str(k): str(v) for k, v in extra_headers.items()})
+    if session_data.get("cookies"):
+        headers["Cookie"] = str(session_data["cookies"])
     numero_norm = normalizar_cnj(numero_cnj)
     tribunal_norm = normalizar_tribunal(tribunal)
     tribunal_inferido = inferir_tribunal_pelo_cnj(numero_cnj)
@@ -122,7 +138,11 @@ async def buscar_via_pdpj(numero_cnj: str, tribunal: str, token: str) -> list[An
     # ── Candidate search endpoints ────────────────────────────────────────────
     # Each tuple: (method, url, params, json_body)
     candidates = []
-    for base in _BASES:
+    seen_bases: list[str] = []
+    for base in [*(session_data.get("api_bases") or []), *_BASES]:
+        if base in seen_bases:
+            continue
+        seen_bases.append(base)
         candidates += [
             ("GET", f"{base}/processos",                   {"numeroProcesso": numero_cnj},  None),
             ("GET", f"{base}/processos",                   {"numeroProcesso": numero_norm}, None),

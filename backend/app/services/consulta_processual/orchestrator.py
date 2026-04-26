@@ -148,7 +148,12 @@ async def sincronizar_processo(processo: Processo, db: Session) -> Sincronizacao
     return log
 
 
-async def sincronizar_processo_jusbr(processo: Processo, db: Session, token: str) -> SincronizacaoLog:
+async def sincronizar_processo_jusbr(
+    processo: Processo,
+    db: Session,
+    token: str | None = None,
+    session_data: dict | None = None,
+) -> SincronizacaoLog:
     log = SincronizacaoLog(
         processo_id=processo.id,
         tribunal=processo.tribunal,
@@ -177,7 +182,12 @@ async def sincronizar_processo_jusbr(processo: Processo, db: Session, token: str
         return log
 
     try:
-        raw_andamentos = await buscar_via_pdpj(processo.numero_cnj, tribunal, token)
+        raw_andamentos = await buscar_via_pdpj(
+            processo.numero_cnj,
+            tribunal,
+            token=token,
+            session_data=session_data,
+        )
     except Exception as exc:
         logger.exception("Erro PDPJ/JusBR para %s", processo.numero_cnj)
         log.status = "erro"
@@ -192,7 +202,7 @@ async def sincronizar_processo_jusbr(processo: Processo, db: Session, token: str
         log.status = "nenhum"
         log.mensagem = (
             "Processo não encontrado no jus.br com este token. "
-            "Verifique se está logado no tribunal correto e se o token ainda é válido."
+            "Verifique se a sessao do jus.br ainda está válida e se o processo está acessível no portal."
         )
         processo.tentativas_falha = 0
         processo.ultimo_check = datetime.now(timezone.utc)

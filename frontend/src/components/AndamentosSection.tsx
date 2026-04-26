@@ -1,13 +1,11 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { andamentosApi } from '../api/andamentos'
-import type { Andamento, SincronizacaoResult } from '../api/andamentos'
+import type { Andamento, JusbrSessionStatus, SincronizacaoResult } from '../api/andamentos'
 import InstrucoesJusBRModal from './InstrucoesJusBRModal'
 import styles from './AndamentosSection.module.css'
 import {
   clearStoredJusbrToken,
-  formatTokenExpiry,
-  loadStoredJusbrToken,
   saveStoredJusbrToken,
 } from '../utils/jusbrToken'
 
@@ -75,13 +73,18 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
   const qc = useQueryClient()
   const [fonte, setFonte] = useState<Fonte>('datajud')
   const [offset, setOffset] = useState(0)
-  const [jusBRToken, setJusBRToken] = useState(() => loadStoredJusbrToken())
   const [showTokenModal, setShowTokenModal] = useState(false)
   const [ultimoAndamentoPre, setUltimoAndamentoPre] = useState<string | null | undefined>(ultimoAndamentoData)
   const PAGE = 10
-  const tokenExpiry = jusBRToken ? formatTokenExpiry(jusBRToken) : null
 
   const fonteParam = fonte === 'datajud' ? 'datajud' : 'jusbr'
+
+  const { data: jusbrSession, refetch: refetchJusbrSession } = useQuery<JusbrSessionStatus>({
+    queryKey: ['jusbr-session'],
+    queryFn: () => andamentosApi.obterSessaoJusBR(),
+    staleTime: 30_000,
+  })
+  const tokenExpiry = jusbrSession?.expires_at ? formatDateTime(jusbrSession.expires_at) : null
 
   const { data: andamentos = [], isLoading, isFetching } = useQuery({
     queryKey: ['andamentos', processoId, offset, fonte],
@@ -106,7 +109,7 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
   })
 
   const syncJusBR = useMutation({
-    mutationFn: (token: string) => andamentosApi.sincronizarJusBR(processoId, token),
+    mutationFn: () => andamentosApi.sincronizarJusBR(processoId),
     onMutate: () => setUltimoAndamentoPre(ultimoAndamentoData),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['andamentos', processoId] })
@@ -127,6 +130,7 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
   const isSyncing = syncDataJud.isPending || syncJusBR.isPending
   const syncData = fonte === 'datajud' ? syncDataJud.data : syncJusBR.data
   const temMais = (count?.total ?? 0) > offset + PAGE
+  const jusbrAtivo = !!jusbrSession?.active
 
   function handleFonte(f: Fonte) {
     setFonte(f)
@@ -139,18 +143,25 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
     if (fonte === 'datajud') {
       syncDataJud.mutate()
     } else {
-      if (!jusBRToken) {
+      if (!jusbrAtivo) {
         setShowTokenModal(true)
       } else {
-        syncJusBR.mutate(jusBRToken)
+        syncJusBR.mutate()
       }
     }
   }
 
-  function handleToken(token: string) {
-    setJusBRToken(token)
-    saveStoredJusbrToken(token)
-    syncJusBR.mutate(token)
+  const configurarSessao = useMutation({
+    mutationFn: (capture: string) => andamentosApi.configurarSessaoJusBR(capture),
+    onSuccess: async (_, capture) => {
+      saveStoredJusbrToken(capture)
+      await refetchJusbrSession()
+      syncJusBR.mutate()
+    },
+  })
+
+  function handleToken(capture: string) {
+    configurarSessao.mutate(capture)
   }
 
   return (
@@ -190,11 +201,11 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
           )}
 
           {/* Sync / token button */}
-          {fonte === 'jusbr' && jusBRToken && (
+          {fonte === 'jusbr' && jusbrAtivo && (
             <button
               className={styles.btnTokenReset}
               onClick={() => setShowTokenModal(true)}
-              title="Token configurado — clique para renovar"
+              title="Sessão configurada — clique para renovar"
             >
               🔑
             </button>
@@ -206,8 +217,8 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
           >
             {isSyncing ? (
               <span className={styles.syncingLabel}><span className={styles.spinner} /> Buscando…</span>
-            ) : fonte === 'jusbr' && !jusBRToken ? (
-              '🔑 Configurar token'
+            ) : fonte === 'jusbr' && !jusbrAtivo ? (
+              '🔑 Conectar jus.br'
             ) : (
               '⟳ Sincronizar'
             )}
@@ -216,25 +227,26 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
       </div>
 
       {/* jus.br token info bar */}
-      {fonte === 'jusbr' && !jusBRToken && !isSyncing && !syncData && (
+      {fonte === 'jusbr' && !jusbrAtivo && !isSyncing && !syncData && (
         <div className={styles.jusBRInfo}>
-          <span>O modo <strong>jus.br</strong> requer um token de sessão obtido no portal. Clique em <strong>"🔑 Configurar token"</strong> para começar.</span>
+          <span>O modo <strong>jus.br</strong> requer uma sessão ativa do portal. Clique em <strong>"🔑 Conectar jus.br"</strong> para conectar uma vez e reutilizar em todos os processos.</span>
         </div>
       )}
-      {fonte === 'jusbr' && jusBRToken && !isSyncing && !syncData && (
+      {fonte === 'jusbr' && jusbrAtivo && !isSyncing && !syncData && (
         <div className={styles.jusBRInfo}>
           <span>
-            Token do <strong>jus.br</strong> carregado automaticamente neste navegador.
+            Sessão do <strong>jus.br</strong> ativa no backend e reutilizada automaticamente para todos os processos.
             {tokenExpiry ? ` Expira em ${tokenExpiry}.` : ''}
           </span>
           <button
             className={styles.btnLer}
-            onClick={() => {
+            onClick={async () => {
+              await andamentosApi.limparSessaoJusBR()
               clearStoredJusbrToken()
-              setJusBRToken('')
+              await refetchJusbrSession()
             }}
           >
-            Limpar token
+            Limpar sessão
           </button>
         </div>
       )}
@@ -274,10 +286,10 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
             <>
               <span className={styles.emptyIcon}>🔍</span>
               <p className={styles.emptyMsg}>Nenhum andamento do jus.br ainda.</p>
-              <p className={styles.emptyHint}>
-                {jusBRToken
+                <p className={styles.emptyHint}>
+                {jusbrAtivo
                   ? 'Clique em ⟳ Sincronizar para buscar no portal.'
-                  : 'Configure o token para sincronizar com o jus.br.'}
+                  : 'Configure a sessão para sincronizar com o jus.br.'}
               </p>
             </>
           )}
@@ -306,7 +318,7 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
         <InstrucoesJusBRModal
           onClose={() => setShowTokenModal(false)}
           onToken={handleToken}
-          initialToken={jusBRToken}
+          initialToken=""
         />
       )}
     </div>

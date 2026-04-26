@@ -1,14 +1,12 @@
 import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { andamentosApi } from '../api/andamentos'
-import type { SincronizacaoResult } from '../api/andamentos'
+import type { JusbrSessionStatus, SincronizacaoResult } from '../api/andamentos'
 import type { Processo } from '../api/processos'
 import InstrucoesJusBRModal from './InstrucoesJusBRModal'
 import styles from './SincronizarModal.module.css'
 import {
   clearStoredJusbrToken,
-  formatTokenExpiry,
-  loadStoredJusbrToken,
   saveStoredJusbrToken,
 } from '../utils/jusbrToken'
 import { inferTribunalFromCnj } from '../utils/cnj'
@@ -41,10 +39,19 @@ function suportaJusBR(p: Processo) {
 export default function SincronizarModal({ processos, onClose }: Props) {
   const qc = useQueryClient()
   const [fonte, setFonte] = useState<Fonte>('datajud')
-  const [jusBRToken, setJusBRToken] = useState(() => loadStoredJusbrToken())
   const [showInstrucoes, setShowInstrucoes] = useState(false)
   const [resultados, setResultados] = useState<SincronizacaoResult[] | null>(null)
-  const tokenExpiry = jusBRToken ? formatTokenExpiry(jusBRToken) : null
+  const { data: jusbrSession, refetch: refetchJusbrSession } = useQuery<JusbrSessionStatus>({
+    queryKey: ['jusbr-session'],
+    queryFn: () => andamentosApi.obterSessaoJusBR(),
+    staleTime: 30_000,
+  })
+  const tokenExpiry = jusbrSession?.expires_at
+    ? new Date(jusbrSession.expires_at).toLocaleString('pt-BR', {
+        day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+      })
+    : null
+  const jusbrAtivo = !!jusbrSession?.active
 
   const disponiveis = processos.filter(fonte === 'datajud' ? suportaDataJud : suportaJusBR)
   const [selecionados, setSelecionados] = useState<Set<string>>(
@@ -62,8 +69,8 @@ export default function SincronizarModal({ processos, onClose }: Props) {
   })
 
   const syncJusBR = useMutation({
-    mutationFn: (token: string) =>
-      andamentosApi.sincronizarBatchJusBR(Array.from(selecionados), token),
+    mutationFn: () =>
+      andamentosApi.sincronizarBatchJusBR(Array.from(selecionados)),
     onSuccess: (data) => {
       setResultados(data)
       qc.invalidateQueries({ queryKey: ['processos'] })
@@ -92,18 +99,25 @@ export default function SincronizarModal({ processos, onClose }: Props) {
     if (fonte === 'datajud') {
       syncDataJud.mutate()
     } else {
-      if (!jusBRToken.trim()) {
+      if (!jusbrAtivo) {
         setShowInstrucoes(true)
       } else {
-        syncJusBR.mutate(jusBRToken.trim())
+        syncJusBR.mutate()
       }
     }
   }
 
-  function handleJusBRToken(token: string) {
-    setJusBRToken(token)
-    saveStoredJusbrToken(token)
-    syncJusBR.mutate(token)
+  const configurarSessao = useMutation({
+    mutationFn: (capture: string) => andamentosApi.configurarSessaoJusBR(capture),
+    onSuccess: async (_, capture) => {
+      saveStoredJusbrToken(capture)
+      await refetchJusbrSession()
+      syncJusBR.mutate()
+    },
+  })
+
+  function handleJusBRToken(capture: string) {
+    configurarSessao.mutate(capture)
   }
 
   // When switching fonte, reset selection to new available list
@@ -141,13 +155,13 @@ export default function SincronizarModal({ processos, onClose }: Props) {
               jus.br v1
             </button>
           </div>
-          {fonte === 'jusbr' && jusBRToken && (
+          {fonte === 'jusbr' && jusbrAtivo && (
             <button
               className={styles.btnTokenSet}
               onClick={() => setShowInstrucoes(true)}
-              title="Clique para renovar o token"
+              title="Clique para renovar a sessão"
             >
-              🔑 token ativo
+              🔑 sessão ativa
             </button>
           )}
         </div>
@@ -156,21 +170,22 @@ export default function SincronizarModal({ processos, onClose }: Props) {
         {fonte === 'jusbr' && (
           <div className={styles.avisoJusBR}>
             <strong>jus.br</strong> retorna nomes reais dos documentos e dados completos via PDPJ,
-            mas requer um <strong>token de sessão</strong> obtido após login manual.
-            {jusBRToken
-              ? ` Token carregado automaticamente.${tokenExpiry ? ` Expira em ${tokenExpiry}.` : ''}`
-              : ' Clique em "Sincronizar" para abrir as instruções.'}
-            {jusBRToken && (
+            mas agora pode reutilizar uma <strong>sessão compartilhada</strong> do app inteiro.
+            {jusbrAtivo
+              ? ` Sessão ativa no backend.${tokenExpiry ? ` Expira em ${tokenExpiry}.` : ''}`
+              : ' Clique em "Sincronizar" para conectar uma vez e reutilizar nos outros processos.'}
+            {jusbrAtivo && (
               <>
                 {' '}
                 <button
                   className={styles.btnToggleAll}
-                  onClick={() => {
+                  onClick={async () => {
+                    await andamentosApi.limparSessaoJusBR()
                     clearStoredJusbrToken()
-                    setJusBRToken('')
+                    await refetchJusbrSession()
                   }}
                 >
-                  Limpar token
+                  Limpar sessão
                 </button>
               </>
             )}
@@ -235,8 +250,8 @@ export default function SincronizarModal({ processos, onClose }: Props) {
               >
                 {isSyncing
                   ? `Sincronizando ${selecionados.size}...`
-                  : fonte === 'jusbr' && !jusBRToken
-                  ? `🔑 Obter token e sincronizar ${selecionados.size}`
+                  : fonte === 'jusbr' && !jusbrAtivo
+                  ? `🔑 Conectar jus.br e sincronizar ${selecionados.size}`
                   : `Sincronizar ${selecionados.size} processo(s)`}
               </button>
             </div>
@@ -277,7 +292,7 @@ export default function SincronizarModal({ processos, onClose }: Props) {
         <InstrucoesJusBRModal
           onClose={() => setShowInstrucoes(false)}
           onToken={handleJusBRToken}
-          initialToken={jusBRToken}
+          initialToken=""
         />
       )}
     </div>

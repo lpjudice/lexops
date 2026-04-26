@@ -8,7 +8,7 @@ import {
 
 interface Props {
   onClose: () => void
-  onToken: (token: string) => void
+  onToken: (capture: string) => void
   initialToken?: string
 }
 
@@ -90,7 +90,7 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
   function handleConfirm() {
     const t = extractJusbrTokenFromText(token)
     if (!t) return
-    onToken(t)
+    onToken(token)
     onClose()
   }
 
