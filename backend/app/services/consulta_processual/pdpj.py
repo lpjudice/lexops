@@ -91,6 +91,15 @@ def _tribunal_matches(item: dict, tribunal: str | None) -> bool:
         item.get("orgaoJulgador"),
         item.get("orgao"),
     ]
+    tramitacoes = item.get("tramitacoes")
+    if isinstance(tramitacoes, list):
+        for tram in tramitacoes:
+            if not isinstance(tram, dict):
+                continue
+            tribunal_obj = tram.get("tribunal")
+            if isinstance(tribunal_obj, dict):
+                candidatos.extend([tribunal_obj.get("sigla"), tribunal_obj.get("nome")])
+            candidatos.append(tram.get("orgaoJulgador"))
     return any(esperado in normalizar_tribunal(str(valor)) for valor in candidatos if valor)
 
 
@@ -99,6 +108,16 @@ def _extract_inline_movimentos(data: dict) -> list[dict]:
         value = data.get(key)
         if isinstance(value, list):
             return [item for item in value if isinstance(item, dict)]
+
+    tramitacoes = data.get("tramitacoes")
+    if isinstance(tramitacoes, list):
+        for tram in tramitacoes:
+            if not isinstance(tram, dict):
+                continue
+            for key in ("movimentos", "andamentos", "movements"):
+                value = tram.get(key)
+                if isinstance(value, list):
+                    return [item for item in value if isinstance(item, dict)]
     return []
 
 
