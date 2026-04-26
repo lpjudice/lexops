@@ -16,6 +16,36 @@ export function sanitizeJusbrToken(raw: string): string {
   return raw.trim().replace(/^Bearer\s+/i, '')
 }
 
+export function extractJusbrTokenFromText(raw: string): string {
+  const text = raw.trim()
+  if (!text) return ''
+
+  const patterns = [
+    /authorization:\s*bearer\s+([A-Za-z0-9\-_=]+\.[A-Za-z0-9\-_=]+\.[A-Za-z0-9\-_=]+)/i,
+    /["']authorization["']\s*:\s*["']Bearer\s+([^"']+)["']/i,
+    /--header\s+['"]authorization:\s*Bearer\s+([^'"]+)['"]/i,
+    /Bearer\s+([A-Za-z0-9\-_=]+\.[A-Za-z0-9\-_=]+\.[A-Za-z0-9\-_=]+)/i,
+  ]
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern)
+    if (match?.[1]) return sanitizeJusbrToken(match[1])
+  }
+
+  const sanitized = sanitizeJusbrToken(text)
+  if (sanitized.split('.').length === 3) return sanitized
+  return ''
+}
+
+export function detectJusbrInputKind(raw: string): 'token' | 'curl' | 'headers' | 'unknown' {
+  const text = raw.trim()
+  if (!text) return 'unknown'
+  if (/^curl\s/i.test(text)) return 'curl'
+  if (/authorization:/i.test(text) || /request headers/i.test(text)) return 'headers'
+  if (sanitizeJusbrToken(text).split('.').length === 3) return 'token'
+  return 'unknown'
+}
+
 export function getJusbrTokenMeta(token: string): { exp: number | null; expired: boolean } {
   const payload = decodePayload(token)
   const exp = typeof payload?.exp === 'number' ? payload.exp : null
@@ -37,7 +67,7 @@ export function loadStoredJusbrToken(): string {
 
 export function saveStoredJusbrToken(token: string): void {
   if (typeof window === 'undefined') return
-  const sanitized = sanitizeJusbrToken(token)
+  const sanitized = extractJusbrTokenFromText(token)
   if (!sanitized) return
   window.localStorage.setItem(STORAGE_KEY, sanitized)
 }

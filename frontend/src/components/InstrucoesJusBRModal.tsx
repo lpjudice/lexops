@@ -1,6 +1,10 @@
 import { useState } from 'react'
 import styles from './InstrucoesJusBRModal.module.css'
-import { formatTokenExpiry, sanitizeJusbrToken } from '../utils/jusbrToken'
+import {
+  detectJusbrInputKind,
+  extractJusbrTokenFromText,
+  formatTokenExpiry,
+} from '../utils/jusbrToken'
 
 interface Props {
   onClose: () => void
@@ -25,9 +29,8 @@ const STEPS: Record<OS, Record<Browser, StepGroup>> = {
         'Abra as ferramentas do desenvolvedor:<br><kbd>Cmd ⌘</kbd> + <kbd>Option ⌥</kbd> + <kbd>I</kbd>',
         'Clique na aba <strong>Network</strong> (Rede).',
         'No portal, <strong>faça qualquer ação</strong> — pesquise um processo, clique em um menu. Isso dispara chamadas de API.',
-        'Na lista de requisições, clique em qualquer item que contenha <strong>"api/"</strong> na URL.',
-        'No painel lateral, clique em <strong>"Headers"</strong> → role até <strong>"Request Headers"</strong>.<br>Localize a linha <strong>authorization: Bearer eyJ…</strong>',
-        'Copie <strong>somente o trecho após "Bearer "</strong> (começa com <em>eyJ</em>) e cole no campo abaixo.',
+        'Na lista de requisições, clique com o botão direito em qualquer item que contenha <strong>"api/"</strong> na URL.',
+        'Escolha <strong>Copy → Copy as cURL</strong> e cole o conteúdo inteiro no campo abaixo.<br>O app extrai o token automaticamente.',
       ],
       after: [],
     },
@@ -38,9 +41,8 @@ const STEPS: Record<OS, Record<Browser, StepGroup>> = {
         'Abra as ferramentas do desenvolvedor:<br><kbd>Cmd ⌘</kbd> + <kbd>Option ⌥</kbd> + <kbd>I</kbd>',
         'Clique na aba <strong>Rede</strong>.',
         'No portal, <strong>faça qualquer ação</strong> — pesquise um processo, clique em um menu.',
-        'Na lista de requisições, clique em qualquer item que contenha <strong>"api/"</strong> na URL.',
-        'Clique na aba <strong>Cabeçalhos</strong> → role até <strong>"Cabeçalhos da solicitação"</strong>.<br>Localize a linha <strong>authorization: Bearer eyJ…</strong>',
-        'Copie <strong>somente o trecho após "Bearer "</strong> (começa com <em>eyJ</em>) e cole no campo abaixo.',
+        'Na lista de requisições, clique com o botão direito em qualquer item que contenha <strong>"api/"</strong> na URL.',
+        'Use <strong>Copiar → Copiar como cURL</strong> e cole o conteúdo inteiro no campo abaixo.<br>O app extrai o token automaticamente.',
       ],
       after: [],
     },
@@ -53,9 +55,8 @@ const STEPS: Record<OS, Record<Browser, StepGroup>> = {
         'Abra as ferramentas do desenvolvedor:<br><kbd>F12</kbd> ou <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd>',
         'Clique na aba <strong>Network</strong> (Rede).',
         'No portal, <strong>faça qualquer ação</strong> — pesquise um processo, clique em um menu. Isso dispara chamadas de API.',
-        'Na lista de requisições, clique em qualquer item que contenha <strong>"api/"</strong> na URL.',
-        'No painel lateral, clique em <strong>"Headers"</strong> → role até <strong>"Request Headers"</strong>.<br>Localize a linha <strong>authorization: Bearer eyJ…</strong>',
-        'Copie <strong>somente o trecho após "Bearer "</strong> (começa com <em>eyJ</em>) e cole no campo abaixo.',
+        'Na lista de requisições, clique com o botão direito em qualquer item que contenha <strong>"api/"</strong> na URL.',
+        'Escolha <strong>Copy → Copy as cURL</strong> e cole o conteúdo inteiro no campo abaixo.<br>O app extrai o token automaticamente.',
       ],
       after: [],
     },
@@ -66,9 +67,8 @@ const STEPS: Record<OS, Record<Browser, StepGroup>> = {
         'Abra as ferramentas do desenvolvedor:<br><kbd>F12</kbd> ou <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd>',
         'Clique na aba <strong>Rede</strong>.',
         'No portal, <strong>faça qualquer ação</strong> — pesquise um processo, clique em um menu.',
-        'Na lista de requisições, clique em qualquer item que contenha <strong>"api/"</strong> na URL.',
-        'Clique na aba <strong>Cabeçalhos</strong> → role até <strong>"Cabeçalhos da solicitação"</strong>.<br>Localize a linha <strong>authorization: Bearer eyJ…</strong>',
-        'Copie <strong>somente o trecho após "Bearer "</strong> (começa com <em>eyJ</em>) e cole no campo abaixo.',
+        'Na lista de requisições, clique com o botão direito em qualquer item que contenha <strong>"api/"</strong> na URL.',
+        'Use <strong>Copiar → Copiar como cURL</strong> e cole o conteúdo inteiro no campo abaixo.<br>O app extrai o token automaticamente.',
       ],
       after: [],
     },
@@ -79,21 +79,43 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
   const [os, setOs] = useState<OS>('macos')
   const [browser, setBrowser] = useState<Browser>('chrome')
   const [token, setToken] = useState(initialToken)
+  const [clipboardMsg, setClipboardMsg] = useState<string | null>(null)
 
   const { before, after } = STEPS[os][browser]
   const allSteps = [...before, ...after]
 
   // Index after which to show the reference image hint
-  const networkStepIdx = allSteps.findIndex(s => s.includes('authorization'))
+  const networkStepIdx = allSteps.findIndex(s => s.includes('cURL'))
 
   function handleConfirm() {
-    const t = sanitizeJusbrToken(token)
+    const t = extractJusbrTokenFromText(token)
     if (!t) return
     onToken(t)
     onClose()
   }
 
-  const tokenExpiry = token.trim() ? formatTokenExpiry(sanitizeJusbrToken(token)) : null
+  async function handlePasteClipboard() {
+    try {
+      const text = await navigator.clipboard.readText()
+      setToken(text)
+      const kind = detectJusbrInputKind(text)
+      setClipboardMsg(
+        kind === 'curl'
+          ? 'cURL detectado. O token será extraído automaticamente.'
+          : kind === 'headers'
+          ? 'Headers detectados. O token será extraído automaticamente.'
+          : kind === 'token'
+          ? 'Token detectado.'
+          : 'Conteúdo colado. Se houver um Bearer válido, ele será extraído automaticamente.'
+      )
+    } catch {
+      setClipboardMsg('Não foi possível ler a área de transferência. Cole manualmente no campo abaixo.')
+    }
+  }
+
+  const extractedToken = token.trim() ? extractJusbrTokenFromText(token) : ''
+  const tokenExpiry = extractedToken ? formatTokenExpiry(extractedToken) : null
+  const inputKind = token.trim() ? detectJusbrInputKind(token) : 'unknown'
 
   return (
     <div className={styles.overlay} onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
@@ -104,7 +126,7 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
             <span className={styles.headerIcon}>🔑</span>
             <div>
               <h2 className={styles.title}>Sincronizar via jus.br</h2>
-              <p className={styles.subtitle}>Capture o token de sessão pela aba Network do DevTools</p>
+              <p className={styles.subtitle}>v2: cole o cURL, headers ou token e o app extrai o Bearer</p>
             </div>
           </div>
           <button className={styles.btnClose} onClick={onClose}>×</button>
@@ -140,8 +162,8 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
             <div className={styles.networkHint}>
               <span className={styles.networkHintIcon}>💡</span>
               <span>
-                O valor completo do token é longo (começa com <code>eyJ</code> e tem centenas de caracteres).
-                Copie tudo — não só o início. Se o campo mostrar só parte, clique duas vezes nele e use Ctrl+A / Cmd+A para selecionar tudo.
+                A forma mais fácil agora é copiar o <strong>cURL inteiro</strong> da requisição.
+                Se preferir, você ainda pode colar só o token Bearer ou um bloco de headers.
               </span>
             </div>
           )}
@@ -159,24 +181,37 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
           {/* Token input */}
           <div className={styles.tokenSection}>
             <label className={styles.tokenLabel}>
-              Cole o token aqui (o trecho após "Bearer "):
+              Cole aqui o <strong>cURL</strong>, os <strong>headers</strong> ou o <strong>token</strong>:
             </label>
             <textarea
               className={styles.tokenInput}
-              placeholder="eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6..."
+              placeholder={`curl 'https://portaldeservicos.pdpj.jus.br/api/...'\n  -H 'authorization: Bearer eyJ...' ...`}
               value={token}
               onChange={(e) => setToken(e.target.value)}
-              rows={3}
+              rows={5}
               spellCheck={false}
               autoCorrect="off"
               autoCapitalize="off"
             />
+            <button className={styles.btnCancel} onClick={handlePasteClipboard}>
+              Colar da área de transferência
+            </button>
+            {clipboardMsg && (
+              <p className={styles.tokenHint}>
+                {clipboardMsg}
+              </p>
+            )}
             <p className={styles.tokenHint}>
-              O token expira em ~5 minutos. Se a sincronização falhar com erro de autenticação, repita o processo.
+              O token expira em poucos minutos. Depois da primeira captura, o app tenta reutilizá-lo automaticamente enquanto ainda estiver válido.
             </p>
+            {inputKind !== 'unknown' && (
+              <p className={styles.tokenHint}>
+                Entrada detectada: {inputKind === 'curl' ? 'cURL' : inputKind === 'headers' ? 'Headers' : 'Token'}.
+              </p>
+            )}
             {tokenExpiry && (
               <p className={styles.tokenHint}>
-                Expiração detectada no token colado: {tokenExpiry}
+                Expiração detectada no token extraído: {tokenExpiry}
               </p>
             )}
           </div>
@@ -188,9 +223,9 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
           <button
             className={styles.btnConfirm}
             onClick={handleConfirm}
-            disabled={!token.trim()}
+            disabled={!extractedToken}
           >
-            Sincronizar com este token
+            Sincronizar com o token extraído
           </button>
         </div>
       </div>
