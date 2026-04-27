@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { processosApi } from '../api/processos'
 import { clientesApi } from '../api/clientes'
+import { andamentosApi } from '../api/andamentos'
 import type { ProcessoCreate, EstadoProcesso, FaseProcesso, StatusProcesso, PoloProcesso, SistemaJuridico, GrauProcesso, ProcessoClienteIn } from '../api/processos'
 import ClienteCombobox from '../components/ClienteCombobox'
 import ProcessoChat from '../components/ProcessoChat'
@@ -92,6 +93,13 @@ export default function ProcessosPage() {
     queryFn: () => clientesApi.listar(),
   })
 
+  const { data: jusbrSession } = useQuery({
+    queryKey: ['jusbr-session'],
+    queryFn: () => andamentosApi.obterSessaoJusBR(),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  })
+
   const criar = useMutation({
     mutationFn: processosApi.criar,
     onSuccess: () => {
@@ -165,6 +173,21 @@ export default function ProcessosPage() {
     return lista
   }, [processos, filtroTribunal, filtroUltMov, filtroPolo, ordemAlfa])
 
+  const jusbrStatusLabel = useMemo(() => {
+    if (!jusbrSession?.active) return 'jus.br: sessão inativa'
+    const expiry = jusbrSession.expires_at
+      ? new Date(jusbrSession.expires_at).toLocaleString('pt-BR', {
+          day: '2-digit',
+          month: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+        })
+      : 'sem expiração detectada'
+    return jusbrSession.has_refresh_token
+      ? `jus.br: ativo até ${expiry} • refresh ok`
+      : `jus.br: ativo até ${expiry} • sem refresh`
+  }, [jusbrSession])
+
   // Litisconsórcio helpers
   const addLitis = (forEdit: boolean) => {
     if (forEdit) setEditLitis((prev) => [...prev, { cliente_id: '', polo: null, principal: false }])
@@ -185,6 +208,14 @@ export default function ProcessosPage() {
       <div className={styles.pageHeader}>
         <h1 className={styles.pageTitle}>Processos</h1>
         <div className={ps.headerActions}>
+          <span
+            className={`${ps.jusbrStatus} ${jusbrSession?.active ? ps.jusbrStatusAtivo : ps.jusbrStatusInativo}`}
+            title={jusbrSession?.active
+              ? 'Sessão do jus.br disponível para sincronização'
+              : 'Sessão do jus.br indisponível; atualize antes de usar a sincronização autenticada'}
+          >
+            {jusbrStatusLabel}
+          </span>
           <button className={styles.btnTable} onClick={() => setShowSyncModal(true)}>
             ⟳ Sincronizar andamentos
           </button>
