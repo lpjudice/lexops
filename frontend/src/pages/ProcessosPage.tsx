@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { processosApi } from '../api/processos'
 import { clientesApi } from '../api/clientes'
 import { andamentosApi } from '../api/andamentos'
-import type { ProcessoCreate, EstadoProcesso, FaseProcesso, StatusProcesso, PoloProcesso, SistemaJuridico, GrauProcesso, ProcessoClienteIn } from '../api/processos'
+import type { ProcessoCreate, EstadoProcesso, FaseProcesso, StatusProcesso, PoloProcesso, SistemaJuridico, GrauProcesso, ProcessoClienteIn, ProcessoJusbrPrefill } from '../api/processos'
 import ClienteCombobox from '../components/ClienteCombobox'
 import ProcessoChat from '../components/ProcessoChat'
 import AndamentosSection from '../components/AndamentosSection'
@@ -72,6 +72,8 @@ export default function ProcessosPage() {
   const [editando, setEditando] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<Partial<ProcessoCreate>>({})
   const [showSyncModal, setShowSyncModal] = useState(false)
+  const [prefillMsg, setPrefillMsg] = useState<string | null>(null)
+  const [prefillErro, setPrefillErro] = useState<string | null>(null)
   const [detalheAberto, setDetalheAberto] = useState<string | null>(null)
   // Litisconsórcio state for create form
   const [createLitis, setCreateLitis] = useState<ProcessoClienteIn[]>([])
@@ -93,6 +95,37 @@ export default function ProcessosPage() {
     queryFn: () => clientesApi.listar(),
   })
 
+  const preencherViaJusbr = useMutation({
+    mutationFn: (numeroCnj: string) => processosApi.preencherViaJusbr(numeroCnj),
+    onSuccess: (data: ProcessoJusbrPrefill) => {
+      setForm((prev) => ({
+        ...prev,
+        numero_cnj: data.numero_cnj || prev.numero_cnj,
+        estado: data.estado || prev.estado,
+        tribunal: data.tribunal ?? prev.tribunal,
+        vara: data.vara ?? prev.vara,
+        comarca: data.comarca ?? prev.comarca,
+        materia: data.materia ?? prev.materia,
+        objeto: data.objeto ?? prev.objeto,
+        serventia: data.serventia ?? prev.serventia,
+        foro: data.foro ?? prev.foro,
+        sistema_juridico: data.sistema_juridico ?? prev.sistema_juridico,
+        grau: data.grau ?? prev.grau,
+        grau_texto: data.grau_texto ?? prev.grau_texto,
+        status: data.status ?? prev.status,
+        polo: data.polo ?? prev.polo,
+      }))
+      setPrefillErro(null)
+      setPrefillMsg(data.resumo_encontrado ?? 'Dados do processo preenchidos via jus.br.')
+    },
+    onError: (e: unknown) => {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setPrefillMsg(null)
+      setPrefillErro(detail ?? 'Não foi possível preencher o processo via jus.br.')
+    },
+  })
+
+
   const { data: jusbrSession } = useQuery({
     queryKey: ['jusbr-session'],
     queryFn: () => andamentosApi.obterSessaoJusBR(),
@@ -108,6 +141,8 @@ export default function ProcessosPage() {
       setForm(EMPTY)
       setCreateLitis([])
       setErro(null)
+      setPrefillMsg(null)
+      setPrefillErro(null)
     },
     onError: (e: unknown) => {
       const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -147,6 +182,17 @@ export default function ProcessosPage() {
 
   const handleEstado = (estado: EstadoProcesso) =>
     setForm({ ...form, estado, tribunal: TRIBUNAIS[estado] || '' })
+
+  const handlePrefillJusbr = () => {
+    if (!form.numero_cnj) {
+      setPrefillErro('Digite o número CNJ antes de buscar no jus.br.')
+      setPrefillMsg(null)
+      return
+    }
+    setPrefillErro(null)
+    setPrefillMsg(null)
+    preencherViaJusbr.mutate(form.numero_cnj)
+  }
 
   const clienteNome = (id: string) => clientes.find((c) => c.id === id)?.nome ?? '—'
 
@@ -245,12 +291,25 @@ export default function ProcessosPage() {
 
           <div className={styles.formRow}>
             <label className={styles.formLabel}>Nº CNJ *</label>
-            <input
-              className={styles.input}
-              placeholder="0000000-00.0000.0.00.0000"
-              value={form.numero_cnj}
-              onChange={(e) => setForm({ ...form, numero_cnj: maskCNJ(e.target.value) })}
-            />
+            <div className={ps.cnjRow}>
+              <input
+                className={styles.input}
+                placeholder="0000000-00.0000.0.00.0000"
+                value={form.numero_cnj}
+                onChange={(e) => setForm({ ...form, numero_cnj: maskCNJ(e.target.value) })}
+              />
+              <button
+                type="button"
+                className={styles.btnTable}
+                onClick={handlePrefillJusbr}
+                disabled={preencherViaJusbr.isPending || !jusbrSession?.active}
+                title={jusbrSession?.active ? 'Buscar dados do processo no jus.br e preencher o formulário' : 'Ative a sessão do jus.br para preencher automaticamente'}
+              >
+                {preencherViaJusbr.isPending ? 'Buscando…' : 'Preencher via jus.br'}
+              </button>
+            </div>
+            {prefillMsg && <div className={`${ps.prefillHint} ${ps.prefillOk}`}>{prefillMsg}</div>}
+            {prefillErro && <div className={`${ps.prefillHint} ${ps.prefillErro}`}>{prefillErro}</div>}
           </div>
 
           <div className={ps.twoCol}>

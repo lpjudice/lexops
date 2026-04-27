@@ -80,6 +80,28 @@ export interface ProcessoCreate {
   clientes_litisconsorcio?: ProcessoClienteIn[]
 }
 
+
+export interface ProcessoJusbrPrefill {
+  numero_cnj: string
+  estado: EstadoProcesso
+  tribunal?: string | null
+  vara?: string | null
+  comarca?: string | null
+  materia?: string | null
+  objeto?: string | null
+  serventia?: string | null
+  foro?: string | null
+  sistema_juridico?: SistemaJuridico | null
+  grau?: GrauProcesso | null
+  grau_texto?: string | null
+  status?: StatusProcesso
+  polo?: PoloProcesso | null
+  cliente_nome_sugerido?: string | null
+  parte_ativa_principal?: string | null
+  parte_passiva_principal?: string | null
+  resumo_encontrado?: string | null
+}
+
 export interface Documento {
   filename: string
   size: number
@@ -99,6 +121,9 @@ export const processosApi = {
   atualizar: (id: string, data: Partial<ProcessoCreate>) =>
     api.patch<Processo>(`/processos/${id}`, data).then((r) => r.data),
   deletar: (id: string) => api.delete(`/processos/${id}`),
+
+  preencherViaJusbr: (numeroCnj: string) =>
+    api.get<ProcessoJusbrPrefill>(`/processos/preencher-jusbr/${encodeURIComponent(numeroCnj)}`).then((r) => r.data),
 
   uploadPdf: (id: string, file: File) => {
     const form = new FormData()

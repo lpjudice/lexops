@@ -142,6 +142,112 @@ def _extract_inline_movimentos(data: dict) -> list[dict]:
     return []
 
 
+def _build_headers(token: str, session_data: dict | None = None) -> dict[str, str]:
+    session_data = session_data or {}
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Origin": "https://portaldeservicos.pdpj.jus.br",
+        "Referer": session_data.get("referer") or "https://portaldeservicos.pdpj.jus.br/",
+    }
+    extra_headers = session_data.get("extra_headers") or {}
+    if isinstance(extra_headers, dict):
+        headers.update({str(k): str(v) for k, v in extra_headers.items()})
+    if session_data.get("cookies"):
+        headers["Cookie"] = str(session_data["cookies"])
+    return headers
+
+
+def _build_candidate_requests(numero_cnj: str, tribunal: str, session_data: dict | None = None) -> tuple[str, str, list[tuple[str, str, dict, None]]]:
+    session_data = session_data or {}
+    numero_norm = normalizar_cnj(numero_cnj)
+    tribunal_norm = normalizar_tribunal(tribunal)
+    tribunais_candidatos = candidatos_tribunal(numero_cnj, tribunal)
+
+    candidates: list[tuple[str, str, dict, None]] = []
+    seen_bases: list[str] = []
+    for base in [*(session_data.get("api_bases") or []), *_BASES]:
+        if base in seen_bases:
+            continue
+        seen_bases.append(base)
+        candidates += [
+            ("GET", f"{base}/processos", {"numeroProcesso": numero_cnj}, None),
+            ("GET", f"{base}/processos", {"numeroProcesso": numero_norm}, None),
+            ("GET", f"{base}/processos", {"numeroProcesso": numero_cnj, "retornarMovimentos": "true"}, None),
+            ("GET", f"{base}/processos", {"numeroProcesso": numero_norm, "retornarMovimentos": "true"}, None),
+            ("GET", f"{base}/processos", {"numeroProcesso": numero_norm, "incluirMovimentos": "true"}, None),
+            ("GET", f"{base}/processos", {"numero": numero_cnj}, None),
+            ("GET", f"{base}/processos", {"numero": numero_norm}, None),
+            ("GET", f"{base}/processos/{numero_cnj}", {}, None),
+            ("GET", f"{base}/processos/{numero_norm}", {}, None),
+            ("GET", f"{base}/processo/{numero_cnj}", {}, None),
+            ("GET", f"{base}/consulta/processos", {"numeroProcesso": numero_cnj}, None),
+            ("GET", f"{base}/consulta/processos", {"numeroProcesso": numero_norm}, None),
+        ]
+        for candidato in tribunais_candidatos:
+            candidates += [
+                ("GET", f"{base}/processos", {"numeroProcesso": numero_norm, "tribunal": candidato}, None),
+                ("GET", f"{base}/processos", {"numeroProcesso": numero_norm, "siglaTribunal": candidato}, None),
+            ]
+    return numero_norm, tribunal_norm, candidates
+
+
+async def buscar_processo_pdpj_raw(
+    numero_cnj: str,
+    tribunal: str,
+    token: str | None = None,
+    session_data: dict | None = None,
+) -> dict | None:
+    session_data = session_data or {}
+    token = token or session_data.get("token") or ""
+    if not token:
+        raise PermissionError("Sessao do jus.br nao configurada.")
+
+    headers = _build_headers(token, session_data)
+    numero_norm, tribunal_norm, candidates = _build_candidate_requests(numero_cnj, tribunal, session_data)
+    tribunal_inferido = inferir_tribunal_pelo_cnj(numero_cnj)
+
+    async with httpx.AsyncClient(timeout=20) as client:
+        for method, url, params, body in candidates:
+            try:
+                resp = await client.request(method, url, headers=headers, params=params or None, json=body)
+            except httpx.RequestError as exc:
+                logger.debug("PDPJ connection error %s: %s", url, exc)
+                continue
+
+            logger.info("PDPJ probe %s %s params=%s → %s", method, url, params, resp.status_code)
+
+            if resp.status_code in (401, 403):
+                exp = _jwt_exp(token)
+                extra = f" Token expira em {exp.strftime('%d/%m/%Y %H:%M:%S')}." if exp else ""
+                raise PermissionError(
+                    "Token expirado ou sem permissão. "
+                    "Abra o portal jus.br, faça login e capture um novo token pela aba Network."
+                    f"{extra}"
+                )
+            if resp.status_code == 404 or resp.status_code != 200:
+                continue
+
+            try:
+                data = resp.json()
+            except Exception:
+                continue
+
+            items = _items_from_response(data)
+            for item in items:
+                n_raw = (item.get("numeroProcesso") or item.get("numero") or "")
+                if re.sub(r"\D", "", n_raw) != numero_norm:
+                    continue
+                if tribunal_norm and not _tribunal_matches(item, tribunal_norm):
+                    if tribunal_inferido and _tribunal_matches(item, tribunal_inferido):
+                        pass
+                    elif item.get("tribunal") or item.get("siglaTribunal") or item.get("tramitacoes"):
+                        continue
+                return item
+    return None
+
+
 async def buscar_via_pdpj(
     numero_cnj: str,
     tribunal: str,
@@ -158,109 +264,19 @@ async def buscar_via_pdpj(
     if not token:
         raise PermissionError("Sessao do jus.br nao configurada.")
 
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "Origin": "https://portaldeservicos.pdpj.jus.br",
-        "Referer": session_data.get("referer") or "https://portaldeservicos.pdpj.jus.br/",
-    }
-    extra_headers = session_data.get("extra_headers") or {}
-    if isinstance(extra_headers, dict):
-        headers.update({str(k): str(v) for k, v in extra_headers.items()})
-    if session_data.get("cookies"):
-        headers["Cookie"] = str(session_data["cookies"])
+    headers = _build_headers(token, session_data)
     numero_norm = normalizar_cnj(numero_cnj)
-    tribunal_norm = normalizar_tribunal(tribunal)
-    tribunal_inferido = inferir_tribunal_pelo_cnj(numero_cnj)
-    tribunais_candidatos = candidatos_tribunal(numero_cnj, tribunal)
 
-    # ── Candidate search endpoints ────────────────────────────────────────────
-    # Each tuple: (method, url, params, json_body)
-    candidates = []
-    seen_bases: list[str] = []
-    for base in [*(session_data.get("api_bases") or []), *_BASES]:
-        if base in seen_bases:
-            continue
-        seen_bases.append(base)
-        candidates += [
-            ("GET", f"{base}/processos",                   {"numeroProcesso": numero_cnj},  None),
-            ("GET", f"{base}/processos",                   {"numeroProcesso": numero_norm}, None),
-            ("GET", f"{base}/processos",                   {"numeroProcesso": numero_cnj, "retornarMovimentos": "true"},  None),
-            ("GET", f"{base}/processos",                   {"numeroProcesso": numero_norm, "retornarMovimentos": "true"}, None),
-            ("GET", f"{base}/processos",                   {"numeroProcesso": numero_norm, "incluirMovimentos": "true"}, None),
-            ("GET", f"{base}/processos",                   {"numero": numero_cnj},          None),
-            ("GET", f"{base}/processos",                   {"numero": numero_norm},         None),
-            ("GET", f"{base}/processos/{numero_cnj}",      {},                              None),
-            ("GET", f"{base}/processos/{numero_norm}",     {},                              None),
-            ("GET", f"{base}/processo/{numero_cnj}",       {},                              None),
-            ("GET", f"{base}/consulta/processos",          {"numeroProcesso": numero_cnj},  None),
-            ("GET", f"{base}/consulta/processos",          {"numeroProcesso": numero_norm}, None),
-        ]
-        for candidato in tribunais_candidatos:
-            candidates += [
-                ("GET", f"{base}/processos", {"numeroProcesso": numero_norm, "tribunal": candidato}, None),
-                ("GET", f"{base}/processos", {"numeroProcesso": numero_norm, "siglaTribunal": candidato}, None),
-            ]
+    processo_data = await buscar_processo_pdpj_raw(
+        numero_cnj,
+        tribunal,
+        token=token,
+        session_data=session_data,
+    )
 
     async with httpx.AsyncClient(timeout=20) as client:
-        processo_data: dict | None = None
-        matched_base = ""
-        inline_movimentos: list[dict] = []
-
-        for method, url, params, body in candidates:
-            try:
-                resp = await client.request(
-                    method, url,
-                    headers=headers,
-                    params=params or None,
-                    json=body,
-                )
-            except httpx.RequestError as exc:
-                logger.debug("PDPJ connection error %s: %s", url, exc)
-                continue
-
-            logger.info("PDPJ probe %s %s params=%s → %s", method, url, params, resp.status_code)
-
-            if resp.status_code in (401, 403):
-                exp = _jwt_exp(token)
-                extra = f" Token expira em {exp.strftime('%d/%m/%Y %H:%M:%S')}." if exp else ""
-                raise PermissionError(
-                    "Token expirado ou sem permissão. "
-                    "Abra o portal jus.br, faça login e capture um novo token pela aba Network."
-                    f"{extra}"
-                )
-            if resp.status_code == 404:
-                continue
-            if resp.status_code != 200:
-                logger.debug("PDPJ %s → %s: %s", url, resp.status_code, resp.text[:200])
-                continue
-
-            try:
-                data = resp.json()
-            except Exception:
-                continue
-
-            # Unwrap paginated response
-            items = _items_from_response(data)
-
-            for item in items:
-                n_raw = (item.get("numeroProcesso") or item.get("numero") or "")
-                if re.sub(r"\D", "", n_raw) != numero_norm:
-                    continue
-                if tribunal_norm and not _tribunal_matches(item, tribunal_norm):
-                    if tribunal_inferido and _tribunal_matches(item, tribunal_inferido):
-                        pass
-                    elif item.get("tribunal") or item.get("siglaTribunal"):
-                        continue
-                if re.sub(r"\D", "", n_raw) == numero_norm:
-                    processo_data = item
-                    matched_base = url.rsplit("/", 2)[0]  # strip /processos
-                    inline_movimentos = _extract_inline_movimentos(item)
-                    break
-
-            if processo_data:
-                break
+        matched_base = next(iter(session_data.get("api_bases") or []), _BASES[0])
+        inline_movimentos: list[dict] = _extract_inline_movimentos(processo_data) if processo_data else []
 
         if not processo_data:
             logger.warning("PDPJ: process %s not found after probing all endpoints", numero_cnj)

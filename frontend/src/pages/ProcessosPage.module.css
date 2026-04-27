@@ -313,3 +313,35 @@
   .cardActions { width: 100%; justify-content: flex-end; }
   .headerActions { flex-direction: column; align-items: flex-end; }
 }
+
+
+.cnjRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.cnjRow input {
+  flex: 1;
+}
+
+.prefillHint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.prefillOk {
+  color: #047857;
+}
+
+.prefillErro {
+  color: #b91c1c;
+}
+
+@media (max-width: 640px) {
+  .cnjRow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

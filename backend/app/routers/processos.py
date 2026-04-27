@@ -2,6 +2,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from pydantic import BaseModel
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
 
@@ -14,6 +15,113 @@ UPLOADS_DIR = Path("/app/uploads/processos")
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 router = APIRouter(prefix="/processos", tags=["processos"])
+
+
+TRIBUNAL_ESTADO_MAP = {
+    "TJES": "ES",
+    "TJSP": "SP",
+    "TJAM": "AM",
+    "TJRJ": "RJ",
+}
+
+
+class ProcessoJusbrPrefillOut(BaseModel):
+    numero_cnj: str
+    estado: str
+    tribunal: str | None = None
+    vara: str | None = None
+    comarca: str | None = None
+    materia: str | None = None
+    objeto: str | None = None
+    serventia: str | None = None
+    foro: str | None = None
+    sistema_juridico: str | None = None
+    grau: str | None = None
+    grau_texto: str | None = None
+    status: str = "ativo"
+    polo: str | None = None
+    cliente_nome_sugerido: str | None = None
+    parte_ativa_principal: str | None = None
+    parte_passiva_principal: str | None = None
+    resumo_encontrado: str | None = None
+
+
+def _extract_tramitacao_principal(data: dict) -> dict:
+    tramitacoes = data.get("tramitacoes")
+    if isinstance(tramitacoes, list) and tramitacoes:
+        return next((t for t in tramitacoes if isinstance(t, dict) and t.get("ativo") is True), tramitacoes[0]) or {}
+    return {}
+
+
+def _split_orgao_julgador(nome: str | None) -> tuple[str | None, str | None]:
+    if not nome:
+        return None, None
+    nome = nome.strip()
+    numero_vara = None
+    serventia = nome
+    import re
+    match = re.match(r"^(\d+)[ªº]?\s+VARA\s+(.*)$", nome, flags=re.IGNORECASE)
+    if match:
+        numero_vara = match.group(1)
+        serventia = match.group(2).strip()
+    if " - " in serventia:
+        serventia = serventia.split(" - ", 1)[0].strip()
+    return numero_vara, serventia or None
+
+
+def _extract_comarca_foro(nome: str | None) -> tuple[str | None, str | None]:
+    if not nome or " - " not in nome:
+        return None, None
+    comarca = nome.split(" - ")[-1].strip().title()
+    return comarca or None, None
+
+
+def _first_nome_parte(partes: list[dict], polo: str) -> str | None:
+    for parte in partes:
+        if isinstance(parte, dict) and parte.get("polo") == polo and parte.get("nome"):
+            return str(parte["nome"])
+    return None
+
+
+def _map_processo_jusbr_prefill(data: dict, numero_cnj: str) -> ProcessoJusbrPrefillOut:
+    tramitacao = _extract_tramitacao_principal(data)
+    tribunal = data.get("siglaTribunal") or (tramitacao.get("tribunal") or {}).get("sigla")
+    estado = TRIBUNAL_ESTADO_MAP.get(str(tribunal or "").upper(), "outro")
+    orgao = tramitacao.get("orgaoJulgador") or {}
+    orgao_nome = orgao.get("nome") if isinstance(orgao, dict) else None
+    vara, serventia = _split_orgao_julgador(orgao_nome)
+    comarca, foro = _extract_comarca_foro(orgao_nome)
+    assuntos = tramitacao.get("assunto") if isinstance(tramitacao.get("assunto"), list) else []
+    classes = tramitacao.get("classe") if isinstance(tramitacao.get("classe"), list) else []
+    partes = tramitacao.get("partes") if isinstance(tramitacao.get("partes"), list) else []
+    materia = next((a.get("descricao") for a in assuntos if isinstance(a, dict) and a.get("descricao")), None)
+    classe_desc = next((c.get("descricao") for c in classes if isinstance(c, dict) and c.get("descricao")), None)
+    objeto = " — ".join([v for v in [classe_desc, materia] if v]) or None
+    parte_ativa = _first_nome_parte(partes, "ATIVO")
+    parte_passiva = _first_nome_parte(partes, "PASSIVO")
+    resumo = f"{tribunal or 'Tribunal'} • {classe_desc or 'Classe não informada'}"
+    if materia:
+        resumo += f" • {materia}"
+    return ProcessoJusbrPrefillOut(
+        numero_cnj=numero_cnj,
+        estado=estado,
+        tribunal=tribunal,
+        vara=vara,
+        comarca=comarca,
+        materia=materia,
+        objeto=objeto,
+        serventia=serventia,
+        foro=foro,
+        sistema_juridico="pje",
+        grau="1grau",
+        grau_texto=None,
+        status="ativo" if tramitacao.get("ativo") is not False else "suspenso",
+        polo=None,
+        cliente_nome_sugerido=parte_ativa,
+        parte_ativa_principal=parte_ativa,
+        parte_passiva_principal=parte_passiva,
+        resumo_encontrado=resumo,
+    )
 
 
 def _sync_litisconsorcio(processo: Processo, clientes_in: list[ProcessoClienteIn], db: Session) -> None:
@@ -69,6 +177,24 @@ def _normalizar_payload_processo(fields: dict) -> dict:
 
     return fields
 
+
+
+
+@router.get('/preencher-jusbr/{numero_cnj}', response_model=ProcessoJusbrPrefillOut)
+async def preencher_processo_via_jusbr(numero_cnj: str):
+    from app.services.consulta_processual.cnj import inferir_tribunal_pelo_cnj
+    from app.services.consulta_processual.jusbr_session import load_session
+    from app.services.consulta_processual.pdpj import buscar_processo_pdpj_raw
+
+    session_data = load_session()
+    if not session_data:
+        raise HTTPException(status_code=400, detail='Sessao do jus.br nao configurada.')
+
+    tribunal = inferir_tribunal_pelo_cnj(numero_cnj) or ''
+    processo = await buscar_processo_pdpj_raw(numero_cnj, tribunal, session_data=session_data)
+    if not processo:
+        raise HTTPException(status_code=404, detail='Processo nao encontrado no jus.br com a sessao atual.')
+    return _map_processo_jusbr_prefill(processo, numero_cnj)
 
 @router.get("/", response_model=list[ProcessoOut])
 def listar_processos(
@@ -227,8 +353,6 @@ def remover_documento(
 
 
 # ── Chat Gemini ───────────────────────────────────────────────────────────────
-
-from pydantic import BaseModel
 
 
 class ChatRequest(BaseModel):
