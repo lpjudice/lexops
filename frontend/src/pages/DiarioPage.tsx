@@ -105,8 +105,60 @@ function buildClientNameVariants(name: string) {
   const filtered = words.filter((word) => word.length >= 4)
   const variants = [name]
   if (filtered.length >= 2) variants.push(`${filtered[0]} ${filtered[filtered.length - 1]}`)
-  if (filtered.length >= 1) variants.push(filtered[filtered.length - 1])
+  if (filtered.length >= 2) variants.push(filtered.slice(0, 2).join(' '))
+  if (filtered.length >= 3) variants.push(`${filtered[0]} ${filtered[2]}`)
   return uniqueStrings(variants)
+}
+
+function extractRelevantTokens(name: string) {
+  return uniqueStrings(name.match(/[A-Za-zÀ-ÿ0-9]+/g) ?? [])
+    .map((token) => normalizeText(token))
+    .filter((token) => token.length >= 4 && !['ltda', 'advogados', 'advocacia', 'sociedade'].includes(token))
+}
+
+function levenshteinDistance(a: string, b: string) {
+  const rows = a.length + 1
+  const cols = b.length + 1
+  const dp = Array.from({ length: rows }, () => Array<number>(cols).fill(0))
+  for (let i = 0; i < rows; i += 1) dp[i][0] = i
+  for (let j = 0; j < cols; j += 1) dp[0][j] = j
+  for (let i = 1; i < rows; i += 1) {
+    for (let j = 1; j < cols; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost,
+      )
+    }
+  }
+  return dp[a.length][b.length]
+}
+
+function hasFuzzyTokenMatch(textTokens: string[], token: string) {
+  if (textTokens.includes(token)) return true
+  return textTokens.some((textToken) => {
+    if (Math.abs(textToken.length - token.length) > 1) return false
+    if (token.length <= 4) return false
+    return levenshteinDistance(textToken, token) <= 1
+  })
+}
+
+function isLogicalSimilarMatch(textTokens: string[], name: string) {
+  const tokens = extractRelevantTokens(name)
+  if (tokens.length < 2) return false
+
+  const firstToken = tokens[0]
+  const lastToken = tokens[tokens.length - 1]
+  const matchedTokens = tokens.filter((token) => hasFuzzyTokenMatch(textTokens, token))
+
+  if (matchedTokens.length < 2) return false
+
+  const hasAnchor =
+    matchedTokens.includes(firstToken) ||
+    matchedTokens.includes(lastToken)
+
+  return hasAnchor
 }
 
 function getProcessClientNames(processo: Processo, clientes: Cliente[]) {
@@ -126,6 +178,7 @@ function classifyPublication(
 ): PublicacaoMatchInfo {
   const text = `${pub.texto_completo ?? ''} ${pub.texto_resumo ?? ''}`
   const normalizedText = normalizeText(text)
+  const textTokens = uniqueStrings(normalizedText.match(/[a-z0-9]+/g) ?? [])
   const textDigits = normalizeDigits(text)
   const exactClientNames = new Set<string>()
   const similarClientNames = new Set<string>()
@@ -155,18 +208,13 @@ function classifyPublication(
           relatedTerms.add(name)
         })
       } else {
-        const similarNames = clientNames.filter((name) =>
-          buildClientNameVariants(name).some((variant) => {
-            const normalizedVariant = normalizeText(variant)
-            return normalizedVariant.length >= 4 && normalizedText.includes(normalizedVariant)
-          }),
-        )
+        const similarNames = clientNames.filter((name) => isLogicalSimilarMatch(textTokens, name))
         if (similarNames.length > 0) {
           matchKind = 'similar'
           similarNames.forEach((name) => {
             similarClientNames.add(name)
             buildClientNameVariants(name).forEach((variant) => {
-              if (variant.length >= 4) relatedTerms.add(variant)
+              if (variant.trim().split(/\s+/).length >= 2) relatedTerms.add(variant)
             })
           })
         }
@@ -201,14 +249,11 @@ function classifyPublication(
       relatedTerms.add(termo)
       continue
     }
-    const hasSimilar = buildClientNameVariants(termo).some((variant) => {
-      const normalizedVariant = normalizeText(variant)
-      return normalizedVariant.length >= 4 && normalizedText.includes(normalizedVariant)
-    })
+    const hasSimilar = isLogicalSimilarMatch(textTokens, termo)
     if (hasSimilar) {
       similarClientNames.add(termo)
       buildClientNameVariants(termo).forEach((variant) => {
-        if (variant.length >= 4) relatedTerms.add(variant)
+        if (variant.trim().split(/\s+/).length >= 2) relatedTerms.add(variant)
       })
     }
   }
@@ -639,38 +684,43 @@ export default function DiarioPage() {
               {nomesClientes.length} cliente{nomesClientes.length !== 1 ? 's' : ''} (auto)
             </span>
           </span>
-          <div className={diarioStyles.termosChips}>
-            {termosCustom.map((t, i) => (
-              <span key={i} className={diarioStyles.termoChipCustom}>
-                {t}
-                <button
-                  className={diarioStyles.termoRemove}
-                  onClick={() => {
-                    const next = termosCustom.filter((_, j) => j !== i)
-                    setTermosCustom(next)
-                    salvarMonitoramento.mutate({ termos_extras: next })
+          <details className={diarioStyles.termosCollapse}>
+            <summary className={diarioStyles.termosSummary}>
+              Nomes adicionais ({termosCustom.length})
+            </summary>
+            <div className={diarioStyles.termosChips}>
+              {termosCustom.map((t, i) => (
+                <span key={i} className={diarioStyles.termoChipCustom}>
+                  {t}
+                  <button
+                    className={diarioStyles.termoRemove}
+                    onClick={() => {
+                      const next = termosCustom.filter((_, j) => j !== i)
+                      setTermosCustom(next)
+                      salvarMonitoramento.mutate({ termos_extras: next })
+                    }}
+                  >×</button>
+                </span>
+              ))}
+              <div className={diarioStyles.termoAddInline}>
+                <input
+                  className={diarioStyles.termoInputInline}
+                  placeholder="+ Adicionar nome/termo..."
+                  value={novoTermo}
+                  onChange={(e) => setNovoTermo(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && novoTermo.trim()) {
+                      const term = novoTermo.trim()
+                      const next = Array.from(new Set([...termosCustom, term]))
+                      setTermosCustom(next)
+                      salvarMonitoramento.mutate({ termos_extras: next })
+                      setNovoTermo('')
+                    }
                   }}
-                >×</button>
-              </span>
-            ))}
-            <div className={diarioStyles.termoAddInline}>
-              <input
-                className={diarioStyles.termoInputInline}
-                placeholder="+ Adicionar termo..."
-                value={novoTermo}
-                onChange={(e) => setNovoTermo(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && novoTermo.trim()) {
-                    const term = novoTermo.trim()
-                    const next = Array.from(new Set([...termosCustom, term]))
-                    setTermosCustom(next)
-                    salvarMonitoramento.mutate({ termos_extras: next })
-                    setNovoTermo('')
-                  }
-                }}
-              />
+                />
+              </div>
             </div>
-          </div>
+          </details>
         </div>
       </div>
 

@@ -254,23 +254,28 @@ def _consultas_comunica(termos: list[str] | None = None) -> list[tuple[str, int,
 
         palavras = re.findall(r"[A-Za-zÀ-ÿ0-9]+", termo_original)
         relevantes = [p for p in palavras if len(p) >= 4 and p.casefold() not in STOPWORDS]
-        primeiro_ultimo = " ".join([relevantes[0], relevantes[-1]]) if len(relevantes) >= 2 else ""
-        ultimo = relevantes[-1] if relevantes else ""
+        primeira_dupla = " ".join(relevantes[:2]) if len(relevantes) >= 2 else ""
+        primeira_terceira = f"{relevantes[0]} {relevantes[2]}" if len(relevantes) >= 3 else ""
+        primeiro_ultimo = " ".join([relevantes[0], relevantes[-1]]) if len(relevantes) == 3 else ""
+        primeira_tripla = " ".join([relevantes[0], relevantes[1], relevantes[-1]]) if len(relevantes) >= 3 else ""
 
         adicionar(termo_original, 0, "texto", termo_original, COMUNICA_MAX_PAGINAS)
         adicionar(termo_original, 1, "nomeParte", termo_original, COMUNICA_MAX_PAGINAS)
         if len(relevantes) >= 2:
             adicionar(termo_original, 1, "nomeAdvogado", termo_original, COMUNICA_MAX_PAGINAS)
 
-        if primeiro_ultimo and primeiro_ultimo.casefold() != termo_original.casefold():
-            adicionar(termo_original, 2, "texto", primeiro_ultimo, 5)
-            adicionar(termo_original, 2, "nomeParte", primeiro_ultimo, 5)
-            adicionar(termo_original, 2, "nomeAdvogado", primeiro_ultimo, 5)
-
-        if ultimo and ultimo.casefold() not in {termo_original.casefold(), primeiro_ultimo.casefold()}:
-            adicionar(termo_original, 3, "texto", ultimo, 3)
-            adicionar(termo_original, 3, "nomeParte", ultimo, 3)
-            adicionar(termo_original, 3, "nomeAdvogado", ultimo, 3)
+        # Similar agora exige contexto de nome, nunca palavra solta isolada.
+        for prioridade, variante, paginas in [
+            (2, primeira_dupla, 5),
+            (2, primeiro_ultimo, 5),
+            (3, primeira_terceira, 4),
+            (3, primeira_tripla, 4),
+        ]:
+            if not variante or variante.casefold() == termo_original.casefold():
+                continue
+            adicionar(termo_original, prioridade, "texto", variante, paginas)
+            adicionar(termo_original, prioridade, "nomeParte", variante, paginas)
+            adicionar(termo_original, prioridade, "nomeAdvogado", variante, paginas)
 
     return consultas or [("", 0, "texto", "", 1)]
 
@@ -631,10 +636,10 @@ def scrape_todos(
     }
     alvos = tribunais or list(mapa.keys())
 
-    data_fim = data or (date.today() - timedelta(days=1))
-    data_inicio = data_fim if data else (date.today() - timedelta(days=max(days_back, 1)))
+    data_fim = data or date.today()
+    data_inicio = data_fim if data else (date.today() - timedelta(days=max(days_back, 1) - 1))
     termos_lista = expandir_termos_busca(termos) if termos else [None]
-    datas_busca = [data_fim] if data else [date.today() - timedelta(days=offset) for offset in range(1, max(days_back, 1) + 1)]
+    datas_busca = [data_fim] if data else [date.today() - timedelta(days=offset) for offset in range(0, max(days_back, 1))]
 
     visto: set[str] = set()
     resultado: list[dict] = []
