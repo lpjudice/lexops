@@ -7,7 +7,13 @@ import { clientesApi } from '../api/clientes'
 import styles from './Page.module.css'
 import diarioStyles from './DiarioPage.module.css'
 
-const TRIBUNAIS = ['TJES', 'TJSP', 'TJAM', 'TJRJ']
+const FONTES_DIARIO = [
+  { key: 'DJEN', label: 'DJEN', tribunais: ['DJEN'] },
+  { key: 'TJSP', label: 'DJSP', tribunais: ['TJSP'] },
+  { key: 'TJES', label: 'DJES', tribunais: ['TJES'] },
+  { key: 'TJAM', label: 'DJAM', tribunais: ['TJAM'] },
+  { key: 'TJRJ', label: 'DJRJ', tribunais: ['TJRJ'] },
+] as const
 
 const FONTE_LABEL: Record<string, string> = {
   gmail: 'Gmail',
@@ -15,7 +21,7 @@ const FONTE_LABEL: Record<string, string> = {
   scraping_tjsp: 'TJSP',
   scraping_tjam: 'TJAM',
   scraping_tjrj: 'TJRJ',
-  scraping_djen: 'DJEN legado',
+  scraping_djen: 'DJEN',
   pje_comunica: 'PJe Comunica',
   manual: 'Manual',
 }
@@ -119,10 +125,11 @@ export default function DiarioPage() {
   })
 
   const syncScraping = useMutation({
-    mutationFn: () => diarioApi.syncScraping(TRIBUNAIS, todosTermos),
+    mutationFn: ({ tribunais, label }: { tribunais: string[]; label: string }) =>
+      diarioApi.syncScraping(tribunais, todosTermos, daysBack).then((r) => ({ ...r, label })),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['diario'] })
-      setSyncMsg(`Tribunais: ${r.inseridas} novas, ${r.duplicatas} duplicatas`)
+      setSyncMsg(`${r.label}: ${r.inseridas} novas, ${r.duplicatas} duplicatas`)
       setTimeout(() => setSyncMsg(null), 5000)
     },
   })
@@ -262,21 +269,34 @@ export default function DiarioPage() {
             {syncGmail.isPending ? 'Buscando...' : '↓ Gmail'}
           </button>
           <button
-            className={diarioStyles.btnTribunais}
-            onClick={() => syncScraping.mutate()}
-            disabled={syncScraping.isPending}
-          >
-            {syncScraping.isPending ? 'Raspando...' : '↓ Tribunais'}
-          </button>
-          <button
             className={diarioStyles.btnGmail}
             onClick={handlePjeClick}
             disabled={syncPje.isPending}
             style={{ background: '#2a1a40', borderColor: '#7c3aed', color: '#a78bfa' }}
           >
-            {syncPje.isPending ? 'Buscando...' : '↓ PJe'}
+            {syncPje.isPending ? 'Buscando...' : '↓ PJe Comunica'}
           </button>
         </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
+        {FONTES_DIARIO.map((fonte) => {
+          const carregando = syncScraping.isPending && syncScraping.variables?.label === fonte.label
+          return (
+            <button
+              key={fonte.key}
+              className={diarioStyles.btnTribunais}
+              onClick={() => syncScraping.mutate({ tribunais: [...fonte.tribunais], label: fonte.label })}
+              disabled={syncScraping.isPending}
+              style={{
+                opacity: syncScraping.isPending && !carregando ? 0.7 : 1,
+                minWidth: '110px',
+              }}
+            >
+              {carregando ? `Buscando ${fonte.label}...` : `↓ ${fonte.label}`}
+            </button>
+          )
+        })}
       </div>
 
       {/* Modal PJe */}
@@ -349,7 +369,7 @@ export default function DiarioPage() {
       {syncMsg && <div className={diarioStyles.syncMsg}>{syncMsg}</div>}
 
       <div className={diarioStyles.syncMsg} style={{ background: '#1f2937', borderColor: '#374151', color: '#cbd5e1' }}>
-        Tribunais locais automatizados: TJES, TJSP e TJAM. O item antigo de DJEN foi retirado da sincronização principal porque não era uma fonte nacional confiável nesta implementação. Para comunicações nacionais autenticadas, use o botão do PJe.
+        Cada botão consulta uma fonte separada. O botão `DJEN` faz uma busca pública best-effort. O botão `PJe Comunica` é outra integração, autenticada, e não substitui o `DJEN`.
       </div>
 
       {/* Termos de Monitoramento */}

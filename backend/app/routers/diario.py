@@ -36,11 +36,18 @@ def _inserir_publicacoes(itens: list[dict], db: Session) -> tuple[int, int, int]
                 existe = db.query(Publicacao).filter(
                     Publicacao.email_message_id == email_id
                 ).first()
-            else:
+            elif item.get("numero_cnj"):
                 existe = db.query(Publicacao).filter(
                     Publicacao.numero_cnj == item.get("numero_cnj"),
                     Publicacao.data_publicacao == item.get("data_publicacao"),
                     Publicacao.fonte == item.get("fonte"),
+                ).first()
+            else:
+                existe = db.query(Publicacao).filter(
+                    Publicacao.texto_resumo == item.get("texto_resumo"),
+                    Publicacao.data_publicacao == item.get("data_publicacao"),
+                    Publicacao.fonte == item.get("fonte"),
+                    Publicacao.tribunal == item.get("tribunal"),
                 ).first()
 
             if existe:
@@ -91,14 +98,20 @@ def sync_gmail(days_back: int = Query(3, ge=1, le=30), db: Session = Depends(get
 def sync_scraping(
     tribunais: list[str] = Query(default=["TJES", "TJSP", "TJAM", "TJRJ"]),
     data: date | None = Query(None),
+    days_back: int = Query(1, ge=1, le=30),
     termos: list[str] = Query(default=[]),
     db: Session = Depends(get_db),
 ):
     """Roda scrapers nos tribunais selecionados para a data informada."""
-    tribunais_validos = [t for t in tribunais if t in {"TJES", "TJSP", "TJAM", "TJRJ"}]
+    tribunais_validos = [t for t in tribunais if t in {"TJES", "TJSP", "TJAM", "TJRJ", "DJEN"}]
     if not tribunais_validos:
         raise HTTPException(status_code=400, detail="Selecione ao menos um tribunal local válido.")
-    itens = scrape_todos(tribunais=tribunais_validos, data=data, termos=termos or None)
+    itens = scrape_todos(
+        tribunais=tribunais_validos,
+        data=data,
+        termos=termos or None,
+        days_back=days_back,
+    )
     ins, dup, err = _inserir_publicacoes(itens, db)
     return SyncResult(inseridas=ins, duplicatas=dup, erros=err, fonte="scraping")
 

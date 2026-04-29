@@ -61,9 +61,9 @@ export const diarioApi = {
   syncGmail: (days_back = 3) =>
     api.post<SyncResult>('/diario/gmail/sync', null, { params: { days_back } }).then((r) => r.data),
 
-  syncScraping: (tribunais: string[], termos: string[] = []) =>
+  syncScraping: (tribunais: string[], termos: string[] = [], days_back = 1) =>
     api.post<SyncResult>('/diario/scraping/sync', null, {
-      params: { tribunais, termos },
+      params: { tribunais, termos, days_back },
     }).then((r) => r.data),
 
   marcarLida: (id: string) =>
