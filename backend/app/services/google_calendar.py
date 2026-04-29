@@ -7,14 +7,12 @@ Fluxo OAuth:
   3. Ao criar/atualizar prazo  → cria/atualiza evento no calendário
 """
 
-import json
 import os
 from datetime import date, timedelta
-from pathlib import Path
 
 import httpx
+from app.services.google_master_tokens import load_master_google_tokens, save_master_google_tokens
 
-TOKENS_FILE = Path("/app/uploads/google_tokens.json")
 SCOPES = " ".join([
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/gmail.readonly",
@@ -60,15 +58,12 @@ def exchange_code(code: str) -> dict:
     )
     resp.raise_for_status()
     tokens = resp.json()
-    TOKENS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    TOKENS_FILE.write_text(json.dumps(tokens))
+    save_master_google_tokens(tokens)
     return tokens
 
 
 def _load_tokens() -> dict | None:
-    if not TOKENS_FILE.exists():
-        return None
-    return json.loads(TOKENS_FILE.read_text())
+    return load_master_google_tokens()
 
 
 def _refresh_token(tokens: dict) -> dict:
@@ -84,7 +79,7 @@ def _refresh_token(tokens: dict) -> dict:
     )
     resp.raise_for_status()
     new_tokens = {**tokens, **resp.json()}
-    TOKENS_FILE.write_text(json.dumps(new_tokens))
+    save_master_google_tokens(new_tokens)
     return new_tokens
 
 

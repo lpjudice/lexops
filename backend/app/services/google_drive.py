@@ -9,13 +9,11 @@ When a new LexOps user authenticates, you must share the folder with their Googl
 
 Scopes required: https://www.googleapis.com/auth/drive.file
 """
-import json
 import os
-from pathlib import Path
 
 import httpx
+from app.services.google_master_tokens import load_master_google_tokens, save_master_google_tokens
 
-TOKENS_FILE = Path("/app/uploads/google_tokens.json")
 DRIVE_API = "https://www.googleapis.com/upload/drive/v3"
 DRIVE_META = "https://www.googleapis.com/drive/v3"
 
@@ -24,9 +22,7 @@ DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "0AFWG-csptyxuUk9PVA")
 
 
 def _load_tokens() -> dict | None:
-    if not TOKENS_FILE.exists():
-        return None
-    return json.loads(TOKENS_FILE.read_text())
+    return load_master_google_tokens()
 
 
 def _refresh(tokens: dict) -> dict:
@@ -41,7 +37,7 @@ def _refresh(tokens: dict) -> dict:
     )
     if resp.is_success:
         new = {**tokens, **resp.json()}
-        TOKENS_FILE.write_text(json.dumps(new))
+        save_master_google_tokens(new)
         return new
     return tokens
 

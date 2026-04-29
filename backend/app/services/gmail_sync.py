@@ -3,23 +3,21 @@ Gmail sync service — fetches emails related to a client from a Gmail account
 and upserts them into emails_cliente with deduplication.
 
 Supports two account types:
-  - "master": tokens stored in /app/uploads/google_tokens.json
+  - "master": tokens stored in the persistent uploads volume
   - "<usuario_id>": tokens stored in usuarios.google_tokens JSONB
 """
 
 import base64
-import json
 import os
 import uuid
 from datetime import datetime, timezone
 from email.utils import parseaddr, parsedate_to_datetime
-from pathlib import Path
 from typing import Any
 
 import httpx
+from app.services.google_master_tokens import load_master_google_tokens, save_master_google_tokens
 
 GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me"
-TOKENS_FILE = Path("/app/uploads/google_tokens.json")
 
 
 # ── Token helpers ──────────────────────────────────────────────────────────────
@@ -47,14 +45,11 @@ def _refresh(tokens: dict) -> dict:
 
 
 def load_tokens_master() -> dict | None:
-    if not TOKENS_FILE.exists():
-        return None
-    return json.loads(TOKENS_FILE.read_text())
+    return load_master_google_tokens()
 
 
 def save_tokens_master(tokens: dict) -> None:
-    TOKENS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    TOKENS_FILE.write_text(json.dumps(tokens))
+    save_master_google_tokens(tokens)
 
 
 def load_tokens_user(usuario_id: str, db_session: Any) -> dict | None:

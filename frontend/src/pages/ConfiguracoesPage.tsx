@@ -228,6 +228,7 @@ function MembrosSection() {
 export default function ConfiguracoesPage() {
   const [searchParams] = useSearchParams()
   const conviteBanner = searchParams.get('convite') === '1'
+  const googleMasterResult = searchParams.get('google')
   const googleUserResult = searchParams.get('google_user') // 'conectado' | 'erro' | null
   const { data: googleStatus } = useGoogleStatus()
   const { usuario: me, isSuperAdmin, refreshMe } = useAuth()
@@ -294,6 +295,22 @@ export default function ConfiguracoesPage() {
           </div>
         </div>
       )}
+      {googleMasterResult === 'conectado' && (
+        <div className={`${cfg.conviteBanner} ${cfg.bannerSucesso}`}>
+          <div className={cfg.conviteBannerTexto}>
+            <strong>Conta Google master conectada com sucesso!</strong>
+            <span> A integração global do escritório ficou ativa para todos os usuários da plataforma.</span>
+          </div>
+        </div>
+      )}
+      {googleMasterResult === 'erro' && (
+        <div className={`${cfg.conviteBanner} ${cfg.bannerErro}`}>
+          <div className={cfg.conviteBannerTexto}>
+            <strong>Erro ao conectar a conta Google master.</strong>
+            <span> Tente novamente com um super admin.</span>
+          </div>
+        </div>
+      )}
       {googleUserResult === 'erro' && (
         <div className={`${cfg.conviteBanner} ${cfg.bannerErro}`}>
           <div className={cfg.conviteBannerTexto}>
@@ -312,7 +329,7 @@ export default function ConfiguracoesPage() {
           <div className={cfg.secaoHeader}>
             <h2 className={cfg.secaoTitulo}>Integrações Google</h2>
             <p className={cfg.secaoDesc}>
-              Conecte sua conta Google para habilitar sincronização de emails (Gmail) e criação de eventos no calendário (Google Calendar).
+              Esta é a conta global do escritório. Quando conectada por um super admin, ela fica disponível para toda a plataforma, incluindo Gmail, Calendar e Drive.
             </p>
           </div>
 
@@ -324,7 +341,7 @@ export default function ConfiguracoesPage() {
                 <div className={cfg.itemStatus}>
                   {conectado ? (
                     <>
-                      <span className={cfg.statusOk}>● Conectado — Gmail e Calendar ativos</span>
+                      <span className={cfg.statusOk}>● Conectado — integração global ativa</span>
                       {googleEmail && <div className={cfg.contaEmail}>{googleEmail}</div>}
                     </>
                   ) : (

@@ -71,6 +71,23 @@ def _refresh_jusbr_session() -> None:
         logger.warning("Scheduler: falha ao renovar sessão jus.br: %s", exc)
 
 
+def _refresh_google_master_session() -> None:
+    try:
+        from app.services.google_calendar import _load_tokens, _refresh_token
+
+        tokens = _load_tokens()
+        if not tokens:
+            logger.info("Scheduler: nenhuma conta Google master conectada para manter")
+            return
+        if not tokens.get("refresh_token"):
+            logger.info("Scheduler: conta Google master sem refresh token disponível")
+            return
+        _refresh_token(tokens)
+        logger.info("Scheduler: conta Google master renovada com sucesso")
+    except Exception as exc:
+        logger.warning("Scheduler: falha ao renovar conta Google master: %s", exc)
+
+
 def start_scheduler() -> None:
     if scheduler.running:
         logger.info("Scheduler já estava ativo")
@@ -88,8 +105,14 @@ def start_scheduler() -> None:
         id="refresh_jusbr_session",
         replace_existing=True,
     )
+    scheduler.add_job(
+        _refresh_google_master_session,
+        trigger=CronTrigger(hour='*/6', minute=25),
+        id="refresh_google_master_session",
+        replace_existing=True,
+    )
     scheduler.start()
-    logger.info("Scheduler iniciado — DataJud diário às 03:00 BRT, jus.br noturno se ativo, e manutenção da sessão a cada 6 horas")
+    logger.info("Scheduler iniciado — DataJud diário às 03:00 BRT, jus.br noturno se ativo, manutenção do jus.br a cada 6 horas e renovação da conta Google master a cada 6 horas")
 
 
 def stop_scheduler() -> None:

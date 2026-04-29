@@ -11,15 +11,13 @@ A lógica:
 """
 
 import base64
-import json
 import re
 from datetime import date, datetime, timedelta
-from pathlib import Path
 
 import httpx
 from bs4 import BeautifulSoup
+from app.services.google_master_tokens import load_master_google_tokens, save_master_google_tokens
 
-TOKENS_FILE = Path("/app/uploads/google_tokens.json")
 GMAIL_API = "https://gmail.googleapis.com/gmail/v1"
 
 # Regex CNJ padrão
@@ -51,9 +49,7 @@ TIPO_ATO_KEYWORDS: dict[str, list[str]] = {
 # ── Helpers OAuth ──────────────────────────────────────────────────────────────
 
 def _load_tokens() -> dict | None:
-    if not TOKENS_FILE.exists():
-        return None
-    return json.loads(TOKENS_FILE.read_text())
+    return load_master_google_tokens()
 
 
 def _refresh_if_needed(tokens: dict) -> dict:
@@ -69,7 +65,7 @@ def _refresh_if_needed(tokens: dict) -> dict:
     )
     if resp.is_success:
         new = {**tokens, **resp.json()}
-        TOKENS_FILE.write_text(json.dumps(new))
+        save_master_google_tokens(new)
         return new
     return tokens
 

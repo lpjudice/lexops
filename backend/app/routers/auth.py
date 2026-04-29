@@ -1,7 +1,5 @@
-import json
 import os
 import uuid
-from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Depends
@@ -9,9 +7,8 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.services.google_master_tokens import save_master_google_tokens
 from app.services.google_calendar import exchange_code, get_auth_url, google_conectado
-
-TOKENS_FILE = Path("/app/uploads/google_tokens.json")
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -50,40 +47,42 @@ def google_login():
 
 @router.get("/google/callback")
 def google_callback(code: str):
-    exchange_code(code)
-    return RedirectResponse(f"{_frontend_url()}/?google=conectado")
+    try:
+        exchange_code(code)
+    except Exception:
+        return RedirectResponse(f"{_frontend_url()}/configuracoes?google=erro")
+    return RedirectResponse(f"{_frontend_url()}/configuracoes?google=conectado")
 
 
 @router.get("/google/status")
 def google_status():
     from app.services.google_calendar import _load_tokens, _refresh_token
     email = None
-    if TOKENS_FILE.exists():
-        try:
-            tokens = _load_tokens()
-            if tokens:
-                if tokens.get("email"):
-                    email = tokens["email"]
-                else:
+    try:
+        tokens = _load_tokens()
+        if tokens:
+            if tokens.get("email"):
+                email = tokens["email"]
+            else:
+                r = httpx.get(
+                    "https://www.googleapis.com/gmail/v1/users/me/profile",
+                    headers={"Authorization": f"Bearer {tokens['access_token']}"},
+                    timeout=5,
+                )
+                if r.status_code == 401 and tokens.get("refresh_token"):
+                    tokens = _refresh_token(tokens)
                     r = httpx.get(
                         "https://www.googleapis.com/gmail/v1/users/me/profile",
                         headers={"Authorization": f"Bearer {tokens['access_token']}"},
                         timeout=5,
                     )
-                    if r.status_code == 401 and tokens.get("refresh_token"):
-                        tokens = _refresh_token(tokens)
-                        r = httpx.get(
-                            "https://www.googleapis.com/gmail/v1/users/me/profile",
-                            headers={"Authorization": f"Bearer {tokens['access_token']}"},
-                            timeout=5,
-                        )
-                    if r.status_code == 200:
-                        email = r.json().get("emailAddress")
-                        if email:
-                            tokens["email"] = email
-                            TOKENS_FILE.write_text(json.dumps(tokens))
-        except Exception:
-            pass
+                if r.status_code == 200:
+                    email = r.json().get("emailAddress")
+                    if email:
+                        tokens["email"] = email
+                        save_master_google_tokens(tokens)
+    except Exception:
+        pass
     return {"conectado": google_conectado(), "email": email}
 
 
