@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { diarioApi } from '../api/diario'
-import type { AnaliseIA, TipoAto } from '../api/diario'
+import type { AnaliseIA, Publicacao, TipoAto } from '../api/diario'
 import { processosApi } from '../api/processos'
+import type { Processo } from '../api/processos'
 import { clientesApi } from '../api/clientes'
+import type { Cliente } from '../api/clientes'
 import styles from './Page.module.css'
 import diarioStyles from './DiarioPage.module.css'
 
@@ -41,6 +43,209 @@ function formatDate(d?: string) {
   return new Date(d + 'T12:00:00').toLocaleDateString('pt-BR')
 }
 
+type MatchFilter = 'todos' | 'cadastrados' | 'exatos' | 'similares'
+type MatchKind = 'processo' | 'exato' | 'similar'
+
+interface ProcessoRelacionado {
+  id: string
+  numero_cnj: string
+  clienteNomes: string[]
+  matchKind: MatchKind
+}
+
+interface PublicacaoMatchInfo {
+  exactClientNames: string[]
+  similarClientNames: string[]
+  relatedProcesses: ProcessoRelacionado[]
+  relatedTerms: string[]
+  primaryProcessId?: string
+  primaryClientName?: string
+  hasRegisteredProcess: boolean
+  hasExactName: boolean
+  hasSimilarName: boolean
+}
+
+interface PublicacaoEnriquecida {
+  pub: Publicacao
+  match: PublicacaoMatchInfo
+}
+
+function normalizeText(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function normalizeDigits(value: string) {
+  return value.replace(/\D/g, '')
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function uniqueStrings(values: string[]) {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const value of values) {
+    const cleaned = value.trim()
+    const key = cleaned.toLocaleLowerCase()
+    if (!cleaned || seen.has(key)) continue
+    seen.add(key)
+    result.push(cleaned)
+  }
+  return result
+}
+
+function buildClientNameVariants(name: string) {
+  const words = name.match(/[A-Za-zÀ-ÿ0-9]+/g) ?? []
+  const filtered = words.filter((word) => word.length >= 4)
+  const variants = [name]
+  if (filtered.length >= 2) variants.push(`${filtered[0]} ${filtered[filtered.length - 1]}`)
+  if (filtered.length >= 1) variants.push(filtered[filtered.length - 1])
+  return uniqueStrings(variants)
+}
+
+function getProcessClientNames(processo: Processo, clientes: Cliente[]) {
+  const byId = new Map(clientes.map((cliente) => [cliente.id, cliente.nome]))
+  const names = [
+    byId.get(processo.cliente_id) ?? '',
+    ...(processo.clientes_litisconsorcio?.map((cliente) => cliente.nome ?? '') ?? []),
+  ]
+  return uniqueStrings(names)
+}
+
+function classifyPublication(
+  pub: Publicacao,
+  processos: Processo[],
+  clientes: Cliente[],
+  termosMonitorados: string[],
+): PublicacaoMatchInfo {
+  const text = `${pub.texto_completo ?? ''} ${pub.texto_resumo ?? ''}`
+  const normalizedText = normalizeText(text)
+  const textDigits = normalizeDigits(text)
+  const exactClientNames = new Set<string>()
+  const similarClientNames = new Set<string>()
+  const relatedTerms = new Set<string>()
+  const relatedProcesses: ProcessoRelacionado[] = []
+
+  for (const processo of processos) {
+    const processDigits = normalizeDigits(processo.numero_cnj)
+    const clientNames = getProcessClientNames(processo, clientes)
+    let matchKind: MatchKind | null = null
+
+    const processMatched =
+      pub.processo_id === processo.id ||
+      (!!pub.numero_cnj && normalizeDigits(pub.numero_cnj) === processDigits) ||
+      (!!processDigits && textDigits.includes(processDigits))
+
+    if (processMatched) {
+      matchKind = 'processo'
+      relatedTerms.add(processo.numero_cnj)
+      clientNames.forEach((name) => exactClientNames.add(name))
+    } else {
+      const exactNames = clientNames.filter((name) => normalizeText(name) && normalizedText.includes(normalizeText(name)))
+      if (exactNames.length > 0) {
+        matchKind = 'exato'
+        exactNames.forEach((name) => {
+          exactClientNames.add(name)
+          relatedTerms.add(name)
+        })
+      } else {
+        const similarNames = clientNames.filter((name) =>
+          buildClientNameVariants(name).some((variant) => {
+            const normalizedVariant = normalizeText(variant)
+            return normalizedVariant.length >= 4 && normalizedText.includes(normalizedVariant)
+          }),
+        )
+        if (similarNames.length > 0) {
+          matchKind = 'similar'
+          similarNames.forEach((name) => {
+            similarClientNames.add(name)
+            buildClientNameVariants(name).forEach((variant) => {
+              if (variant.length >= 4) relatedTerms.add(variant)
+            })
+          })
+        }
+      }
+    }
+
+    if (matchKind) {
+      relatedProcesses.push({
+        id: processo.id,
+        numero_cnj: processo.numero_cnj,
+        clienteNomes: clientNames,
+        matchKind,
+      })
+    }
+  }
+
+  relatedProcesses.sort((a, b) => {
+    const rank = { processo: 0, exato: 1, similar: 2 }
+    return rank[a.matchKind] - rank[b.matchKind]
+  })
+
+  const hasRegisteredProcess = relatedProcesses.some((processo) => processo.matchKind === 'processo')
+  const hasExactName = exactClientNames.size > 0
+  const hasSimilarName = similarClientNames.size > 0
+  const primary = relatedProcesses[0]
+
+  for (const termo of termosMonitorados) {
+    const normalizedTerm = normalizeText(termo)
+    if (!normalizedTerm) continue
+    if (normalizedText.includes(normalizedTerm)) {
+      exactClientNames.add(termo)
+      relatedTerms.add(termo)
+      continue
+    }
+    const hasSimilar = buildClientNameVariants(termo).some((variant) => {
+      const normalizedVariant = normalizeText(variant)
+      return normalizedVariant.length >= 4 && normalizedText.includes(normalizedVariant)
+    })
+    if (hasSimilar) {
+      similarClientNames.add(termo)
+      buildClientNameVariants(termo).forEach((variant) => {
+        if (variant.length >= 4) relatedTerms.add(variant)
+      })
+    }
+  }
+
+  if (pub.numero_cnj) relatedTerms.add(pub.numero_cnj)
+  if (primary?.numero_cnj) relatedTerms.add(primary.numero_cnj)
+
+  return {
+    exactClientNames: [...exactClientNames],
+    similarClientNames: [...similarClientNames].filter((name) => !exactClientNames.has(name)),
+    relatedProcesses,
+    relatedTerms: uniqueStrings([...relatedTerms]),
+    primaryProcessId: primary?.id,
+    primaryClientName: primary?.clienteNomes[0],
+    hasRegisteredProcess,
+    hasExactName,
+    hasSimilarName,
+  }
+}
+
+function buildHighlightedHtml(text: string, terms: string[]) {
+  const escaped = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+
+  const normalizedTerms = uniqueStrings(terms)
+    .filter((term) => term.trim().length >= 3)
+    .sort((a, b) => b.length - a.length)
+
+  if (normalizedTerms.length === 0) return escaped
+
+  const pattern = normalizedTerms.map(escapeRegExp).join('|')
+  const regex = new RegExp(`(${pattern})`, 'gi')
+  return escaped.replace(regex, '<strong class="diario-highlight">$1</strong>')
+}
+
 export default function DiarioPage() {
   const qc = useQueryClient()
   const [expandido, setExpandido] = useState<string | null>(null)
@@ -48,6 +253,7 @@ export default function DiarioPage() {
   const [processoSelecionado, setProcessoSelecionado] = useState('')
   const [filtroLida, setFiltroLida] = useState<'todas' | 'nao_lidas'>('nao_lidas')
   const [filtroComConteudo, setFiltroComConteudo] = useState(false)
+  const [filtroMatch, setFiltroMatch] = useState<MatchFilter>('todos')
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
   const [acaoMsg, setAcaoMsg] = useState<Record<string, string>>({})
   const [daysBack, setDaysBack] = useState(3)
@@ -218,13 +424,65 @@ export default function DiarioPage() {
     },
   })
 
+  const copiarTextoPublicacao = async (pub: Publicacao, match: PublicacaoMatchInfo) => {
+    const baseText = pub.texto_completo || pub.texto_resumo || ''
+    const html = buildHighlightedHtml(baseText, match.relatedTerms)
+    try {
+      if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            'text/html': new Blob([html], { type: 'text/html' }),
+            'text/plain': new Blob([baseText], { type: 'text/plain' }),
+          }),
+        ])
+      } else {
+        await navigator.clipboard.writeText(baseText)
+      }
+      setAcaoMsg((m) => ({ ...m, [pub.id]: 'Texto copiado com destaques.' }))
+    } catch {
+      setAcaoMsg((m) => ({ ...m, [pub.id]: 'Não foi possível copiar o texto.' }))
+    }
+  }
+
+  const criarPrazoDireto = async (item: PublicacaoEnriquecida) => {
+    const { pub, match } = item
+    try {
+      if (!pub.processo_id) {
+        if (!match.primaryProcessId) {
+          setAcaoMsg((m) => ({ ...m, [pub.id]: '⚠ Vincule a publicação a um processo antes de criar o prazo.' }))
+          return
+        }
+        await vincular.mutateAsync({ id: pub.id, processo_id: match.primaryProcessId })
+      }
+      if (!pub.analise_ia) {
+        await analisar.mutateAsync(pub.id)
+      }
+      await criarPrazo.mutateAsync(pub.id)
+    } catch {
+      // mensagens já tratadas nas mutations
+    }
+  }
+
   const processoNome = (id?: string) =>
     id ? processos.find((p) => p.id === id)?.numero_cnj ?? id : null
 
   const SEM_PUB = 'Sem publicações nesta edição.'
-  const publicacoesFiltradas = filtroComConteudo
-    ? publicacoes.filter((p) => p.texto_resumo !== SEM_PUB && !!p.texto_resumo)
-    : publicacoes
+  const publicacoesEnriquecidas = [...publicacoes]
+    .map((pub) => ({ pub, match: classifyPublication(pub, processos, clientes, todosTermos) }))
+    .sort((a, b) => {
+      const dateA = new Date(`${a.pub.data_publicacao}T12:00:00`).getTime()
+      const dateB = new Date(`${b.pub.data_publicacao}T12:00:00`).getTime()
+      if (dateA !== dateB) return dateB - dateA
+      return new Date(b.pub.created_at).getTime() - new Date(a.pub.created_at).getTime()
+    })
+
+  const publicacoesFiltradas = publicacoesEnriquecidas.filter(({ pub, match }) => {
+    if (filtroComConteudo && (pub.texto_resumo === SEM_PUB || !pub.texto_resumo)) return false
+    if (filtroMatch === 'cadastrados' && !match.hasRegisteredProcess) return false
+    if (filtroMatch === 'exatos' && !match.hasExactName) return false
+    if (filtroMatch === 'similares' && !match.hasSimilarName) return false
+    return true
+  })
 
   return (
     <div>
@@ -243,9 +501,9 @@ export default function DiarioPage() {
       <div className={styles.pageHeader}>
         <h1 className={styles.pageTitle}>
           Diário Oficial
-          {publicacoes.filter((p) => !p.lida && p.texto_resumo !== 'Sem publicações nesta edição.').length > 0 && (
+          {publicacoesEnriquecidas.filter(({ pub }) => !pub.lida && pub.texto_resumo !== 'Sem publicações nesta edição.').length > 0 && (
             <span className={diarioStyles.badge}>
-              {publicacoes.filter((p) => !p.lida && p.texto_resumo !== 'Sem publicações nesta edição.').length}
+              {publicacoesEnriquecidas.filter(({ pub }) => !pub.lida && pub.texto_resumo !== 'Sem publicações nesta edição.').length}
             </span>
           )}
         </h1>
@@ -369,7 +627,7 @@ export default function DiarioPage() {
       {syncMsg && <div className={diarioStyles.syncMsg}>{syncMsg}</div>}
 
       <div className={diarioStyles.syncMsg} style={{ background: '#1f2937', borderColor: '#374151', color: '#cbd5e1' }}>
-        Cada botão consulta uma fonte separada. O botão `DJEN` faz uma busca pública best-effort. O botão `PJe Comunica` é outra integração, autenticada, e não substitui o `DJEN`.
+        Cada botão consulta uma fonte separada. O `DJEN` e os botões por tribunal usam a busca pública nacional quando disponível. O `PJe Comunica` continua separado, autenticado, e não substitui o `DJEN`.
       </div>
 
       {/* Termos de Monitoramento */}
@@ -436,6 +694,24 @@ export default function DiarioPage() {
         >
           Com conteúdo
         </button>
+        <button
+          className={`${diarioStyles.filtroBtn} ${filtroMatch === 'cadastrados' ? diarioStyles.filtroAtivo : ''}`}
+          onClick={() => setFiltroMatch((v) => v === 'cadastrados' ? 'todos' : 'cadastrados')}
+        >
+          Processos cadastrados
+        </button>
+        <button
+          className={`${diarioStyles.filtroBtn} ${filtroMatch === 'exatos' ? diarioStyles.filtroAtivo : ''}`}
+          onClick={() => setFiltroMatch((v) => v === 'exatos' ? 'todos' : 'exatos')}
+        >
+          Nomes exatos
+        </button>
+        <button
+          className={`${diarioStyles.filtroBtn} ${filtroMatch === 'similares' ? diarioStyles.filtroAtivo : ''}`}
+          onClick={() => setFiltroMatch((v) => v === 'similares' ? 'todos' : 'similares')}
+        >
+          Nomes similares
+        </button>
       </div>
 
       {isLoading ? (
@@ -450,7 +726,7 @@ export default function DiarioPage() {
         </p>
       ) : (
         <div className={diarioStyles.feed}>
-          {publicacoesFiltradas.map((pub) => (
+          {publicacoesFiltradas.map(({ pub, match }) => (
             <div
               key={pub.id}
               className={`${diarioStyles.card} ${pub.lida ? diarioStyles.cardLida : ''} ${pub.texto_resumo === 'Sem publicações nesta edição.' ? diarioStyles.cardSemPub : ''}`}
@@ -496,6 +772,12 @@ export default function DiarioPage() {
                     {expandido === pub.id ? 'Fechar' : 'Ver texto'}
                   </button>
                   <button
+                    className={diarioStyles.btnCopy}
+                    onClick={() => copiarTextoPublicacao(pub, match)}
+                  >
+                    Copiar
+                  </button>
+                  <button
                     className={styles.btnDanger}
                     onClick={() => { if (confirm('Remover?')) deletar.mutate(pub.id) }}
                   >
@@ -518,6 +800,44 @@ export default function DiarioPage() {
                     >
                       Vincular processo
                     </button>
+                  )}
+                </div>
+              )}
+
+              <div className={diarioStyles.matchBox}>
+                {match.hasRegisteredProcess && (
+                  <span className={`${diarioStyles.matchBadge} ${diarioStyles.matchProcesso}`}>Processo cadastrado</span>
+                )}
+                {match.hasExactName && (
+                  <span className={`${diarioStyles.matchBadge} ${diarioStyles.matchExato}`}>Nome exato</span>
+                )}
+                {match.hasSimilarName && (
+                  <span className={`${diarioStyles.matchBadge} ${diarioStyles.matchSimilar}`}>Nome similar</span>
+                )}
+              </div>
+
+              {(match.primaryClientName || match.relatedProcesses.length > 0 || match.exactClientNames.length > 0 || match.similarClientNames.length > 0) && (
+                <div className={diarioStyles.matchDetails}>
+                  {match.primaryClientName && (
+                    <div>
+                      <span className={diarioStyles.iaLabel}>Cliente provável</span> {match.primaryClientName}
+                    </div>
+                  )}
+                  {match.relatedProcesses.length > 0 && (
+                    <div>
+                      <span className={diarioStyles.iaLabel}>Processos relacionados</span>{' '}
+                      {match.relatedProcesses.slice(0, 3).map((processo) => processo.numero_cnj).join(' · ')}
+                    </div>
+                  )}
+                  {match.exactClientNames.length > 0 && (
+                    <div>
+                      <span className={diarioStyles.iaLabel}>Exato</span> {match.exactClientNames.slice(0, 3).join(' · ')}
+                    </div>
+                  )}
+                  {match.similarClientNames.length > 0 && (
+                    <div>
+                      <span className={diarioStyles.iaLabel}>Similar</span> {match.similarClientNames.slice(0, 3).join(' · ')}
+                    </div>
                   )}
                 </div>
               )}
@@ -551,7 +871,10 @@ export default function DiarioPage() {
               )}
 
               {pub.texto_resumo && (
-                <p className={diarioStyles.resumo}>{pub.texto_resumo}</p>
+                <p
+                  className={diarioStyles.resumo}
+                  dangerouslySetInnerHTML={{ __html: buildHighlightedHtml(pub.texto_resumo, match.relatedTerms) }}
+                />
               )}
 
               {/* Painel IA — oculto para "sem publicações" */}
@@ -561,13 +884,22 @@ export default function DiarioPage() {
                 return (
                   <div className={diarioStyles.iaPanel}>
                     {!analise ? (
-                      <button
-                        className={diarioStyles.btnAnalisar}
-                        disabled={isAnalisando}
-                        onClick={() => analisar.mutate(pub.id)}
-                      >
-                        {isAnalisando ? '⏳ Analisando...' : '✦ Analisar com IA'}
-                      </button>
+                      <div className={diarioStyles.iaAcoes}>
+                        <button
+                          className={diarioStyles.btnAnalisar}
+                          disabled={isAnalisando}
+                          onClick={() => analisar.mutate(pub.id)}
+                        >
+                          {isAnalisando ? '⏳ Analisando...' : '✦ Analisar com IA'}
+                        </button>
+                        <button
+                          className={diarioStyles.btnCriarPrazo}
+                          disabled={isAnalisando || !!pub.prazo_id}
+                          onClick={() => criarPrazoDireto({ pub, match })}
+                        >
+                          {pub.prazo_id ? 'Prazo já criado' : isAnalisando ? 'Preparando...' : '+ Criar Prazo'}
+                        </button>
+                      </div>
                     ) : analise.erro ? (
                       <div className={diarioStyles.iaErro}>
                         ⚠ Erro na análise: {analise.erro}
@@ -597,16 +929,19 @@ export default function DiarioPage() {
                         </div>
                         <p className={diarioStyles.iaResumo}>{analise.resumo}</p>
                         <div className={diarioStyles.iaAcoes}>
-                          {analise.requer_resposta && (
-                            <button
-                              className={diarioStyles.btnCriarPrazo}
-                              disabled={criarPrazo.isPending && criarPrazo.variables === pub.id}
-                              onClick={() => criarPrazo.mutate(pub.id)}
-                            >
-                              {criarPrazo.isPending && criarPrazo.variables === pub.id
-                                ? 'Criando...' : '+ Criar Prazo'}
-                            </button>
-                          )}
+                          <button
+                            className={diarioStyles.btnCriarPrazo}
+                            disabled={!!pub.prazo_id || (criarPrazo.isPending && criarPrazo.variables === pub.id) || (analisar.isPending && analisar.variables === pub.id)}
+                            onClick={() => criarPrazoDireto({ pub, match })}
+                          >
+                            {pub.prazo_id
+                              ? 'Prazo já criado'
+                              : criarPrazo.isPending && criarPrazo.variables === pub.id
+                              ? 'Criando...'
+                              : !pub.processo_id && match.primaryProcessId
+                                ? '+ Vincular e Criar Prazo'
+                                : '+ Criar Prazo'}
+                          </button>
                           <button
                             className={diarioStyles.btnCriarTese}
                             disabled={criarTese.isPending && criarTese.variables === pub.id}
@@ -632,7 +967,10 @@ export default function DiarioPage() {
               })()}
 
               {expandido === pub.id && pub.texto_completo && (
-                <pre className={diarioStyles.textoCompleto}>{pub.texto_completo}</pre>
+                <div
+                  className={diarioStyles.textoCompleto}
+                  dangerouslySetInnerHTML={{ __html: buildHighlightedHtml(pub.texto_completo, match.relatedTerms) }}
+                />
               )}
             </div>
           ))}
