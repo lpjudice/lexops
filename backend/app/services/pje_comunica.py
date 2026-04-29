@@ -136,7 +136,7 @@ def comunicacoes_para_publicacoes(itens: list[dict]) -> list[dict]:
         tribunal = item.get("siglaTribunal", "DJEN")
 
         resultado.append({
-            "fonte": "scraping_djen",
+            "fonte": "pje_comunica",
             "data_publicacao": data_pub,
             "numero_cnj": numero_cnj,
             "tipo_ato": "intimacao",

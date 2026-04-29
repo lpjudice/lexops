@@ -1,7 +1,7 @@
 import api from './client'
 
 export type FontePublicacao =
-  | 'gmail' | 'scraping_tjes' | 'scraping_tjsp' | 'scraping_tjam' | 'scraping_tjrj' | 'scraping_djen' | 'manual'
+  | 'gmail' | 'scraping_tjes' | 'scraping_tjsp' | 'scraping_tjam' | 'scraping_tjrj' | 'scraping_djen' | 'pje_comunica' | 'manual'
 export type TipoAto =
   | 'despacho' | 'decisao' | 'sentenca' | 'acordao' | 'intimacao' | 'citacao' | 'outro'
 
@@ -48,6 +48,12 @@ export interface SyncResult {
   fonte: string
 }
 
+export interface DiarioMonitoringConfig {
+  tribunais: string[]
+  termos_extras: string[]
+  auto_sync: boolean
+}
+
 export const diarioApi = {
   listar: (params?: { lida?: boolean; tribunal?: string; processo_id?: string }) =>
     api.get<Publicacao[]>('/diario/', { params }).then((r) => r.data),
@@ -88,4 +94,10 @@ export const diarioApi = {
 
   savePjeConfig: (login_cpf: string, senha: string) =>
     api.post('/pje/config', { login_cpf, senha }).then(r => r.data),
+
+  monitoramento: () =>
+    api.get<DiarioMonitoringConfig>('/diario/monitoramento').then((r) => r.data),
+
+  salvarMonitoramento: (data: DiarioMonitoringConfig) =>
+    api.put<DiarioMonitoringConfig>('/diario/monitoramento', data).then((r) => r.data),
 }

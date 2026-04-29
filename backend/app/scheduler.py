@@ -88,6 +88,46 @@ def _refresh_google_master_session() -> None:
         logger.warning("Scheduler: falha ao renovar conta Google master: %s", exc)
 
 
+def _sync_diarios_monitorados() -> None:
+    try:
+        from app.database import SessionLocal
+        from app.models.cliente import Cliente
+        from app.routers.diario import _inserir_publicacoes
+        from app.services.diario_monitoring import load_monitoring_config
+        from app.services.scraping_tribunais import scrape_todos
+
+        db = SessionLocal()
+        try:
+            config = load_monitoring_config()
+            if not config.get("auto_sync", True):
+                logger.info("Scheduler: monitoramento automático do Diário Oficial está desativado")
+                return
+
+            tribunais = [t for t in (config.get("tribunais") or []) if t in {"TJES", "TJSP", "TJAM", "TJRJ"}]
+            if not tribunais:
+                logger.info("Scheduler: nenhum tribunal local configurado para monitoramento do Diário Oficial")
+                return
+
+            nomes_clientes = [
+                c.nome.strip()
+                for c in db.query(Cliente).order_by(Cliente.nome).all()
+                if getattr(c, "nome", None) and c.nome.strip()
+            ]
+            termos = list(dict.fromkeys([*nomes_clientes, *(config.get("termos_extras") or [])]))
+            if not termos:
+                logger.info("Scheduler: nenhum termo monitorado para Diário Oficial")
+                return
+
+            logger.info("Scheduler: sincronizando Diário Oficial de %s com %d termo(s)", ",".join(tribunais), len(termos))
+            itens = scrape_todos(tribunais=tribunais, termos=termos)
+            ins, dup, err = _inserir_publicacoes(itens, db)
+            logger.info("Scheduler: Diário Oficial concluído (%d novas, %d duplicatas, %d erros)", ins, dup, err)
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.warning("Scheduler: falha na sincronização automática do Diário Oficial: %s", exc)
+
+
 def start_scheduler() -> None:
     if scheduler.running:
         logger.info("Scheduler já estava ativo")
@@ -111,8 +151,14 @@ def start_scheduler() -> None:
         id="refresh_google_master_session",
         replace_existing=True,
     )
+    scheduler.add_job(
+        _sync_diarios_monitorados,
+        trigger=CronTrigger(hour=6, minute=10),
+        id="sync_diario_monitorado",
+        replace_existing=True,
+    )
     scheduler.start()
-    logger.info("Scheduler iniciado — DataJud diário às 03:00 BRT, jus.br noturno se ativo, manutenção do jus.br a cada 6 horas e renovação da conta Google master a cada 6 horas")
+    logger.info("Scheduler iniciado — DataJud diário às 03:00 BRT, Diário Oficial monitorado às 06:10 BRT, jus.br noturno se ativo, manutenção do jus.br a cada 6 horas e renovação da conta Google master a cada 6 horas")
 
 
 def stop_scheduler() -> None:

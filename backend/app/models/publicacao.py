@@ -17,7 +17,7 @@ class Publicacao(Base):
 
     # Origem
     fonte: Mapped[str] = mapped_column(
-        Enum("gmail", "scraping_tjes", "scraping_tjsp", "scraping_tjam", "scraping_tjrj", "manual", name="fonte_publicacao"),
+        Enum("gmail", "scraping_tjes", "scraping_tjsp", "scraping_tjam", "scraping_tjrj", "scraping_djen", "pje_comunica", "manual", name="fonte_publicacao"),
         nullable=False,
     )
     data_publicacao: Mapped[date] = mapped_column(Date, nullable=False)

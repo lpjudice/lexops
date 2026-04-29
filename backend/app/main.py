@@ -23,6 +23,12 @@ def _run_migrations() -> None:
             "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS url_fonte TEXT"
         ))
         conn.execute(text(
+            "ALTER TYPE fonte_publicacao ADD VALUE IF NOT EXISTS 'scraping_djen'"
+        ))
+        conn.execute(text(
+            "ALTER TYPE fonte_publicacao ADD VALUE IF NOT EXISTS 'pje_comunica'"
+        ))
+        conn.execute(text(
             "ALTER TABLE contratos ADD COLUMN IF NOT EXISTS arquivos JSONB DEFAULT '[]'::jsonb"
         ))
         conn.execute(text(

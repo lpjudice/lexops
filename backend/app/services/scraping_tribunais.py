@@ -8,7 +8,7 @@ TJES  → https://dje.tjes.jus.br
 TJSP  → https://dje.tjsp.jus.br/cdje/consultaSimples.do
 TJAM  → https://www.tjam.jus.br/index.php/diario-da-justica
 TJRJ  → https://www3.tjrj.jus.br/consultadje/
-DJEN  → https://dje.stj.jus.br (Diário da Justiça Eletrônico Nacional — STJ)
+DJEN  → legado/experimental (não usado como fonte nacional principal)
 """
 
 import re
@@ -24,7 +24,7 @@ TRIBUNAL_URLS: dict[str, str] = {
     "TJSP": "https://dje.tjsp.jus.br/cdje/consultaSimples.do",
     "TJAM": "https://www.tjam.jus.br/index.php/diario-da-justica",
     "TJRJ": "https://www3.tjrj.jus.br/consultadje/",
-    "DJEN": "https://scon.stj.jus.br/SCON/pesquisar.jsp",
+    "DJEN": "https://www.cnj.jus.br/programas-e-acoes/processo-judicial-eletronico-pje/comunicacoes-processuais/",
 }
 
 TIPO_ATO_KEYWORDS = {
@@ -295,85 +295,14 @@ def scrape_tjrj(data: date | None = None, termos: list[str] | None = None) -> li
     return publicacoes
 
 
-# ── DJEN (Diário de Justiça Eletrônico Nacional — STJ) ───────────────────────
+# ── DJEN legado/experimental ──────────────────────────────────────────────────
 
 def scrape_djen(data: date | None = None, termos: list[str] | None = None) -> list[dict]:
     """
-    Consulta o DJEN do STJ via pesquisa de jurisprudência.
-    O portal permite busca por nome de parte, advogado ou número de processo.
+    Mantido apenas como compatibilidade/experimento.
+    Não representa uma consulta nacional confiável do DJEN.
     """
-    data = data or date.today() - timedelta(days=1)
-    data_str = data.strftime("%d/%m/%Y")
-    publicacoes: list[dict] = []
-
-    # Busca por cada termo individualmente para maximizar resultados
-    termos_busca = termos or [""]
-    visto: set[str] = set()
-
-    for termo in termos_busca:
-        try:
-            resp = httpx.get(
-                "https://scon.stj.jus.br/SCON/pesquisar.jsp",
-                params={
-                    "b": "ACOR",
-                    "livre": termo or "",
-                    "data": data_str,
-                    "processo": "",
-                    "tp": "T",
-                },
-                headers=HEADERS,
-                timeout=20,
-                follow_redirects=True,
-            )
-            if not resp.is_success:
-                continue
-
-            soup = BeautifulSoup(resp.text, "html.parser")
-
-            # Tenta encontrar resultados de acórdão/decisão
-            blocos = soup.find_all("div", class_=re.compile(r"documento|decisao|resultado", re.I))
-            if not blocos:
-                blocos = soup.find_all("table", {"class": re.compile(r"resultado|lista", re.I)})
-            if not blocos:
-                # fallback global
-                novos = _extrair_por_cnj_global(soup, "DJEN", "scraping_djen", data)
-                for p in novos:
-                    chave = p.get("numero_cnj", "")
-                    if chave and chave not in visto:
-                        visto.add(chave)
-                        publicacoes.append(p)
-                continue
-
-            for bloco in blocos:
-                texto = bloco.get_text(" ", strip=True)
-                if len(texto) < 50:
-                    continue
-                for p in _texto_para_publicacoes(texto, "DJEN", "scraping_djen", data):
-                    chave = p.get("numero_cnj", "")
-                    if chave and chave not in visto:
-                        visto.add(chave)
-                        publicacoes.append(p)
-
-        except Exception:
-            continue
-
-    # Segunda tentativa: DJe do STJ por data
-    if not publicacoes:
-        try:
-            resp2 = httpx.get(
-                "https://dje.stj.jus.br/cgi-bin/dgrecadv.exe",
-                params={"DataPublicacao": data_str, "Pesquisa": " ".join(termos or [])},
-                headers=HEADERS,
-                timeout=20,
-                follow_redirects=True,
-            )
-            if resp2.is_success:
-                soup2 = BeautifulSoup(resp2.text, "html.parser")
-                publicacoes.extend(_extrair_por_cnj_global(soup2, "DJEN", "scraping_djen", data))
-        except Exception:
-            pass
-
-    return publicacoes
+    return []
 
 
 # ── Dispatcher ────────────────────────────────────────────────────────────────
@@ -392,7 +321,6 @@ def scrape_todos(
         "TJSP": scrape_tjsp,
         "TJAM": scrape_tjam,
         "TJRJ": scrape_tjrj,
-        "DJEN": scrape_djen,
     }
     alvos = tribunais or list(mapa.keys())
 

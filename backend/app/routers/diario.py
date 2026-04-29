@@ -3,6 +3,7 @@ import uuid
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -16,6 +17,12 @@ from app.services.ia_diario import analisar_publicacao
 from app.services.scraping_tribunais import scrape_todos
 
 router = APIRouter(prefix="/diario", tags=["diario"])
+
+
+class DiarioMonitoringConfig(BaseModel):
+    tribunais: list[str]
+    termos_extras: list[str]
+    auto_sync: bool = True
 
 
 def _inserir_publicacoes(itens: list[dict], db: Session) -> tuple[int, int, int]:
@@ -88,9 +95,27 @@ def sync_scraping(
     db: Session = Depends(get_db),
 ):
     """Roda scrapers nos tribunais selecionados para a data informada."""
-    itens = scrape_todos(tribunais=tribunais, data=data, termos=termos or None)
+    tribunais_validos = [t for t in tribunais if t in {"TJES", "TJSP", "TJAM", "TJRJ"}]
+    if not tribunais_validos:
+        raise HTTPException(status_code=400, detail="Selecione ao menos um tribunal local válido.")
+    itens = scrape_todos(tribunais=tribunais_validos, data=data, termos=termos or None)
     ins, dup, err = _inserir_publicacoes(itens, db)
     return SyncResult(inseridas=ins, duplicatas=dup, erros=err, fonte="scraping")
+
+
+@router.get("/monitoramento", response_model=DiarioMonitoringConfig)
+def obter_monitoramento():
+    from app.services.diario_monitoring import load_monitoring_config
+
+    return DiarioMonitoringConfig(**load_monitoring_config())
+
+
+@router.put("/monitoramento", response_model=DiarioMonitoringConfig)
+def salvar_monitoramento(body: DiarioMonitoringConfig):
+    from app.services.diario_monitoring import save_monitoring_config
+
+    saved = save_monitoring_config(body.model_dump())
+    return DiarioMonitoringConfig(**saved)
 
 
 # ── CRUD ───────────────────────────────────────────────────────────────────────

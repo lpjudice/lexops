@@ -7,7 +7,7 @@ import { clientesApi } from '../api/clientes'
 import styles from './Page.module.css'
 import diarioStyles from './DiarioPage.module.css'
 
-const TRIBUNAIS = ['TJES', 'TJSP', 'TJAM', 'TJRJ', 'DJEN']
+const TRIBUNAIS = ['TJES', 'TJSP', 'TJAM', 'TJRJ']
 
 const FONTE_LABEL: Record<string, string> = {
   gmail: 'Gmail',
@@ -15,7 +15,8 @@ const FONTE_LABEL: Record<string, string> = {
   scraping_tjsp: 'TJSP',
   scraping_tjam: 'TJAM',
   scraping_tjrj: 'TJRJ',
-  scraping_djen: 'DJEN',
+  scraping_djen: 'DJEN legado',
+  pje_comunica: 'PJe Comunica',
   manual: 'Manual',
 }
 
@@ -44,9 +45,7 @@ export default function DiarioPage() {
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
   const [acaoMsg, setAcaoMsg] = useState<Record<string, string>>({})
   const [daysBack, setDaysBack] = useState(3)
-  const [termosCustom, setTermosCustom] = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem('diario_termos_custom') || '[]') } catch { return [] }
-  })
+  const [termosCustom, setTermosCustom] = useState<string[]>([])
   const [novoTermo, setNovoTermo] = useState('')
   const [_termosAberto, _setTermosAberto] = useState(false)
   const [pjeModalAberto, setPjeModalAberto] = useState(false)
@@ -54,9 +53,6 @@ export default function DiarioPage() {
   const [pjeSenha, setPjeSenha] = useState('')
   const [pjeSaving, setPjeSaving] = useState(false)
 
-  useEffect(() => {
-    localStorage.setItem('diario_termos_custom', JSON.stringify(termosCustom))
-  }, [termosCustom])
 
   const parseAnalise = (pub: { analise_ia?: string }): AnaliseIA | null => {
     if (!pub.analise_ia) return null
@@ -87,6 +83,17 @@ export default function DiarioPage() {
 
   const nomesClientes = clientes.map((c) => c.nome)
 
+  const { data: monitoramento } = useQuery({
+    queryKey: ['diario-monitoramento'],
+    queryFn: () => diarioApi.monitoramento(),
+  })
+
+  useEffect(() => {
+    if (monitoramento?.termos_extras) {
+      setTermosCustom(monitoramento.termos_extras)
+    }
+  }, [monitoramento])
+
   const syncGmail = useMutation({
     mutationFn: () => diarioApi.syncGmail(daysBack),
     onSuccess: (r) => {
@@ -97,6 +104,19 @@ export default function DiarioPage() {
   })
 
   const todosTermos = [...nomesClientes, ...termosCustom].filter(Boolean)
+
+  const salvarMonitoramento = useMutation({
+    mutationFn: (payload: { termos_extras: string[] }) =>
+      diarioApi.salvarMonitoramento({
+        tribunais: monitoramento?.tribunais?.length ? monitoramento.tribunais : ['TJES', 'TJSP', 'TJAM'],
+        auto_sync: monitoramento?.auto_sync ?? true,
+        termos_extras: payload.termos_extras,
+      }),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['diario-monitoramento'] })
+      setTermosCustom(data.termos_extras)
+    },
+  })
 
   const syncScraping = useMutation({
     mutationFn: () => diarioApi.syncScraping(TRIBUNAIS, todosTermos),
@@ -328,6 +348,10 @@ export default function DiarioPage() {
 
       {syncMsg && <div className={diarioStyles.syncMsg}>{syncMsg}</div>}
 
+      <div className={diarioStyles.syncMsg} style={{ background: '#1f2937', borderColor: '#374151', color: '#cbd5e1' }}>
+        Tribunais locais automatizados: TJES, TJSP e TJAM. O item antigo de DJEN foi retirado da sincronização principal porque não era uma fonte nacional confiável nesta implementação. Para comunicações nacionais autenticadas, use o botão do PJe.
+      </div>
+
       {/* Termos de Monitoramento */}
       <div className={diarioStyles.termosBox}>
         <div className={diarioStyles.termosInline}>
@@ -343,7 +367,11 @@ export default function DiarioPage() {
                 {t}
                 <button
                   className={diarioStyles.termoRemove}
-                  onClick={() => setTermosCustom((prev) => prev.filter((_, j) => j !== i))}
+                  onClick={() => {
+                    const next = termosCustom.filter((_, j) => j !== i)
+                    setTermosCustom(next)
+                    salvarMonitoramento.mutate({ termos_extras: next })
+                  }}
                 >×</button>
               </span>
             ))}
@@ -355,7 +383,10 @@ export default function DiarioPage() {
                 onChange={(e) => setNovoTermo(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && novoTermo.trim()) {
-                    setTermosCustom((prev) => [...prev, novoTermo.trim()])
+                    const term = novoTermo.trim()
+                    const next = Array.from(new Set([...termosCustom, term]))
+                    setTermosCustom(next)
+                    salvarMonitoramento.mutate({ termos_extras: next })
                     setNovoTermo('')
                   }
                 }}

@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 FontePublicacao = Literal[
-    "gmail", "scraping_tjes", "scraping_tjsp", "scraping_tjam", "scraping_tjrj", "manual"
+    "gmail", "scraping_tjes", "scraping_tjsp", "scraping_tjam", "scraping_tjrj", "scraping_djen", "pje_comunica", "manual"
 ]
 TipoAto = Literal[
     "despacho", "decisao", "sentenca", "acordao", "intimacao", "citacao", "outro"
