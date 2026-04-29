@@ -11,7 +11,9 @@ TJRJ  → https://www3.tjrj.jus.br/consultadje/
 DJEN  → legado/experimental (não usado como fonte nacional principal)
 """
 
+import math
 import re
+import time
 from datetime import date, timedelta
 
 import httpx
@@ -24,7 +26,7 @@ TRIBUNAL_URLS: dict[str, str] = {
     "TJSP": "https://dje.tjsp.jus.br/cdje/consultaSimples.do",
     "TJAM": "https://www.tjam.jus.br/index.php/diario-da-justica",
     "TJRJ": "https://www3.tjrj.jus.br/consultadje/",
-    "DJEN": "https://www.cnj.jus.br/programas-e-acoes/processo-judicial-eletronico-pje/comunicacoes-processuais/",
+    "DJEN": "https://comunica.pje.jus.br/",
 }
 
 TIPO_ATO_KEYWORDS = {
@@ -41,6 +43,20 @@ HEADERS = {
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
     )
+}
+
+COMUNICA_API_URL = "https://comunicaapi.pje.jus.br/api/v1/comunicacao"
+COMUNICA_ITENS_POR_PAGINA = 100
+COMUNICA_MAX_PAGINAS = 20
+COMUNICA_MAX_TENTATIVAS = 8
+COMUNICA_TIMEOUT_SECONDS = 8
+
+FONTE_POR_TRIBUNAL = {
+    "TJES": "scraping_tjes",
+    "TJSP": "scraping_tjsp",
+    "TJAM": "scraping_tjam",
+    "TJRJ": "scraping_tjrj",
+    "DJEN": "scraping_djen",
 }
 
 STOPWORDS = {
@@ -134,6 +150,19 @@ def _montar_publicacao(
     }
 
 
+def _formatar_numero_cnj(numero: str | None) -> str | None:
+    if not numero:
+        return None
+    apenas_digitos = re.sub(r"\D", "", numero)
+    if len(apenas_digitos) != 20:
+        return numero
+    return (
+        f"{apenas_digitos[:7]}-{apenas_digitos[7:9]}."
+        f"{apenas_digitos[9:13]}.{apenas_digitos[13]}."
+        f"{apenas_digitos[14:16]}.{apenas_digitos[16:]}"
+    )
+
+
 def _termo_encontrado(texto: str, termos: list[str] | None = None) -> bool:
     if not termos:
         return False
@@ -200,6 +229,190 @@ def _extrair_por_cnj_global(
     return resultado
 
 
+def _consultas_comunica(termos: list[str] | None = None) -> list[tuple[str, int, str, str, int]]:
+    """
+    Gera uma lista enxuta de consultas para a API pública.
+    Mantém variações úteis, mas evita dezenas de requests para um único nome.
+    """
+    consultas: list[tuple[str, int, str, str, int]] = []
+    vistos: set[tuple[str, str]] = set()
+
+    def adicionar(origem: str, prioridade: int, campo: str, termo: str, max_paginas: int) -> None:
+        termo = _normalizar_espacos(termo)
+        if len(termo) < 3:
+            return
+        chave = (campo, termo.casefold())
+        if chave in vistos:
+            return
+        vistos.add(chave)
+        consultas.append((origem, prioridade, campo, termo, max_paginas))
+
+    for termo_original in termos or [""]:
+        termo_original = _normalizar_espacos(termo_original)
+        if not termo_original:
+            continue
+
+        palavras = re.findall(r"[A-Za-zÀ-ÿ0-9]+", termo_original)
+        relevantes = [p for p in palavras if len(p) >= 4 and p.casefold() not in STOPWORDS]
+        primeiro_ultimo = " ".join([relevantes[0], relevantes[-1]]) if len(relevantes) >= 2 else ""
+        ultimo = relevantes[-1] if relevantes else ""
+
+        adicionar(termo_original, 0, "texto", termo_original, COMUNICA_MAX_PAGINAS)
+        adicionar(termo_original, 1, "nomeParte", termo_original, COMUNICA_MAX_PAGINAS)
+        if len(relevantes) >= 2:
+            adicionar(termo_original, 1, "nomeAdvogado", termo_original, COMUNICA_MAX_PAGINAS)
+
+        if primeiro_ultimo and primeiro_ultimo.casefold() != termo_original.casefold():
+            adicionar(termo_original, 2, "texto", primeiro_ultimo, 5)
+            adicionar(termo_original, 2, "nomeParte", primeiro_ultimo, 5)
+            adicionar(termo_original, 2, "nomeAdvogado", primeiro_ultimo, 5)
+
+        if ultimo and ultimo.casefold() not in {termo_original.casefold(), primeiro_ultimo.casefold()}:
+            adicionar(termo_original, 3, "texto", ultimo, 3)
+            adicionar(termo_original, 3, "nomeParte", ultimo, 3)
+            adicionar(termo_original, 3, "nomeAdvogado", ultimo, 3)
+
+    return consultas or [("", 0, "texto", "", 1)]
+
+
+def _normalizar_data_comunica(valor: str | None) -> date | None:
+    if not valor:
+        return None
+    valor = valor.strip()
+    for formato in ("%Y-%m-%d", "%d/%m/%Y"):
+        try:
+            from datetime import datetime
+
+            return datetime.strptime(valor, formato).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _comunica_para_publicacao(item: dict, tribunal_alvo: str) -> dict | None:
+    texto = _normalizar_espacos(item.get("texto") or "")
+    if len(texto) < 20:
+        return None
+
+    tribunal_item = item.get("siglaTribunal") or tribunal_alvo
+    data_pub = (
+        _normalizar_data_comunica(item.get("data_disponibilizacao"))
+        or _normalizar_data_comunica(item.get("datadisponibilizacao"))
+        or date.today()
+    )
+    numero_cnj = (
+        item.get("numeroprocessocommascara")
+        or _formatar_numero_cnj(item.get("numero_processo"))
+        or _formatar_numero_cnj(item.get("numeroProcesso"))
+    )
+    url_fonte = item.get("link") or TRIBUNAL_URLS.get("DJEN")
+    fonte = FONTE_POR_TRIBUNAL.get(tribunal_alvo, "scraping_djen")
+
+    pub = _montar_publicacao(
+        texto=texto,
+        tribunal=tribunal_item,
+        fonte=fonte,
+        data_pub=data_pub,
+        numero_cnj=numero_cnj,
+    )
+    pub["url_fonte"] = url_fonte
+    return pub
+
+
+def _buscar_comunica_api(
+    tribunal: str,
+    data_inicio: date,
+    data_fim: date,
+    termos: list[str] | None = None,
+) -> list[dict]:
+    """
+    Consulta a API pública do DJEN/Comunica.
+    Quando `tribunal` é DJEN, faz busca nacional; caso contrário, filtra a sigla.
+    """
+    if data_fim < data_inicio:
+        data_inicio, data_fim = data_fim, data_inicio
+
+    vistos: set[str] = set()
+    resultado: list[dict] = []
+    consultas = _consultas_comunica(termos)
+
+    sucesso_por_origem: dict[str, int] = {}
+
+    with httpx.Client(headers=HEADERS, timeout=COMUNICA_TIMEOUT_SECONDS, follow_redirects=True) as client:
+        for origem, prioridade, campo, termo, max_paginas in consultas:
+            if origem and sucesso_por_origem.get(origem, 99) < prioridade:
+                continue
+
+            pagina = 1
+            paginas_limite = max_paginas
+            itens_encontrados_nesta_consulta = 0
+
+            while pagina <= paginas_limite:
+                params = {
+                    "pagina": pagina,
+                    "itensPorPagina": COMUNICA_ITENS_POR_PAGINA,
+                    "dataDisponibilizacaoInicio": data_inicio.isoformat(),
+                    "dataDisponibilizacaoFim": data_fim.isoformat(),
+                }
+                if termo:
+                    params[campo] = termo
+                if tribunal != "DJEN":
+                    params["siglaTribunal"] = tribunal
+
+                resp = None
+                for tentativa in range(1, COMUNICA_MAX_TENTATIVAS + 1):
+                    try:
+                        resp = client.get(COMUNICA_API_URL, params=params)
+                        if resp.status_code < 500:
+                            break
+                    except httpx.HTTPError:
+                        resp = None
+                    time.sleep(min(0.6 * tentativa, 3.0))
+
+                if not resp or not resp.is_success:
+                    break
+
+                try:
+                    payload = resp.json()
+                except ValueError:
+                    break
+
+                itens = payload.get("items") or []
+                total = int(payload.get("count") or 0)
+                paginas_limite = min(
+                    max(1, math.ceil(total / COMUNICA_ITENS_POR_PAGINA)),
+                    max_paginas,
+                )
+
+                for item in itens:
+                    pub = _comunica_para_publicacao(item, tribunal)
+                    if not pub:
+                        continue
+                    itens_encontrados_nesta_consulta += 1
+                    chave = str(item.get("id") or "") or "|".join(
+                        [
+                            pub.get("fonte", "") or "",
+                            pub.get("tribunal", "") or "",
+                            pub.get("numero_cnj", "") or "",
+                            str(pub.get("data_publicacao", "") or ""),
+                            (pub.get("texto_resumo", "") or "")[:180],
+                        ]
+                    )
+                    if chave in vistos:
+                        continue
+                    vistos.add(chave)
+                    resultado.append(pub)
+
+                if not itens:
+                    break
+                pagina += 1
+
+            if origem and itens_encontrados_nesta_consulta > 0:
+                sucesso_por_origem[origem] = min(sucesso_por_origem.get(origem, 99), prioridade)
+
+    return resultado
+
+
 # ── TJES ──────────────────────────────────────────────────────────────────────
 
 def scrape_tjes(data: date | None = None, termos: list[str] | None = None) -> list[dict]:
@@ -262,10 +475,11 @@ def scrape_tjsp(data: date | None = None, termos: list[str] | None = None) -> li
 
     try:
         resp = httpx.post(
-            "https://dje.tjsp.jus.br/cdje/consultaSimples.do",
+            "https://dje.tjsp.jus.br/cdje/consultaAvancada.do",
             data={
                 "dadosConsulta.dtInicio": data_str,
                 "dadosConsulta.dtFim": data_str,
+                "dadosConsulta.cdCaderno": "-11",
                 "dadosConsulta.pesquisaLivre": " ".join(termos or [""]),
                 "pagina": "1",
             },
@@ -390,87 +604,10 @@ def scrape_tjrj(data: date | None = None, termos: list[str] | None = None) -> li
 
 def scrape_djen(data: date | None = None, termos: list[str] | None = None) -> list[dict]:
     """
-    Consulta pública best-effort do DJEN.
-    Ainda é menos previsível do que os diários estaduais.
+    Consulta pública do DJEN via API nacional do Comunica.
     """
     data = data or date.today() - timedelta(days=1)
-    data_str = data.strftime("%d/%m/%Y")
-    publicacoes: list[dict] = []
-    vistos: set[str] = set()
-
-    for termo in expandir_termos_busca(termos) or [""]:
-        try:
-            resp = httpx.get(
-                "https://scon.stj.jus.br/SCON/pesquisar.jsp",
-                params={
-                    "b": "ACOR",
-                    "livre": termo,
-                    "data": data_str,
-                    "processo": "",
-                    "tp": "T",
-                },
-                headers=HEADERS,
-                timeout=20,
-                follow_redirects=True,
-            )
-            if not resp.is_success:
-                continue
-
-            soup = BeautifulSoup(resp.text, "html.parser")
-            blocos = soup.find_all("div", class_=re.compile(r"documento|decisao|resultado", re.I))
-            if not blocos:
-                blocos = soup.find_all("table", {"class": re.compile(r"resultado|lista", re.I)})
-
-            candidatos: list[dict] = []
-            for bloco in blocos:
-                texto = bloco.get_text(" ", strip=True)
-                if len(texto) < 50:
-                    continue
-                candidatos.extend(_texto_para_publicacoes(texto, "DJEN", "scraping_djen", data, termos=[termo]))
-
-            if not candidatos:
-                candidatos.extend(_extrair_por_cnj_global(soup, "DJEN", "scraping_djen", data, termos=[termo]))
-
-            for pub in candidatos:
-                chave = "|".join(
-                    [
-                        str(pub.get("data_publicacao", "")),
-                        pub.get("numero_cnj", "") or "",
-                        (pub.get("texto_resumo", "") or "")[:180],
-                    ]
-                )
-                if chave not in vistos:
-                    vistos.add(chave)
-                    publicacoes.append(pub)
-        except Exception:
-            continue
-
-    if not publicacoes:
-        try:
-            resp = httpx.get(
-                "https://dje.stj.jus.br/cgi-bin/dgrecadv.exe",
-                params={"DataPublicacao": data_str, "Pesquisa": " ".join(termos or [])},
-                headers=HEADERS,
-                timeout=20,
-                follow_redirects=True,
-            )
-            if resp.is_success:
-                soup = BeautifulSoup(resp.text, "html.parser")
-                for pub in _extrair_por_cnj_global(soup, "DJEN", "scraping_djen", data, termos=termos):
-                    chave = "|".join(
-                        [
-                            str(pub.get("data_publicacao", "")),
-                            pub.get("numero_cnj", "") or "",
-                            (pub.get("texto_resumo", "") or "")[:180],
-                        ]
-                    )
-                    if chave not in vistos:
-                        vistos.add(chave)
-                        publicacoes.append(pub)
-        except Exception:
-            pass
-
-    return publicacoes
+    return _buscar_comunica_api("DJEN", data, data, termos=termos)
 
 
 # ── Dispatcher ────────────────────────────────────────────────────────────────
@@ -494,9 +631,10 @@ def scrape_todos(
     }
     alvos = tribunais or list(mapa.keys())
 
-    # Busca cada termo separado — evita "João Maria Silva" que não acha nada
+    data_fim = data or (date.today() - timedelta(days=1))
+    data_inicio = data_fim if data else (date.today() - timedelta(days=max(days_back, 1)))
     termos_lista = expandir_termos_busca(termos) if termos else [None]
-    datas_busca = [data] if data else [date.today() - timedelta(days=offset) for offset in range(1, max(days_back, 1) + 1)]
+    datas_busca = [data_fim] if data else [date.today() - timedelta(days=offset) for offset in range(1, max(days_back, 1) + 1)]
 
     visto: set[str] = set()
     resultado: list[dict] = []
@@ -504,6 +642,27 @@ def scrape_todos(
     for tribunal in alvos:
         if tribunal not in mapa:
             continue
+
+        # DJEN e os estados mais recentes ficam mais confiáveis via API pública do CNJ.
+        if tribunal in {"DJEN", "TJES", "TJSP", "TJAM", "TJRJ"}:
+            novos = _buscar_comunica_api(tribunal, data_inicio, data_fim, termos=termos)
+            if novos or tribunal == "DJEN":
+                for pub in novos:
+                    chave = "|".join(
+                        [
+                            str(pub.get("data_publicacao", "")),
+                            pub.get("fonte", "") or "",
+                            pub.get("tribunal", "") or "",
+                            pub.get("numero_cnj", "") or "",
+                            (pub.get("texto_resumo", "") or "")[:180],
+                        ]
+                    )
+                    if chave not in visto:
+                        visto.add(chave)
+                        resultado.append(pub)
+                if novos:
+                    continue
+
         fn = mapa[tribunal]
         for data_busca in datas_busca:
             for termo in termos_lista:
