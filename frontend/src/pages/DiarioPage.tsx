@@ -537,9 +537,6 @@ export default function DiarioPage() {
     }
   }
 
-  const processoNome = (id?: string) =>
-    id ? processos.find((p) => p.id === id)?.numero_cnj ?? id : null
-
   const SEM_PUB = 'Sem publicações nesta edição.'
   const publicacoesEnriquecidas = [...publicacoes]
     .map((pub) => ({ pub, match: classifyPublication(pub, processos, clientes, todosTermos) }))
