@@ -56,6 +56,9 @@ interface ProcessoRelacionado {
 interface PublicacaoMatchInfo {
   exactClientNames: string[]
   similarClientNames: string[]
+  exactTermMatches: string[]
+  similarTermMatches: string[]
+  probableClientNames: string[]
   relatedProcesses: ProcessoRelacionado[]
   relatedTerms: string[]
   primaryProcessId?: string
@@ -104,9 +107,10 @@ function buildClientNameVariants(name: string) {
   const words = name.match(/[A-Za-zÀ-ÿ0-9]+/g) ?? []
   const filtered = words.filter((word) => word.length >= 4)
   const variants = [name]
-  if (filtered.length >= 2) variants.push(`${filtered[0]} ${filtered[filtered.length - 1]}`)
   if (filtered.length >= 2) variants.push(filtered.slice(0, 2).join(' '))
-  if (filtered.length >= 3) variants.push(`${filtered[0]} ${filtered[2]}`)
+  if (filtered.length === 3) variants.push(`${filtered[0]} ${filtered[filtered.length - 1]}`)
+  if (filtered.length >= 3) variants.push(filtered.slice(0, 3).join(' '))
+  if (filtered.length >= 4) variants.push(`${filtered[0]} ${filtered[2]}`)
   return uniqueStrings(variants)
 }
 
@@ -140,7 +144,8 @@ function hasFuzzyTokenMatch(textTokens: string[], token: string) {
   return textTokens.some((textToken) => {
     if (Math.abs(textToken.length - token.length) > 1) return false
     if (token.length <= 4) return false
-    return levenshteinDistance(textToken, token) <= 1
+    const maxDistance = token.length >= 6 ? 2 : 1
+    return levenshteinDistance(textToken, token) <= maxDistance
   })
 }
 
@@ -159,6 +164,24 @@ function isLogicalSimilarMatch(textTokens: string[], name: string) {
     matchedTokens.includes(lastToken)
 
   return hasAnchor
+}
+
+function buildRelevantExcerpt(text: string, terms: string[], radius = 220) {
+  const source = text.trim()
+  if (!source) return ''
+
+  const lower = source.toLowerCase()
+  for (const term of uniqueStrings(terms).sort((a, b) => b.length - a.length)) {
+    const idx = lower.indexOf(term.toLowerCase())
+    if (idx < 0) continue
+    const start = Math.max(0, idx - radius)
+    const end = Math.min(source.length, idx + term.length + radius)
+    const prefix = start > 0 ? '... ' : ''
+    const suffix = end < source.length ? ' ...' : ''
+    return `${prefix}${source.slice(start, end).trim()}${suffix}`
+  }
+
+  return source.slice(0, radius * 2)
 }
 
 function getProcessClientNames(processo: Processo, clientes: Cliente[]) {
@@ -182,13 +205,15 @@ function classifyPublication(
   const textDigits = normalizeDigits(text)
   const exactClientNames = new Set<string>()
   const similarClientNames = new Set<string>()
+  const exactTermMatches = new Set<string>()
+  const similarTermMatches = new Set<string>()
+  const probableClientNames = new Set<string>()
   const relatedTerms = new Set<string>()
   const relatedProcesses: ProcessoRelacionado[] = []
 
   for (const processo of processos) {
     const processDigits = normalizeDigits(processo.numero_cnj)
     const clientNames = getProcessClientNames(processo, clientes)
-    let matchKind: MatchKind | null = null
 
     const processMatched =
       pub.processo_id === processo.id ||
@@ -196,37 +221,42 @@ function classifyPublication(
       (!!processDigits && textDigits.includes(processDigits))
 
     if (processMatched) {
-      matchKind = 'processo'
       relatedTerms.add(processo.numero_cnj)
-      clientNames.forEach((name) => exactClientNames.add(name))
-    } else {
-      const exactNames = clientNames.filter((name) => normalizeText(name) && normalizedText.includes(normalizeText(name)))
-      if (exactNames.length > 0) {
-        matchKind = 'exato'
-        exactNames.forEach((name) => {
-          exactClientNames.add(name)
-          relatedTerms.add(name)
-        })
-      } else {
-        const similarNames = clientNames.filter((name) => isLogicalSimilarMatch(textTokens, name))
-        if (similarNames.length > 0) {
-          matchKind = 'similar'
-          similarNames.forEach((name) => {
-            similarClientNames.add(name)
-            buildClientNameVariants(name).forEach((variant) => {
-              if (variant.trim().split(/\s+/).length >= 2) relatedTerms.add(variant)
-            })
-          })
-        }
-      }
-    }
-
-    if (matchKind) {
       relatedProcesses.push({
         id: processo.id,
         numero_cnj: processo.numero_cnj,
         clienteNomes: clientNames,
-        matchKind,
+        matchKind: 'processo',
+      })
+      clientNames.forEach((name) => {
+        exactClientNames.add(name)
+        exactTermMatches.add(name)
+        probableClientNames.add(name)
+        relatedTerms.add(name)
+      })
+      continue
+    }
+
+    const exactNames = clientNames.filter((name) => normalizeText(name) && normalizedText.includes(normalizeText(name)))
+    if (exactNames.length > 0) {
+      exactNames.forEach((name) => {
+        exactClientNames.add(name)
+        exactTermMatches.add(name)
+        probableClientNames.add(name)
+        relatedTerms.add(name)
+      })
+      continue
+    }
+
+    const similarNames = clientNames.filter((name) => isLogicalSimilarMatch(textTokens, name))
+    if (similarNames.length > 0) {
+      similarNames.forEach((name) => {
+        similarClientNames.add(name)
+        similarTermMatches.add(name)
+        probableClientNames.add(name)
+        buildClientNameVariants(name).forEach((variant) => {
+          if (variant.trim().split(/\s+/).length >= 2) relatedTerms.add(variant)
+        })
       })
     }
   }
@@ -237,21 +267,19 @@ function classifyPublication(
   })
 
   const hasRegisteredProcess = relatedProcesses.some((processo) => processo.matchKind === 'processo')
-  const hasExactName = exactClientNames.size > 0
-  const hasSimilarName = similarClientNames.size > 0
   const primary = relatedProcesses[0]
 
   for (const termo of termosMonitorados) {
     const normalizedTerm = normalizeText(termo)
     if (!normalizedTerm) continue
     if (normalizedText.includes(normalizedTerm)) {
-      exactClientNames.add(termo)
+      exactTermMatches.add(termo)
       relatedTerms.add(termo)
       continue
     }
     const hasSimilar = isLogicalSimilarMatch(textTokens, termo)
     if (hasSimilar) {
-      similarClientNames.add(termo)
+      similarTermMatches.add(termo)
       buildClientNameVariants(termo).forEach((variant) => {
         if (variant.trim().split(/\s+/).length >= 2) relatedTerms.add(variant)
       })
@@ -264,13 +292,16 @@ function classifyPublication(
   return {
     exactClientNames: [...exactClientNames],
     similarClientNames: [...similarClientNames].filter((name) => !exactClientNames.has(name)),
+    exactTermMatches: [...exactTermMatches],
+    similarTermMatches: [...similarTermMatches].filter((name) => !exactTermMatches.has(name)),
+    probableClientNames: [...probableClientNames],
     relatedProcesses,
     relatedTerms: uniqueStrings([...relatedTerms]),
     primaryProcessId: primary?.id,
-    primaryClientName: primary?.clienteNomes[0],
+    primaryClientName: [...probableClientNames][0] ?? primary?.clienteNomes[0],
     hasRegisteredProcess,
-    hasExactName,
-    hasSimilarName,
+    hasExactName: exactClientNames.size > 0 || exactTermMatches.size > 0,
+    hasSimilarName: similarClientNames.size > 0 || similarTermMatches.size > 0,
   }
 }
 
@@ -776,7 +807,13 @@ export default function DiarioPage() {
         </p>
       ) : (
         <div className={diarioStyles.feed}>
-          {publicacoesFiltradas.map(({ pub, match }) => (
+          {publicacoesFiltradas.map(({ pub, match }) => {
+            const textoBase = pub.texto_completo || pub.texto_resumo || ''
+            const resumoExibicao = buildRelevantExcerpt(textoBase, match.relatedTerms)
+            const nomesExatos = uniqueStrings([...match.exactClientNames, ...match.exactTermMatches])
+            const nomesSimilares = uniqueStrings([...match.similarClientNames, ...match.similarTermMatches])
+
+            return (
             <div
               key={pub.id}
               className={`${diarioStyles.card} ${pub.lida ? diarioStyles.cardLida : ''} ${pub.texto_resumo === 'Sem publicações nesta edição.' ? diarioStyles.cardSemPub : ''}`}
@@ -866,7 +903,7 @@ export default function DiarioPage() {
                 )}
               </div>
 
-              {(match.primaryClientName || match.relatedProcesses.length > 0 || match.exactClientNames.length > 0 || match.similarClientNames.length > 0) && (
+              {(match.primaryClientName || match.relatedProcesses.length > 0 || nomesExatos.length > 0 || nomesSimilares.length > 0) && (
                 <div className={diarioStyles.matchDetails}>
                   {match.primaryClientName && (
                     <div>
@@ -875,18 +912,18 @@ export default function DiarioPage() {
                   )}
                   {match.relatedProcesses.length > 0 && (
                     <div>
-                      <span className={diarioStyles.iaLabel}>Processos relacionados</span>{' '}
+                      <span className={diarioStyles.iaLabel}>Processo exato</span>{' '}
                       {match.relatedProcesses.slice(0, 3).map((processo) => processo.numero_cnj).join(' · ')}
                     </div>
                   )}
-                  {match.exactClientNames.length > 0 && (
+                  {nomesExatos.length > 0 && (
                     <div>
-                      <span className={diarioStyles.iaLabel}>Exato</span> {match.exactClientNames.slice(0, 3).join(' · ')}
+                      <span className={diarioStyles.iaLabel}>Nome exato encontrado</span> {nomesExatos.slice(0, 3).join(' · ')}
                     </div>
                   )}
-                  {match.similarClientNames.length > 0 && (
+                  {nomesSimilares.length > 0 && (
                     <div>
-                      <span className={diarioStyles.iaLabel}>Similar</span> {match.similarClientNames.slice(0, 3).join(' · ')}
+                      <span className={diarioStyles.iaLabel}>Nome similar encontrado</span> {nomesSimilares.slice(0, 3).join(' · ')}
                     </div>
                   )}
                 </div>
@@ -920,10 +957,10 @@ export default function DiarioPage() {
                 </div>
               )}
 
-              {pub.texto_resumo && (
+              {resumoExibicao && (
                 <p
                   className={diarioStyles.resumo}
-                  dangerouslySetInnerHTML={{ __html: buildHighlightedHtml(pub.texto_resumo, match.relatedTerms) }}
+                  dangerouslySetInnerHTML={{ __html: buildHighlightedHtml(resumoExibicao, match.relatedTerms) }}
                 />
               )}
 
@@ -1023,7 +1060,7 @@ export default function DiarioPage() {
                 />
               )}
             </div>
-          ))}
+          )})}
         </div>
       )}
     </div>

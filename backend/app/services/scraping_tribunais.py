@@ -111,17 +111,14 @@ def expandir_termos_busca(termos: list[str] | None = None) -> list[str]:
             if len(p) >= 4 and p.casefold() not in STOPWORDS
         ]
 
-        for palavra in relevantes:
-            adicionar(palavra)
-
         if len(relevantes) >= 2:
-            adicionar(f"{relevantes[0]} {relevantes[-1]}")
             adicionar(" ".join(relevantes[:2]))
-            adicionar(" ".join(relevantes[-2:]))
 
         if len(relevantes) >= 3:
+            if len(relevantes) == 3:
+                adicionar(f"{relevantes[0]} {relevantes[-1]}")
             adicionar(" ".join(relevantes[:3]))
-            adicionar(" ".join(relevantes[-3:]))
+            adicionar(f"{relevantes[0]} {relevantes[2]}")
 
     return resultado
 
