@@ -149,6 +149,13 @@ function hasFuzzyTokenMatch(textTokens: string[], token: string) {
   })
 }
 
+function textHasExactTerm(normalizedText: string, term: string) {
+  const normalizedTerm = normalizeText(term)
+  if (!normalizedTerm) return false
+  const pattern = `(^|[^a-z0-9])${escapeRegExp(normalizedTerm).replace(/\ /g, '\\s+')}(?=$|[^a-z0-9])`
+  return new RegExp(pattern, 'i').test(normalizedText)
+}
+
 function isLogicalSimilarMatch(textTokens: string[], name: string) {
   const tokens = extractRelevantTokens(name)
   if (tokens.length < 2) return false
@@ -164,6 +171,13 @@ function isLogicalSimilarMatch(textTokens: string[], name: string) {
     matchedTokens.includes(lastToken)
 
   return hasAnchor
+}
+
+function getMatchPriority(match: PublicacaoMatchInfo) {
+  if (match.hasRegisteredProcess) return 0
+  if (match.hasExactName) return 1
+  if (match.hasSimilarName) return 2
+  return 3
 }
 
 function buildRelevantExcerpt(text: string, terms: string[], radius = 220) {
@@ -235,7 +249,7 @@ function classifyPublication(
       continue
     }
 
-    const exactNames = clientNames.filter((name) => normalizeText(name) && normalizedText.includes(normalizeText(name)))
+    const exactNames = clientNames.filter((name) => textHasExactTerm(normalizedText, name))
     if (exactNames.length > 0) {
       exactNames.forEach((name) => {
         exactClientNames.add(name)
@@ -270,7 +284,7 @@ function classifyPublication(
   for (const termo of termosMonitorados) {
     const normalizedTerm = normalizeText(termo)
     if (!normalizedTerm) continue
-    if (normalizedText.includes(normalizedTerm)) {
+    if (textHasExactTerm(normalizedText, termo)) {
       exactTermMatches.add(termo)
       relatedTerms.add(termo)
       continue
@@ -284,7 +298,6 @@ function classifyPublication(
     }
   }
 
-  if (pub.numero_cnj) relatedTerms.add(pub.numero_cnj)
   if (primary?.numero_cnj) relatedTerms.add(primary.numero_cnj)
 
   return {
@@ -541,6 +554,10 @@ export default function DiarioPage() {
   const publicacoesEnriquecidas = [...publicacoes]
     .map((pub) => ({ pub, match: classifyPublication(pub, processos, clientes, todosTermos) }))
     .sort((a, b) => {
+      const priorityA = getMatchPriority(a.match)
+      const priorityB = getMatchPriority(b.match)
+      if (priorityA !== priorityB) return priorityA - priorityB
+
       const dateA = new Date(`${a.pub.data_publicacao}T12:00:00`).getTime()
       const dateB = new Date(`${b.pub.data_publicacao}T12:00:00`).getTime()
       if (dateA !== dateB) return dateB - dateA

@@ -77,6 +77,87 @@ def _normalizar_espacos(texto: str) -> str:
     return re.sub(r"\s+", " ", (texto or "").strip())
 
 
+def _normalizar_texto_busca(texto: str) -> str:
+    texto = texto or ""
+    texto = texto.casefold()
+    substituicoes = str.maketrans(
+        "áàâãäéèêëíìîïóòôõöúùûüç",
+        "aaaaaeeeeiiiiooooouuuuc",
+    )
+    texto = texto.translate(substituicoes)
+    return _normalizar_espacos(texto)
+
+
+def _tokenizar_relevantes(texto: str) -> list[str]:
+    tokens = re.findall(r"[a-z0-9]+", _normalizar_texto_busca(texto))
+    return [token for token in tokens if len(token) >= 4 and token not in STOPWORDS]
+
+
+def _distancia_levenshtein(a: str, b: str) -> int:
+    linhas = len(a) + 1
+    colunas = len(b) + 1
+    dp = [[0] * colunas for _ in range(linhas)]
+    for i in range(linhas):
+        dp[i][0] = i
+    for j in range(colunas):
+        dp[0][j] = j
+    for i in range(1, linhas):
+        for j in range(1, colunas):
+            custo = 0 if a[i - 1] == b[j - 1] else 1
+            dp[i][j] = min(
+                dp[i - 1][j] + 1,
+                dp[i][j - 1] + 1,
+                dp[i - 1][j - 1] + custo,
+            )
+    return dp[-1][-1]
+
+
+def _token_match_aproximado(tokens_texto: list[str], token: str) -> bool:
+    if token in tokens_texto:
+        return True
+    if len(token) <= 4:
+        return False
+    limite = 2 if len(token) >= 6 else 1
+    for token_texto in tokens_texto:
+        if abs(len(token_texto) - len(token)) > 1:
+            continue
+        if _distancia_levenshtein(token_texto, token) <= limite:
+            return True
+    return False
+
+
+def _termo_exato_no_texto(texto: str, termo: str) -> bool:
+    termo_norm = _normalizar_texto_busca(termo)
+    if not termo_norm:
+        return False
+    padrao = r"(?<![a-z0-9])" + re.escape(termo_norm).replace(r"\ ", r"\s+") + r"(?![a-z0-9])"
+    return re.search(padrao, _normalizar_texto_busca(texto)) is not None
+
+
+def _termo_similar_no_texto(texto: str, termo: str) -> bool:
+    tokens_termo = _tokenizar_relevantes(termo)
+    if len(tokens_termo) < 2:
+        return False
+    tokens_texto = _tokenizar_relevantes(texto)
+    primeiro = tokens_termo[0]
+    ultimo = tokens_termo[-1]
+    encontrados = [token for token in tokens_termo if _token_match_aproximado(tokens_texto, token)]
+    if len(encontrados) < 2:
+        return False
+    return primeiro in encontrados or ultimo in encontrados
+
+
+def _texto_tem_match_monitorado(texto: str, termos: list[str] | None = None) -> bool:
+    if not termos:
+        return False
+    for termo in termos:
+        if _termo_exato_no_texto(texto, termo):
+            return True
+        if _termo_similar_no_texto(texto, termo):
+            return True
+    return False
+
+
 def expandir_termos_busca(termos: list[str] | None = None) -> list[str]:
     """
     Gera variações úteis para nomes e razões sociais quando o portal
@@ -161,23 +242,21 @@ def _formatar_numero_cnj(numero: str | None) -> str | None:
 
 
 def _termo_encontrado(texto: str, termos: list[str] | None = None) -> bool:
-    if not termos:
-        return False
-    texto_normalizado = texto.lower()
-    return any(termo and termo.lower() in texto_normalizado for termo in termos)
+    return _texto_tem_match_monitorado(texto, termos)
 
 
 def _extrair_trecho_por_termo(texto: str, termos: list[str] | None = None) -> str | None:
     if not termos:
         return None
-    texto_normalizado = texto.lower()
+    texto_normalizado = _normalizar_texto_busca(texto)
     for termo in termos:
         if not termo:
             continue
-        idx = texto_normalizado.find(termo.lower())
+        termo_normalizado = _normalizar_texto_busca(termo)
+        idx = texto_normalizado.find(termo_normalizado)
         if idx >= 0:
             inicio = max(0, idx - 250)
-            fim = min(len(texto), idx + max(len(termo), 1) + 1250)
+            fim = min(len(texto), idx + max(len(termo_normalizado), 1) + 1250)
             return texto[inicio:fim].strip()
     return None
 
@@ -389,6 +468,8 @@ def _buscar_comunica_api(
                 for item in itens:
                     pub = _comunica_para_publicacao(item, tribunal)
                     if not pub:
+                        continue
+                    if termos and not _texto_tem_match_monitorado(pub.get("texto_completo") or pub.get("texto_resumo") or "", termos):
                         continue
                     itens_encontrados_nesta_consulta += 1
                     chave = str(item.get("id") or "") or "|".join(
