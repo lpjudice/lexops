@@ -202,7 +202,6 @@ function classifyPublication(
   const text = `${pub.texto_completo ?? ''} ${pub.texto_resumo ?? ''}`
   const normalizedText = normalizeText(text)
   const textTokens = uniqueStrings(normalizedText.match(/[a-z0-9]+/g) ?? [])
-  const textDigits = normalizeDigits(text)
   const exactClientNames = new Set<string>()
   const similarClientNames = new Set<string>()
   const exactTermMatches = new Set<string>()
@@ -217,8 +216,7 @@ function classifyPublication(
 
     const processMatched =
       pub.processo_id === processo.id ||
-      (!!pub.numero_cnj && normalizeDigits(pub.numero_cnj) === processDigits) ||
-      (!!processDigits && textDigits.includes(processDigits))
+      (!!pub.numero_cnj && normalizeDigits(pub.numero_cnj) === processDigits)
 
     if (processMatched) {
       relatedTerms.add(processo.numero_cnj)
@@ -875,10 +873,11 @@ export default function DiarioPage() {
 
               {pub.numero_cnj && (
                 <div className={diarioStyles.cnj}>
+                  <span className={diarioStyles.iaLabel}>CNJ publicado</span>
                   <code>{pub.numero_cnj}</code>
                   {pub.processo_id ? (
                     <span className={diarioStyles.vinculado}>
-                      → {processoNome(pub.processo_id)}
+                      Processo cadastrado no sistema
                     </span>
                   ) : (
                     <button
