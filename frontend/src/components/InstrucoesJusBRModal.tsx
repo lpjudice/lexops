@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import styles from './InstrucoesJusBRModal.module.css'
 import {
+  canSubmitJusbrCapture,
   detectJusbrInputKind,
   extractJusbrTokenFromText,
   formatTokenExpiry,
@@ -87,8 +88,7 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
   const networkStepIdx = allSteps.findIndex(s => s.includes('token'))
 
   function handleConfirm() {
-    const t = extractJusbrTokenFromText(token)
-    if (!t) return
+    if (!canSubmitJusbrCapture(token)) return
     onToken(token)
     onClose()
   }
@@ -119,6 +119,7 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
   const extractedToken = token.trim() ? extractJusbrTokenFromText(token) : ''
   const tokenExpiry = extractedToken ? formatTokenExpiry(extractedToken) : null
   const inputKind = token.trim() ? detectJusbrInputKind(token) : 'unknown'
+  const canSubmit = canSubmitJusbrCapture(token)
 
   return (
     <div className={styles.overlay} onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
@@ -233,7 +234,7 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
           <button
             className={styles.btnConfirm}
             onClick={handleConfirm}
-            disabled={!extractedToken}
+            disabled={!canSubmit}
           >
             Conectar sessão do jus.br
           </button>

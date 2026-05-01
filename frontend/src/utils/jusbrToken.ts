@@ -56,6 +56,11 @@ export function detectJusbrInputKind(raw: string): 'token_json' | 'process_respo
   return 'unknown'
 }
 
+export function canSubmitJusbrCapture(raw: string): boolean {
+  const kind = detectJusbrInputKind(raw)
+  return kind === 'token_json' || kind === 'token' || kind === 'curl' || kind === 'headers'
+}
+
 export function getJusbrTokenMeta(token: string): { exp: number | null; expired: boolean } {
   const payload = decodePayload(token)
   const exp = typeof payload?.exp === 'number' ? payload.exp : null
