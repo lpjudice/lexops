@@ -3,8 +3,11 @@ set -e
 
 echo "[START] Starting Gestor Juridico..."
 
-# Start FastAPI, capturing output
 cd /app/backend
+echo "[START] Applying database migrations..."
+alembic upgrade head
+
+# Start FastAPI, capturing output
 echo "[START] Launching uvicorn..."
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1 2>&1 &
 UVICORN_PID=$!

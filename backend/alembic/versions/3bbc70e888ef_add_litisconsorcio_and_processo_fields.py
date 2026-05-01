@@ -18,22 +18,33 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _has_column(inspector, table_name: str, column_name: str) -> bool:
+    return any(col["name"] == column_name for col in inspector.get_columns(table_name))
+
+
 def upgrade() -> None:
     """Upgrade schema."""
-    # New columns for clientes
-    op.add_column('clientes', sa.Column('incompleto', sa.Boolean(), server_default='false', nullable=False))
-
-    # New columns for processos
-    op.add_column('processos', sa.Column('serventia', sa.String(length=100), nullable=True))
-    op.add_column('processos', sa.Column('foro', sa.String(length=100), nullable=True))
-    op.add_column('processos', sa.Column('sistema_juridico', sa.String(length=20), nullable=True))
-    op.add_column('processos', sa.Column('grau', sa.String(length=20), nullable=True))
-    op.add_column('processos', sa.Column('grau_texto', sa.String(length=100), nullable=True))
-
-    # Litisconsórcio association table (create only if not already present)
     from sqlalchemy import inspect
     bind = op.get_bind()
     inspector = inspect(bind)
+
+    # New columns for clientes
+    if not _has_column(inspector, 'clientes', 'incompleto'):
+        op.add_column('clientes', sa.Column('incompleto', sa.Boolean(), server_default='false', nullable=False))
+
+    # New columns for processos
+    if not _has_column(inspector, 'processos', 'serventia'):
+        op.add_column('processos', sa.Column('serventia', sa.String(length=100), nullable=True))
+    if not _has_column(inspector, 'processos', 'foro'):
+        op.add_column('processos', sa.Column('foro', sa.String(length=100), nullable=True))
+    if not _has_column(inspector, 'processos', 'sistema_juridico'):
+        op.add_column('processos', sa.Column('sistema_juridico', sa.String(length=20), nullable=True))
+    if not _has_column(inspector, 'processos', 'grau'):
+        op.add_column('processos', sa.Column('grau', sa.String(length=20), nullable=True))
+    if not _has_column(inspector, 'processos', 'grau_texto'):
+        op.add_column('processos', sa.Column('grau_texto', sa.String(length=100), nullable=True))
+
+    # Litisconsórcio association table (create only if not already present)
     if 'processo_clientes' not in inspector.get_table_names():
         op.create_table(
             'processo_clientes',

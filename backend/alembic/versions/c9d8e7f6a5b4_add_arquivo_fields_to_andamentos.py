@@ -18,9 +18,17 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column("andamentos_processo", sa.Column("arquivo_nome", sa.String(length=255), nullable=True))
-    op.add_column("andamentos_processo", sa.Column("arquivo_path", sa.String(length=500), nullable=True))
-    op.add_column("andamentos_processo", sa.Column("arquivo_drive_link", sa.String(length=1000), nullable=True))
+    from sqlalchemy import inspect
+
+    inspector = inspect(op.get_bind())
+    cols = {col["name"] for col in inspector.get_columns("andamentos_processo")}
+
+    if "arquivo_nome" not in cols:
+        op.add_column("andamentos_processo", sa.Column("arquivo_nome", sa.String(length=255), nullable=True))
+    if "arquivo_path" not in cols:
+        op.add_column("andamentos_processo", sa.Column("arquivo_path", sa.String(length=500), nullable=True))
+    if "arquivo_drive_link" not in cols:
+        op.add_column("andamentos_processo", sa.Column("arquivo_drive_link", sa.String(length=1000), nullable=True))
 
 
 def downgrade() -> None:

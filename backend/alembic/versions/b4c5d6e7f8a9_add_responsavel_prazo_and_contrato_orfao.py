@@ -17,8 +17,16 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column('prazos', sa.Column('responsavel', sa.String(length=100), nullable=True))
-    op.add_column('honorarios', sa.Column('contrato_orfao', sa.Boolean(), server_default='false', nullable=False))
+    from sqlalchemy import inspect
+
+    inspector = inspect(op.get_bind())
+    prazo_cols = {col["name"] for col in inspector.get_columns('prazos')}
+    honorario_cols = {col["name"] for col in inspector.get_columns('honorarios')}
+
+    if 'responsavel' not in prazo_cols:
+        op.add_column('prazos', sa.Column('responsavel', sa.String(length=100), nullable=True))
+    if 'contrato_orfao' not in honorario_cols:
+        op.add_column('honorarios', sa.Column('contrato_orfao', sa.Boolean(), server_default='false', nullable=False))
 
 
 def downgrade() -> None:
