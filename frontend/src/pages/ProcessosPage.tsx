@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { processosApi } from '../api/processos'
 import { clientesApi } from '../api/clientes'
 import { andamentosApi } from '../api/andamentos'
-import type { ProcessoCreate, EstadoProcesso, FaseProcesso, StatusProcesso, PoloProcesso, SistemaJuridico, GrauProcesso, ProcessoClienteIn, ProcessoJusbrPrefill } from '../api/processos'
+import type { ProcessoCreate, EstadoProcesso, FaseProcesso, StatusProcesso, PoloProcesso, SistemaJuridico, GrauProcesso, OrgaoJulgadorTipo, ProcessoClienteIn, ProcessoJusbrPrefill } from '../api/processos'
 import ClienteCombobox from '../components/ClienteCombobox'
 import ProcessoChat from '../components/ProcessoChat'
 import AndamentosSection from '../components/AndamentosSection'
@@ -47,11 +47,24 @@ const GRAU_OPTS: Array<{ value: GrauProcesso; label: string }> = [
   { value: 'stf', label: 'STF' },
   { value: 'outro', label: 'Outro' },
 ]
+const ORGAO_OPTS: Array<{ value: OrgaoJulgadorTipo; label: string; numeroLabel: string; numeroPlaceholder: string }> = [
+  { value: 'vara', label: 'Vara', numeroLabel: 'Número da vara', numeroPlaceholder: 'Ex: 3' },
+  { value: 'camara', label: 'Câmara', numeroLabel: 'Número da câmara', numeroPlaceholder: 'Ex: 2' },
+  { value: 'turma', label: 'Turma', numeroLabel: 'Número da turma', numeroPlaceholder: 'Ex: 1' },
+  { value: 'pleno', label: 'Pleno', numeroLabel: 'Identificador', numeroPlaceholder: 'Opcional' },
+  { value: 'orgao_especial', label: 'Órgão Especial', numeroLabel: 'Identificador', numeroPlaceholder: 'Opcional' },
+  { value: 'gabinete', label: 'Gabinete/Relatoria', numeroLabel: 'Identificador', numeroPlaceholder: 'Opcional' },
+  { value: 'secao', label: 'Seção', numeroLabel: 'Número da seção', numeroPlaceholder: 'Ex: 1' },
+  { value: 'outro', label: 'Outro', numeroLabel: 'Identificador', numeroPlaceholder: 'Opcional' },
+]
+const ORGAO_LABEL: Record<OrgaoJulgadorTipo, string> = Object.fromEntries(
+  ORGAO_OPTS.map((o) => [o.value, o.label])
+) as Record<OrgaoJulgadorTipo, string>
 
 const EMPTY: ProcessoCreate = {
   numero_cnj: '', cliente_id: '', vara: '', comarca: '',
   estado: 'ES', tribunal: 'TJES', materia: '', fase: undefined, status: 'ativo', objeto: '',
-  serventia: '', foro: '', sistema_juridico: null, grau: null, grau_texto: '',
+  orgao_julgador_tipo: 'vara', serventia: '', foro: '', sistema_juridico: null, grau: null, grau_texto: '',
   clientes_litisconsorcio: [],
 }
 
@@ -107,6 +120,7 @@ export default function ProcessosPage() {
         numero_cnj: data.numero_cnj || prev.numero_cnj,
         estado: data.estado || prev.estado,
         tribunal: data.tribunal ?? prev.tribunal,
+        orgao_julgador_tipo: data.orgao_julgador_tipo ?? prev.orgao_julgador_tipo,
         vara: data.vara ?? prev.vara,
         comarca: data.comarca ?? prev.comarca,
         materia: data.materia ?? prev.materia,
@@ -213,6 +227,21 @@ export default function ProcessosPage() {
   }
 
   const clienteNome = (id: string) => clientes.find((c) => c.id === id)?.nome ?? '—'
+  const orgaoTipo = (tipo?: OrgaoJulgadorTipo | null, numero?: string | null): OrgaoJulgadorTipo | null =>
+    tipo ?? (numero ? 'vara' : null)
+  const orgaoNumeroConfig = (tipo?: OrgaoJulgadorTipo | null) =>
+    ORGAO_OPTS.find((o) => o.value === tipo) ?? ORGAO_OPTS[0]
+  const orgaoJulgadorTexto = (p: { orgao_julgador_tipo?: OrgaoJulgadorTipo | null; vara?: string | null; serventia?: string | null }) => {
+    const tipo = orgaoTipo(p.orgao_julgador_tipo, p.vara)
+    const tipoLabel = tipo ? ORGAO_LABEL[tipo] : null
+    const numero = p.vara?.trim()
+    const prefixo = tipoLabel
+      ? numero && !['pleno', 'orgao_especial', 'gabinete', 'outro'].includes(tipo!)
+        ? `${numero}ª ${tipoLabel}`
+        : tipoLabel
+      : numero || null
+    return [prefixo, p.serventia].filter(Boolean).join(' — ')
+  }
 
   const tribunaisUnicos = useMemo(() => {
     const set = new Set(processos.map((p) => p.tribunal).filter(Boolean) as string[])
@@ -233,9 +262,15 @@ export default function ProcessosPage() {
         (p) => p.ultimo_andamento_data && new Date(p.ultimo_andamento_data) >= limite
       )
     }
-    if (ordemAlfa) lista.sort((a, b) => a.numero_cnj.localeCompare(b.numero_cnj))
+    if (ordemAlfa) {
+      lista.sort((a, b) => {
+        const nomeA = clienteNome(a.cliente_id)
+        const nomeB = clienteNome(b.cliente_id)
+        return nomeA.localeCompare(nomeB, 'pt-BR', { sensitivity: 'base' }) || a.numero_cnj.localeCompare(b.numero_cnj)
+      })
+    }
     return lista
-  }, [processos, filtroTribunal, filtroUltMov, filtroPolo, ordemAlfa])
+  }, [processos, clientes, filtroTribunal, filtroUltMov, filtroPolo, ordemAlfa])
 
   const jusbrStatusLabel = useMemo(() => {
     if (!jusbrSession?.active) return 'jus.br: sessão inativa'
@@ -355,18 +390,26 @@ export default function ProcessosPage() {
 
           <div className={ps.twoCol}>
             <div className={styles.formRow}>
-              <label className={styles.formLabel}>Vara (nº)</label>
-              <input className={styles.input} placeholder="Ex: 3" value={form.vara ?? ''}
-                onChange={(e) => setForm({ ...form, vara: e.target.value })} />
+              <label className={styles.formLabel}>Órgão julgador</label>
+              <select className={styles.input} value={form.orgao_julgador_tipo ?? ''}
+                onChange={(e) => setForm({ ...form, orgao_julgador_tipo: (e.target.value as OrgaoJulgadorTipo) || null })}>
+                <option value="">Não informado</option>
+                {ORGAO_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
             </div>
             <div className={styles.formRow}>
-              <label className={styles.formLabel}>Serventia</label>
-              <input className={styles.input} placeholder="Fazenda Pública, Cível..." value={form.serventia ?? ''}
-                onChange={(e) => setForm({ ...form, serventia: e.target.value })} />
+              <label className={styles.formLabel}>{orgaoNumeroConfig(form.orgao_julgador_tipo).numeroLabel}</label>
+              <input className={styles.input} placeholder={orgaoNumeroConfig(form.orgao_julgador_tipo).numeroPlaceholder} value={form.vara ?? ''}
+                onChange={(e) => setForm({ ...form, vara: e.target.value })} />
             </div>
           </div>
 
           <div className={ps.twoCol}>
+            <div className={styles.formRow}>
+              <label className={styles.formLabel}>Competência / descrição do órgão</label>
+              <input className={styles.input} placeholder="Fazenda Pública, Cível..." value={form.serventia ?? ''}
+                onChange={(e) => setForm({ ...form, serventia: e.target.value })} />
+            </div>
             <div className={styles.formRow}>
               <label className={styles.formLabel}>Comarca</label>
               <input className={styles.input} value={form.comarca ?? ''}
@@ -500,7 +543,7 @@ export default function ProcessosPage() {
             className={`${ps.filtroBtn} ${ordemAlfa ? ps.filtroBtnActive : ''}`}
             onClick={() => setOrdemAlfa((o) => !o)}
           >
-            A–Z
+            Parte A–Z
           </button>
         </div>
       )}
@@ -561,7 +604,7 @@ export default function ProcessosPage() {
                   <button className={styles.btnTable}
                     onClick={() => {
                       setEditando(editando === p.id ? null : p.id)
-                      setEditForm({ numero_cnj: p.numero_cnj, cliente_id: p.cliente_id, vara: p.vara, comarca: p.comarca, estado: p.estado, tribunal: p.tribunal, materia: p.materia, fase: p.fase, status: p.status, objeto: p.objeto, polo: p.polo, serventia: p.serventia, foro: p.foro, sistema_juridico: p.sistema_juridico, grau: p.grau, grau_texto: p.grau_texto })
+                      setEditForm({ numero_cnj: p.numero_cnj, cliente_id: p.cliente_id, orgao_julgador_tipo: p.orgao_julgador_tipo, vara: p.vara, comarca: p.comarca, estado: p.estado, tribunal: p.tribunal, materia: p.materia, fase: p.fase, status: p.status, objeto: p.objeto, polo: p.polo, serventia: p.serventia, foro: p.foro, sistema_juridico: p.sistema_juridico, grau: p.grau, grau_texto: p.grau_texto })
                       setEditLitis((p.clientes_litisconsorcio ?? []).map((cl) => ({ cliente_id: cl.cliente_id, polo: (cl.polo as PoloProcesso | null) ?? null, principal: cl.principal ?? false })))
                       setDocsChatAberto(null)
                       setAndamentosAberto(null)
@@ -580,10 +623,8 @@ export default function ProcessosPage() {
                 <div className={ps.infoPanel}>
                   {(p.vara || p.serventia) && (
                     <div className={ps.infoField}>
-                      <span className={ps.infoLabel}>Vara / Serventia</span>
-                      <span className={ps.infoValue}>
-                        {[p.vara ? `${p.vara}ª Vara` : null, p.serventia].filter(Boolean).join(' — ')}
-                      </span>
+                      <span className={ps.infoLabel}>Órgão julgador</span>
+                      <span className={ps.infoValue}>{orgaoJulgadorTexto(p)}</span>
                     </div>
                   )}
                   {(p.comarca || p.foro) && (
@@ -662,9 +703,25 @@ export default function ProcessosPage() {
                         onChange={(e) => setEditForm({ ...editForm, tribunal: e.target.value })} />
                     </div>
                     <div className={styles.formRow}>
-                      <label className={styles.formLabel}>Vara</label>
+                      <label className={styles.formLabel}>Órgão julgador</label>
+                      <select className={styles.input} value={editForm.orgao_julgador_tipo ?? ''}
+                        onChange={(e) => setEditForm({ ...editForm, orgao_julgador_tipo: (e.target.value as OrgaoJulgadorTipo) || null })}>
+                        <option value="">Não informado</option>
+                        {ORGAO_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div className={ps.twoCol}>
+                    <div className={styles.formRow}>
+                      <label className={styles.formLabel}>{orgaoNumeroConfig(editForm.orgao_julgador_tipo).numeroLabel}</label>
                       <input className={styles.input} value={editForm.vara ?? ''}
+                        placeholder={orgaoNumeroConfig(editForm.orgao_julgador_tipo).numeroPlaceholder}
                         onChange={(e) => setEditForm({ ...editForm, vara: e.target.value })} />
+                    </div>
+                    <div className={styles.formRow}>
+                      <label className={styles.formLabel}>Competência / descrição do órgão</label>
+                      <input className={styles.input} placeholder="Fazenda Pública, Cível..." value={editForm.serventia ?? ''}
+                        onChange={(e) => setEditForm({ ...editForm, serventia: e.target.value })} />
                     </div>
                   </div>
                   <div className={styles.formRow}>
@@ -673,11 +730,6 @@ export default function ProcessosPage() {
                       onChange={(e) => setEditForm({ ...editForm, materia: e.target.value })} />
                   </div>
                   <div className={ps.twoCol}>
-                    <div className={styles.formRow}>
-                      <label className={styles.formLabel}>Serventia</label>
-                      <input className={styles.input} placeholder="Fazenda Pública, Cível..." value={editForm.serventia ?? ''}
-                        onChange={(e) => setEditForm({ ...editForm, serventia: e.target.value })} />
-                    </div>
                     <div className={styles.formRow}>
                       <label className={styles.formLabel}>Foro</label>
                       <input className={styles.input} placeholder="Central, Hely Lopes..." value={editForm.foro ?? ''}

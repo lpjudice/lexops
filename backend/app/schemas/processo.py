@@ -20,6 +20,7 @@ PoloProcesso = Literal[
 
 SistemaJuridico = Literal["esaj", "projudi", "ejud", "pje"]
 GrauProcesso = Literal["1grau", "2grau", "stj", "stf", "outro"]
+OrgaoJulgadorTipo = Literal["vara", "camara", "turma", "pleno", "orgao_especial", "gabinete", "secao", "outro"]
 
 
 class ProcessoClienteIn(BaseModel):
@@ -50,6 +51,7 @@ class ProcessoBase(BaseModel):
     objeto: str | None = None
     polo: PoloProcesso | None = None
     # New fields
+    orgao_julgador_tipo: OrgaoJulgadorTipo | None = None
     serventia: str | None = None
     foro: str | None = None
     sistema_juridico: SistemaJuridico | None = None
@@ -72,6 +74,7 @@ class ProcessoUpdate(BaseModel):
     status: StatusProcesso | None = None
     objeto: str | None = None
     polo: PoloProcesso | None = None
+    orgao_julgador_tipo: OrgaoJulgadorTipo | None = None
     serventia: str | None = None
     foro: str | None = None
     sistema_juridico: SistemaJuridico | None = None

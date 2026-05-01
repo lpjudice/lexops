@@ -57,6 +57,7 @@ class Processo(Base):
     polo: Mapped[str | None] = mapped_column(String(50))
 
     # Expanded form fields
+    orgao_julgador_tipo: Mapped[str | None] = mapped_column(String(30), nullable=True)
     serventia: Mapped[str | None] = mapped_column(String(100), nullable=True)
     foro: Mapped[str | None] = mapped_column(String(100), nullable=True)
     sistema_juridico: Mapped[str | None] = mapped_column(String(20), nullable=True)

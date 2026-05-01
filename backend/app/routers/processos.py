@@ -1,5 +1,6 @@
 import uuid
 import mimetypes
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -30,6 +31,7 @@ class ProcessoJusbrPrefillOut(BaseModel):
     numero_cnj: str
     estado: str
     tribunal: str | None = None
+    orgao_julgador_tipo: str | None = None
     vara: str | None = None
     comarca: str | None = None
     materia: str | None = None
@@ -54,20 +56,69 @@ def _extract_tramitacao_principal(data: dict) -> dict:
     return {}
 
 
-def _split_orgao_julgador(nome: str | None) -> tuple[str | None, str | None]:
+def _split_orgao_julgador(nome: str | None) -> tuple[str | None, str | None, str | None]:
     if not nome:
-        return None, None
+        return None, None, None
     nome = nome.strip()
-    numero_vara = None
+    numero = None
+    tipo = None
     serventia = nome
-    import re
-    match = re.match(r"^(\d+)[ªº]?\s+VARA\s+(.*)$", nome, flags=re.IGNORECASE)
-    if match:
-        numero_vara = match.group(1)
-        serventia = match.group(2).strip()
+    base = nome.split(" - ", 1)[0].strip()
+    patterns = [
+        ("vara", r"^(\d+)[ªº]?\s+VARA\b\s*(.*)$"),
+        ("camara", r"^(\d+)[ªº]?\s+C[ÂA]MARA\b\s*(.*)$"),
+        ("turma", r"^(\d+)[ªº]?\s+TURMA\b\s*(.*)$"),
+        ("secao", r"^(\d+)[ªº]?\s+SE[ÇC][AÃ]O\b\s*(.*)$"),
+    ]
+    for candidate, pattern in patterns:
+        match = re.match(pattern, base, flags=re.IGNORECASE)
+        if match:
+            tipo = candidate
+            numero = match.group(1)
+            serventia = match.group(2).strip() or base
+            break
+    if tipo is None:
+        up = base.upper()
+        if "ÓRGÃO ESPECIAL" in up or "ORGAO ESPECIAL" in up:
+            tipo = "orgao_especial"
+            serventia = base
+        elif "PLENO" in up:
+            tipo = "pleno"
+            serventia = base
+        elif "GABINETE" in up or "DESEMBARGADOR" in up or "RELATOR" in up:
+            tipo = "gabinete"
+            serventia = base
+        elif "CÂMARA" in up or "CAMARA" in up:
+            tipo = "camara"
+            serventia = base
+        elif "TURMA" in up:
+            tipo = "turma"
+            serventia = base
+        elif "VARA" in up:
+            tipo = "vara"
+            serventia = base
+        else:
+            tipo = "outro"
+            serventia = base
     if " - " in serventia:
         serventia = serventia.split(" - ", 1)[0].strip()
-    return numero_vara, serventia or None
+    return tipo, numero, serventia or None
+
+
+def _inferir_grau(tribunal: str | None, orgao_tipo: str | None, orgao_nome: str | None) -> tuple[str | None, str | None]:
+    tribunal_up = str(tribunal or "").upper()
+    if tribunal_up == "STJ":
+        return "stj", None
+    if tribunal_up == "STF":
+        return "stf", None
+    nome_up = str(orgao_nome or "").upper()
+    if orgao_tipo in {"camara", "turma", "pleno", "orgao_especial", "gabinete", "secao"}:
+        return "2grau", None
+    if "2º GRAU" in nome_up or "2 GRAU" in nome_up or "SEGUNDO GRAU" in nome_up:
+        return "2grau", None
+    if orgao_tipo == "vara":
+        return "1grau", None
+    return None, orgao_nome
 
 
 def _extract_comarca_foro(nome: str | None) -> tuple[str | None, str | None]:
@@ -90,7 +141,8 @@ def _map_processo_jusbr_prefill(data: dict, numero_cnj: str) -> ProcessoJusbrPre
     estado = TRIBUNAL_ESTADO_MAP.get(str(tribunal or "").upper(), "outro")
     orgao = tramitacao.get("orgaoJulgador") or {}
     orgao_nome = orgao.get("nome") if isinstance(orgao, dict) else None
-    vara, serventia = _split_orgao_julgador(orgao_nome)
+    orgao_tipo, vara, serventia = _split_orgao_julgador(orgao_nome)
+    grau, grau_texto = _inferir_grau(tribunal, orgao_tipo, orgao_nome)
     comarca, foro = _extract_comarca_foro(orgao_nome)
     assuntos = tramitacao.get("assunto") if isinstance(tramitacao.get("assunto"), list) else []
     classes = tramitacao.get("classe") if isinstance(tramitacao.get("classe"), list) else []
@@ -107,6 +159,7 @@ def _map_processo_jusbr_prefill(data: dict, numero_cnj: str) -> ProcessoJusbrPre
         numero_cnj=numero_cnj,
         estado=estado,
         tribunal=tribunal,
+        orgao_julgador_tipo=orgao_tipo,
         vara=vara,
         comarca=comarca,
         materia=materia,
@@ -114,8 +167,8 @@ def _map_processo_jusbr_prefill(data: dict, numero_cnj: str) -> ProcessoJusbrPre
         serventia=serventia,
         foro=foro,
         sistema_juridico="pje",
-        grau="1grau",
-        grau_texto=None,
+        grau=grau,
+        grau_texto=grau_texto,
         status="ativo" if tramitacao.get("ativo") is not False else "suspenso",
         polo=None,
         cliente_nome_sugerido=parte_ativa,

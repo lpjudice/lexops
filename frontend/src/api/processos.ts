@@ -17,6 +17,7 @@ export type PoloProcesso =
 
 export type SistemaJuridico = 'esaj' | 'projudi' | 'ejud' | 'pje'
 export type GrauProcesso = '1grau' | '2grau' | 'stj' | 'stf' | 'outro'
+export type OrgaoJulgadorTipo = 'vara' | 'camara' | 'turma' | 'pleno' | 'orgao_especial' | 'gabinete' | 'secao' | 'outro'
 
 export interface ProcessoClienteRef {
   cliente_id: string
@@ -38,6 +39,7 @@ export interface Processo {
   status: StatusProcesso
   objeto?: string
   polo?: PoloProcesso
+  orgao_julgador_tipo?: OrgaoJulgadorTipo | null
   serventia?: string | null
   foro?: string | null
   sistema_juridico?: SistemaJuridico | null
@@ -72,6 +74,7 @@ export interface ProcessoCreate {
   status?: StatusProcesso
   objeto?: string
   polo?: PoloProcesso
+  orgao_julgador_tipo?: OrgaoJulgadorTipo | null
   serventia?: string | null
   foro?: string | null
   sistema_juridico?: SistemaJuridico | null
@@ -86,6 +89,7 @@ export interface ProcessoJusbrPrefill {
   estado: EstadoProcesso
   tribunal?: string | null
   vara?: string | null
+  orgao_julgador_tipo?: OrgaoJulgadorTipo | null
   comarca?: string | null
   materia?: string | null
   objeto?: string | null

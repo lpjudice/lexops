@@ -97,6 +97,9 @@ def _run_migrations() -> None:
         conn.execute(text(
             "ALTER TABLE processos ADD COLUMN IF NOT EXISTS andamentos_nao_lidos INTEGER NOT NULL DEFAULT 0"
         ))
+        conn.execute(text(
+            "ALTER TABLE processos ADD COLUMN IF NOT EXISTS orgao_julgador_tipo VARCHAR(30)"
+        ))
         # Andamentos tables
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS andamentos_processo (
