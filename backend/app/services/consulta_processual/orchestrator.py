@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import mimetypes
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,6 +36,10 @@ TRIBUNAIS_CONHECIDOS = {
 }
 
 UPLOADS_DIR = Path("/app/uploads/processos")
+
+
+def _deve_manter_copia_app_uploads() -> bool:
+    return os.getenv("KEEP_JUSBR_LOCAL_UPLOADS", "false").lower() in {"1", "true", "yes"}
 
 
 def _classificar_erro(exc: Exception) -> str:
@@ -111,7 +116,15 @@ def _persistir_documento_jusbr(
                 mimetype or "application/pdf",
             )
         except Exception:
+            logger.exception("Falha ao enviar documento JusBR para o Google Drive")
             drive_link = None
+
+    if drive_link and not _deve_manter_copia_app_uploads():
+        try:
+            destino.unlink(missing_ok=True)
+        except Exception:
+            logger.exception("Falha ao remover copia local temporaria do documento JusBR")
+        return destino.name, None, drive_link
 
     return destino.name, str(destino), drive_link
 
@@ -130,7 +143,9 @@ def _arquivo_local_valido(caminho: str | None) -> bool:
 
 
 def _arquivo_andamento_util(andamento: AndamentoProcesso) -> bool:
-    return bool(andamento.arquivo_drive_link) and _arquivo_local_valido(andamento.arquivo_path)
+    if andamento.arquivo_drive_link:
+        return True
+    return _arquivo_local_valido(andamento.arquivo_path)
 
 
 def _mensagem_sessao_documentos(session_data: dict | None) -> str:

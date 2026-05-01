@@ -13,10 +13,26 @@ Estrutura de pastas por cliente:
     {numero_cnj}/   ← subpasta por processo
 """
 import re
+import os
 from datetime import datetime
 from pathlib import Path
 
-HOST_DIR = Path("/host/clientes")
+_DOCKER_HOST_DIR = Path("/host/clientes")
+_MAC_HOST_DIR = Path("/Users/lucasjudice/Dropbox/Clientes/LexOps")
+
+
+def _base_dir() -> Path:
+    configured = os.getenv("CLIENTES_HOST_DIR")
+    if configured:
+        return Path(configured)
+    if _DOCKER_HOST_DIR.exists():
+        return _DOCKER_HOST_DIR
+    if _MAC_HOST_DIR.exists():
+        return _MAC_HOST_DIR
+    return _DOCKER_HOST_DIR
+
+
+HOST_DIR = _base_dir()
 
 # Mapeamento tipo → nome da pasta
 SUBPASTAS: dict[str, str] = {
@@ -139,7 +155,11 @@ def renomear_pasta_cliente(nome_antigo: str, nome_novo: str) -> bool:
 
 def caminho_host(nome_cliente: str, subfolder: str | None = None) -> str:
     """Returns the macOS host path (for display / clipboard)."""
-    base = f"/Users/lucasjudice/Dropbox/Clientes/LexOps/{_safe_name(nome_cliente)}"
+    base_dir = _base_dir()
+    if str(base_dir) == "/host/clientes":
+        base = f"/Users/lucasjudice/Dropbox/Clientes/LexOps/{_safe_name(nome_cliente)}"
+    else:
+        base = str(base_dir / _safe_name(nome_cliente))
     if subfolder:
         return f"{base}/{subfolder}"
     return base

@@ -59,6 +59,11 @@ def criar_cliente(data: ClienteCreate, db: Session = Depends(get_db)):
         _pasta_dropbox(cliente.nome)
     except Exception:
         pass
+    try:
+        from app.services.google_drive import ensure_cliente_folder
+        ensure_cliente_folder(cliente.nome)
+    except Exception:
+        pass
     return cliente
 
 

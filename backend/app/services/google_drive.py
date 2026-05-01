@@ -9,6 +9,8 @@ When a new LexOps user authenticates, you must share the folder with their Googl
 
 Scopes required: https://www.googleapis.com/auth/drive.file
 """
+import json
+import logging
 import os
 
 import httpx
@@ -16,6 +18,7 @@ from app.services.google_master_tokens import load_master_google_tokens, save_ma
 
 DRIVE_API = "https://www.googleapis.com/upload/drive/v3"
 DRIVE_META = "https://www.googleapis.com/drive/v3"
+logger = logging.getLogger(__name__)
 
 # The shared folder that holds all LexOps uploads
 DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "0AFWG-csptyxuUk9PVA")
@@ -150,6 +153,29 @@ def upload_arquivo(
         tokens = _refresh(tokens)
         link = _do()
     return link
+
+
+def ensure_cliente_folder(nome_cliente: str) -> str | None:
+    """Creates or reuses the root Drive folder for a client."""
+    tokens = _load_tokens()
+    if not tokens:
+        return None
+
+    def _do(tkns: dict) -> str:
+        h = _auth_headers(tkns)
+        folder_id = _get_or_create_subfolder(nome_cliente, DRIVE_FOLDER_ID, h)
+        return f"https://drive.google.com/drive/folders/{folder_id}"
+
+    try:
+        return _do(tokens)
+    except Exception as exc:
+        logger.warning("Falha ao garantir pasta do cliente no Drive: %s", exc)
+        tokens2 = _refresh(tokens)
+        try:
+            return _do(tokens2)
+        except Exception as exc2:
+            logger.warning("Falha ao garantir pasta do cliente no Drive apos refresh: %s", exc2)
+            return None
 
 
 def upload_pdf(
