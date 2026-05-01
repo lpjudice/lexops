@@ -95,6 +95,14 @@ def _get_or_create_subfolder(name: str, parent_id: str, headers: dict) -> str:
     return r.json()["id"]
 
 
+def _is_unauthorized(exc: Exception) -> bool:
+    return (
+        isinstance(exc, httpx.HTTPStatusError)
+        and exc.response is not None
+        and exc.response.status_code == 401
+    )
+
+
 def upload_arquivo(
     conteudo: bytes,
     nome_arquivo: str,
@@ -114,8 +122,8 @@ def upload_arquivo(
     if not tokens:
         return None
 
-    def _do() -> str | None:
-        h = _auth_headers(tokens)
+    def _do(tkns: dict) -> str | None:
+        h = _auth_headers(tkns)
         cliente_folder_id = _get_or_create_subfolder(nome_cliente, DRIVE_FOLDER_ID, h)
         tipo_folder_id = _get_or_create_subfolder(subfolder, cliente_folder_id, h)
         parent_id = tipo_folder_id
@@ -148,11 +156,27 @@ def upload_arquivo(
         fid = r.json().get("id")
         return r.json().get("webViewLink", f"https://drive.google.com/file/d/{fid}/view")
 
-    link = _do()
-    if link is None:
+    try:
+        link = _do(tokens)
+    except Exception as exc:
+        if not _is_unauthorized(exc):
+            logger.warning("Falha ao enviar arquivo ao Drive: %s", exc)
+            return None
         tokens = _refresh(tokens)
-        link = _do()
-    return link
+        try:
+            return _do(tokens)
+        except Exception as exc2:
+            logger.warning("Falha ao enviar arquivo ao Drive apos refresh: %s", exc2)
+            return None
+
+    if link is not None:
+        return link
+    tokens = _refresh(tokens)
+    try:
+        return _do(tokens)
+    except Exception as exc:
+        logger.warning("Falha ao enviar arquivo ao Drive apos refresh: %s", exc)
+        return None
 
 
 def ensure_cliente_folder(nome_cliente: str) -> str | None:
