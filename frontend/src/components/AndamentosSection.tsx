@@ -34,6 +34,15 @@ function formatDateTime(iso: string | null | undefined): string {
   })
 }
 
+function formatDetectedHost(url: string | null | undefined): string | null {
+  if (!url) return null
+  try {
+    return new URL(url).host
+  } catch {
+    return null
+  }
+}
+
 
 function extractApiErrorMessage(error: unknown, fallback: string): string {
   if (axios.isAxiosError(error)) {
@@ -101,6 +110,7 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
     staleTime: 30_000,
   })
   const tokenExpiry = jusbrSession?.expires_at ? formatDateTime(jusbrSession.expires_at) : null
+  const detectedHost = formatDetectedHost(jusbrSession?.detected_url)
 
   const { data: andamentos = [], isLoading, isFetching } = useQuery({
     queryKey: ['andamentos', processoId, offset, fonte],
@@ -267,6 +277,7 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
             Sessão do <strong>jus.br v4</strong> ativa no backend e reutilizada automaticamente para todos os processos.
             {tokenExpiry ? ` Expira em ${tokenExpiry}.` : ''}
             {!jusbrSession?.has_cookies ? ' Para baixar documentos, reconecte com cURL ou headers completos do portal.' : ''}
+            {!jusbrSession?.has_cookies && detectedHost ? ` Captura atual: ${detectedHost}.` : ''}
           </span>
           <button
             className={styles.btnLer}

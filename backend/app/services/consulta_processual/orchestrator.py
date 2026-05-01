@@ -6,6 +6,7 @@ import mimetypes
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 from sqlalchemy.orm import Session
 
@@ -130,6 +131,40 @@ def _arquivo_local_valido(caminho: str | None) -> bool:
 
 def _arquivo_andamento_util(andamento: AndamentoProcesso) -> bool:
     return bool(andamento.arquivo_drive_link) and _arquivo_local_valido(andamento.arquivo_path)
+
+
+def _mensagem_sessao_documentos(session_data: dict | None) -> str:
+    if not session_data:
+        return (
+            "Os andamentos foram sincronizados, mas alguns documentos nao puderam ser baixados. "
+            "Reconecte o jus.br com um cURL ou headers autenticados do portal e sincronize novamente."
+        )
+
+    capture_kind = str(session_data.get("capture_kind") or "")
+    detected_url = str(session_data.get("detected_url") or "").strip()
+    host = urlparse(detected_url).netloc.lower() if detected_url else ""
+
+    if capture_kind == "token_json":
+        return (
+            "Os andamentos foram sincronizados, mas os documentos nao baixaram porque a sessao atual veio so do JSON de token. "
+            "Para documentos, conecte o jus.br usando o cURL ou os headers de uma requisicao autenticada do portal."
+        )
+    if host.startswith("sso.") or "sso.cloud.pje.jus.br" in host:
+        return (
+            "Os andamentos foram sincronizados, mas os documentos nao baixaram porque o cURL atual parece ser da autenticacao SSO, "
+            "e nao de uma chamada do portal de processos. Copie o cURL de uma requisicao em "
+            "portaldeservicos.pdpj.jus.br/api/... e sincronize novamente."
+        )
+    if detected_url and "portaldeservicos.pdpj.jus.br/api" not in detected_url:
+        return (
+            "Os andamentos foram sincronizados, mas os documentos nao baixaram porque a captura atual nao veio de uma chamada "
+            "portaldeservicos.pdpj.jus.br/api/.... Copie o cURL ou os headers de uma requisicao autenticada do portal e tente de novo."
+        )
+    return (
+        "Os andamentos foram sincronizados, mas alguns documentos nao puderam ser baixados. "
+        "O cURL ou os headers atuais nao trouxeram os cookies necessarios da sessao do portal. "
+        "Copie uma requisicao autenticada do proprio portal de processos e sincronize novamente."
+    )
 
 
 async def sincronizar_processo(processo: Processo, db: Session) -> SincronizacaoLog:
@@ -367,11 +402,7 @@ async def sincronizar_processo_jusbr(
     log.novos_andamentos = novos
     log.status = "ok"
     if docs_detectados_sem_arquivo > 0 and session_data and not session_data.get("cookies"):
-        log.mensagem = (
-            "Os andamentos foram sincronizados, mas alguns documentos nao puderam ser baixados. "
-            "Reconecte o jus.br usando o cURL ou os headers de uma requisicao autenticada do portal "
-            "para incluir os cookies da sessao e sincronize novamente."
-        )
+        log.mensagem = _mensagem_sessao_documentos(session_data)
     log.finalizado_em = datetime.now(timezone.utc)
     db.commit()
     return log
