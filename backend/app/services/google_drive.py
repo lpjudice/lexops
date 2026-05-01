@@ -131,7 +131,13 @@ def upload_arquivo(
 
     media_mimetype = mimetype or "application/octet-stream"
     target_mimetype = media_mimetype
-    is_html = media_mimetype.lower() in {"text/html", "application/xhtml+xml"} or nome_lower.endswith((".html", ".htm"))
+    content_preview = conteudo[:512].lstrip().lower()
+    looks_like_html = content_preview.startswith((b"<!doctype", b"<html")) or b"<body" in content_preview
+    is_html = (
+        media_mimetype.lower() in {"text/html", "application/xhtml+xml"}
+        or nome_lower.endswith((".html", ".htm"))
+        or (converter_html_para_google_docs and media_mimetype.lower() == "text/plain" and looks_like_html)
+    )
     if converter_html_para_google_docs and is_html:
         media_mimetype = "text/html"
         target_mimetype = "application/vnd.google-apps.document"

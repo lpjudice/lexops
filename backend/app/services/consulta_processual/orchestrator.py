@@ -168,12 +168,13 @@ def _persistir_documento_jusbr(
         except Exception:
             pass
         try:
+            drive_mimetype = "text/html" if destino.name.lower().endswith((".html", ".htm")) else (mimetype or "application/pdf")
             drive_link = upload_arquivo(
                 conteudo,
                 _nome_drive_documento(destino.name, mimetype),
                 cliente.nome,
                 processo.numero_cnj,
-                mimetype or "application/pdf",
+                drive_mimetype,
                 sub_subfolder="Andamentos",
                 converter_html_para_google_docs=True,
             )
