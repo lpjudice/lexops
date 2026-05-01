@@ -1,0 +1,11 @@
+.git
+.fly-tmp
+frontend/node_modules
+frontend/dist
+node_modules
+dist
+__pycache__
+*.pyc
+.DS_Store
+uploads
+backend/uploads
