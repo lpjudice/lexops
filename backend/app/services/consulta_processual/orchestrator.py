@@ -282,7 +282,19 @@ async def sincronizar_processo_jusbr(
             str(a.data_andamento) if a.data_andamento else None,
             a.descricao,
         )
-        if db.query(AndamentoProcesso).filter(AndamentoProcesso.hash_unico == h).first():
+        existente = db.query(AndamentoProcesso).filter(AndamentoProcesso.hash_unico == h).first()
+        if existente:
+            if not existente.arquivo_nome and a.arquivo_nome and a.arquivo_bytes:
+                arquivo_nome, arquivo_path, arquivo_drive_link = _persistir_documento_jusbr(
+                    processo,
+                    db,
+                    a.arquivo_nome,
+                    a.arquivo_bytes,
+                    a.arquivo_mimetype,
+                )
+                existente.arquivo_nome = arquivo_nome
+                existente.arquivo_path = arquivo_path
+                existente.arquivo_drive_link = arquivo_drive_link
             continue
         arquivo_nome, arquivo_path, arquivo_drive_link = _persistir_documento_jusbr(
             processo,

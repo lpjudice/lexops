@@ -141,11 +141,23 @@ async def _baixar_documento_movimento(
     matched_base: str,
     processo_id: str,
     movimento: dict,
+    documentos_por_id: dict[str, dict] | None = None,
 ) -> tuple[str, bytes, str | None] | None:
     doc = next(
         (movimento.get(key) for key in ("documento", "doc", "arquivo") if isinstance(movimento.get(key), dict)),
         None,
     )
+    doc_id = next(
+        (
+            str(movimento.get(key)).strip()
+            for key in ("idDocumento", "documentoId", "id_documento")
+            if movimento.get(key)
+        ),
+        "",
+    )
+    doc_meta = (documentos_por_id or {}).get(doc_id) if doc_id else None
+    if not isinstance(doc, dict):
+        doc = doc_meta if isinstance(doc_meta, dict) else None
     if not isinstance(doc, dict):
         return None
 
@@ -161,15 +173,18 @@ async def _baixar_documento_movimento(
     candidatos: list[str] = []
     _coletar_urls_documento(doc, matched_base, candidatos)
     _coletar_urls_documento(movimento, matched_base, candidatos)
+    if isinstance(doc_meta, dict):
+        _coletar_urls_documento(doc_meta, matched_base, candidatos)
 
-    doc_id = next(
-        (
-            str(doc.get(key)).strip()
-            for key in ("id", "documentoId", "idDocumento", "uuid", "chave", "key")
-            if doc.get(key)
-        ),
-        "",
-    )
+    if not doc_id:
+        doc_id = next(
+            (
+                str(doc.get(key)).strip()
+                for key in ("id", "documentoId", "idDocumento", "uuid", "chave", "key")
+                if doc.get(key)
+            ),
+            "",
+        )
     if doc_id:
         for url in (
             f"{matched_base}/documentos/{doc_id}",
@@ -212,6 +227,73 @@ async def _baixar_documento_movimento(
         return nome, resp.content, content_type or None
 
     return None
+
+
+def _indexar_documentos_por_id(payload: object) -> dict[str, dict]:
+    resultado: dict[str, dict] = {}
+
+    def visit(obj: object) -> None:
+        if isinstance(obj, dict):
+            docs = obj.get("documentos")
+            if isinstance(docs, list):
+                for item in docs:
+                    if not isinstance(item, dict):
+                        continue
+                    href = item.get("hrefBinario") or item.get("hrefTexto")
+                    ident = ""
+                    if isinstance(href, str):
+                        match = re.search(r"/documentos/([^/]+)/(?:binario|texto)", href)
+                        if match:
+                            ident = match.group(1)
+                    if not ident:
+                        ident = next(
+                            (
+                                str(item.get(key)).strip()
+                                for key in ("idDocumento", "documentoId", "id", "uuid", "chave", "key")
+                                if item.get(key)
+                            ),
+                            "",
+                        )
+                    if ident and ident not in resultado:
+                        resultado[ident] = item
+            for value in obj.values():
+                visit(value)
+        elif isinstance(obj, list):
+            for item in obj:
+                visit(item)
+
+    visit(payload)
+    return resultado
+
+
+async def _buscar_documentos_processo(
+    client: httpx.AsyncClient,
+    headers: dict[str, str],
+    numero_cnj: str,
+) -> dict[str, dict]:
+    candidatos = [
+        f"https://portaldeservicos.pdpj.jus.br/api/v2/processos/{numero_cnj}",
+        f"https://portaldeservicos.pdpj.jus.br/api/v2/processos/{normalizar_cnj(numero_cnj)}",
+    ]
+    params = {"incluirDocumentos": "true"}
+
+    for url in candidatos:
+        try:
+            resp = await client.get(url, headers=headers, params=params)
+        except Exception:
+            continue
+        if resp.status_code in (401, 403):
+            raise PermissionError("Token expirado ao buscar documentos do jus.br. Renove a sessão.")
+        if resp.status_code != 200:
+            continue
+        try:
+            payload = resp.json()
+        except Exception:
+            continue
+        docs = _indexar_documentos_por_id(payload)
+        if docs:
+            return docs
+    return {}
 
 
 def _jwt_exp(token: str) -> datetime | None:
@@ -417,6 +499,7 @@ async def buscar_via_pdpj(
     async with httpx.AsyncClient(timeout=20) as client:
         matched_base = next(iter(session_data.get("api_bases") or []), _BASES[0])
         inline_movimentos: list[dict] = _extract_inline_movimentos(processo_data) if processo_data else []
+        documentos_por_id = await _buscar_documentos_processo(client, headers, numero_cnj)
 
         if not processo_data:
             logger.warning("PDPJ: process %s not found after probing all endpoints", numero_cnj)
@@ -473,7 +556,14 @@ async def buscar_via_pdpj(
             )
             desc = _movimento_desc(m)
             tipo = _movimento_tipo(m)
-            arquivo = await _baixar_documento_movimento(client, headers, matched_base, processo_id, m)
+            arquivo = await _baixar_documento_movimento(
+                client,
+                headers,
+                matched_base,
+                processo_id,
+                m,
+                documentos_por_id=documentos_por_id,
+            )
 
             for doc_key in ("documento", "doc", "arquivo"):
                 doc = m.get(doc_key)

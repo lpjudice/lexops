@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+import mimetypes
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -112,9 +113,10 @@ def abrir_arquivo_andamento(andamento_id: uuid.UUID, db: Session = Depends(get_d
     if andamento.arquivo_path:
         caminho = Path(andamento.arquivo_path)
         if caminho.exists():
+            media_type = mimetypes.guess_type(str(caminho))[0] or "application/octet-stream"
             return FileResponse(
                 caminho,
-                media_type="application/pdf",
+                media_type=media_type,
                 filename=andamento.arquivo_nome or caminho.name,
             )
 
