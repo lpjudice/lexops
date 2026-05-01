@@ -35,6 +35,7 @@ export interface JusbrSessionStatus {
   detected_url: string | null
   capture_kind: string | null
   has_refresh_token: boolean
+  has_cookies: boolean
 }
 
 export const andamentosApi = {

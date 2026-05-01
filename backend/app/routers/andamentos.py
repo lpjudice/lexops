@@ -110,6 +110,9 @@ def abrir_arquivo_andamento(andamento_id: uuid.UUID, db: Session = Depends(get_d
     if not andamento:
         raise HTTPException(status_code=404, detail="Andamento não encontrado")
 
+    if andamento.arquivo_drive_link:
+        return RedirectResponse(andamento.arquivo_drive_link)
+
     if andamento.arquivo_path:
         caminho = Path(andamento.arquivo_path)
         if caminho.exists():
@@ -119,9 +122,6 @@ def abrir_arquivo_andamento(andamento_id: uuid.UUID, db: Session = Depends(get_d
                 media_type=media_type,
                 filename=andamento.arquivo_nome or caminho.name,
             )
-
-    if andamento.arquivo_drive_link:
-        return RedirectResponse(andamento.arquivo_drive_link)
 
     raise HTTPException(status_code=404, detail="Arquivo não encontrado para este andamento")
 
@@ -251,18 +251,14 @@ def obter_sessao_jusbr():
 
 @router.post("/jusbr/session")
 def configurar_sessao_jusbr(body: JusBRSessionBody):
-    from app.services.consulta_processual.jusbr_session import save_session_from_capture
+    from app.services.consulta_processual.jusbr_session import save_session_from_capture, session_status
 
     try:
-        data = save_session_from_capture(body.capture)
+        save_session_from_capture(body.capture)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
-    return {
-        "active": True,
-        "expires_at": data.get("expires_at"),
-        "detected_url": data.get("detected_url"),
-    }
+    return session_status()
 
 
 @router.delete("/jusbr/session")

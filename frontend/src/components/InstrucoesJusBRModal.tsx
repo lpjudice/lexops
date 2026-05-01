@@ -29,8 +29,8 @@ const STEPS: Record<OS, Record<Browser, StepGroup>> = {
         'Abra as ferramentas do desenvolvedor:<br><kbd>Cmd ⌘</kbd> + <kbd>Option ⌥</kbd> + <kbd>I</kbd>',
         'Clique na aba <strong>Network</strong> (Rede) e marque <strong>Preserve log</strong>.',
         'No portal, faça uma ação que carregue seus dados. O melhor alvo agora é a requisição de <strong>token</strong> ou qualquer chamada autenticada do portal.',
-        'Na lista de requisições, procure primeiro por <strong>token</strong>. Se não achar, use uma requisição autenticada do portal e copie o <strong>cURL</strong>. Não precisa mais procurar manualmente por Bearer.',
-        'Você pode colar abaixo o <strong>JSON do token</strong>, o <strong>cURL</strong>, os <strong>headers</strong> ou o <strong>token puro</strong>. O app extrai tudo automaticamente.',
+        'Para sincronizar <strong>documentos de verdade</strong>, prefira copiar o <strong>cURL</strong> ou os <strong>headers</strong> de uma requisição autenticada do portal, porque isso preserva os cookies da sessão.',
+        'Você pode colar abaixo o <strong>cURL</strong>, os <strong>headers</strong>, o <strong>JSON do token</strong> ou o <strong>token puro</strong>. O app extrai tudo automaticamente, mas o token sozinho pode não bastar para baixar documentos.',
       ],
       after: [],
     },
@@ -41,8 +41,8 @@ const STEPS: Record<OS, Record<Browser, StepGroup>> = {
         'Abra as ferramentas do desenvolvedor:<br><kbd>Cmd ⌘</kbd> + <kbd>Option ⌥</kbd> + <kbd>I</kbd>',
         'Clique na aba <strong>Rede</strong> e marque <strong>Persistir logs</strong>, se disponível.',
         'No portal, faça uma ação que carregue seus dados. O melhor alvo agora é a requisição de <strong>token</strong> ou qualquer chamada autenticada do portal.',
-        'Na lista de requisições, procure primeiro por <strong>token</strong>. Se não achar, use uma requisição autenticada do portal e copie o <strong>cURL</strong>. Não precisa mais procurar manualmente por Bearer.',
-        'Você pode colar abaixo o <strong>JSON do token</strong>, o <strong>cURL</strong>, os <strong>headers</strong> ou o <strong>token puro</strong>. O app extrai tudo automaticamente.',
+        'Para sincronizar <strong>documentos de verdade</strong>, prefira copiar o <strong>cURL</strong> ou os <strong>headers</strong> de uma requisição autenticada do portal, porque isso preserva os cookies da sessão.',
+        'Você pode colar abaixo o <strong>cURL</strong>, os <strong>headers</strong>, o <strong>JSON do token</strong> ou o <strong>token puro</strong>. O app extrai tudo automaticamente, mas o token sozinho pode não bastar para baixar documentos.',
       ],
       after: [],
     },
@@ -55,8 +55,8 @@ const STEPS: Record<OS, Record<Browser, StepGroup>> = {
         'Abra as ferramentas do desenvolvedor:<br><kbd>F12</kbd> ou <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd>',
         'Clique na aba <strong>Network</strong> (Rede) e marque <strong>Preserve log</strong>.',
         'No portal, faça uma ação que carregue seus dados. O melhor alvo agora é a requisição de <strong>token</strong> ou qualquer chamada autenticada do portal.',
-        'Na lista de requisições, procure primeiro por <strong>token</strong>. Se não achar, use uma requisição autenticada do portal e copie o <strong>cURL</strong>. Não precisa mais procurar manualmente por Bearer.',
-        'Você pode colar abaixo o <strong>JSON do token</strong>, o <strong>cURL</strong>, os <strong>headers</strong> ou o <strong>token puro</strong>. O app extrai tudo automaticamente.',
+        'Para sincronizar <strong>documentos de verdade</strong>, prefira copiar o <strong>cURL</strong> ou os <strong>headers</strong> de uma requisição autenticada do portal, porque isso preserva os cookies da sessão.',
+        'Você pode colar abaixo o <strong>cURL</strong>, os <strong>headers</strong>, o <strong>JSON do token</strong> ou o <strong>token puro</strong>. O app extrai tudo automaticamente, mas o token sozinho pode não bastar para baixar documentos.',
       ],
       after: [],
     },
@@ -67,8 +67,8 @@ const STEPS: Record<OS, Record<Browser, StepGroup>> = {
         'Abra as ferramentas do desenvolvedor:<br><kbd>F12</kbd> ou <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd>',
         'Clique na aba <strong>Rede</strong> e marque <strong>Persistir logs</strong>, se disponível.',
         'No portal, faça uma ação que carregue seus dados. O melhor alvo agora é a requisição de <strong>token</strong> ou qualquer chamada autenticada do portal.',
-        'Na lista de requisições, procure primeiro por <strong>token</strong>. Se não achar, use uma requisição autenticada do portal e copie o <strong>cURL</strong>. Não precisa mais procurar manualmente por Bearer.',
-        'Você pode colar abaixo o <strong>JSON do token</strong>, o <strong>cURL</strong>, os <strong>headers</strong> ou o <strong>token puro</strong>. O app extrai tudo automaticamente.',
+        'Para sincronizar <strong>documentos de verdade</strong>, prefira copiar o <strong>cURL</strong> ou os <strong>headers</strong> de uma requisição autenticada do portal, porque isso preserva os cookies da sessão.',
+        'Você pode colar abaixo o <strong>cURL</strong>, os <strong>headers</strong>, o <strong>JSON do token</strong> ou o <strong>token puro</strong>. O app extrai tudo automaticamente, mas o token sozinho pode não bastar para baixar documentos.',
       ],
       after: [],
     },
@@ -100,7 +100,7 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
       const kind = detectJusbrInputKind(text)
       setClipboardMsg(
         kind === 'token_json'
-          ? 'JSON de token detectado. Esse é o formato preferido para manter a sessão do jus.br.'
+          ? 'JSON de token detectado. Ele conecta a sessão, mas para baixar documentos o ideal continua sendo colar um cURL ou headers autenticados.'
           : kind === 'process_response'
           ? 'Resposta de /processos detectada. Ela ajuda no diagnóstico, mas não conecta a sessão. Cole o JSON da requisição token.'
           : kind === 'curl'
@@ -128,7 +128,7 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
             <span className={styles.headerIcon}>🔑</span>
             <div>
               <h2 className={styles.title}>Conectar jus.br</h2>
-              <p className={styles.subtitle}>v4: use o JSON de token para conectar a sessão; resposta de /processos não substitui o token</p>
+              <p className={styles.subtitle}>v4: prefira cURL ou headers autenticados para baixar documentos; resposta de /processos não substitui a sessão</p>
             </div>
           </div>
           <button className={styles.btnClose} onClick={onClose}>×</button>
@@ -161,8 +161,8 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
             <div className={styles.networkHint}>
               <span className={styles.networkHintIcon}>💡</span>
               <span>
-                O melhor formato agora é o <strong>JSON da resposta de token</strong> com <strong>access_token</strong> e <strong>refresh_token</strong>.
-                A resposta de <strong>/processos</strong> nao conecta a sessao sozinha; ela serve apenas para diagnostico.
+                Para baixar <strong>documentos reais</strong>, o melhor formato agora é o <strong>cURL</strong> ou os <strong>headers</strong> de uma requisição autenticada do portal.
+                O <strong>JSON de token</strong> continua aceito, mas pode sincronizar andamentos sem conseguir abrir o arquivo.
               </span>
             </div>
           )}
@@ -203,7 +203,7 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
               </p>
             )}
             <p className={styles.tokenHint}>
-              Quando houver <strong>refresh_token</strong>, o app tenta renovar a sessão automaticamente para reutilizar em todos os processos. Se você colar uma resposta de <strong>/processos</strong>, o botão continuará desabilitado de propósito.
+              Quando houver <strong>refresh_token</strong>, o app tenta renovar a sessão automaticamente. Para os <strong>documentos</strong>, prefira uma captura com <strong>cookies</strong> do portal, como cURL ou headers completos.
             </p>
             {inputKind !== 'unknown' && (
               <p className={styles.tokenHint}>

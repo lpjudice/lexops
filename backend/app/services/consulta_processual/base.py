@@ -29,6 +29,7 @@ class Andamento:
     arquivo_nome: str | None = None
     arquivo_bytes: bytes | None = None
     arquivo_mimetype: str | None = None
+    documento_detectado: bool = False
 
 
 class BaseScraper:

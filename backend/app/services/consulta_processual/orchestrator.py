@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import mimetypes
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,7 +16,7 @@ from app.services.google_drive import upload_arquivo
 from app.services.pasta_cliente import pasta_processo as pasta_cliente_processo, salvar_arquivo
 
 from .datajud import buscar_via_datajud
-from .pdpj import buscar_via_pdpj
+from .pdpj import _conteudo_documento_valido, buscar_via_pdpj
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,7 @@ def _persistir_documento_jusbr(
     nome_arquivo: str | None,
     conteudo: bytes | None,
     mimetype: str | None,
+    caminho_atual: str | None = None,
 ) -> tuple[str | None, str | None, str | None]:
     if not nome_arquivo or not conteudo:
         return None, None, None
@@ -86,7 +88,10 @@ def _persistir_documento_jusbr(
     if (mimetype or "").lower() == "application/pdf" and not nome_limpo.lower().endswith(".pdf"):
         nome_limpo = f"{nome_limpo}.pdf"
 
-    destino = _caminho_documento_unico(processo.id, nome_limpo)
+    destino = Path(caminho_atual) if caminho_atual else _caminho_documento_unico(processo.id, nome_limpo)
+    if destino.name != nome_limpo:
+        destino = _caminho_documento_unico(processo.id, nome_limpo)
+    destino.parent.mkdir(parents=True, exist_ok=True)
     destino.write_bytes(conteudo)
 
     drive_link = None
@@ -108,6 +113,23 @@ def _persistir_documento_jusbr(
             drive_link = None
 
     return destino.name, str(destino), drive_link
+
+
+def _arquivo_local_valido(caminho: str | None) -> bool:
+    if not caminho:
+        return False
+    try:
+        path = Path(caminho)
+        if not path.exists() or not path.is_file():
+            return False
+        content_type = mimetypes.guess_type(str(path))[0] or path.suffix
+        return _conteudo_documento_valido(path.read_bytes(), content_type)
+    except Exception:
+        return False
+
+
+def _arquivo_andamento_util(andamento: AndamentoProcesso) -> bool:
+    return bool(andamento.arquivo_drive_link) and _arquivo_local_valido(andamento.arquivo_path)
 
 
 async def sincronizar_processo(processo: Processo, db: Session) -> SincronizacaoLog:
@@ -276,6 +298,7 @@ async def sincronizar_processo_jusbr(
         return log
 
     novos = 0
+    docs_detectados_sem_arquivo = 0
     for a in raw_andamentos:
         h = AndamentoProcesso.calcular_hash(
             str(processo.id),
@@ -284,17 +307,21 @@ async def sincronizar_processo_jusbr(
         )
         existente = db.query(AndamentoProcesso).filter(AndamentoProcesso.hash_unico == h).first()
         if existente:
-            if not existente.arquivo_nome and a.arquivo_nome and a.arquivo_bytes:
+            precisa_reprocessar = not _arquivo_andamento_util(existente)
+            if precisa_reprocessar and a.arquivo_nome and a.arquivo_bytes:
                 arquivo_nome, arquivo_path, arquivo_drive_link = _persistir_documento_jusbr(
                     processo,
                     db,
                     a.arquivo_nome,
                     a.arquivo_bytes,
                     a.arquivo_mimetype,
+                    caminho_atual=existente.arquivo_path,
                 )
                 existente.arquivo_nome = arquivo_nome
                 existente.arquivo_path = arquivo_path
                 existente.arquivo_drive_link = arquivo_drive_link
+            elif precisa_reprocessar and a.documento_detectado:
+                docs_detectados_sem_arquivo += 1
             continue
         arquivo_nome, arquivo_path, arquivo_drive_link = _persistir_documento_jusbr(
             processo,
@@ -317,6 +344,8 @@ async def sincronizar_processo_jusbr(
             lido=False,
             notificado=False,
         ))
+        if a.documento_detectado and not arquivo_drive_link:
+            docs_detectados_sem_arquivo += 1
         novos += 1
 
     if novos > 0:
@@ -337,6 +366,12 @@ async def sincronizar_processo_jusbr(
     processo.ultimo_check = datetime.now(timezone.utc)
     log.novos_andamentos = novos
     log.status = "ok"
+    if docs_detectados_sem_arquivo > 0 and session_data and not session_data.get("cookies"):
+        log.mensagem = (
+            "Os andamentos foram sincronizados, mas alguns documentos nao puderam ser baixados. "
+            "Reconecte o jus.br usando o cURL ou os headers de uma requisicao autenticada do portal "
+            "para incluir os cookies da sessao e sincronize novamente."
+        )
     log.finalizado_em = datetime.now(timezone.utc)
     db.commit()
     return log

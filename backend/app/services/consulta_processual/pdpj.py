@@ -135,6 +135,40 @@ def _nome_documento(doc: dict, fallback: str) -> str:
     return nome or fallback
 
 
+def _conteudo_documento_valido(content: bytes, content_type: str | None) -> bool:
+    if not content:
+        return False
+    ct = (content_type or "").lower()
+    prefix = content[:400].decode("utf-8", errors="ignore").lower()
+
+    if "application/json" in ct:
+        return False
+    if "text/html" in ct and "portal de serviços do poder judiciário" in prefix:
+        return False
+    if '"code":500' in prefix or "503 service temporarily unavailable" in prefix:
+        return False
+    return True
+
+
+def _movimento_tem_documento(
+    movimento: dict,
+    documentos_por_id: dict[str, dict] | None = None,
+) -> bool:
+    if any(isinstance(movimento.get(key), dict) for key in ("documento", "doc", "arquivo")):
+        return True
+    doc_id = next(
+        (
+            str(movimento.get(key)).strip()
+            for key in ("idDocumento", "documentoId", "id_documento")
+            if movimento.get(key)
+        ),
+        "",
+    )
+    if doc_id and isinstance((documentos_por_id or {}).get(doc_id), dict):
+        return True
+    return False
+
+
 async def _baixar_documento_movimento(
     client: httpx.AsyncClient,
     headers: dict[str, str],
@@ -219,6 +253,9 @@ async def _baixar_documento_movimento(
                 if embutido_payload:
                     nome = _nome_documento(doc, fallback_nome)
                     return nome, embutido_payload[0], embutido_payload[1] or "application/pdf"
+            continue
+
+        if not _conteudo_documento_valido(resp.content, content_type):
             continue
 
         nome = _nome_documento(doc, fallback_nome)
@@ -556,6 +593,7 @@ async def buscar_via_pdpj(
             )
             desc = _movimento_desc(m)
             tipo = _movimento_tipo(m)
+            documento_detectado = _movimento_tem_documento(m, documentos_por_id)
             arquivo = await _baixar_documento_movimento(
                 client,
                 headers,
@@ -582,6 +620,7 @@ async def buscar_via_pdpj(
                     arquivo_nome=arquivo[0] if arquivo else None,
                     arquivo_bytes=arquivo[1] if arquivo else None,
                     arquivo_mimetype=arquivo[2] if arquivo else None,
+                    documento_detectado=documento_detectado,
                 ))
 
         if andamentos:

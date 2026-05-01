@@ -70,13 +70,17 @@ function SyncBanner({ result, ultimoAndamentoPre }: {
       <span className={styles.bannerIcon}>✓</span>
       <span>
         {novos_andamentos} novo{novos_andamentos > 1 ? 's' : ''} andamento{novos_andamentos > 1 ? 's' : ''} encontrado{novos_andamentos > 1 ? 's' : ''}.
+        {mensagem ? ` ${mensagem}` : ''}
       </span>
     </div>
   )
   return (
     <div className={`${styles.banner} ${styles.bannerNeutro}`}>
       <span className={styles.bannerIcon}>✓</span>
-      <span>{temDataRef ? `Nenhum andamento novo desde ${dataRef}.` : 'Nenhum andamento novo.'}</span>
+      <span>
+        {temDataRef ? `Nenhum andamento novo desde ${dataRef}.` : 'Nenhum andamento novo.'}
+        {mensagem ? ` ${mensagem}` : ''}
+      </span>
     </div>
   )
 }
@@ -254,7 +258,7 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
       {/* jus.br token info bar */}
       {fonte === 'jusbr' && !jusbrAtivo && !isSyncing && !syncData && (
         <div className={styles.jusBRInfo}>
-          <span>O modo <strong>jus.br v4</strong> usa uma sessão compartilhada do portal. Conecte com o <strong>JSON de token</strong>; colar a resposta de <strong>/processos</strong> não ativa o botão.</span>
+          <span>O modo <strong>jus.br v4</strong> usa uma sessão compartilhada do portal. Para baixar <strong>documentos reais</strong>, conecte de preferência com <strong>cURL</strong> ou <strong>headers</strong> autenticados; a resposta de <strong>/processos</strong> não ativa o botão.</span>
         </div>
       )}
       {fonte === 'jusbr' && jusbrAtivo && !isSyncing && !syncData && (
@@ -262,6 +266,7 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
           <span>
             Sessão do <strong>jus.br v4</strong> ativa no backend e reutilizada automaticamente para todos os processos.
             {tokenExpiry ? ` Expira em ${tokenExpiry}.` : ''}
+            {!jusbrSession?.has_cookies ? ' Para baixar documentos, reconecte com cURL ou headers completos do portal.' : ''}
           </span>
           <button
             className={styles.btnLer}

@@ -324,6 +324,7 @@ def session_status() -> dict:
             "detected_url": None,
             "capture_kind": None,
             "has_refresh_token": False,
+            "has_cookies": False,
         }
     return {
         "active": True,
@@ -331,4 +332,5 @@ def session_status() -> dict:
         "detected_url": data.get("detected_url"),
         "capture_kind": data.get("capture_kind"),
         "has_refresh_token": bool(data.get("refresh_token")),
+        "has_cookies": bool(data.get("cookies")),
     }
