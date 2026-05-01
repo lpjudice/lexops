@@ -1,4 +1,5 @@
 import uuid
+import mimetypes
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -304,22 +305,38 @@ async def upload_pdf(
     content = await file.read()
     dest.write_bytes(content)
 
+    drive_link = None
+
     # Copia para pasta Dropbox e Google Drive do cliente
     try:
         from app.models.cliente import Cliente
-        from app.services.pasta_cliente import pasta_processo as _pasta_proc, salvar_arquivo
         cliente = db.query(Cliente).filter(Cliente.id == processo.cliente_id).first()
         if cliente and processo.numero_cnj:
-            salvar_arquivo(_pasta_proc(cliente.nome, processo.numero_cnj), file.filename, content)
+            try:
+                from app.services.pasta_cliente import pasta_processo as _pasta_proc, salvar_arquivo
+                pasta_local = _pasta_proc(cliente.nome, processo.numero_cnj)
+                if pasta_local.exists():
+                    pasta_local = pasta_local / "Documentos"
+                    pasta_local.mkdir(parents=True, exist_ok=True)
+                salvar_arquivo(pasta_local, file.filename, content)
+            except Exception:
+                pass
             try:
                 from app.services.google_drive import upload_arquivo
-                upload_arquivo(content, file.filename, cliente.nome, processo.numero_cnj)
+                drive_link = upload_arquivo(
+                    content,
+                    file.filename,
+                    cliente.nome,
+                    processo.numero_cnj,
+                    file.content_type or mimetypes.guess_type(file.filename)[0] or "application/pdf",
+                    sub_subfolder="Documentos",
+                )
             except Exception:
                 pass
     except Exception:
         pass
 
-    return {"filename": file.filename, "size": len(content)}
+    return {"filename": file.filename, "size": len(content), "drive_link": drive_link}
 
 
 @router.get("/{processo_id}/documentos")

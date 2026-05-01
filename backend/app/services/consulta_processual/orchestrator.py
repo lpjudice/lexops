@@ -7,6 +7,7 @@ import os
 import re
 from datetime import date, datetime, timezone
 from pathlib import Path
+from typing import Callable
 from urllib.parse import urlparse
 
 from sqlalchemy.orm import Session
@@ -21,6 +22,7 @@ from .datajud import buscar_via_datajud
 from .pdpj import _conteudo_documento_valido, buscar_via_pdpj
 
 logger = logging.getLogger(__name__)
+ProgressCallback = Callable[[dict], None]
 
 # CNJ format: NNNNNNN-DD.AAAA.J.TT.OOOO
 _CNJ_RE = re.compile(r"^\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}$")
@@ -368,7 +370,12 @@ async def sincronizar_processo_jusbr(
     db: Session,
     token: str | None = None,
     session_data: dict | None = None,
+    progress_callback: ProgressCallback | None = None,
 ) -> SincronizacaoLog:
+    def progress(**payload) -> None:
+        if progress_callback:
+            progress_callback(payload)
+
     log = SincronizacaoLog(
         processo_id=processo.id,
         tribunal=processo.tribunal,
@@ -397,6 +404,7 @@ async def sincronizar_processo_jusbr(
         return log
 
     try:
+        progress(stage="consultando", message="Consultando o jus.br...")
         raw_andamentos = await buscar_via_pdpj(
             processo.numero_cnj,
             tribunal,
@@ -425,8 +433,19 @@ async def sincronizar_processo_jusbr(
         db.commit()
         return log
 
+    docs_total = sum(1 for a in raw_andamentos if a.arquivo_nome or a.documento_detectado)
+    progress(
+        stage="processando",
+        message=f"{len(raw_andamentos)} andamento(s) encontrados. Preparando documentos...",
+        total=docs_total,
+        processed=0,
+        uploaded=0,
+    )
+
     novos = 0
     docs_detectados_sem_arquivo = 0
+    docs_processados = 0
+    docs_enviados = 0
     sequenciais_docs = _sequenciais_documentos(processo, raw_andamentos)
     for a in raw_andamentos:
         h = AndamentoProcesso.calcular_hash(
@@ -438,6 +457,14 @@ async def sincronizar_processo_jusbr(
         if existente:
             precisa_reprocessar = not _arquivo_andamento_util(existente)
             if precisa_reprocessar and a.arquivo_nome and a.arquivo_bytes:
+                docs_processados += 1
+                progress(
+                    stage="documentos",
+                    message=f"Enviando documento {docs_processados}/{docs_total}: {a.arquivo_nome}",
+                    total=docs_total,
+                    processed=docs_processados,
+                    uploaded=docs_enviados,
+                )
                 arquivo_nome, arquivo_path, arquivo_drive_link = _persistir_documento_jusbr(
                     processo,
                     db,
@@ -453,9 +480,35 @@ async def sincronizar_processo_jusbr(
                 existente.arquivo_nome = arquivo_nome
                 existente.arquivo_path = arquivo_path
                 existente.arquivo_drive_link = arquivo_drive_link
+                if arquivo_drive_link:
+                    docs_enviados += 1
             elif precisa_reprocessar and a.documento_detectado:
+                docs_processados += 1
                 docs_detectados_sem_arquivo += 1
+            elif a.arquivo_nome or a.documento_detectado:
+                docs_processados += 1
+                if existente.arquivo_drive_link:
+                    docs_enviados += 1
+            if a.arquivo_nome or a.documento_detectado:
+                progress(
+                    stage="documentos",
+                    message=f"Documentos processados: {docs_processados}/{docs_total}",
+                    total=docs_total,
+                    processed=docs_processados,
+                    uploaded=docs_enviados,
+                )
             continue
+        if a.arquivo_nome and a.arquivo_bytes:
+            docs_processados += 1
+            progress(
+                stage="documentos",
+                message=f"Enviando documento {docs_processados}/{docs_total}: {a.arquivo_nome}",
+                total=docs_total,
+                processed=docs_processados,
+                uploaded=docs_enviados,
+            )
+        elif a.documento_detectado:
+            docs_processados += 1
         arquivo_nome, arquivo_path, arquivo_drive_link = _persistir_documento_jusbr(
             processo,
             db,
@@ -483,6 +536,16 @@ async def sincronizar_processo_jusbr(
         ))
         if a.documento_detectado and not arquivo_drive_link:
             docs_detectados_sem_arquivo += 1
+        if arquivo_drive_link:
+            docs_enviados += 1
+        if a.arquivo_nome or a.documento_detectado:
+            progress(
+                stage="documentos",
+                message=f"Documentos processados: {docs_processados}/{docs_total}",
+                total=docs_total,
+                processed=docs_processados,
+                uploaded=docs_enviados,
+            )
         novos += 1
 
     if novos > 0:
@@ -507,6 +570,13 @@ async def sincronizar_processo_jusbr(
         log.mensagem = _mensagem_sessao_documentos(session_data)
     log.finalizado_em = datetime.now(timezone.utc)
     db.commit()
+    progress(
+        stage="finalizado",
+        message="Sincronização concluída.",
+        total=docs_total,
+        processed=docs_processados,
+        uploaded=docs_enviados,
+    )
     return log
 
 

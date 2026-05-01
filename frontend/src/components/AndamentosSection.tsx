@@ -1,8 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 import { andamentosApi } from '../api/andamentos'
-import type { Andamento, JusbrSessionStatus, SincronizacaoResult } from '../api/andamentos'
+import type { Andamento, JusbrSessionStatus, JusbrSyncJobStatus, SincronizacaoResult } from '../api/andamentos'
 import InstrucoesJusBRModal from './InstrucoesJusBRModal'
 import styles from './AndamentosSection.module.css'
 import {
@@ -100,6 +100,9 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
   const [offset, setOffset] = useState(0)
   const [showTokenModal, setShowTokenModal] = useState(false)
   const [ultimoAndamentoPre, setUltimoAndamentoPre] = useState<string | null | undefined>(ultimoAndamentoData)
+  const [jusbrJobId, setJusbrJobId] = useState<string | null>(null)
+  const [jusbrJobResult, setJusbrJobResult] = useState<SincronizacaoResult | null>(null)
+  const [jusbrJobError, setJusbrJobError] = useState<string | null>(null)
   const PAGE = 10
 
   const fonteParam = fonte === 'datajud' ? 'datajud' : 'jusbr'
@@ -134,15 +137,38 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
     },
   })
 
-  const syncJusBR = useMutation({
-    mutationFn: () => andamentosApi.sincronizarJusBR(processoId),
-    onMutate: () => setUltimoAndamentoPre(ultimoAndamentoData),
-    onSuccess: () => {
+  const startJusBR = useMutation({
+    mutationFn: () => andamentosApi.iniciarSincronizacaoJusBR(processoId),
+    onMutate: () => {
+      setUltimoAndamentoPre(ultimoAndamentoData)
+      setJusbrJobResult(null)
+      setJusbrJobError(null)
+    },
+    onSuccess: ({ job_id }) => setJusbrJobId(job_id),
+  })
+
+  const { data: jusbrJob } = useQuery<JusbrSyncJobStatus>({
+    queryKey: ['jusbr-sync-job', jusbrJobId],
+    queryFn: () => andamentosApi.statusSincronizacaoJusBR(jusbrJobId!),
+    enabled: !!jusbrJobId,
+    refetchInterval: jusbrJobId ? 1200 : false,
+  })
+
+  useEffect(() => {
+    if (!jusbrJob) return
+    if (jusbrJob.status === 'concluido') {
+      setJusbrJobResult(jusbrJob.result)
+      setJusbrJobError(null)
+      setJusbrJobId(null)
       qc.invalidateQueries({ queryKey: ['andamentos', processoId] })
       qc.invalidateQueries({ queryKey: ['andamentos-count', processoId] })
       qc.invalidateQueries({ queryKey: ['processos'] })
-    },
-  })
+    }
+    if (jusbrJob.status === 'erro') {
+      setJusbrJobError(jusbrJob.error || jusbrJob.message || 'Falha ao sincronizar jus.br.')
+      setJusbrJobId(null)
+    }
+  }, [jusbrJob, processoId, qc])
 
   const marcarLidos = useMutation({
     mutationFn: () => andamentosApi.marcarLidos(processoId),
@@ -153,29 +179,37 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
     },
   })
 
-  const isSyncing = syncDataJud.isPending || syncJusBR.isPending
+  const isJusBRJobRunning = !!jusbrJobId && (!jusbrJob || jusbrJob.status === 'rodando')
+  const isSyncing = syncDataJud.isPending || startJusBR.isPending || isJusBRJobRunning
   const syncData = useMemo(() => {
-    const data = fonte === 'datajud' ? syncDataJud.data : syncJusBR.data
+    const data = fonte === 'datajud' ? syncDataJud.data : jusbrJobResult
     if (data) return data
-    const error = fonte === 'datajud' ? syncDataJud.error : syncJusBR.error
-    if (!error) return null
+    const error = fonte === 'datajud' ? syncDataJud.error : startJusBR.error
+    if (!error && !(fonte === 'jusbr' && jusbrJobError)) return null
     return {
       processo_id: processoId,
       tribunal: null,
       status: 'erro' as const,
       novos_andamentos: 0,
-      mensagem: extractApiErrorMessage(error, 'Falha ao sincronizar andamentos.'),
+      mensagem: fonte === 'jusbr' && jusbrJobError
+        ? jusbrJobError
+        : extractApiErrorMessage(error, 'Falha ao sincronizar andamentos.'),
       ultimo_andamento_data: ultimoAndamentoPre ?? null,
     }
-  }, [fonte, processoId, syncDataJud.data, syncDataJud.error, syncJusBR.data, syncJusBR.error, ultimoAndamentoPre])
+  }, [fonte, processoId, syncDataJud.data, syncDataJud.error, jusbrJobResult, jusbrJobError, startJusBR.error, ultimoAndamentoPre])
   const temMais = (count?.total ?? 0) > offset + PAGE
   const jusbrAtivo = !!jusbrSession?.active
+  const jusbrProgressPct = jusbrJob?.total
+    ? Math.min(100, Math.round((jusbrJob.processed / jusbrJob.total) * 100))
+    : 0
 
   function handleFonte(f: Fonte) {
     setFonte(f)
     setOffset(0)
     syncDataJud.reset()
-    syncJusBR.reset()
+    startJusBR.reset()
+    setJusbrJobResult(null)
+    setJusbrJobError(null)
   }
 
   function handleSync() {
@@ -185,7 +219,7 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
       if (!jusbrAtivo) {
         setShowTokenModal(true)
       } else {
-        syncJusBR.mutate()
+        startJusBR.mutate()
       }
     }
   }
@@ -195,7 +229,7 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
     onSuccess: async (_, capture) => {
       saveStoredJusbrToken(capture)
       await refetchJusbrSession()
-      syncJusBR.mutate()
+      startJusBR.mutate()
     },
   })
 
@@ -293,7 +327,24 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
       )}
 
       {/* Progress bar */}
-      {isSyncing && <div className={styles.progressBar}><div className={styles.progressFill} /></div>}
+      {isSyncing && (
+        <div className={styles.progressWrap}>
+          <div className={styles.progressBar}>
+            <div
+              className={styles.progressFill}
+              style={jusbrJob?.total ? { width: `${jusbrProgressPct}%`, animation: 'none' } : undefined}
+            />
+          </div>
+          {fonte === 'jusbr' && (
+            <div className={styles.progressText}>
+              <span>{jusbrJob?.message || 'Preparando sincronização do jus.br...'}</span>
+              {jusbrJob?.total ? (
+                <strong>{jusbrJob.processed}/{jusbrJob.total} processados · {jusbrJob.uploaded} no Drive</strong>
+              ) : null}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Result banner */}
       {!isSyncing && syncData && (

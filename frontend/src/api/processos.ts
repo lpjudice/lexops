@@ -128,7 +128,7 @@ export const processosApi = {
   uploadPdf: (id: string, file: File) => {
     const form = new FormData()
     form.append('file', file)
-    return api.post<{ filename: string; size: number }>(`/processos/${id}/upload-pdf`, form, {
+    return api.post<{ filename: string; size: number; drive_link: string | null }>(`/processos/${id}/upload-pdf`, form, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then((r) => r.data)
   },

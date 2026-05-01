@@ -1,16 +1,19 @@
 """Andamentos router — list, sync, mark-read."""
 from __future__ import annotations
 
+import asyncio
+from datetime import datetime, timezone
+import threading
 import uuid
 import mimetypes
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.models.andamento import AndamentoProcesso
 from app.models.processo import Processo
 from app.schemas.andamento import AndamentoOut, SincronizacaoResult
@@ -42,6 +45,89 @@ class BatchJusBRSyncBody(BaseModel):
 
 class JusBRSessionBody(BaseModel):
     capture: str
+
+
+class JusBRSyncJobStart(BaseModel):
+    job_id: str
+
+
+class JusBRSyncJobStatus(BaseModel):
+    job_id: str
+    status: str
+    stage: str
+    message: str | None = None
+    total: int = 0
+    processed: int = 0
+    uploaded: int = 0
+    result: SincronizacaoResult | None = None
+    error: str | None = None
+    started_at: datetime
+    updated_at: datetime
+
+
+_sync_jobs: dict[str, dict] = {}
+_sync_jobs_lock = threading.Lock()
+
+
+def _job_result_from_log(log, processo: Processo) -> dict:
+    return {
+        "processo_id": str(log.processo_id),
+        "tribunal": log.tribunal,
+        "status": log.status,
+        "novos_andamentos": log.novos_andamentos,
+        "mensagem": log.mensagem,
+        "ultimo_andamento_data": processo.ultimo_andamento_data,
+    }
+
+
+def _set_job(job_id: str, **updates) -> None:
+    with _sync_jobs_lock:
+        job = _sync_jobs.get(job_id)
+        if not job:
+            return
+        job.update(updates)
+        job["updated_at"] = datetime.now(timezone.utc)
+
+
+def _run_jusbr_sync_job(job_id: str, processo_id: uuid.UUID, token: str | None = None) -> None:
+    from app.services.consulta_processual.jusbr_session import load_session
+    from app.services.consulta_processual.orchestrator import sincronizar_processo_jusbr as _sync
+
+    db = SessionLocal()
+    try:
+        processo = db.query(Processo).filter(Processo.id == processo_id).first()
+        if not processo:
+            _set_job(job_id, status="erro", stage="erro", error="Processo não encontrado")
+            return
+
+        session_data = load_session() if not token else None
+        if not token and not session_data:
+            _set_job(job_id, status="erro", stage="erro", error="Sessao do jus.br nao configurada.")
+            return
+
+        def progress(payload: dict) -> None:
+            _set_job(
+                job_id,
+                stage=payload.get("stage") or "processando",
+                message=payload.get("message"),
+                total=int(payload.get("total") or 0),
+                processed=int(payload.get("processed") or 0),
+                uploaded=int(payload.get("uploaded") or 0),
+            )
+
+        log = asyncio.run(_sync(processo, db, token=token, session_data=session_data, progress_callback=progress))
+        db.refresh(processo)
+        _set_job(
+            job_id,
+            status="concluido",
+            stage="finalizado",
+            message="Sincronização concluída.",
+            result=_job_result_from_log(log, processo),
+        )
+    except Exception as exc:
+        _set_job(job_id, status="erro", stage="erro", error=str(exc), message="Falha ao sincronizar jus.br.")
+    finally:
+        db.close()
 
 
 # ── List andamentos for a process ────────────────────────────────────────────
@@ -196,6 +282,52 @@ async def sincronizar_jusbr(
         mensagem=log.mensagem,
         ultimo_andamento_data=p.ultimo_andamento_data,
     )
+
+
+@router.post("/processo/{processo_id}/sincronizar-jusbr-job", response_model=JusBRSyncJobStart)
+def iniciar_sincronizacao_jusbr(
+    processo_id: uuid.UUID,
+    body: JusBRSyncBody,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    from app.services.consulta_processual.jusbr_session import load_session
+
+    p = db.query(Processo).filter(Processo.id == processo_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+
+    session_data = load_session() if not body.token else None
+    if not body.token and not session_data:
+        raise HTTPException(status_code=400, detail="Sessao do jus.br nao configurada.")
+
+    job_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    with _sync_jobs_lock:
+        _sync_jobs[job_id] = {
+            "job_id": job_id,
+            "status": "rodando",
+            "stage": "fila",
+            "message": "Sincronização iniciada...",
+            "total": 0,
+            "processed": 0,
+            "uploaded": 0,
+            "result": None,
+            "error": None,
+            "started_at": now,
+            "updated_at": now,
+        }
+    background_tasks.add_task(_run_jusbr_sync_job, job_id, processo_id, body.token)
+    return {"job_id": job_id}
+
+
+@router.get("/sincronizar-jusbr-job/{job_id}", response_model=JusBRSyncJobStatus)
+def status_sincronizacao_jusbr(job_id: str):
+    with _sync_jobs_lock:
+        job = _sync_jobs.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Sincronização não encontrada")
+        return dict(job)
 
 
 # ── JusBR batch sync ──────────────────────────────────────────────────────────
