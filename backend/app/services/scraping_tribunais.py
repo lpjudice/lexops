@@ -93,6 +93,19 @@ def _tokenizar_relevantes(texto: str) -> list[str]:
     return [token for token in tokens if len(token) >= 4 and token not in STOPWORDS]
 
 
+def _termo_parece_cnj(termo: str) -> bool:
+    return len(re.sub(r"\D", "", termo or "")) == 20
+
+
+def _termo_nome_buscavel(termo: str) -> bool:
+    if _termo_parece_cnj(termo):
+        return True
+    tokens = _tokenizar_relevantes(termo)
+    if len(tokens) >= 2:
+        return True
+    return len(tokens) == 1 and len(tokens[0]) >= 8
+
+
 def _distancia_levenshtein(a: str, b: str) -> int:
     linhas = len(a) + 1
     colunas = len(b) + 1
@@ -151,8 +164,12 @@ def _texto_tem_match_monitorado(texto: str, termos: list[str] | None = None) -> 
     if not termos:
         return False
     for termo in termos:
+        if not _termo_nome_buscavel(termo):
+            continue
         if _termo_exato_no_texto(texto, termo):
             return True
+        if _termo_parece_cnj(termo):
+            continue
         if _termo_similar_no_texto(texto, termo):
             return True
     return False
@@ -333,6 +350,8 @@ def _consultas_comunica(termos: list[str] | None = None) -> list[tuple[str, int,
         termo_original = _normalizar_espacos(termo_original)
         if not termo_original:
             continue
+        if not _termo_nome_buscavel(termo_original):
+            continue
 
         palavras = re.findall(r"[A-Za-zÀ-ÿ0-9]+", termo_original)
         relevantes = [p for p in palavras if len(p) >= 4 and p.casefold() not in STOPWORDS]
@@ -359,7 +378,9 @@ def _consultas_comunica(termos: list[str] | None = None) -> list[tuple[str, int,
             adicionar(termo_original, prioridade, "nomeParte", variante, paginas)
             adicionar(termo_original, prioridade, "nomeAdvogado", variante, paginas)
 
-    return consultas or [("", 0, "texto", "", 1)]
+    if termos:
+        return consultas
+    return [("", 0, "texto", "", 1)]
 
 
 def _normalizar_data_comunica(valor: str | None) -> date | None:
@@ -758,6 +779,11 @@ def scrape_todos(
                 termos_individual = [termo] if termo else None
                 novos = fn(data=data_busca, termos=termos_individual)
                 for pub in novos:
+                    if termos and not _texto_tem_match_monitorado(
+                        pub.get("texto_completo") or pub.get("texto_resumo") or "",
+                        termos,
+                    ):
+                        continue
                     chave = "|".join(
                         [
                             str(pub.get("data_publicacao", "")),

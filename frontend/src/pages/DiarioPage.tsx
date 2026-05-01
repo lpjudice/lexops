@@ -120,6 +120,17 @@ function extractRelevantTokens(name: string) {
     .filter((token) => token.length >= 4 && !['ltda', 'advogados', 'advocacia', 'sociedade'].includes(token))
 }
 
+function looksLikeCnj(value: string) {
+  return normalizeDigits(value).length === 20
+}
+
+function isMonitorableTerm(value: string) {
+  if (looksLikeCnj(value)) return true
+  const tokens = extractRelevantTokens(value)
+  if (tokens.length >= 2) return true
+  return tokens.length === 1 && tokens[0].length >= 8
+}
+
 function levenshteinDistance(a: string, b: string) {
   const rows = a.length + 1
   const cols = b.length + 1
@@ -249,7 +260,7 @@ function classifyPublication(
       continue
     }
 
-    const exactNames = clientNames.filter((name) => textHasExactTerm(normalizedText, name))
+    const exactNames = clientNames.filter((name) => isMonitorableTerm(name) && textHasExactTerm(normalizedText, name))
     if (exactNames.length > 0) {
       exactNames.forEach((name) => {
         exactClientNames.add(name)
@@ -260,7 +271,7 @@ function classifyPublication(
       continue
     }
 
-    const similarNames = clientNames.filter((name) => isLogicalSimilarMatch(textTokens, name))
+    const similarNames = clientNames.filter((name) => isMonitorableTerm(name) && isLogicalSimilarMatch(textTokens, name))
     if (similarNames.length > 0) {
       similarNames.forEach((name) => {
         similarClientNames.add(name)
@@ -284,6 +295,7 @@ function classifyPublication(
   for (const termo of termosMonitorados) {
     const normalizedTerm = normalizeText(termo)
     if (!normalizedTerm) continue
+    if (!isMonitorableTerm(termo)) continue
     if (textHasExactTerm(normalizedText, termo)) {
       exactTermMatches.add(termo)
       relatedTerms.add(termo)
@@ -407,7 +419,7 @@ export default function DiarioPage() {
   const termosBuscaDiario = uniqueStrings([
     ...numerosProcessosMonitorados,
     ...termosNomesMonitorados,
-  ])
+  ]).filter(isMonitorableTerm)
 
   const salvarMonitoramento = useMutation({
     mutationFn: (payload: { termos_extras: string[] }) =>
