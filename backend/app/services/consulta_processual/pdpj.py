@@ -87,15 +87,25 @@ def _normalizar_url_documento(raw: str, base: str) -> str | None:
     return urljoin(f"{base.rstrip('/')}/", valor.lstrip("/"))
 
 
+def _adicionar_candidato(acc: list[str], url: str | None) -> None:
+    if url and url not in acc:
+        acc.append(url)
+
+
+def _adicionar_url_documento(raw: str, base: str, acc: list[str]) -> None:
+    normalizada = _normalizar_url_documento(raw, base)
+    _adicionar_candidato(acc, normalizada)
+    if raw.startswith("/processos/") and "/api/" in base:
+        _adicionar_candidato(acc, f"{base.rstrip('/')}{raw}")
+
+
 def _coletar_urls_documento(obj: object, base: str, acc: list[str]) -> None:
     if isinstance(obj, dict):
         for key, value in obj.items():
             if isinstance(value, str) and any(
                 marker in key.lower() for marker in ("url", "href", "link", "download", "uri", "path")
             ):
-                normalizada = _normalizar_url_documento(value, base)
-                if normalizada and normalizada not in acc:
-                    acc.append(normalizada)
+                _adicionar_url_documento(value, base, acc)
             else:
                 _coletar_urls_documento(value, base, acc)
     elif isinstance(obj, list):
@@ -225,14 +235,16 @@ async def _baixar_documento_movimento(
             f"{matched_base}/documentos/{doc_id}/download",
             f"{matched_base}/documentos/{doc_id}/arquivo",
             f"{matched_base}/processos/{processo_id}/documentos/{doc_id}",
+            f"{matched_base}/processos/{processo_id}/documentos/{doc_id}/binario",
+            f"{matched_base}/processos/{processo_id}/documentos/{doc_id}/texto",
             f"{matched_base}/processos/{processo_id}/documentos/{doc_id}/download",
         ):
-            if url not in candidatos:
-                candidatos.append(url)
+            _adicionar_candidato(candidatos, url)
 
+    doc_headers = _build_document_headers(headers)
     for url in candidatos:
         try:
-            resp = await client.get(url, headers=headers)
+            resp = await client.get(url, headers=doc_headers)
         except Exception:
             continue
         if resp.status_code in (401, 403):
@@ -418,6 +430,27 @@ def _build_headers(token: str, session_data: dict | None = None) -> dict[str, st
     return headers
 
 
+def _build_document_headers(headers: dict[str, str]) -> dict[str, str]:
+    allowed = {
+        "Authorization",
+        "Accept-Language",
+        "Origin",
+        "Referer",
+        "Cookie",
+        "User-Agent",
+        "Sec-Ch-Ua",
+        "Sec-Ch-Ua-Mobile",
+        "Sec-Ch-Ua-Platform",
+        "Sec-Fetch-Dest",
+        "Sec-Fetch-Mode",
+        "Sec-Fetch-Site",
+    }
+    doc_headers = {key: value for key, value in headers.items() if key in allowed}
+    doc_headers["Accept"] = "application/pdf,text/html,application/octet-stream,*/*"
+    doc_headers.setdefault("Referer", "https://portaldeservicos.pdpj.jus.br/")
+    return doc_headers
+
+
 def _build_candidate_requests(numero_cnj: str, tribunal: str, session_data: dict | None = None) -> tuple[str, str, list[tuple[str, str, dict, None]]]:
     session_data = session_data or {}
     numero_norm = normalizar_cnj(numero_cnj)
@@ -480,6 +513,12 @@ async def buscar_processo_pdpj_raw(
             if resp.status_code in (401, 403):
                 exp = _jwt_exp(token)
                 extra = f" Token expira em {exp.strftime('%d/%m/%Y %H:%M:%S')}." if exp else ""
+                if resp.status_code == 403 and exp and exp > datetime.now():
+                    raise PermissionError(
+                        "Sessao do jus.br valida, mas sem permissao para este processo ou tribunal neste endpoint. "
+                        "Confirme se o processo abre no portal com o mesmo login."
+                        f"{extra}"
+                    )
                 raise PermissionError(
                     "Token expirado ou sem permissão. "
                     "Abra o portal jus.br, faça login e capture um novo token pela aba Network."
