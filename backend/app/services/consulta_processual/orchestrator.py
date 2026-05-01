@@ -5,7 +5,7 @@ import logging
 import mimetypes
 import os
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -63,6 +63,51 @@ def _sanitizar_nome_arquivo(nome: str) -> str:
     return cleaned or "documento_jusbr.pdf"
 
 
+def _extensao_documento(nome_arquivo: str, mimetype: str | None) -> str:
+    mime = (mimetype or "").lower()
+    if mime == "application/pdf":
+        return ".pdf"
+    if mime in {"text/html", "application/xhtml+xml"}:
+        return ".html"
+    ext = Path(nome_arquivo or "").suffix
+    if ext:
+        return ext
+    return (mimetypes.guess_extension(mime) if mime else None) or ".bin"
+
+
+def _trecho_nome_andamento(descricao: str | None, tipo: str | None) -> str:
+    texto = re.sub(r"<[^>]+>", " ", descricao or "")
+    texto = re.sub(r"\s+", " ", texto).strip()
+    if tipo:
+        texto = re.sub(rf"^{re.escape(tipo)}\s*[-:–—]*\s*", "", texto, flags=re.IGNORECASE)
+    texto = texto[:90].strip(" .,-:;")
+    return _sanitizar_nome_arquivo(texto) if texto else "documento"
+
+
+def _nome_documento_andamento(
+    sequencial: int | None,
+    data_andamento: date | None,
+    tipo: str | None,
+    descricao: str | None,
+    nome_original: str,
+    mimetype: str | None,
+) -> str:
+    numero = f"{sequencial or 999:03d}"
+    data_txt = data_andamento.isoformat() if data_andamento else "sem-data"
+    tipo_txt = _sanitizar_nome_arquivo(tipo or Path(nome_original).stem or "Documento")[:45].strip(" .,-")
+    resumo = _trecho_nome_andamento(descricao, tipo_txt)
+    ext = _extensao_documento(nome_original, mimetype)
+    stem = f"{numero} - {data_txt} - {tipo_txt} - {resumo}"
+    stem = _sanitizar_nome_arquivo(stem)[:160].strip(" .,-")
+    return f"{stem}{ext}"
+
+
+def _nome_drive_documento(nome_arquivo: str, mimetype: str | None) -> str:
+    if (mimetype or "").lower() in {"text/html", "application/xhtml+xml"}:
+        return Path(nome_arquivo).with_suffix("").name
+    return nome_arquivo
+
+
 def _caminho_documento_unico(processo_id, nome_arquivo: str) -> Path:
     pasta = UPLOADS_DIR / str(processo_id)
     pasta.mkdir(parents=True, exist_ok=True)
@@ -85,14 +130,23 @@ def _persistir_documento_jusbr(
     nome_arquivo: str | None,
     conteudo: bytes | None,
     mimetype: str | None,
+    data_andamento: date | None = None,
+    descricao: str | None = None,
+    tipo: str | None = None,
+    sequencial: int | None = None,
     caminho_atual: str | None = None,
 ) -> tuple[str | None, str | None, str | None]:
     if not nome_arquivo or not conteudo:
         return None, None, None
 
-    nome_limpo = _sanitizar_nome_arquivo(nome_arquivo)
-    if (mimetype or "").lower() == "application/pdf" and not nome_limpo.lower().endswith(".pdf"):
-        nome_limpo = f"{nome_limpo}.pdf"
+    nome_limpo = _nome_documento_andamento(
+        sequencial,
+        data_andamento,
+        tipo,
+        descricao,
+        _sanitizar_nome_arquivo(nome_arquivo),
+        mimetype,
+    )
 
     destino = Path(caminho_atual) if caminho_atual else _caminho_documento_unico(processo.id, nome_limpo)
     if destino.name != nome_limpo:
@@ -104,16 +158,22 @@ def _persistir_documento_jusbr(
     cliente = db.query(Cliente).filter(Cliente.id == processo.cliente_id).first()
     if cliente and processo.numero_cnj:
         try:
-            salvar_arquivo(pasta_cliente_processo(cliente.nome, processo.numero_cnj), destino.name, conteudo)
+            pasta_local = pasta_cliente_processo(cliente.nome, processo.numero_cnj)
+            if pasta_local.exists():
+                pasta_local = pasta_local / "Andamentos"
+                pasta_local.mkdir(parents=True, exist_ok=True)
+            salvar_arquivo(pasta_local, destino.name, conteudo)
         except Exception:
             pass
         try:
             drive_link = upload_arquivo(
                 conteudo,
-                destino.name,
+                _nome_drive_documento(destino.name, mimetype),
                 cliente.nome,
                 processo.numero_cnj,
                 mimetype or "application/pdf",
+                sub_subfolder="Andamentos",
+                converter_html_para_google_docs=True,
             )
         except Exception:
             logger.exception("Falha ao enviar documento JusBR para o Google Drive")
@@ -146,6 +206,21 @@ def _arquivo_andamento_util(andamento: AndamentoProcesso) -> bool:
     if andamento.arquivo_drive_link:
         return True
     return _arquivo_local_valido(andamento.arquivo_path)
+
+
+def _sequenciais_documentos(processo: Processo, raw_andamentos: list) -> dict[str, int]:
+    documentos = []
+    for idx, andamento in enumerate(raw_andamentos):
+        if not (andamento.arquivo_nome or andamento.documento_detectado):
+            continue
+        h = AndamentoProcesso.calcular_hash(
+            str(processo.id),
+            str(andamento.data_andamento) if andamento.data_andamento else None,
+            andamento.descricao,
+        )
+        documentos.append((andamento.data_andamento or date.max, idx, h))
+    documentos.sort(key=lambda item: (item[0], item[1]))
+    return {h: idx + 1 for idx, (_, __, h) in enumerate(documentos)}
 
 
 def _mensagem_sessao_documentos(session_data: dict | None) -> str:
@@ -349,6 +424,7 @@ async def sincronizar_processo_jusbr(
 
     novos = 0
     docs_detectados_sem_arquivo = 0
+    sequenciais_docs = _sequenciais_documentos(processo, raw_andamentos)
     for a in raw_andamentos:
         h = AndamentoProcesso.calcular_hash(
             str(processo.id),
@@ -365,6 +441,10 @@ async def sincronizar_processo_jusbr(
                     a.arquivo_nome,
                     a.arquivo_bytes,
                     a.arquivo_mimetype,
+                    data_andamento=a.data_andamento,
+                    descricao=a.descricao,
+                    tipo=a.tipo,
+                    sequencial=sequenciais_docs.get(h),
                     caminho_atual=existente.arquivo_path,
                 )
                 existente.arquivo_nome = arquivo_nome
@@ -379,6 +459,10 @@ async def sincronizar_processo_jusbr(
             a.arquivo_nome,
             a.arquivo_bytes,
             a.arquivo_mimetype,
+            data_andamento=a.data_andamento,
+            descricao=a.descricao,
+            tipo=a.tipo,
+            sequencial=sequenciais_docs.get(h),
         )
         db.add(AndamentoProcesso(
             processo_id=processo.id,

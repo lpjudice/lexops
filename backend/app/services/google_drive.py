@@ -110,6 +110,7 @@ def upload_arquivo(
     subfolder: str,
     mimetype: str = "application/pdf",
     sub_subfolder: str | None = None,
+    converter_html_para_google_docs: bool = False,
 ) -> str | None:
     """
     Generic file upload to Drive under:
@@ -122,6 +123,11 @@ def upload_arquivo(
     if not tokens:
         return None
 
+    media_mimetype = mimetype or "application/octet-stream"
+    target_mimetype = media_mimetype
+    if converter_html_para_google_docs and media_mimetype.lower() in {"text/html", "application/xhtml+xml"}:
+        target_mimetype = "application/vnd.google-apps.document"
+
     def _do(tkns: dict) -> str | None:
         h = _auth_headers(tkns)
         cliente_folder_id = _get_or_create_subfolder(nome_cliente, DRIVE_FOLDER_ID, h)
@@ -133,14 +139,14 @@ def upload_arquivo(
         metadata = json.dumps({
             "name": nome_arquivo,
             "parents": [parent_id],
-            "mimeType": mimetype,
+            "mimeType": target_mimetype,
         }).encode()
 
         boundary = "boundary_lexops_upload"
         body = (
             f"--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n"
         ).encode() + metadata + (
-            f"\r\n--{boundary}\r\nContent-Type: {mimetype}\r\n\r\n"
+            f"\r\n--{boundary}\r\nContent-Type: {media_mimetype}\r\n\r\n"
         ).encode() + conteudo + f"\r\n--{boundary}--".encode()
 
         r = httpx.post(
