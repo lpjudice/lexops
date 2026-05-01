@@ -325,6 +325,23 @@
   flex: 1;
 }
 
+.tokenBtn {
+  flex: 0 0 auto;
+  min-width: 40px;
+  height: 40px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  color: #374151;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.tokenBtn:hover {
+  border-color: #00b090;
+  color: #00b090;
+}
+
 .prefillHint {
   margin-top: 6px;
   font-size: 12px;

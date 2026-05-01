@@ -8,6 +8,8 @@ export interface Andamento {
   tipo: string | null
   fonte: string | null
   grau: string | null
+  arquivo_nome: string | null
+  arquivo_drive_link: string | null
   lido: boolean
   notificado: boolean
   created_at: string
@@ -75,6 +77,8 @@ export const andamentosApi = {
 
   limparSessaoJusBR: () =>
     api.delete('/andamentos/jusbr/session').then((r) => r.data),
+
+  arquivoUrl: (andamentoId: string) => `/api/andamentos/arquivo/${andamentoId}`,
 
   importarJusBR: (processoId: string, payload: string) =>
     api

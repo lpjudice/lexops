@@ -4,11 +4,15 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime, timezone
+from pathlib import Path
 
 from sqlalchemy.orm import Session
 
 from app.models.andamento import AndamentoProcesso, SincronizacaoLog
+from app.models.cliente import Cliente
 from app.models.processo import Processo
+from app.services.google_drive import upload_arquivo
+from app.services.pasta_cliente import pasta_processo as pasta_cliente_processo, salvar_arquivo
 
 from .datajud import buscar_via_datajud
 from .pdpj import buscar_via_pdpj
@@ -28,6 +32,8 @@ TRIBUNAIS_CONHECIDOS = {
     "TRF6", "STJ", "TST", "TSE", "STM",
 }
 
+UPLOADS_DIR = Path("/app/uploads/processos")
+
 
 def _classificar_erro(exc: Exception) -> str:
     msg = str(exc)
@@ -43,6 +49,65 @@ def _classificar_erro(exc: Exception) -> str:
     if "404" in msg:
         return f"Índice do tribunal não encontrado no DataJud: {msg[:120]}"
     return f"Erro inesperado: {msg[:200]}"
+
+
+def _sanitizar_nome_arquivo(nome: str) -> str:
+    cleaned = re.sub(r'[\\/:*?"<>|]+', "_", (nome or "").strip())
+    return cleaned or "documento_jusbr.pdf"
+
+
+def _caminho_documento_unico(processo_id, nome_arquivo: str) -> Path:
+    pasta = UPLOADS_DIR / str(processo_id)
+    pasta.mkdir(parents=True, exist_ok=True)
+    candidato = pasta / nome_arquivo
+    if not candidato.exists():
+        return candidato
+    stem = candidato.stem
+    suffix = candidato.suffix
+    idx = 2
+    while True:
+        alternativo = pasta / f"{stem} ({idx}){suffix}"
+        if not alternativo.exists():
+            return alternativo
+        idx += 1
+
+
+def _persistir_documento_jusbr(
+    processo: Processo,
+    db: Session,
+    nome_arquivo: str | None,
+    conteudo: bytes | None,
+    mimetype: str | None,
+) -> tuple[str | None, str | None, str | None]:
+    if not nome_arquivo or not conteudo:
+        return None, None, None
+
+    nome_limpo = _sanitizar_nome_arquivo(nome_arquivo)
+    if (mimetype or "").lower() == "application/pdf" and not nome_limpo.lower().endswith(".pdf"):
+        nome_limpo = f"{nome_limpo}.pdf"
+
+    destino = _caminho_documento_unico(processo.id, nome_limpo)
+    destino.write_bytes(conteudo)
+
+    drive_link = None
+    cliente = db.query(Cliente).filter(Cliente.id == processo.cliente_id).first()
+    if cliente and processo.numero_cnj:
+        try:
+            salvar_arquivo(pasta_cliente_processo(cliente.nome, processo.numero_cnj), destino.name, conteudo)
+        except Exception:
+            pass
+        try:
+            drive_link = upload_arquivo(
+                conteudo,
+                destino.name,
+                cliente.nome,
+                processo.numero_cnj,
+                mimetype or "application/pdf",
+            )
+        except Exception:
+            drive_link = None
+
+    return destino.name, str(destino), drive_link
 
 
 async def sincronizar_processo(processo: Processo, db: Session) -> SincronizacaoLog:
@@ -219,6 +284,13 @@ async def sincronizar_processo_jusbr(
         )
         if db.query(AndamentoProcesso).filter(AndamentoProcesso.hash_unico == h).first():
             continue
+        arquivo_nome, arquivo_path, arquivo_drive_link = _persistir_documento_jusbr(
+            processo,
+            db,
+            a.arquivo_nome,
+            a.arquivo_bytes,
+            a.arquivo_mimetype,
+        )
         db.add(AndamentoProcesso(
             processo_id=processo.id,
             data_andamento=a.data_andamento,
@@ -226,6 +298,9 @@ async def sincronizar_processo_jusbr(
             tipo=a.tipo,
             fonte=f"JusBR/{tribunal}",
             grau=a.grau,
+            arquivo_nome=arquivo_nome,
+            arquivo_path=arquivo_path,
+            arquivo_drive_link=arquivo_drive_link,
             hash_unico=h,
             lido=False,
             notificado=False,

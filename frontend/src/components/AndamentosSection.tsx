@@ -351,6 +351,7 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
 }
 
 function AndamentoCard({ andamento: a }: { andamento: Andamento }) {
+  const arquivoUrl = andamentosApi.arquivoUrl(a.id)
   return (
     <div className={`${styles.card} ${!a.lido ? styles.cardNaoLido : ''}`}>
       <div className={styles.cardMeta}>
@@ -358,6 +359,17 @@ function AndamentoCard({ andamento: a }: { andamento: Andamento }) {
         {a.grau && <span className={styles.grauBadge}>{a.grau}</span>}
         {a.tipo && <span className={styles.tipo}>{a.tipo}</span>}
         {!a.lido && <span className={styles.novoBadge}>Novo</span>}
+        {a.arquivo_nome && (
+          <a
+            className={styles.btnArquivo}
+            href={arquivoUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={a.arquivo_nome}
+          >
+            Arquivo
+          </a>
+        )}
       </div>
       <p className={styles.descricao}>{a.descricao}</p>
     </div>

@@ -8,6 +8,8 @@ import ClienteCombobox from '../components/ClienteCombobox'
 import ProcessoChat from '../components/ProcessoChat'
 import AndamentosSection from '../components/AndamentosSection'
 import SincronizarModal from '../components/SincronizarModal'
+import InstrucoesJusBRModal from '../components/InstrucoesJusBRModal'
+import { saveStoredJusbrToken } from '../utils/jusbrToken'
 import styles from './Page.module.css'
 import ps from './ProcessosPage.module.css'
 
@@ -68,13 +70,15 @@ export default function ProcessosPage() {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<ProcessoCreate>(EMPTY)
   const [erro, setErro] = useState<string | null>(null)
-  const [expandido, setExpandido] = useState<string | null>(null)
   const [editando, setEditando] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<Partial<ProcessoCreate>>({})
   const [showSyncModal, setShowSyncModal] = useState(false)
+  const [showTokenModal, setShowTokenModal] = useState(false)
   const [prefillMsg, setPrefillMsg] = useState<string | null>(null)
   const [prefillErro, setPrefillErro] = useState<string | null>(null)
   const [detalheAberto, setDetalheAberto] = useState<string | null>(null)
+  const [docsChatAberto, setDocsChatAberto] = useState<string | null>(null)
+  const [andamentosAberto, setAndamentosAberto] = useState<string | null>(null)
   // Litisconsórcio state for create form
   const [createLitis, setCreateLitis] = useState<ProcessoClienteIn[]>([])
   // Litisconsórcio state for edit form
@@ -126,11 +130,25 @@ export default function ProcessosPage() {
   })
 
 
-  const { data: jusbrSession } = useQuery({
+  const { data: jusbrSession, refetch: refetchJusbrSession } = useQuery({
     queryKey: ['jusbr-session'],
     queryFn: () => andamentosApi.obterSessaoJusBR(),
     staleTime: 30_000,
     refetchInterval: 60_000,
+  })
+
+  const configurarSessao = useMutation({
+    mutationFn: (capture: string) => andamentosApi.configurarSessaoJusBR(capture),
+    onSuccess: async (_, capture) => {
+      saveStoredJusbrToken(capture)
+      await refetchJusbrSession()
+      setPrefillErro(null)
+      setShowTokenModal(false)
+    },
+    onError: (e: unknown) => {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setPrefillErro(detail ?? 'Não foi possível configurar a sessão do jus.br.')
+    },
   })
 
   const criar = useMutation({
@@ -298,6 +316,14 @@ export default function ProcessosPage() {
                 value={form.numero_cnj}
                 onChange={(e) => setForm({ ...form, numero_cnj: maskCNJ(e.target.value) })}
               />
+              <button
+                type="button"
+                className={ps.tokenBtn}
+                onClick={() => setShowTokenModal(true)}
+                title={jusbrSession?.active ? 'Sessão ativa — clique para renovar' : 'Conectar sessão do jus.br'}
+              >
+                🔑
+              </button>
               <button
                 type="button"
                 className={styles.btnTable}
@@ -517,11 +543,18 @@ export default function ProcessosPage() {
                 <div className={ps.cardActions}>
                   <button className={styles.btnTable}
                     onClick={() => {
-                      setExpandido(expandido === p.id ? null : p.id)
+                      setDocsChatAberto(docsChatAberto === p.id ? null : p.id)
                       setEditando(null)
                     }}>
-                    {expandido === p.id ? '▲ Fechar' : '▼ Docs / Chat / Andamentos'}
-                    {!expandido && (p.andamentos_nao_lidos ?? 0) > 0 && (
+                    {docsChatAberto === p.id ? '▲ Fechar Docs + Chat' : '▼ Docs + Chat'}
+                  </button>
+                  <button className={styles.btnTable}
+                    onClick={() => {
+                      setAndamentosAberto(andamentosAberto === p.id ? null : p.id)
+                      setEditando(null)
+                    }}>
+                    {andamentosAberto === p.id ? '▲ Fechar Andamentos' : '▼ Andamentos'}
+                    {andamentosAberto !== p.id && (p.andamentos_nao_lidos ?? 0) > 0 && (
                       <span className={ps.naoLidosBadge}>{p.andamentos_nao_lidos}</span>
                     )}
                   </button>
@@ -530,7 +563,8 @@ export default function ProcessosPage() {
                       setEditando(editando === p.id ? null : p.id)
                       setEditForm({ numero_cnj: p.numero_cnj, cliente_id: p.cliente_id, vara: p.vara, comarca: p.comarca, estado: p.estado, tribunal: p.tribunal, materia: p.materia, fase: p.fase, status: p.status, objeto: p.objeto, polo: p.polo, serventia: p.serventia, foro: p.foro, sistema_juridico: p.sistema_juridico, grau: p.grau, grau_texto: p.grau_texto })
                       setEditLitis((p.clientes_litisconsorcio ?? []).map((cl) => ({ cliente_id: cl.cliente_id, polo: (cl.polo as PoloProcesso | null) ?? null, principal: cl.principal ?? false })))
-                      setExpandido(null)
+                      setDocsChatAberto(null)
+                      setAndamentosAberto(null)
                     }}>
                     {editando === p.id ? 'Cancelar' : 'Editar'}
                   </button>
@@ -731,9 +765,14 @@ export default function ProcessosPage() {
               )}
 
               {/* Painel de docs + chat + andamentos */}
-              {expandido === p.id && (
+              {docsChatAberto === p.id && (
                 <div className={ps.docsPanel}>
                   <ProcessoChat processoId={p.id} clienteId={p.cliente_id} processoNome={p.numero_cnj} />
+                </div>
+              )}
+
+              {andamentosAberto === p.id && (
+                <div className={ps.docsPanel}>
                   <AndamentosSection
                     processoId={p.id}
                     tribunal={p.tribunal}
@@ -745,6 +784,14 @@ export default function ProcessosPage() {
             </div>
           ))}
         </div>
+      )}
+
+      {showTokenModal && (
+        <InstrucoesJusBRModal
+          onClose={() => setShowTokenModal(false)}
+          onToken={(capture) => configurarSessao.mutate(capture)}
+          initialToken=""
+        />
       )}
     </div>
   )

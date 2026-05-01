@@ -13,6 +13,7 @@ import json
 import logging
 import re
 from datetime import date, datetime
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -71,6 +72,145 @@ def _movimento_tipo(m: dict) -> str | None:
     descricao = m.get("descricao")
     if isinstance(descricao, str) and descricao:
         return descricao[:255]
+    return None
+
+
+def _normalizar_url_documento(raw: str, base: str) -> str | None:
+    valor = (raw or "").strip()
+    if not valor:
+        return None
+    if valor.startswith("http://") or valor.startswith("https://"):
+        return valor
+    if valor.startswith("/"):
+        parsed = urlparse(base)
+        return f"{parsed.scheme}://{parsed.netloc}{valor}"
+    return urljoin(f"{base.rstrip('/')}/", valor.lstrip("/"))
+
+
+def _coletar_urls_documento(obj: object, base: str, acc: list[str]) -> None:
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if isinstance(value, str) and any(
+                marker in key.lower() for marker in ("url", "href", "link", "download", "uri", "path")
+            ):
+                normalizada = _normalizar_url_documento(value, base)
+                if normalizada and normalizada not in acc:
+                    acc.append(normalizada)
+            else:
+                _coletar_urls_documento(value, base, acc)
+    elif isinstance(obj, list):
+        for item in obj:
+            _coletar_urls_documento(item, base, acc)
+
+
+def _coletar_bytes_embutidos(doc: dict) -> tuple[bytes, str | None] | None:
+    for key in ("conteudoBase64", "arquivoBase64", "base64", "contentBase64", "pdfBase64"):
+        raw = doc.get(key)
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        payload = raw.strip()
+        if "," in payload and payload.lower().startswith("data:"):
+            header, payload = payload.split(",", 1)
+            mimetype = header[5:].split(";", 1)[0] if header.startswith("data:") else None
+        else:
+            mimetype = doc.get("mimetype") if isinstance(doc.get("mimetype"), str) else None
+        try:
+            return base64.b64decode(payload), mimetype
+        except Exception:
+            continue
+    return None
+
+
+def _nome_documento(doc: dict, fallback: str) -> str:
+    nome = (
+        doc.get("nome")
+        or doc.get("nomeArquivo")
+        or doc.get("filename")
+        or doc.get("tituloDocumento")
+        or fallback
+    )
+    if not isinstance(nome, str) or not nome.strip():
+        return fallback
+    nome = re.sub(r'[\\/:*?"<>|]+', "_", nome).strip()
+    return nome or fallback
+
+
+async def _baixar_documento_movimento(
+    client: httpx.AsyncClient,
+    headers: dict[str, str],
+    matched_base: str,
+    processo_id: str,
+    movimento: dict,
+) -> tuple[str, bytes, str | None] | None:
+    doc = next(
+        (movimento.get(key) for key in ("documento", "doc", "arquivo") if isinstance(movimento.get(key), dict)),
+        None,
+    )
+    if not isinstance(doc, dict):
+        return None
+
+    embutido = _coletar_bytes_embutidos(doc)
+    fallback_nome = f"documento_{movimento.get('id') or processo_id}.pdf"
+    if embutido:
+        nome = _nome_documento(doc, fallback_nome)
+        mimetype = embutido[1] or "application/pdf"
+        if mimetype == "application/pdf" and not nome.lower().endswith(".pdf"):
+            nome = f"{nome}.pdf"
+        return nome, embutido[0], mimetype
+
+    candidatos: list[str] = []
+    _coletar_urls_documento(doc, matched_base, candidatos)
+    _coletar_urls_documento(movimento, matched_base, candidatos)
+
+    doc_id = next(
+        (
+            str(doc.get(key)).strip()
+            for key in ("id", "documentoId", "idDocumento", "uuid", "chave", "key")
+            if doc.get(key)
+        ),
+        "",
+    )
+    if doc_id:
+        for url in (
+            f"{matched_base}/documentos/{doc_id}",
+            f"{matched_base}/documentos/{doc_id}/download",
+            f"{matched_base}/documentos/{doc_id}/arquivo",
+            f"{matched_base}/processos/{processo_id}/documentos/{doc_id}",
+            f"{matched_base}/processos/{processo_id}/documentos/{doc_id}/download",
+        ):
+            if url not in candidatos:
+                candidatos.append(url)
+
+    for url in candidatos:
+        try:
+            resp = await client.get(url, headers=headers)
+        except Exception:
+            continue
+        if resp.status_code in (401, 403):
+            raise PermissionError("Token expirado ao baixar documento do jus.br. Renove a sessão.")
+        if resp.status_code != 200 or not resp.content:
+            continue
+
+        content_type = resp.headers.get("content-type", "")
+        if "application/json" in content_type:
+            try:
+                payload = resp.json()
+            except Exception:
+                continue
+            if isinstance(payload, dict):
+                _coletar_urls_documento(payload, matched_base, candidatos)
+                nested_doc = payload.get("documento") if isinstance(payload.get("documento"), dict) else payload
+                embutido_payload = _coletar_bytes_embutidos(nested_doc if isinstance(nested_doc, dict) else {})
+                if embutido_payload:
+                    nome = _nome_documento(doc, fallback_nome)
+                    return nome, embutido_payload[0], embutido_payload[1] or "application/pdf"
+            continue
+
+        nome = _nome_documento(doc, fallback_nome)
+        if "application/pdf" in content_type and not nome.lower().endswith(".pdf"):
+            nome = f"{nome}.pdf"
+        return nome, resp.content, content_type or None
+
     return None
 
 
@@ -333,6 +473,7 @@ async def buscar_via_pdpj(
             )
             desc = _movimento_desc(m)
             tipo = _movimento_tipo(m)
+            arquivo = await _baixar_documento_movimento(client, headers, matched_base, processo_id, m)
 
             for doc_key in ("documento", "doc", "arquivo"):
                 doc = m.get(doc_key)
@@ -348,6 +489,9 @@ async def buscar_via_pdpj(
                     descricao=desc[:2000],
                     tipo=tipo,
                     grau=m.get("grau"),
+                    arquivo_nome=arquivo[0] if arquivo else None,
+                    arquivo_bytes=arquivo[1] if arquivo else None,
+                    arquivo_mimetype=arquivo[2] if arquivo else None,
                 ))
 
         if andamentos:

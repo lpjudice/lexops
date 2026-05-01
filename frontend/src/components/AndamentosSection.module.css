@@ -241,6 +241,22 @@
   padding: 1px 7px;
 }
 
+.btnArquivo {
+  margin-left: auto;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #047857;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  border-radius: 999px;
+  padding: 2px 8px;
+  text-decoration: none;
+}
+
+.btnArquivo:hover {
+  background: #d1fae5;
+}
+
 .descricao {
   font-size: 12.5px;
   color: #374151;

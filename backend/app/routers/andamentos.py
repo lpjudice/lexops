@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
+from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -99,6 +101,27 @@ def marcar_lidos(processo_id: uuid.UUID, db: Session = Depends(get_db)):
     if p:
         p.andamentos_nao_lidos = 0
     db.commit()
+
+
+@router.get("/arquivo/{andamento_id}")
+def abrir_arquivo_andamento(andamento_id: uuid.UUID, db: Session = Depends(get_db)):
+    andamento = db.query(AndamentoProcesso).filter(AndamentoProcesso.id == andamento_id).first()
+    if not andamento:
+        raise HTTPException(status_code=404, detail="Andamento não encontrado")
+
+    if andamento.arquivo_path:
+        caminho = Path(andamento.arquivo_path)
+        if caminho.exists():
+            return FileResponse(
+                caminho,
+                media_type="application/pdf",
+                filename=andamento.arquivo_nome or caminho.name,
+            )
+
+    if andamento.arquivo_drive_link:
+        return RedirectResponse(andamento.arquivo_drive_link)
+
+    raise HTTPException(status_code=404, detail="Arquivo não encontrado para este andamento")
 
 
 # ── Sync single process ───────────────────────────────────────────────────────

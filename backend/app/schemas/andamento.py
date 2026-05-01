@@ -12,6 +12,8 @@ class AndamentoOut(BaseModel):
     tipo: str | None
     fonte: str | None
     grau: str | None
+    arquivo_nome: str | None
+    arquivo_drive_link: str | None
     lido: bool
     notificado: bool
     created_at: datetime

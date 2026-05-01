@@ -26,6 +26,9 @@ class Andamento:
     descricao: str
     tipo: str | None = None
     grau: str | None = None   # "1G", "2G"
+    arquivo_nome: str | None = None
+    arquivo_bytes: bytes | None = None
+    arquivo_mimetype: str | None = None
 
 
 class BaseScraper:

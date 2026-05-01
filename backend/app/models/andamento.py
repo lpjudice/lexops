@@ -24,6 +24,9 @@ class AndamentoProcesso(Base):
     tipo: Mapped[str | None] = mapped_column(String(255), nullable=True)    # e.g. "Despacho", "Sentença"
     fonte: Mapped[str | None] = mapped_column(String(100), nullable=True)  # "TJES", "TJSP", etc.
     grau: Mapped[str | None] = mapped_column(String(10), nullable=True)    # "1G", "2G"
+    arquivo_nome: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    arquivo_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    arquivo_drive_link: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     hash_unico: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     lido: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     notificado: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
