@@ -402,7 +402,12 @@ export default function DiarioPage() {
     },
   })
 
-  const todosTermos = [...nomesClientes, ...termosCustom].filter(Boolean)
+  const termosNomesMonitorados = [...nomesClientes, ...termosCustom].filter(Boolean)
+  const numerosProcessosMonitorados = processos.map((p) => p.numero_cnj).filter(Boolean)
+  const termosBuscaDiario = uniqueStrings([
+    ...numerosProcessosMonitorados,
+    ...termosNomesMonitorados,
+  ])
 
   const salvarMonitoramento = useMutation({
     mutationFn: (payload: { termos_extras: string[] }) =>
@@ -419,7 +424,7 @@ export default function DiarioPage() {
 
   const syncScraping = useMutation({
     mutationFn: ({ tribunais, label }: { tribunais: string[]; label: string }) =>
-      diarioApi.syncScraping(tribunais, todosTermos, daysBack).then((r) => ({ ...r, label })),
+      diarioApi.syncScraping(tribunais, termosBuscaDiario, daysBack).then((r) => ({ ...r, label })),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['diario'] })
       setSyncMsg(`${r.label}: ${r.inseridas} novas, ${r.duplicatas} duplicatas`)
@@ -552,7 +557,7 @@ export default function DiarioPage() {
 
   const SEM_PUB = 'Sem publicações nesta edição.'
   const publicacoesEnriquecidas = [...publicacoes]
-    .map((pub) => ({ pub, match: classifyPublication(pub, processos, clientes, todosTermos) }))
+    .map((pub) => ({ pub, match: classifyPublication(pub, processos, clientes, termosNomesMonitorados) }))
     .sort((a, b) => {
       const priorityA = getMatchPriority(a.match)
       const priorityB = getMatchPriority(b.match)

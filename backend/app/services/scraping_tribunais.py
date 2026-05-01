@@ -268,11 +268,14 @@ def _texto_para_publicacoes(
     data_pub: date,
     termos: list[str] | None = None,
 ) -> list[dict]:
+    if termos and not _texto_tem_match_monitorado(texto, termos):
+        return []
+
     cnjs = list(set(CNJ_RE.findall(texto)))
 
     if cnjs:
         return [_montar_publicacao(texto, tribunal, fonte, data_pub, numero_cnj=cnj) for cnj in cnjs]
-    if _termo_encontrado(texto, termos):
+    if termos:
         return [_montar_publicacao(texto, tribunal, fonte, data_pub)]
     return []
 
@@ -291,6 +294,9 @@ def _extrair_por_cnj_global(
     texto_pagina = soup.get_text(" ", strip=True)
     cnjs = list(set(CNJ_RE.findall(texto_pagina)))
     resultado: list[dict] = []
+
+    if termos and not _texto_tem_match_monitorado(texto_pagina, termos):
+        return []
 
     for cnj in cnjs:
         idx = texto_pagina.find(cnj)
