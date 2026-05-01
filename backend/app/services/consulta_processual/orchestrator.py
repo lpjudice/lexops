@@ -65,9 +65,10 @@ def _sanitizar_nome_arquivo(nome: str) -> str:
 
 def _extensao_documento(nome_arquivo: str, mimetype: str | None) -> str:
     mime = (mimetype or "").lower()
-    if mime == "application/pdf":
+    nome_lower = (nome_arquivo or "").lower()
+    if mime == "application/pdf" or nome_lower.endswith(".pdf"):
         return ".pdf"
-    if mime in {"text/html", "application/xhtml+xml"}:
+    if mime in {"text/html", "application/xhtml+xml"} or nome_lower.endswith((".html", ".htm")):
         return ".html"
     ext = Path(nome_arquivo or "").suffix
     if ext:
@@ -103,7 +104,8 @@ def _nome_documento_andamento(
 
 
 def _nome_drive_documento(nome_arquivo: str, mimetype: str | None) -> str:
-    if (mimetype or "").lower() in {"text/html", "application/xhtml+xml"}:
+    nome_lower = (nome_arquivo or "").lower()
+    if (mimetype or "").lower() in {"text/html", "application/xhtml+xml"} or nome_lower.endswith((".html", ".htm")):
         return Path(nome_arquivo).with_suffix("").name
     return nome_arquivo
 

@@ -123,9 +123,17 @@ def upload_arquivo(
     if not tokens:
         return None
 
+    nome_lower = (nome_arquivo or "").lower()
+    if not mimetype and nome_lower.endswith((".html", ".htm")):
+        mimetype = "text/html"
+    elif not mimetype and nome_lower.endswith(".pdf"):
+        mimetype = "application/pdf"
+
     media_mimetype = mimetype or "application/octet-stream"
     target_mimetype = media_mimetype
-    if converter_html_para_google_docs and media_mimetype.lower() in {"text/html", "application/xhtml+xml"}:
+    is_html = media_mimetype.lower() in {"text/html", "application/xhtml+xml"} or nome_lower.endswith((".html", ".htm"))
+    if converter_html_para_google_docs and is_html:
+        media_mimetype = "text/html"
         target_mimetype = "application/vnd.google-apps.document"
 
     def _do(tkns: dict) -> str | None:
