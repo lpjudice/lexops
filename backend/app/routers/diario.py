@@ -93,12 +93,21 @@ def _item_tem_match_monitorado_exato(
     return False, None
 
 
-def _filtrar_itens_monitorados_exatos(itens: list[dict], db: Session) -> list[dict]:
+def _filtrar_itens_monitorados_exatos(
+    itens: list[dict],
+    db: Session,
+    termos_busca: list[str] | None = None,
+) -> list[dict]:
     from app.services.diario_monitoring import load_monitoring_config
 
     config = load_monitoring_config()
     processos_por_cnj = _processos_por_cnj(db)
-    nomes_monitorados = _nomes_monitorados(db, config.get("termos_extras") or [])
+    termos_extras = [
+        termo
+        for termo in [*(config.get("termos_extras") or []), *(termos_busca or [])]
+        if len(_normalizar_cnj(termo)) != 20
+    ]
+    nomes_monitorados = _nomes_monitorados(db, termos_extras)
 
     filtrados: list[dict] = []
     for item in itens:
@@ -200,7 +209,7 @@ def sync_scraping(
         termos=termos or None,
         days_back=days_back,
     )
-    itens = _filtrar_itens_monitorados_exatos(itens, db)
+    itens = _filtrar_itens_monitorados_exatos(itens, db, termos)
     ins, dup, err = _inserir_publicacoes(itens, db)
     return SyncResult(inseridas=ins, duplicatas=dup, erros=err, fonte="scraping")
 
