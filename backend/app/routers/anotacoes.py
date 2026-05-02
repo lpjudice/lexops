@@ -40,9 +40,8 @@ def criar_anotacao(data: AnotacaoCreate, db: Session = Depends(get_db)):
     db.add(anotacao)
     db.commit()
     db.refresh(anotacao)
-    # Salva PDF na pasta do cliente (Dropbox + Drive)
+    # Salva PDF na pasta do cliente no Google Drive.
     try:
-        from app.services.pasta_cliente import pasta_tipo, salvar_arquivo
         from app.services.gerar_pdf_texto import texto_para_pdf
         data_evento_str = anotacao.data_evento.isoformat() if hasattr(anotacao.data_evento, 'isoformat') else str(anotacao.data_evento)
         nome_arquivo = f"{anotacao.tipo}_{data_evento_str}_{str(anotacao.id)[:8]}.pdf"
@@ -59,14 +58,8 @@ def criar_anotacao(data: AnotacaoCreate, db: Session = Depends(get_db)):
             cliente_nome=cliente.nome,
             data=anotacao.data_evento if hasattr(anotacao.data_evento, 'strftime') else None,
         )
-        # Dropbox
-        salvar_arquivo(pasta_tipo(cliente.nome, "ia"), nome_arquivo, pdf_bytes)
-        # Drive
-        try:
-            from app.services.google_drive import upload_arquivo
-            upload_arquivo(pdf_bytes, nome_arquivo, cliente.nome, "IA")
-        except Exception:
-            pass
+        from app.services.google_drive import upload_arquivo
+        upload_arquivo(pdf_bytes, nome_arquivo, cliente.nome, "IA")
     except Exception:
         pass
     return anotacao

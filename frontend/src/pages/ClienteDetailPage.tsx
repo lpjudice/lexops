@@ -225,7 +225,7 @@ export default function ClienteDetailPage() {
         </div>
       </div>
 
-      {/* Projeto info + path */}
+      {/* Projeto info */}
       <div className={detailStyles.projetoInfo}>
         {cliente.projeto_nome && (
           <>
@@ -233,23 +233,6 @@ export default function ClienteDetailPage() {
             <code className={detailStyles.worktreeNome}>{cliente.worktree_nome}</code>
           </>
         )}
-        <code className={detailStyles.pathLocal} title="Pasta de uploads do cliente (servidor)">
-          📁 ./uploads/clientes/{cliente.id}/
-        </code>
-        {(() => {
-          const pastaBase = localStorage.getItem('gestor_pasta_clientes') || '/Users/lucasjudice/Dropbox/Clientes/LexOps'
-          const pastaCliente = `${pastaBase}/${cliente.nome}`
-          return (
-            <button
-              className={detailStyles.pathLocal}
-              title={`Copiar caminho: ${pastaCliente} (depois use Cmd+Shift+G no Finder)`}
-              style={{ color: '#00b090', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'monospace', fontSize: 'inherit', padding: 0, marginLeft: 8 }}
-              onClick={() => navigator.clipboard.writeText(pastaCliente)}
-            >
-              📂 Copiar pasta ↗
-            </button>
-          )
-        })()}
       </div>
 
       {/* Abas */}

@@ -31,6 +31,8 @@ export interface Documento {
   filename: string
   size: number
   subpasta?: string | null
+  drive_link?: string | null
+  source?: 'drive' | 'local'
 }
 
 export interface PastaArquivo {
@@ -73,7 +75,7 @@ export const clientesApi = {
   uploadPdf: (id: string, file: File) => {
     const form = new FormData()
     form.append('file', file)
-    return api.post<{ filename: string; size: number }>(`/clientes/${id}/upload-pdf`, form, {
+    return api.post<{ filename: string; size: number; drive_link?: string | null }>(`/clientes/${id}/upload-pdf`, form, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then((r) => r.data)
   },

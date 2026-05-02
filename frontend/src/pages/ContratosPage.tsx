@@ -338,12 +338,13 @@ export default function ContratosPage() {
                           {arquivos.map((arq) => (
                             <li key={arq.filename} className={cs.arquivoItem}>
                               <a
-                                href={contratosApi.verArquivoUrl(c.id, arq.filename)}
+                                href={arq.drive_link || contratosApi.verArquivoUrl(c.id, arq.filename)}
                                 target="_blank" rel="noreferrer"
                                 className={cs.arquivoLink}
                               >
                                 📄 {arq.filename}
                               </a>
+                              {arq.drive_link && <span className={cs.arquivoNome}>Drive</span>}
                               {c.status === 'rascunho' && (
                                 <button className={cs.btnRemove}
                                   onClick={() => {

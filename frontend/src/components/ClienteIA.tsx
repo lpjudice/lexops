@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { clientesApi } from '../api/clientes'
-import type { ChatMessage, PastaArquivo } from '../api/clientes'
+import type { ChatMessage } from '../api/clientes'
 import { conversasIaApi } from '../api/conversas_ia'
 import type { ConversaIA } from '../api/conversas_ia'
 import styles from './ClienteIA.module.css'
@@ -35,12 +35,6 @@ export default function ClienteIA({ clienteId }: Props) {
   const { data: docs = [] } = useQuery({
     queryKey: ['cliente-docs', clienteId],
     queryFn: () => clientesApi.listarDocumentos(clienteId),
-  })
-
-  const { data: pastaArquivos = [], refetch: refetchPasta, isFetching: loadingPasta } = useQuery({
-    queryKey: ['pasta-arquivos', clienteId],
-    queryFn: () => clientesApi.pastaArquivos(clienteId),
-    enabled: false, // only fetch on demand
   })
 
   const { data: conversas = [] } = useQuery({
@@ -141,79 +135,14 @@ export default function ClienteIA({ clienteId }: Props) {
     qc.invalidateQueries({ queryKey: ['cliente-docs', clienteId] })
   }
 
-  // Group Dropbox files by subpasta
-  const pastaGrupos = pastaArquivos.reduce<Record<string, PastaArquivo[]>>((acc, arq) => {
-    const key = arq.subpasta ?? '__raiz__'
-    if (!acc[key]) acc[key] = []
-    acc[key].push(arq)
-    return acc
-  }, {})
-
-  const fileIcon = (tipo: string) => {
-    if (tipo === 'pdf') return '📄'
-    if (tipo === 'md' || tipo === 'txt') return '📝'
-    if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(tipo)) return '🖼️'
-    return '📎'
-  }
-
   const formatSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
     return `${(bytes / 1024 / 1024).toFixed(1)} MB`
   }
 
-  const formatDate = (iso: string) => {
-    try { return new Date(iso).toLocaleDateString('pt-BR') } catch { return iso }
-  }
-
   return (
     <div className={styles.root}>
-      {/* Pasta Dropbox */}
-      <div className={styles.docsSection} style={{ marginBottom: '12px' }}>
-        <div className={styles.docsHeader}>
-          <span className={styles.docsTitle}>📂 Pasta Dropbox</span>
-          <button
-            className={styles.btnUpload}
-            onClick={() => refetchPasta()}
-            disabled={loadingPasta}
-          >
-            {loadingPasta ? 'Buscando...' : 'Atualizar'}
-          </button>
-        </div>
-        {pastaArquivos.length === 0 ? (
-          <p className={styles.docsVazio}>
-            {loadingPasta ? 'Carregando...' : 'Clique em "Atualizar" para listar arquivos da pasta Dropbox do cliente.'}
-          </p>
-        ) : (
-          <div>
-            {Object.entries(pastaGrupos).map(([grupo, arquivos]) => (
-              <div key={grupo} style={{ marginBottom: '8px' }}>
-                {grupo !== '__raiz__' && (
-                  <div style={{ fontSize: '11px', color: '#00b090', fontWeight: 600, marginBottom: '4px', letterSpacing: '0.03em' }}>
-                    📁 {grupo}
-                  </div>
-                )}
-                <ul className={styles.docsList}>
-                  {arquivos.map((arq) => (
-                    <li key={arq.caminho} className={styles.docItem}>
-                      <span>{fileIcon(arq.tipo)}</span>
-                      <span className={styles.docNome} style={{ flex: 1 }}>{arq.nome}</span>
-                      <span className={styles.docTamanho}>{formatSize(arq.tamanho)}</span>
-                      <span className={styles.docTamanho} style={{ color: '#666' }}>{formatDate(arq.modificado)}</span>
-                      {arq.subpasta && (
-                        <span style={{ fontSize: '10px', background: '#1a2a20', color: '#00b090', borderRadius: '4px', padding: '1px 5px' }}>
-                          {arq.subpasta}
-                        </span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
       {/* Documentos */}
       <div className={styles.docsSection}>
         <div className={styles.docsHeader}>
@@ -239,9 +168,18 @@ export default function ClienteIA({ clienteId }: Props) {
           <ul className={styles.docsList}>
             {docs.map((d) => (
               <li key={d.filename} className={styles.docItem}>
-                <span className={styles.docNome}>{d.filename}</span>
-                <span className={styles.docTamanho}>{(d.size / 1024).toFixed(0)} KB</span>
-                <button className={styles.btnRemoverDoc} onClick={() => remover(d.filename)}>×</button>
+                {d.drive_link ? (
+                  <a className={styles.docNome} href={d.drive_link} target="_blank" rel="noreferrer">
+                    {d.filename}
+                  </a>
+                ) : (
+                  <span className={styles.docNome}>{d.filename}</span>
+                )}
+                <span className={styles.docTamanho}>{formatSize(d.size)}</span>
+                {d.source === 'drive' && <span className={styles.docTamanho}>Drive</span>}
+                {d.source !== 'drive' && (
+                  <button className={styles.btnRemoverDoc} onClick={() => remover(d.filename)}>×</button>
+                )}
               </li>
             ))}
           </ul>

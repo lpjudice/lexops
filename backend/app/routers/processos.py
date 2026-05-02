@@ -284,15 +284,6 @@ def criar_processo(data: ProcessoCreate, db: Session = Depends(get_db)):
     if litis_in:
         _sync_litisconsorcio(processo, litis_in, db)
         db.commit()
-    # Cria subpasta no Dropbox
-    try:
-        from app.models.cliente import Cliente
-        from app.services.pasta_cliente import pasta_processo as _pasta_proc
-        cliente = db.query(Cliente).filter(Cliente.id == processo.cliente_id).first()
-        if cliente and processo.numero_cnj:
-            _pasta_proc(cliente.nome, processo.numero_cnj)
-    except Exception:
-        pass
     return _processo_to_out(processo, db)
 
 
@@ -360,20 +351,11 @@ async def upload_pdf(
 
     drive_link = None
 
-    # Copia para pasta Dropbox e Google Drive do cliente
+    # Envia para o Google Drive do cliente.
     try:
         from app.models.cliente import Cliente
         cliente = db.query(Cliente).filter(Cliente.id == processo.cliente_id).first()
         if cliente and processo.numero_cnj:
-            try:
-                from app.services.pasta_cliente import pasta_processo as _pasta_proc, salvar_arquivo
-                pasta_local = _pasta_proc(cliente.nome, processo.numero_cnj)
-                if pasta_local.exists():
-                    pasta_local = pasta_local / "Documentos"
-                    pasta_local.mkdir(parents=True, exist_ok=True)
-                salvar_arquivo(pasta_local, file.filename, content)
-            except Exception:
-                pass
             try:
                 from app.services.google_drive import upload_arquivo
                 drive_link = upload_arquivo(
@@ -399,13 +381,24 @@ def listar_documentos(processo_id: uuid.UUID, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Processo não encontrado")
 
     pasta = UPLOADS_DIR / str(processo_id)
-    if not pasta.exists():
-        return []
-    return [
-        {"filename": f.name, "size": f.stat().st_size}
+    local_docs = [
+        {"filename": f.name, "size": f.stat().st_size, "source": "local"}
         for f in sorted(pasta.iterdir())
         if f.suffix.lower() == ".pdf"
-    ]
+    ] if pasta.exists() else []
+
+    drive_docs = []
+    try:
+        from app.models.cliente import Cliente
+        from app.services.google_drive import listar_arquivos
+        cliente = db.query(Cliente).filter(Cliente.id == processo.cliente_id).first()
+        if cliente and processo.numero_cnj:
+            drive_docs = listar_arquivos(cliente.nome, processo.numero_cnj, sub_subfolder="Documentos")
+    except Exception:
+        drive_docs = []
+
+    nomes_drive = {d["filename"] for d in drive_docs}
+    return [*drive_docs, *[doc for doc in local_docs if doc["filename"] not in nomes_drive]]
 
 
 @router.delete("/{processo_id}/documentos/{filename}")

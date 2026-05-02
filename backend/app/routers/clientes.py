@@ -53,12 +53,6 @@ def criar_cliente(data: ClienteCreate, db: Session = Depends(get_db)):
     db.add(cliente)
     db.commit()
     db.refresh(cliente)
-    # Cria pasta no Dropbox (silencioso se não disponível)
-    try:
-        from app.services.pasta_cliente import pasta_cliente as _pasta_dropbox
-        _pasta_dropbox(cliente.nome)
-    except Exception:
-        pass
     try:
         from app.services.google_drive import ensure_cliente_folder
         ensure_cliente_folder(cliente.nome)
@@ -89,13 +83,6 @@ def atualizar_cliente(
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
-    # Renomeia pasta Dropbox ANTES de atualizar o banco
-    if data.nome and data.nome != cliente.nome:
-        try:
-            from app.services.pasta_cliente import renomear_pasta_cliente
-            renomear_pasta_cliente(cliente.nome, data.nome)
-        except Exception:
-            pass
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(cliente, field, value)
     # Atualiza projeto se nome mudou
@@ -133,13 +120,19 @@ async def upload_pdf(
     dest = pasta / file.filename
     content = await file.read()
     dest.write_bytes(content)
-    # Salva cópia na pasta Dropbox
+    drive_link = None
     try:
-        from app.services.pasta_cliente import pasta_tipo, salvar_arquivo
-        salvar_arquivo(pasta_tipo(cliente.nome, "uploads"), file.filename, content)
+        from app.services.google_drive import upload_arquivo
+        drive_link = upload_arquivo(
+            content,
+            file.filename,
+            cliente.nome,
+            "Uploads",
+            file.content_type or "application/pdf",
+        )
     except Exception:
         pass
-    return {"filename": file.filename, "size": len(content)}
+    return {"filename": file.filename, "size": len(content), "drive_link": drive_link}
 
 
 @router.get("/{cliente_id}/documentos")
@@ -148,33 +141,29 @@ def listar_documentos(cliente_id: uuid.UUID, db: Session = Depends(get_db)):
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
 
-    # Arquivos do servidor (uploads)
+    # Arquivos locais do servidor (apoio imediato para IA) + Drive (fonte persistente)
     pasta = UPLOADS_DIR / str(cliente_id)
     server_docs = []
     if pasta.exists():
         server_docs = [
-            {"filename": f.name, "size": f.stat().st_size, "subpasta": None}
+            {"filename": f.name, "size": f.stat().st_size, "subpasta": None, "source": "local"}
             for f in sorted(pasta.iterdir())
             if f.suffix.lower() in (".pdf", ".md", ".txt")
         ]
 
-    # Arquivos do Dropbox
     try:
-        from app.services.pasta_cliente import listar_arquivos
-        dropbox_docs = listar_arquivos(cliente.nome)
+        from app.services.google_drive import listar_arquivos
+        drive_docs = listar_arquivos(cliente.nome, "Uploads")
     except Exception:
-        dropbox_docs = []
+        drive_docs = []
 
-    # Merge e deduplica por nome de arquivo
+    # Merge e deduplica por nome de arquivo, preferindo o link persistente do Drive.
     nomes_server = {d["filename"] for d in server_docs}
-    merged = list(server_docs)
-    for arq in dropbox_docs:
-        if arq["nome"] not in nomes_server:
-            merged.append({
-                "filename": arq["nome"],
-                "size": arq["tamanho"],
-                "subpasta": arq.get("subpasta"),
-            })
+    merged = list(drive_docs)
+    nomes_drive = {d["filename"] for d in drive_docs}
+    for doc in server_docs:
+        if doc["filename"] not in nomes_drive:
+            merged.append(doc)
 
     return merged
 
@@ -346,15 +335,6 @@ async def importar_processos_batch(
     for p in criados:
         db.refresh(p)
 
-    # Cria subpastas no Dropbox para os processos criados
-    try:
-        from app.services.pasta_cliente import pasta_processo as _pasta_proc
-        for p in criados:
-            if p.numero_cnj:
-                _pasta_proc(cliente.nome, p.numero_cnj)
-    except Exception:
-        pass
-
     return criados
 
 
@@ -399,10 +379,9 @@ def gerar_proposta(
     nome_arquivo = f"Proposta_{body.projeto_tipo}_{datetime.today().strftime('%Y%m%d')}.pdf"
     (pasta / nome_arquivo).write_bytes(pdf_bytes)
 
-    # Salva cópia no Dropbox
     try:
-        from app.services.pasta_cliente import pasta_tipo, salvar_arquivo
-        salvar_arquivo(pasta_tipo(cliente.nome, "contratos"), nome_arquivo, pdf_bytes)
+        from app.services.google_drive import upload_arquivo
+        upload_arquivo(pdf_bytes, nome_arquivo, cliente.nome, "Propostas")
     except Exception:
         pass
 
@@ -441,7 +420,6 @@ def chat_cliente(
     )
 
     from app.services.ia_cliente import chat
-    # Sempre usa Gemini para contexto completo do Dropbox
     resposta = chat(
         modelo="gemini",
         pergunta=body.pergunta,
@@ -535,9 +513,9 @@ def sincronizar_emails(cliente_id: uuid.UUID, body: EmailSyncRequest, db: Sessio
 
 @router.post("/{cliente_id}/pasta-arquivos/refresh")
 def refresh_pasta_arquivos(cliente_id: uuid.UUID, db: Session = Depends(get_db)):
-    """Returns all files in the client's Dropbox folder (including manually added)."""
+    """Compat: returns persistent client Uploads from Google Drive."""
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
-    from app.services.pasta_cliente import listar_arquivos
-    return listar_arquivos(cliente.nome)
+    from app.services.google_drive import listar_arquivos
+    return listar_arquivos(cliente.nome, "Uploads")

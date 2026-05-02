@@ -47,16 +47,15 @@ def atualizar_conversa(conversa_id: uuid.UUID, data: ConversaIAUpdate, db: Sessi
     db.commit()
     db.refresh(c)
 
-    # Salva conversa como PDF no Dropbox + Drive do cliente
+    # Salva conversa como PDF no Drive do cliente
     _salvar_conversa_pdf(c, db)
 
     return c
 
 
 def _salvar_conversa_pdf(c: ConversaIA, db: Session) -> None:
-    """Persiste a conversa como PDF na pasta IA do cliente (local + Drive)."""
+    """Persiste a conversa como PDF na pasta IA do cliente no Drive."""
     try:
-        from app.services.pasta_cliente import pasta_tipo, salvar_arquivo
         from app.services.gerar_pdf_texto import texto_para_pdf
         from app.models.cliente import Cliente as _Cliente
 
@@ -81,13 +80,8 @@ def _salvar_conversa_pdf(c: ConversaIA, db: Session) -> None:
         )
         id_curto = str(c.id)[:8]
         nome = f"conversa_ia_{id_curto}.pdf"
-        salvar_arquivo(pasta_tipo(cliente.nome, "ia"), nome, pdf_bytes)
-
-        try:
-            from app.services.google_drive import upload_arquivo
-            upload_arquivo(pdf_bytes, nome, cliente.nome, "IA")
-        except Exception:
-            pass
+        from app.services.google_drive import upload_arquivo
+        upload_arquivo(pdf_bytes, nome, cliente.nome, "IA")
     except Exception:
         pass
 

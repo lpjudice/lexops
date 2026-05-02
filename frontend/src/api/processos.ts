@@ -109,6 +109,8 @@ export interface ProcessoJusbrPrefill {
 export interface Documento {
   filename: string
   size: number
+  drive_link?: string | null
+  source?: 'drive' | 'local'
 }
 
 export interface ChatMessage {

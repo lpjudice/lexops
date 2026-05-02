@@ -20,6 +20,7 @@ export interface ContratoArquivo {
   filename: string
   path: string
   clicksign_key?: string
+  drive_link?: string | null
 }
 
 export interface Contrato {

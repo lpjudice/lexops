@@ -100,20 +100,17 @@ async def upload_pdf(
         # Mantém arquivo_path legado apontando para o primeiro arquivo
         if not c.arquivo_path:
             c.arquivo_path = str(destino)
-        # Salva cópia no Dropbox + Drive
+        drive_link = None
         try:
             from app.models.cliente import Cliente
-            from app.services.pasta_cliente import pasta_tipo, salvar_arquivo
             cliente = db.query(Cliente).filter(Cliente.id == c.cliente_id).first()
             if cliente:
-                salvar_arquivo(pasta_tipo(cliente.nome, "contratos"), arquivo.filename, conteudo_bytes)
-                try:
-                    from app.services.google_drive import upload_arquivo
-                    upload_arquivo(conteudo_bytes, arquivo.filename, cliente.nome, "Contratos")
-                except Exception:
-                    pass
+                from app.services.google_drive import upload_arquivo
+                drive_link = upload_arquivo(conteudo_bytes, arquivo.filename, cliente.nome, "Contratos")
         except Exception:
             pass
+        if drive_link:
+            lista[-1]["drive_link"] = drive_link
 
     c.arquivos = lista
     db.commit()
@@ -206,23 +203,18 @@ async def gerar_pdf_contrato(
     destino = UPLOADS_DIR / nome_arquivo
     destino.write_bytes(pdf_bytes)
 
-    # Salva cópia no Dropbox + Drive do cliente
+    drive_link = None
     try:
         from app.models.cliente import Cliente
-        from app.services.pasta_cliente import pasta_tipo, salvar_arquivo
         cliente = db.query(Cliente).filter(Cliente.id == c.cliente_id).first()
         if cliente:
-            salvar_arquivo(pasta_tipo(cliente.nome, "contratos"), nome_arquivo, pdf_bytes)
-            try:
-                from app.services.google_drive import upload_arquivo
-                upload_arquivo(pdf_bytes, nome_arquivo, cliente.nome, "Contratos")
-            except Exception:
-                pass
+            from app.services.google_drive import upload_arquivo
+            drive_link = upload_arquivo(pdf_bytes, nome_arquivo, cliente.nome, "Contratos")
     except Exception:
         pass
 
     lista = list(c.arquivos or [])
-    lista.append({"filename": nome_arquivo, "path": str(destino), "clicksign_key": None})
+    lista.append({"filename": nome_arquivo, "path": str(destino), "clicksign_key": None, "drive_link": drive_link})
     c.arquivos = lista
     c.arquivo_path = str(destino)
     db.commit()

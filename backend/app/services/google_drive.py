@@ -233,6 +233,59 @@ def upload_pdf(
     return upload_arquivo(pdf_bytes, nome_arquivo, nome_cliente, subfolder, "application/pdf", sub_subfolder)
 
 
+def listar_arquivos(nome_cliente: str, subfolder: str, sub_subfolder: str | None = None) -> list[dict]:
+    """Lists files from {nome_cliente}/{subfolder}[/{sub_subfolder}] in Drive."""
+    tokens = _load_tokens()
+    if not tokens:
+        return []
+
+    def _do(tkns: dict) -> list[dict]:
+        h = _auth_headers(tkns)
+        cliente_folder_id = _get_or_create_subfolder(nome_cliente, DRIVE_FOLDER_ID, h)
+        folder_id = _get_or_create_subfolder(subfolder, cliente_folder_id, h)
+        if sub_subfolder:
+            folder_id = _get_or_create_subfolder(sub_subfolder, folder_id, h)
+        query = f"'{folder_id}' in parents and trashed=false"
+        r = httpx.get(
+            f"{DRIVE_META}/files",
+            headers=h,
+            params={
+                "q": query,
+                "fields": "files(id,name,size,mimeType,modifiedTime,webViewLink)",
+                "supportsAllDrives": True,
+                "includeItemsFromAllDrives": True,
+                "orderBy": "modifiedTime desc",
+            },
+            timeout=30,
+        )
+        r.raise_for_status()
+        return [
+            {
+                "filename": item.get("name") or "",
+                "size": int(item.get("size") or 0),
+                "drive_link": item.get("webViewLink") or f"https://drive.google.com/file/d/{item.get('id')}/view",
+                "mime_type": item.get("mimeType"),
+                "modified_time": item.get("modifiedTime"),
+                "source": "drive",
+            }
+            for item in r.json().get("files", [])
+            if item.get("name")
+        ]
+
+    try:
+        return _do(tokens)
+    except Exception as exc:
+        if not _is_unauthorized(exc):
+            logger.warning("Falha ao listar arquivos do Drive: %s", exc)
+            return []
+        tokens2 = _refresh(tokens)
+        try:
+            return _do(tokens2)
+        except Exception as exc2:
+            logger.warning("Falha ao listar arquivos do Drive apos refresh: %s", exc2)
+            return []
+
+
 def get_folder_link(nome_cliente: str, subfolder: str, sub_subfolder: str | None = None) -> str | None:
     """
     Returns the webViewLink of {nome_cliente}/{subfolder}[/{sub_subfolder}] in Drive.

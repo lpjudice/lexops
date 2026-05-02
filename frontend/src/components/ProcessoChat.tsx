@@ -195,9 +195,18 @@ export default function ProcessoChat({ processoId, clienteId, processoNome }: Pr
           <ul className={styles.docsList}>
             {docs.map((d) => (
               <li key={d.filename} className={styles.docItem}>
-                <span className={styles.docNome}>{d.filename}</span>
+                {d.drive_link ? (
+                  <a className={styles.docNome} href={d.drive_link} target="_blank" rel="noreferrer">
+                    {d.filename}
+                  </a>
+                ) : (
+                  <span className={styles.docNome}>{d.filename}</span>
+                )}
                 <span className={styles.docTamanho}>{(d.size / 1024).toFixed(0)} KB</span>
-                <button className={styles.btnRemoverDoc} onClick={() => remover(d.filename)}>×</button>
+                {d.source === 'drive' && <span className={styles.docTamanho}>Drive</span>}
+                {d.source !== 'drive' && (
+                  <button className={styles.btnRemoverDoc} onClick={() => remover(d.filename)}>×</button>
+                )}
               </li>
             ))}
           </ul>
