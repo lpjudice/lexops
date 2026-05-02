@@ -156,19 +156,26 @@ def channel_ativo() -> dict | None:
 
 
 def renovar_se_necessario() -> None:
-    """Chamado pelo scheduler — renova channel se expirar em menos de 1 dia."""
+    """Chamado pelo scheduler — renova channel se expirar em menos de 1 dia, ou registra se não existir."""
+    import os
     import time
+
     channel = _load_channel()
+    base_url = os.getenv("WEBHOOK_BASE_URL", "https://lexops.fly.dev")
+
     if not channel:
+        logger.info("Drive watch channel não encontrado — registrando automaticamente")
+        registrar_watch(base_url)
         return
 
     exp_ms = channel.get("expiration_ms")
     if not exp_ms:
+        registrar_watch(base_url)
         return
 
     restante_ms = int(exp_ms) - int(time.time() * 1000)
     um_dia_ms = 24 * 60 * 60 * 1000
     if restante_ms < um_dia_ms:
         logger.info("Renovando Drive watch channel (expira em %dh)", restante_ms // 3_600_000)
-        base_url = channel.get("webhook_url", "").replace("/webhooks/drive", "")
-        registrar_watch(base_url or None)
+        url = channel.get("webhook_url", "").replace("/webhooks/drive", "") or base_url
+        registrar_watch(url)

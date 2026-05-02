@@ -302,6 +302,23 @@ def _startup():
         import logging
         logging.getLogger(__name__).warning("apscheduler não instalado — scheduler desativado")
 
+    # Auto-registra Drive webhook se ainda não estiver ativo
+    try:
+        import os
+        from app.services.drive_watch import channel_ativo, registrar_watch
+        if not channel_ativo():
+            base_url = os.getenv("WEBHOOK_BASE_URL", "https://lexops.fly.dev")
+            result = registrar_watch(base_url)
+            import logging
+            log = logging.getLogger(__name__)
+            if "erro" in result:
+                log.warning("Drive webhook não registrado no startup: %s", result["erro"])
+            else:
+                log.info("Drive webhook registrado automaticamente no startup: %s", result.get("channel_id"))
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("Erro ao registrar Drive webhook no startup: %s", exc)
+
 
 @app.on_event("shutdown")
 def _shutdown():

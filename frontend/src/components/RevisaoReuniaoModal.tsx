@@ -5,6 +5,7 @@ import { reunioesApi } from '../api/reunioes'
 import type { Reuniao, AcaoSugerida, TipoAcao } from '../api/reunioes'
 import { clientesApi } from '../api/clientes'
 import { processosApi } from '../api/processos'
+import ClienteCombobox from './ClienteCombobox'
 import styles from './RevisaoReuniaoModal.module.css'
 import p from '../pages/Page.module.css'
 
@@ -147,18 +148,16 @@ export default function RevisaoReuniaoModal({ reuniao: initialReuniao, onClose }
 
         {/* Meta: cliente + processo */}
         <div className={styles.meta}>
-          <div className={styles.metaRow}>
+          <div className={styles.metaRow} style={{ alignItems: 'flex-start', flexDirection: 'column', gap: 4 }}>
             <label className={styles.metaLabel}>Cliente</label>
-            <select
-              className={styles.metaSelect}
-              value={clienteId}
-              onChange={(e) => { setClienteId(e.target.value); setProcessoId('') }}
-            >
-              <option value="">Selecionar cliente...</option>
-              {clientes.map((c: { id: string; nome: string }) => (
-                <option key={c.id} value={c.id}>{c.nome}</option>
-              ))}
-            </select>
+            <div style={{ minWidth: 260 }}>
+              <ClienteCombobox
+                value={clienteId}
+                onChange={(id) => { setClienteId(id); setProcessoId('') }}
+                clientes={clientes}
+                onCreateCliente={async () => ''}
+              />
+            </div>
           </div>
           {clienteId && processosFiltrados.length > 0 && (
             <div className={styles.metaRow}>

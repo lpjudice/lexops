@@ -24,7 +24,11 @@ const TIPOS_ANOTACAO: TipoAnotacao[] = ['reuniao', 'ligacao', 'whatsapp', 'email
 const TIPO_ICON: Record<string, string> = {
   reuniao: '🤝', ligacao: '📞', whatsapp: '💬', email: '✉️',
   documento: '📄', anamnese: '📋', outro: '📝',
-  prazo: '⏰', publicacao: '📰',
+  prazo: '⏰', publicacao: '📰', reuniao_meet: '📹',
+}
+
+const STATUS_REUNIAO_LABEL: Record<string, string> = {
+  pendente: 'Pendente', em_revisao: 'Em revisão', processada: 'Processada',
 }
 
 const TIPO_COLOR: Record<string, string> = {
@@ -32,6 +36,7 @@ const TIPO_COLOR: Record<string, string> = {
   prazo: detailStyles.itemPrazo,
   publicacao: detailStyles.itemPublicacao,
   email: detailStyles.itemEmail,
+  reuniao: detailStyles.itemAnotacao,
 }
 
 function formatDate(d: string) {
@@ -286,20 +291,48 @@ export default function ClienteDetailPage() {
             <p className={styles.empty}>Nenhum evento registrado.</p>
           ) : (
             timeline.map((item, i) => (
-              <div key={`${item.referencia_id}-${i}`} className={`${detailStyles.timelineItem} ${TIPO_COLOR[item.tipo]}`}>
+              <div
+                key={`${item.referencia_id}-${i}`}
+                className={`${detailStyles.timelineItem} ${TIPO_COLOR[item.tipo]}`}
+                style={item.tipo === 'reuniao' ? { cursor: 'pointer' } : undefined}
+                onClick={item.tipo === 'reuniao' ? () => {
+                  const r = reunioes.find((r: Reuniao) => r.id === item.referencia_id)
+                  if (r) setReuniaoRevisando(r)
+                } : undefined}
+              >
                 <div className={detailStyles.timelineIcon}>
-                  {TIPO_ICON[item.tipo === 'anotacao' ? (item.meta.tipo as string) : item.tipo] || '•'}
+                  {item.tipo === 'reuniao'
+                    ? '📹'
+                    : TIPO_ICON[item.tipo === 'anotacao' ? (item.meta.tipo as string) : item.tipo] || '•'}
                 </div>
                 <div className={detailStyles.timelineContent}>
                   <div className={detailStyles.timelineHeader}>
                     <strong>{item.titulo}</strong>
                     <span className={detailStyles.timelineData}>{formatDate(item.data)}</span>
                   </div>
-                  {item.subtitulo && <div className={detailStyles.subtitulo}>{item.subtitulo}</div>}
+                  {item.tipo === 'reuniao' && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
+                      <span style={{
+                        fontSize: 11, fontWeight: 700, borderRadius: 999, padding: '2px 8px',
+                        background: item.meta.status === 'pendente' ? '#fef3c7' : item.meta.status === 'em_revisao' ? '#d1fae5' : '#f3f4f6',
+                        color: item.meta.status === 'pendente' ? '#92400e' : item.meta.status === 'em_revisao' ? '#065f46' : '#6b7280',
+                      }}>
+                        {STATUS_REUNIAO_LABEL[String(item.meta.status)] ?? String(item.meta.status)}
+                      </span>
+                      {Number(item.meta.acoes_aprovadas) > 0 && (
+                        <span style={{ fontSize: 11, color: '#6b7280' }}>
+                          {item.meta.acoes_aprovadas} ação(ões) criadas
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  {item.subtitulo && item.tipo !== 'reuniao' && (
+                    <div className={detailStyles.subtitulo}>{item.subtitulo}</div>
+                  )}
                   {item.texto && (
                     <p
                       className={`${detailStyles.timelineTexto} ${expandido === `${item.referencia_id}-${i}` ? detailStyles.expandido : ''}`}
-                      onClick={() => setExpandido(expandido === `${item.referencia_id}-${i}` ? null : `${item.referencia_id}-${i}`)}
+                      onClick={(e) => { e.stopPropagation(); setExpandido(expandido === `${item.referencia_id}-${i}` ? null : `${item.referencia_id}-${i}`) }}
                     >
                       {item.texto}
                     </p>

@@ -9,6 +9,7 @@ from app.models.anotacao import Anotacao
 from app.models.cliente import Cliente
 from app.models.prazo import Prazo
 from app.models.publicacao import Publicacao
+from app.models.reuniao import Reuniao
 from app.schemas.anotacao import AnotacaoCreate, AnotacaoOut, AnotacaoUpdate, TimelineItem
 from app.services.gmail_cliente import buscar_emails_cliente
 
@@ -161,6 +162,26 @@ def timeline_cliente(
                 referencia_id=e.get("id"),
                 meta={"de": e.get("de"), "para": e.get("para"), "corpo": e.get("corpo")},
             ))
+
+    # ── Reuniões vinculadas ao cliente ───────────────────────────────────
+    reunioes = db.query(Reuniao).filter(Reuniao.cliente_id == cliente_id).all()
+    for r in reunioes:
+        data_ref = r.data_reuniao or r.created_at
+        acoes_count = len([a for a in (r.acoes_sugeridas or []) if a.get("aprovada")])
+        items.append(TimelineItem(
+            tipo="reuniao",
+            data=data_ref.isoformat(),
+            titulo=r.titulo,
+            subtitulo=r.status,
+            texto=r.resumo_ia,
+            referencia_id=str(r.id),
+            meta={
+                "status": r.status,
+                "fonte": r.fonte,
+                "acoes_aprovadas": acoes_count,
+                "duracao_minutos": r.duracao_minutos,
+            },
+        ))
 
     # Ordena por data decrescente
     items.sort(key=lambda x: x.data, reverse=True)
