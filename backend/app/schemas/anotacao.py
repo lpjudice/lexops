@@ -38,7 +38,7 @@ class AnotacaoOut(AnotacaoBase):
 
 class TimelineItem(BaseModel):
     """Item unificado da timeline do cliente."""
-    tipo: Literal["anotacao", "prazo", "publicacao", "email"]
+    tipo: Literal["anotacao", "prazo", "publicacao", "email", "reuniao"]
     data: str  # ISO string para ordenação uniforme
     titulo: str
     subtitulo: str | None = None
