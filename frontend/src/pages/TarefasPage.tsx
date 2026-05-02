@@ -6,6 +6,7 @@ import { clientesApi } from '../api/clientes'
 import { processosApi } from '../api/processos'
 import { anotacoesApi } from '../api/anotacoes'
 import { usuariosApi } from '../api/usuarios'
+import { useAuth } from '../contexts/AuthContext'
 import ComboBox from '../components/ComboBox'
 import ClienteCombobox from '../components/ClienteCombobox'
 import styles from './Page.module.css'
@@ -57,6 +58,7 @@ interface EditForm {
 
 export default function TarefasPage() {
   const qc = useQueryClient()
+  const { usuario, isSuperAdmin } = useAuth()
 
   // ── Create form ───────────────────────────────────────────────────────
   const [showForm, setShowForm] = useState(false)
@@ -133,6 +135,27 @@ export default function TarefasPage() {
   const deletar = useMutation({
     mutationFn: (id: string) => tarefasApi.deletar(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tarefas'] }),
+    onError: () => alert('Sem permissão para excluir esta tarefa.'),
+  })
+
+  const solicitarAcesso = useMutation({
+    mutationFn: (id: string) => tarefasApi.solicitarAcesso(id),
+    onSuccess: (r) => { alert(r.mensagem); qc.invalidateQueries({ queryKey: ['tarefas'] }) },
+    onError: () => alert('Erro ao solicitar acesso.'),
+  })
+
+  const concederAcesso = useMutation({
+    mutationFn: ({ tarefaId, usuarioId }: { tarefaId: string; usuarioId: string }) =>
+      tarefasApi.concederAcesso(tarefaId, usuarioId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tarefas'] }),
+    onError: () => alert('Erro ao conceder acesso.'),
+  })
+
+  const revogarAcesso = useMutation({
+    mutationFn: ({ tarefaId, usuarioId }: { tarefaId: string; usuarioId: string }) =>
+      tarefasApi.revogarAcesso(tarefaId, usuarioId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tarefas'] }),
+    onError: () => alert('Erro ao recusar solicitação.'),
   })
 
   const criarClienteRapido = async (raw: string): Promise<string> => {
@@ -186,17 +209,19 @@ export default function TarefasPage() {
 
   const submitEdit = () => {
     if (!editingId) return
+    const ef = editForm as EditForm & { confidencial?: boolean }
     atualizar.mutate({
       id: editingId,
       data: {
-        titulo: editForm.titulo,
-        descricao: editForm.descricao || null,
-        responsavel: editForm.responsavel || null,
-        data_limite: editForm.data_limite || null,
-        tags: editForm.tags || null,
-        cliente_id: editForm.cliente_id || null,
-        processo_id: editForm.processo_id || null,
-        status: editForm.status,
+        titulo: ef.titulo,
+        descricao: ef.descricao || null,
+        responsavel: ef.responsavel || null,
+        data_limite: ef.data_limite || null,
+        tags: ef.tags || null,
+        cliente_id: ef.cliente_id || null,
+        processo_id: ef.processo_id || null,
+        status: ef.status,
+        ...(ef.confidencial !== undefined ? { confidencial: ef.confidencial } : {}),
       },
     })
   }
@@ -463,9 +488,15 @@ export default function TarefasPage() {
             const labelProcesso = processoLabel(tarefa.processo_id)
             const tituloAnotacao = anotacaoTitulo(tarefa.anotacao_id)
 
+            const isCreator = usuario && tarefa.criado_por_id === usuario.id
+            const canManage = isCreator || isSuperAdmin
+            const acessoRestrito = tarefa.acesso_restrito
+            const pedidos = tarefa.pedidos_acesso ?? []
+
             return (
               <div key={tarefa.id}
-                className={`${t.card} ${atrasada ? t.atrasada : ''} ${tarefa.status === 'concluido' ? t.concluida : ''}`}>
+                className={`${t.card} ${atrasada ? t.atrasada : ''} ${tarefa.status === 'concluido' ? t.concluida : ''}`}
+                style={tarefa.confidencial ? { borderLeft: '3px solid #a855f7' } : undefined}>
 
                 {isEditing ? (
                   /* ── Inline edit form ──────────────────────────── */
@@ -534,6 +565,19 @@ export default function TarefasPage() {
                       <textarea className={styles.input} rows={3} value={editForm.descricao}
                         onChange={(e) => setEditForm({ ...editForm, descricao: e.target.value })} />
                     </div>
+                    {canManage && (
+                      <div className={styles.formRow} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <input
+                          type="checkbox"
+                          id={`conf-${tarefa.id}`}
+                          checked={editForm.confidencial ?? tarefa.confidencial}
+                          onChange={(e) => setEditForm({ ...editForm, confidencial: e.target.checked } as typeof editForm & { confidencial: boolean })}
+                        />
+                        <label htmlFor={`conf-${tarefa.id}`} style={{ fontSize: 13, color: '#7c3aed', cursor: 'pointer' }}>
+                          🔒 Tarefa confidencial
+                        </label>
+                      </div>
+                    )}
                     <div className={t.editAcoes}>
                       <button className={styles.btnPrimary} onClick={submitEdit} disabled={atualizar.isPending}>
                         {atualizar.isPending ? 'Salvando...' : 'Salvar'}
@@ -541,9 +585,72 @@ export default function TarefasPage() {
                       <button className={styles.btnTable} onClick={() => setEditingId(null)}>Cancelar</button>
                     </div>
                   </div>
+                ) : acessoRestrito ? (
+                  /* ── Restricted card: only lock + creator + cliente + prazo ── */
+                  <>
+                    <div className={t.cardTop}>
+                      <div style={{ fontSize: 18, flexShrink: 0, color: '#a855f7' }}>🔒</div>
+                      <div className={t.cardBody}>
+                        <div className={t.tituloRow}>
+                          <span className={t.titulo} style={{ color: '#7c3aed' }}>Tarefa confidencial</span>
+                          <span style={{ fontSize: 11, background: '#f3e8ff', color: '#7c3aed', borderRadius: 4, padding: '1px 6px' }}>confidencial</span>
+                        </div>
+                        <div className={t.meta}>
+                          {(nomCliente || tarefa.cliente_nome) && (
+                            <span className={t.metaChip}>{nomCliente || tarefa.cliente_nome}</span>
+                          )}
+                          {tarefa.criado_por_nome && (
+                            <span className={t.metaChip}>por {tarefa.criado_por_nome}</span>
+                          )}
+                          {tarefa.data_limite && (
+                            <span className={`${t.metaPrazo} ${atrasada ? t.metaPrazoAtrasado : ''}`}>
+                              {atrasada ? '⚠ ' : '📅 '}{formatDate(tarefa.data_limite)}
+                              {dias !== null && tarefa.status !== 'concluido' && (
+                                <> ({dias < 0 ? `${Math.abs(dias)}d atrás` : dias === 0 ? 'hoje' : `${dias}d`})</>
+                              )}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className={t.cardActions}>
+                        <button
+                          className={styles.btnTable}
+                          style={{ fontSize: 11 }}
+                          onClick={() => solicitarAcesso.mutate(tarefa.id)}
+                          disabled={solicitarAcesso.isPending}
+                        >
+                          Solicitar acesso
+                        </button>
+                      </div>
+                    </div>
+                  </>
                 ) : (
                   /* ── Card display ──────────────────────────────── */
                   <>
+                    {/* Pending access requests banner for creator/super_admin */}
+                    {canManage && pedidos.length > 0 && (
+                      <div style={{ padding: '6px 12px', background: '#fffbeb', borderBottom: '1px solid #fde68a', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: '#92400e' }}>
+                          🔔 {pedidos.length} pedido(s) de acesso:
+                        </span>
+                        {pedidos.map((req) => (
+                          <span key={req.usuario_id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
+                            <span style={{ color: '#374151' }}>{req.nome}</span>
+                            <button
+                              className={styles.btnPrimary}
+                              style={{ fontSize: 10, padding: '1px 8px', background: '#059669' }}
+                              onClick={() => concederAcesso.mutate({ tarefaId: tarefa.id, usuarioId: req.usuario_id })}
+                            >✓</button>
+                            <button
+                              className={styles.btnTable}
+                              style={{ fontSize: 10, padding: '1px 8px', color: '#dc2626' }}
+                              onClick={() => revogarAcesso.mutate({ tarefaId: tarefa.id, usuarioId: req.usuario_id })}
+                            >✕</button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
                     <div className={t.cardTop}>
                       <button
                         className={`${t.checkBtn} ${tarefa.status === 'concluido' ? t.checked : tarefa.status === 'em_andamento' ? t.andamento : ''}`}
@@ -555,6 +662,7 @@ export default function TarefasPage() {
 
                       <div className={t.cardBody}>
                         <div className={t.tituloRow}>
+                          {tarefa.confidencial && <span style={{ fontSize: 11, background: '#f3e8ff', color: '#7c3aed', borderRadius: 4, padding: '1px 6px', flexShrink: 0 }}>🔒 confidencial</span>}
                           <span className={t.titulo}>{tarefa.titulo}</span>
                           {tarefa.tags && <span className={t.tagChip}>{tarefa.tags}</span>}
                         </div>
@@ -562,6 +670,9 @@ export default function TarefasPage() {
                           {nomCliente && <span className={t.metaChip}>{nomCliente}</span>}
                           {labelProcesso && <span className={t.metaChip}>{labelProcesso}</span>}
                           {tarefa.responsavel && <span className={t.metaChip}>→ {tarefa.responsavel}</span>}
+                          {tarefa.criado_por_nome && !isCreator && (
+                            <span className={t.metaChip} style={{ color: '#9ca3af' }}>por {tarefa.criado_por_nome}</span>
+                          )}
                           {tarefa.data_limite && (
                             <span className={`${t.metaPrazo} ${atrasada ? t.metaPrazoAtrasado : ''}`}>
                               {atrasada ? '⚠ ' : '📅 '}{formatDate(tarefa.data_limite)}
@@ -590,10 +701,12 @@ export default function TarefasPage() {
                           </button>
                         )}
                         <button className={t.btnEdit} onClick={() => openEdit(tarefa)} title="Editar">✎</button>
-                        <button className={styles.btnDanger}
-                          onClick={() => { if (confirm('Remover tarefa?')) deletar.mutate(tarefa.id) }}>
-                          ×
-                        </button>
+                        {(!tarefa.confidencial || canManage) && (
+                          <button className={styles.btnDanger}
+                            onClick={() => { if (confirm('Remover tarefa?')) deletar.mutate(tarefa.id) }}>
+                            ×
+                          </button>
+                        )}
                       </div>
                     </div>
 

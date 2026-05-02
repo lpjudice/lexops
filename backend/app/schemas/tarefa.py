@@ -1,6 +1,6 @@
 import uuid
 from datetime import date, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -18,6 +18,7 @@ class TarefaCreate(BaseModel):
     data_limite: date | None = None
     status: StatusTarefa = "pendente"
     resumo_ia: str | None = None
+    confidencial: bool = False
 
 
 class TarefaUpdate(BaseModel):
@@ -30,12 +31,42 @@ class TarefaUpdate(BaseModel):
     data_limite: date | None = None
     status: StatusTarefa | None = None
     resumo_ia: str | None = None
+    confidencial: bool | None = None
 
 
-class TarefaOut(TarefaCreate):
+class PedidoAcessoTarefa(BaseModel):
+    usuario_id: str
+    nome: str
+
+
+class TarefaOut(BaseModel):
     id: uuid.UUID
+    cliente_id: uuid.UUID | None
+    processo_id: uuid.UUID | None
+    anotacao_id: uuid.UUID | None
+    criado_por_id: uuid.UUID | None = None
+    titulo: str
+    descricao: str | None
+    responsavel: str | None
+    tags: str | None
+    data_limite: date | None
+    status: str
+    resumo_ia: str | None
     google_event_id: str | None = None
+    confidencial: bool = False
+    usuarios_com_acesso: list[str] | None = None
     created_at: datetime
     updated_at: datetime
+    # Enriched
+    criado_por_nome: str | None = None
+    cliente_nome: str | None = None
+    # Access control
+    acesso_restrito: bool = False
+    pedidos_acesso: list[PedidoAcessoTarefa] = []
 
     model_config = {"from_attributes": True}
+
+
+class SolicitarAcessoTarefaResponse(BaseModel):
+    ok: bool
+    mensagem: str
