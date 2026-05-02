@@ -236,6 +236,27 @@ def _run_migrations() -> None:
             "ALTER TABLE tarefas ADD COLUMN IF NOT EXISTS usuarios_com_acesso JSONB DEFAULT '[]'::jsonb",
         ]:
             conn.execute(text(col_sql))
+
+        # Retroactive: link existing 'reuniao'-type annotations to their confidential source meeting
+        # by matching cliente_id + closest date. Sets reuniao_id + confidencial=TRUE.
+        conn.execute(text("""
+            UPDATE anotacoes a
+            SET
+                reuniao_id = sub.reuniao_id,
+                confidencial = TRUE
+            FROM (
+                SELECT DISTINCT ON (a2.id)
+                    a2.id AS anotacao_id,
+                    r.id  AS reuniao_id
+                FROM anotacoes a2
+                JOIN reunioes r ON r.cliente_id = a2.cliente_id AND r.confidencial = TRUE
+                WHERE a2.tipo = 'reuniao'
+                  AND a2.reuniao_id IS NULL
+                ORDER BY a2.id, ABS(EXTRACT(EPOCH FROM (r.data_reuniao - a2.data_evento::timestamp)))
+            ) sub
+            WHERE a.id = sub.anotacao_id
+        """))
+
         conn.commit()
 
 

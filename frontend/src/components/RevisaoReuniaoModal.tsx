@@ -491,12 +491,12 @@ export default function RevisaoReuniaoModal({ reuniao: initialReuniao, onClose }
               }
               confirmarMut.mutate()
             }}
-            disabled={confirmarMut.isPending || reuniao.status === 'processada'}
+            disabled={confirmarMut.isPending || acessoRestrito}
           >
             {confirmarMut.isPending
               ? 'Criando...'
               : reuniao.status === 'processada'
-              ? 'Ações já criadas'
+              ? `Criar ${aprovadas} ação(ões) adicionais`
               : `Criar ${aprovadas} ação(ões) aprovada(s)`}
           </button>
         </div>
