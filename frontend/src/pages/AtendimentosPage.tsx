@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
+import { Lock, LockOpen } from 'lucide-react'
 import { anotacoesApi } from '../api/anotacoes'
 import type { AnotacaoCreate, TipoAnotacao } from '../api/anotacoes'
 import { tarefasApi } from '../api/tarefas'
@@ -8,6 +9,7 @@ import type { Tarefa } from '../api/tarefas'
 import { clientesApi } from '../api/clientes'
 import AnamneseForm from '../components/AnamneseForm'
 import ClienteCombobox from '../components/ClienteCombobox'
+import { useAuth } from '../contexts/AuthContext'
 import styles from './Page.module.css'
 import at from './AtendimentosPage.module.css'
 
@@ -30,6 +32,7 @@ function formatDate(d: string) {
 
 export default function AtendimentosPage() {
   const qc = useQueryClient()
+  const { isSuperAdmin } = useAuth()
   const [showForm, setShowForm] = useState(false)
   const [filtroTipo, setFiltroTipo] = useState<TipoAnotacao | ''>('')
   const [filtroCliente, setFiltroCliente] = useState('')
@@ -125,6 +128,12 @@ export default function AtendimentosPage() {
 
   const deletar = useMutation({
     mutationFn: (id: string) => anotacoesApi.deletar(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['anotacoes-atendimentos'] }),
+  })
+
+  const toggleConfidencial = useMutation({
+    mutationFn: ({ id, confidencial }: { id: string; confidencial: boolean }) =>
+      anotacoesApi.atualizar(id, { confidencial }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['anotacoes-atendimentos'] }),
   })
 
@@ -339,7 +348,14 @@ export default function AtendimentosPage() {
                     <div className={at.cardLeft}>
                       <span className={at.tipoIcon}>{TIPO_ICON[a.tipo]}</span>
                       <div>
-                        <div className={at.cardTitulo}>{a.titulo || TIPO_LABEL[a.tipo]}</div>
+                        <div className={at.cardTitulo}>
+                          {a.titulo || TIPO_LABEL[a.tipo]}
+                          {a.confidencial && (
+                            <span style={{ marginLeft: 6, color: '#9333ea', fontSize: 11, fontWeight: 600, verticalAlign: 'middle' }}>
+                              🔒 confidencial
+                            </span>
+                          )}
+                        </div>
                         <div className={at.cardMeta}>
                           <Link to={`/clientes/${a.cliente_id}`} className={at.clienteLink}
                             onClick={(e) => e.stopPropagation()}>
@@ -357,6 +373,16 @@ export default function AtendimentosPage() {
                       <span className={at.data}>{formatDate(a.data_evento)}</span>
                       {(a.texto || tarefasVinculadas.length > 0) && (
                         <span className={at.chevron}>{isExpanded ? '▲' : '▼'}</span>
+                      )}
+                      {/* Super-admin can toggle confidential on any annotation */}
+                      {isSuperAdmin && (
+                        <button
+                          title={a.confidencial ? 'Tornar pública' : 'Tornar confidencial'}
+                          onClick={(e) => { e.stopPropagation(); toggleConfidencial.mutate({ id: a.id, confidencial: !a.confidencial }) }}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px', color: a.confidencial ? '#9333ea' : '#9ca3af' }}
+                        >
+                          {a.confidencial ? <Lock size={13} /> : <LockOpen size={13} />}
+                        </button>
                       )}
                       <button className={at.btnEdit}
                         onClick={(e) => { e.stopPropagation(); openEdit(a) }}

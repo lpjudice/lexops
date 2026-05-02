@@ -279,6 +279,8 @@ def processar_reuniao(
         acoes.append({
             "tipo": "tarefa",
             "aprovada": None,
+            "criada": False,
+            "confidencial": r.confidencial,
             "titulo": tarefa.get("titulo", ""),
             "descricao": tarefa.get("descricao", ""),
             "data_limite": tarefa.get("data_sugerida"),
@@ -289,6 +291,8 @@ def processar_reuniao(
         acoes.append({
             "tipo": "contrato",
             "aprovada": None,
+            "criada": False,
+            "confidencial": r.confidencial,
             "titulo": contrato.get("titulo", ""),
             "descricao": contrato.get("descricao", ""),
             "valor_mencionado": contrato.get("valor_mencionado"),
@@ -298,6 +302,8 @@ def processar_reuniao(
         acoes.append({
             "tipo": "anotacao",
             "aprovada": None,
+            "criada": False,
+            "confidencial": r.confidencial,
             "titulo": f"Reunião: {r.titulo}",
             "conteudo": resultado["anotacao"],
         })
@@ -328,11 +334,18 @@ def confirmar_acoes(
 
     data_base = (r.data_reuniao.date() if r.data_reuniao else date.today())
 
-    for acao in data.acoes_sugeridas:
+    # Work on a mutable copy so we can stamp criada=True after each creation
+    acoes_result = [dict(a) for a in data.acoes_sugeridas]
+
+    for acao in acoes_result:
         if not acao.get("aprovada"):
+            continue
+        if acao.get("criada"):  # Already created in a previous confirmation — skip
             continue
 
         tipo = acao.get("tipo")
+        # Per-action confidentiality; falls back to the meeting-level flag
+        acao_confidencial: bool = bool(acao.get("confidencial", r.confidencial))
 
         if tipo == "tarefa":
             data_limite = None
@@ -350,8 +363,11 @@ def confirmar_acoes(
                 data_limite=data_limite,
                 status="pendente",
                 resumo_ia=f"Gerado automaticamente da reunião: {r.titulo}",
+                confidencial=acao_confidencial,
+                criado_por_id=usuario.id if usuario else None,
             )
             db.add(tarefa)
+            acao["criada"] = True
 
         elif tipo == "contrato":
             contrato = Contrato(
@@ -363,6 +379,7 @@ def confirmar_acoes(
                 arquivos=[],
             )
             db.add(contrato)
+            acao["criada"] = True
 
         elif tipo == "anotacao":
             anotacao = Anotacao(
@@ -373,9 +390,10 @@ def confirmar_acoes(
                 data_evento=data_base,
                 titulo=acao.get("titulo"),
                 texto=acao.get("conteudo", ""),
-                confidencial=r.confidencial,
+                confidencial=acao_confidencial,
             )
             db.add(anotacao)
+            acao["criada"] = True
 
     if r.resumo_ia and r.cliente_id:
         cliente = db.query(Cliente).filter(Cliente.id == r.cliente_id).first()
@@ -392,7 +410,7 @@ def confirmar_acoes(
             except Exception:
                 pass
 
-    r.acoes_sugeridas = data.acoes_sugeridas
+    r.acoes_sugeridas = acoes_result
     r.status = "processada"
     db.commit()
     db.refresh(r)

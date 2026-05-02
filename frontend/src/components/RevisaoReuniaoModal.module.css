@@ -273,6 +273,12 @@
   opacity: 0.65;
 }
 
+.acaoCriada {
+  border-color: #86efac;
+  background: #f0fdf4;
+  opacity: 0.75;
+}
+
 .acaoHeader {
   display: flex;
   align-items: center;

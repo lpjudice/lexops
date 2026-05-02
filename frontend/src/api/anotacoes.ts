@@ -10,6 +10,8 @@ export interface Anotacao {
   data_evento: string
   titulo?: string
   texto: string
+  confidencial: boolean
+  reuniao_id?: string | null
   created_at: string
   updated_at: string
 }
@@ -21,6 +23,15 @@ export interface AnotacaoCreate {
   data_evento: string
   titulo?: string
   texto: string
+}
+
+export interface AnotacaoUpdate {
+  tipo?: TipoAnotacao
+  data_evento?: string
+  titulo?: string
+  texto?: string
+  processo_id?: string
+  confidencial?: boolean
 }
 
 export type TimelineTipo = 'anotacao' | 'prazo' | 'publicacao' | 'email' | 'reuniao'
@@ -42,7 +53,7 @@ export const anotacoesApi = {
   criar: (data: AnotacaoCreate) =>
     api.post<Anotacao>('/anotacoes/', data).then((r) => r.data),
 
-  atualizar: (id: string, data: Partial<AnotacaoCreate>) =>
+  atualizar: (id: string, data: AnotacaoUpdate | Partial<AnotacaoCreate>) =>
     api.patch<Anotacao>(`/anotacoes/${id}`, data).then((r) => r.data),
 
   deletar: (id: string) => api.delete(`/anotacoes/${id}`),

@@ -7,6 +7,10 @@ export type TipoAcao = 'tarefa' | 'contrato' | 'anotacao'
 export interface AcaoSugerida {
   tipo: TipoAcao
   aprovada: boolean | null
+  /** True after the item has been created in the system (prevents re-creation) */
+  criada?: boolean
+  /** Per-action confidentiality — defaults to the meeting's confidencial flag */
+  confidencial?: boolean
   titulo: string
   descricao?: string | null
   // tarefa

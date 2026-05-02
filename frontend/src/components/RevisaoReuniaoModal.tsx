@@ -152,13 +152,18 @@ export default function RevisaoReuniaoModal({ reuniao: initialReuniao, onClose }
     setAcoes((prev) => prev.map((a, i) => i === idx ? { ...a, aprovada } : a))
   }
 
-  function updateAcao(idx: number, field: string, value: string | number | null) {
+  function updateAcao(idx: number, field: string, value: string | number | null | boolean) {
     setAcoes((prev) => prev.map((a, i) => i === idx ? { ...a, [field]: value } : a))
   }
 
+  function toggleAcaoConfidencial(idx: number) {
+    setAcoes((prev) => prev.map((a, i) => i === idx ? { ...a, confidencial: !a.confidencial } : a))
+  }
+
   const processosFiltrados = processos.filter((p: { cliente_id: string | null }) => !clienteId || p.cliente_id === clienteId)
-  const aprovadas = acoes.filter((a) => a.aprovada === true).length
-  const semResposta = acoes.filter((a) => a.aprovada === null).length
+  // Only count non-already-created actions
+  const aprovadas = acoes.filter((a) => a.aprovada === true && !a.criada).length
+  const semResposta = acoes.filter((a) => a.aprovada === null && !a.criada).length
 
   return (
     <div className={styles.overlay} onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -346,34 +351,59 @@ export default function RevisaoReuniaoModal({ reuniao: initialReuniao, onClose }
                   {acoes.map((acao, idx) => (
                     <div
                       key={idx}
-                      className={`${styles.acaoCard} ${acao.aprovada === true ? styles.acaoAprovada : acao.aprovada === false ? styles.acaoRecusada : ''}`}
+                      className={`${styles.acaoCard} ${acao.criada ? styles.acaoCriada : acao.aprovada === true ? styles.acaoAprovada : acao.aprovada === false ? styles.acaoRecusada : ''}`}
                     >
                       <div className={styles.acaoHeader}>
-                        <span
-                          className={styles.acaoTipo}
-                          style={{ background: TIPO_BG[acao.tipo], color: TIPO_COLOR[acao.tipo] }}
-                        >
-                          {TIPO_ICON[acao.tipo]} {TIPO_LABEL[acao.tipo]}
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <span
+                            className={styles.acaoTipo}
+                            style={{ background: TIPO_BG[acao.tipo], color: TIPO_COLOR[acao.tipo] }}
+                          >
+                            {TIPO_ICON[acao.tipo]} {TIPO_LABEL[acao.tipo]}
+                          </span>
+                          {acao.criada && (
+                            <span style={{ fontSize: 11, color: '#16a34a', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 3 }}>
+                              <CheckCircle size={11} /> Criada
+                            </span>
+                          )}
+                          {acao.confidencial && !acao.criada && (
+                            <span style={{ fontSize: 11, color: '#9333ea', display: 'flex', alignItems: 'center', gap: 3 }}>
+                              <Lock size={11} /> confidencial
+                            </span>
+                          )}
+                        </div>
                         <div className={styles.acaoControls}>
+                          {/* Per-action confidential toggle */}
+                          {!acao.criada && (
+                            <button
+                              className={styles.acaoBtn}
+                              onClick={() => toggleAcaoConfidencial(idx)}
+                              title={acao.confidencial ? 'Tornar pública' : 'Tornar confidencial'}
+                              style={{ color: acao.confidencial ? '#9333ea' : '#9ca3af' }}
+                            >
+                              {acao.confidencial ? <Lock size={14} /> : <LockOpen size={14} />}
+                            </button>
+                          )}
                           <button
                             className={`${styles.acaoBtn} ${acao.aprovada === true ? styles.acaoBtnAtivo : ''}`}
-                            onClick={() => toggleAcao(idx, acao.aprovada === true ? null : true)}
-                            title="Aprovar"
+                            onClick={() => !acao.criada && toggleAcao(idx, acao.aprovada === true ? null : true)}
+                            title={acao.criada ? 'Já criada' : 'Aprovar'}
+                            disabled={!!acao.criada}
                           >
                             <CheckCircle size={16} />
                           </button>
                           <button
                             className={`${styles.acaoBtn} ${styles.acaoBtnRejeitar} ${acao.aprovada === false ? styles.acaoBtnAtivoRed : ''}`}
-                            onClick={() => toggleAcao(idx, acao.aprovada === false ? null : false)}
-                            title="Rejeitar"
+                            onClick={() => !acao.criada && toggleAcao(idx, acao.aprovada === false ? null : false)}
+                            title={acao.criada ? 'Já criada' : 'Rejeitar'}
+                            disabled={!!acao.criada}
                           >
                             <XCircle size={16} />
                           </button>
                         </div>
                       </div>
 
-                      <div className={styles.acaoFields}>
+                      <div className={styles.acaoFields} style={acao.criada ? { opacity: 0.45, pointerEvents: 'none' } : {}}>
                         <input
                           className={styles.acaoInput}
                           value={acao.titulo}

@@ -26,6 +26,7 @@ class AnotacaoUpdate(BaseModel):
     titulo: str | None = None
     texto: str | None = None
     processo_id: uuid.UUID | None = None
+    confidencial: bool | None = None
 
 
 class AnotacaoOut(AnotacaoBase):
