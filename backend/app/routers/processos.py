@@ -408,10 +408,21 @@ def remover_documento(
     processo = db.query(Processo).filter(Processo.id == processo_id).first()
     if not processo:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
+    removed = False
     f = UPLOADS_DIR / str(processo_id) / filename
-    if not f.exists():
+    if f.exists():
+        f.unlink()
+        removed = True
+    try:
+        from app.models.cliente import Cliente
+        from app.services.google_drive import deletar_arquivo
+        cliente = db.query(Cliente).filter(Cliente.id == processo.cliente_id).first()
+        if cliente and processo.numero_cnj:
+            removed = deletar_arquivo(cliente.nome, processo.numero_cnj, filename, sub_subfolder="Documentos") or removed
+    except Exception:
+        pass
+    if not removed:
         raise HTTPException(status_code=404, detail="Arquivo não encontrado")
-    f.unlink()
     return {"ok": True}
 
 

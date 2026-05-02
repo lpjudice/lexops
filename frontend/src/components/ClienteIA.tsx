@@ -177,9 +177,7 @@ export default function ClienteIA({ clienteId }: Props) {
                 )}
                 <span className={styles.docTamanho}>{formatSize(d.size)}</span>
                 {d.source === 'drive' && <span className={styles.docTamanho}>Drive</span>}
-                {d.source !== 'drive' && (
-                  <button className={styles.btnRemoverDoc} onClick={() => remover(d.filename)}>×</button>
-                )}
+                <button className={styles.btnRemoverDoc} onClick={() => remover(d.filename)}>×</button>
               </li>
             ))}
           </ul>

@@ -175,10 +175,18 @@ def remover_documento(
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
+    removed = False
     f = UPLOADS_DIR / str(cliente_id) / filename
-    if not f.exists():
+    if f.exists():
+        f.unlink()
+        removed = True
+    try:
+        from app.services.google_drive import deletar_arquivo
+        removed = deletar_arquivo(cliente.nome, "Uploads", filename) or removed
+    except Exception:
+        pass
+    if not removed:
         raise HTTPException(status_code=404, detail="Arquivo não encontrado")
-    f.unlink()
     return {"ok": True}
 
 

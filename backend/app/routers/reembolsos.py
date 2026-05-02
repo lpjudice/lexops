@@ -296,6 +296,17 @@ def deletar_reembolso(reembolso_id: uuid.UUID, db: Session = Depends(get_db)):
     r = db.query(Reembolso).filter(Reembolso.id == reembolso_id).first()
     if not r:
         raise HTTPException(status_code=404, detail="Reembolso não encontrado")
+    try:
+        from app.models.cliente import Cliente
+        from app.services.google_drive import deletar_arquivo
+        cliente = db.query(Cliente).filter(Cliente.id == r.cliente_id).first()
+        if cliente:
+            deletar_arquivo(cliente.nome, "Reembolsos", f"nota_reembolso_{reembolso_id}.pdf", sub_subfolder=r.titulo)
+            for item in r.itens or []:
+                if item.comprovante_path:
+                    deletar_arquivo(cliente.nome, "Reembolsos", Path(item.comprovante_path).name, sub_subfolder=r.titulo)
+    except Exception:
+        pass
     db.delete(r)
     db.commit()
 
@@ -473,9 +484,20 @@ def remover_comprovante(
     ).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item não encontrado")
+    reembolso = db.query(Reembolso).filter(Reembolso.id == reembolso_id).first()
     if item.comprovante_path:
+        nome_drive = Path(item.comprovante_path).name
         try:
             Path(item.comprovante_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+        try:
+            from app.models.cliente import Cliente
+            from app.services.google_drive import deletar_arquivo
+            if reembolso:
+                cliente = db.query(Cliente).filter(Cliente.id == reembolso.cliente_id).first()
+                if cliente:
+                    deletar_arquivo(cliente.nome, "Reembolsos", nome_drive, sub_subfolder=reembolso.titulo)
         except Exception:
             pass
         item.comprovante_path = None
@@ -494,6 +516,17 @@ def remover_item(
     ).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item não encontrado")
+    if item.comprovante_path:
+        try:
+            from app.models.cliente import Cliente
+            from app.services.google_drive import deletar_arquivo
+            reembolso = db.query(Reembolso).filter(Reembolso.id == reembolso_id).first()
+            if reembolso:
+                cliente = db.query(Cliente).filter(Cliente.id == reembolso.cliente_id).first()
+                if cliente:
+                    deletar_arquivo(cliente.nome, "Reembolsos", Path(item.comprovante_path).name, sub_subfolder=reembolso.titulo)
+        except Exception:
+            pass
     db.delete(item)
     db.commit()
 

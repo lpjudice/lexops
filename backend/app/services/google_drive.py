@@ -286,6 +286,64 @@ def listar_arquivos(nome_cliente: str, subfolder: str, sub_subfolder: str | None
             return []
 
 
+def deletar_arquivo(nome_cliente: str, subfolder: str, nome_arquivo: str, sub_subfolder: str | None = None) -> bool:
+    """Moves matching Drive file(s) in {nome_cliente}/{subfolder}[/{sub_subfolder}] to trash."""
+    tokens = _load_tokens()
+    if not tokens:
+        return False
+
+    def _do(tkns: dict) -> bool:
+        h = _auth_headers(tkns)
+        cliente_folder_id = _get_or_create_subfolder(nome_cliente, DRIVE_FOLDER_ID, h)
+        folder_id = _get_or_create_subfolder(subfolder, cliente_folder_id, h)
+        if sub_subfolder:
+            folder_id = _get_or_create_subfolder(sub_subfolder, folder_id, h)
+        query = (
+            f"name='{_escape_drive_query(nome_arquivo)}' "
+            f"and '{folder_id}' in parents and trashed=false"
+        )
+        r = httpx.get(
+            f"{DRIVE_META}/files",
+            headers=h,
+            params={
+                "q": query,
+                "fields": "files(id,name)",
+                "supportsAllDrives": True,
+                "includeItemsFromAllDrives": True,
+            },
+            timeout=30,
+        )
+        r.raise_for_status()
+        deleted = False
+        for item in r.json().get("files", []):
+            file_id = item.get("id")
+            if not file_id:
+                continue
+            resp = httpx.patch(
+                f"{DRIVE_META}/files/{file_id}",
+                headers={**h, "Content-Type": "application/json"},
+                params={"supportsAllDrives": True},
+                content=json.dumps({"trashed": True}),
+                timeout=30,
+            )
+            resp.raise_for_status()
+            deleted = True
+        return deleted
+
+    try:
+        return _do(tokens)
+    except Exception as exc:
+        if not _is_unauthorized(exc):
+            logger.warning("Falha ao deletar arquivo do Drive: %s", exc)
+            return False
+        tokens2 = _refresh(tokens)
+        try:
+            return _do(tokens2)
+        except Exception as exc2:
+            logger.warning("Falha ao deletar arquivo do Drive apos refresh: %s", exc2)
+            return False
+
+
 def get_folder_link(nome_cliente: str, subfolder: str, sub_subfolder: str | None = None) -> str | None:
     """
     Returns the webViewLink of {nome_cliente}/{subfolder}[/{sub_subfolder}] in Drive.

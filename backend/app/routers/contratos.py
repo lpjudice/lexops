@@ -67,6 +67,17 @@ def deletar_contrato(contrato_id: uuid.UUID, db: Session = Depends(get_db)):
     c = db.query(Contrato).filter(Contrato.id == contrato_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Contrato não encontrado")
+    try:
+        from app.models.cliente import Cliente
+        from app.services.google_drive import deletar_arquivo
+        cliente = db.query(Cliente).filter(Cliente.id == c.cliente_id).first()
+        if cliente:
+            for arq in c.arquivos or []:
+                filename = arq.get("filename")
+                if filename:
+                    deletar_arquivo(cliente.nome, "Contratos", filename)
+    except Exception:
+        pass
     # Marcar honorários vinculados como órfãos para validação
     from app.models.financeiro import Honorario
     for h in db.query(Honorario).filter(Honorario.contrato_id == c.id).all():
@@ -137,6 +148,14 @@ def remover_arquivo(
         if arq.get("filename") == filename:
             try:
                 Path(arq["path"]).unlink(missing_ok=True)
+            except Exception:
+                pass
+            try:
+                from app.models.cliente import Cliente
+                from app.services.google_drive import deletar_arquivo
+                cliente = db.query(Cliente).filter(Cliente.id == c.cliente_id).first()
+                if cliente:
+                    deletar_arquivo(cliente.nome, "Contratos", filename)
             except Exception:
                 pass
     c.arquivos = nova_lista

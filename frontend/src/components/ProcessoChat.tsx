@@ -204,9 +204,7 @@ export default function ProcessoChat({ processoId, clienteId, processoNome }: Pr
                 )}
                 <span className={styles.docTamanho}>{(d.size / 1024).toFixed(0)} KB</span>
                 {d.source === 'drive' && <span className={styles.docTamanho}>Drive</span>}
-                {d.source !== 'drive' && (
-                  <button className={styles.btnRemoverDoc} onClick={() => remover(d.filename)}>×</button>
-                )}
+                <button className={styles.btnRemoverDoc} onClick={() => remover(d.filename)}>×</button>
               </li>
             ))}
           </ul>
