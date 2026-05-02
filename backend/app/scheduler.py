@@ -1,4 +1,4 @@
-"""APScheduler — daily andamentos sync at 03:00 BRT."""
+"""APScheduler — rotinas automáticas do app em horário de São Paulo."""
 from __future__ import annotations
 
 import asyncio
@@ -10,6 +10,8 @@ from apscheduler.triggers.cron import CronTrigger
 logger = logging.getLogger(__name__)
 
 scheduler = BackgroundScheduler(timezone="America/Sao_Paulo")
+DIARIO_TRIBUNAIS_ORDEM = ["DJEN", "TJSP", "TJES", "TJAM", "TJRJ"]
+DIARIO_DAYS_BACK = 3
 
 
 def _processos_ativos(db):
@@ -99,15 +101,6 @@ def _sync_diarios_monitorados() -> None:
         db = SessionLocal()
         try:
             config = load_monitoring_config()
-            if not config.get("auto_sync", True):
-                logger.info("Scheduler: monitoramento automático do Diário Oficial está desativado")
-                return
-
-            tribunais = [t for t in (config.get("tribunais") or []) if t in {"TJES", "TJSP", "TJAM", "TJRJ"}]
-            if not tribunais:
-                logger.info("Scheduler: nenhum tribunal local configurado para monitoramento do Diário Oficial")
-                return
-
             nomes_clientes = [
                 c.nome.strip()
                 for c in db.query(Cliente).order_by(Cliente.nome).all()
@@ -118,11 +111,41 @@ def _sync_diarios_monitorados() -> None:
                 logger.info("Scheduler: nenhum termo monitorado para Diário Oficial")
                 return
 
-            logger.info("Scheduler: sincronizando Diário Oficial de %s com %d termo(s)", ",".join(tribunais), len(termos))
-            itens = scrape_todos(tribunais=tribunais, termos=termos)
-            itens = _filtrar_itens_monitorados_exatos(itens, db)
-            ins, dup, err = _inserir_publicacoes(itens, db)
-            logger.info("Scheduler: Diário Oficial concluído (%d novas, %d duplicatas, %d erros)", ins, dup, err)
+            totais = {"inseridas": 0, "duplicatas": 0, "erros": 0}
+            logger.info(
+                "Scheduler: sincronizando Diário Oficial (%s) com %d termo(s), janela de %d dia(s)",
+                " > ".join(DIARIO_TRIBUNAIS_ORDEM),
+                len(termos),
+                DIARIO_DAYS_BACK,
+            )
+            for tribunal in DIARIO_TRIBUNAIS_ORDEM:
+                try:
+                    itens = scrape_todos(
+                        tribunais=[tribunal],
+                        termos=termos,
+                        days_back=DIARIO_DAYS_BACK,
+                    )
+                    itens = _filtrar_itens_monitorados_exatos(itens, db, termos)
+                    ins, dup, err = _inserir_publicacoes(itens, db)
+                    totais["inseridas"] += ins
+                    totais["duplicatas"] += dup
+                    totais["erros"] += err
+                    logger.info(
+                        "Scheduler: Diário Oficial %s concluído (%d novas, %d duplicatas, %d erros)",
+                        tribunal,
+                        ins,
+                        dup,
+                        err,
+                    )
+                except Exception as exc:
+                    totais["erros"] += 1
+                    logger.warning("Scheduler: falha ao sincronizar Diário Oficial %s: %s", tribunal, exc)
+            logger.info(
+                "Scheduler: Diário Oficial concluído (%d novas, %d duplicatas, %d erros)",
+                totais["inseridas"],
+                totais["duplicatas"],
+                totais["erros"],
+            )
         finally:
             db.close()
     except Exception as exc:
@@ -154,12 +177,12 @@ def start_scheduler() -> None:
     )
     scheduler.add_job(
         _sync_diarios_monitorados,
-        trigger=CronTrigger(hour=6, minute=10),
+        trigger=CronTrigger(day_of_week="mon-fri", hour=8, minute=0),
         id="sync_diario_monitorado",
         replace_existing=True,
     )
     scheduler.start()
-    logger.info("Scheduler iniciado — DataJud diário às 03:00 BRT, Diário Oficial monitorado às 06:10 BRT, jus.br noturno se ativo, manutenção do jus.br a cada 6 horas e renovação da conta Google master a cada 6 horas")
+    logger.info("Scheduler iniciado — DataJud diário às 03:00 BRT, Diário Oficial monitorado de segunda a sexta às 08:00 BRT, jus.br noturno se ativo, manutenção do jus.br a cada 6 horas e renovação da conta Google master a cada 6 horas")
 
 
 def stop_scheduler() -> None:
