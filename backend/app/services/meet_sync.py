@@ -28,20 +28,7 @@ def _load_tokens() -> dict | None:
 
 
 def _refresh(tokens: dict) -> dict:
-    resp = httpx.post(
-        "https://oauth2.googleapis.com/token",
-        data={
-            "refresh_token": tokens.get("refresh_token", ""),
-            "client_id": __import__("os").getenv("GOOGLE_CLIENT_ID", ""),
-            "client_secret": __import__("os").getenv("GOOGLE_CLIENT_SECRET", ""),
-            "grant_type": "refresh_token",
-        },
-    )
-    if resp.is_success:
-        new = {**tokens, **resp.json()}
-        save_master_google_tokens(new)
-        return new
-    return tokens
+    return _refresh_tokens(tokens, save=True)
 
 
 def _auth_headers(tokens: dict) -> dict:
@@ -114,9 +101,29 @@ def _download_file(file_id: str, h: dict) -> str | None:
     return None
 
 
-def baixar_conteudo_arquivo(file_id: str, mime_type: str) -> str | None:
-    """Baixa o conteúdo de um arquivo do Drive."""
-    tokens = _load_tokens()
+def _refresh_tokens(tokens: dict, save: bool = False) -> dict:
+    """Refresh using any token dict (not just master account)."""
+    resp = httpx.post(
+        "https://oauth2.googleapis.com/token",
+        data={
+            "refresh_token": tokens.get("refresh_token", ""),
+            "client_id": __import__("os").getenv("GOOGLE_CLIENT_ID", ""),
+            "client_secret": __import__("os").getenv("GOOGLE_CLIENT_SECRET", ""),
+            "grant_type": "refresh_token",
+        },
+    )
+    if resp.is_success:
+        new = {**tokens, **resp.json()}
+        if save:
+            save_master_google_tokens(new)
+        return new
+    return tokens
+
+
+def baixar_conteudo_arquivo(file_id: str, mime_type: str, tokens: dict | None = None) -> str | None:
+    """Baixa o conteúdo de um arquivo do Drive. tokens: usa master se None."""
+    if tokens is None:
+        tokens = _load_tokens()
     if not tokens:
         return None
 
@@ -128,7 +135,7 @@ def baixar_conteudo_arquivo(file_id: str, mime_type: str) -> str | None:
             content = _download_file(file_id, h)
 
         if content is None:
-            tokens = _refresh(tokens)
+            tokens = _refresh_tokens(tokens)
             h = _auth_headers(tokens)
             if mime_type == "application/vnd.google-apps.document":
                 content = _export_google_doc(file_id, h)
@@ -141,13 +148,13 @@ def baixar_conteudo_arquivo(file_id: str, mime_type: str) -> str | None:
         return None
 
 
-def listar_novas_transcricoes(ultimo_sync: str | None = None) -> list[dict]:
+def listar_novas_transcricoes(ultimo_sync: str | None = None, tokens: dict | None = None) -> list[dict]:
     """
     Lista arquivos novos na pasta Meet Recordings do Drive.
-    Retorna lista de dicts com metadados dos arquivos encontrados.
-    ultimo_sync: ISO datetime string para filtrar apenas arquivos criados depois.
+    tokens: usa master se None. Permite varredura por conta de usuário específico.
     """
-    tokens = _load_tokens()
+    if tokens is None:
+        tokens = _load_tokens()
     if not tokens:
         logger.warning("meet_sync: tokens do Google não encontrados")
         return []
@@ -156,12 +163,12 @@ def listar_novas_transcricoes(ultimo_sync: str | None = None) -> list[dict]:
     try:
         folder_id = _find_meet_folder_id(h)
         if not folder_id:
-            tokens = _refresh(tokens)
+            tokens = _refresh_tokens(tokens)
             h = _auth_headers(tokens)
             folder_id = _find_meet_folder_id(h)
 
         if not folder_id:
-            logger.info("meet_sync: pasta 'Meet Recordings' não encontrada no Drive")
+            logger.info("meet_sync: pasta 'Meet Recordings' não encontrada")
             return []
 
         arquivos = _list_files_in_folder(folder_id, h, created_after=ultimo_sync)

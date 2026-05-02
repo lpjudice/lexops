@@ -171,15 +171,16 @@ def timeline_cliente(
         items.append(TimelineItem(
             tipo="reuniao",
             data=data_ref.isoformat(),
-            titulo=r.titulo,
+            titulo=r.titulo if not r.confidencial else "Reunião confidencial",
             subtitulo=r.status,
-            texto=r.resumo_ia,
+            texto=r.resumo_ia if not r.confidencial else None,
             referencia_id=str(r.id),
             meta={
                 "status": r.status,
                 "fonte": r.fonte,
                 "acoes_aprovadas": acoes_count,
                 "duracao_minutos": r.duracao_minutos,
+                "confidencial": r.confidencial,
             },
         ))
 

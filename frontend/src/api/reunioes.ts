@@ -28,6 +28,8 @@ export interface Reuniao {
   cliente_nome: string | null
   processo_id: string | null
   processo_numero: string | null
+  criado_por_id: string | null
+  criado_por_nome: string | null
   drive_transcricao_file_id: string | null
   drive_notas_file_id: string | null
   drive_tldr_file_id: string | null
@@ -36,6 +38,9 @@ export interface Reuniao {
   acoes_sugeridas: AcaoSugerida[] | null
   status: StatusReuniao
   fonte: FonteReuniao
+  confidencial: boolean
+  usuarios_com_acesso: string[] | null
+  acesso_restrito: boolean
   created_at: string
   updated_at: string
 }
@@ -49,6 +54,7 @@ export interface ReuniaoCreate {
   cliente_id?: string | null
   processo_id?: string | null
   fonte?: FonteReuniao
+  confidencial?: boolean
 }
 
 export const reunioesApi = {
@@ -64,7 +70,7 @@ export const reunioesApi = {
   obter: (id: string) =>
     api.get<Reuniao>(`/reunioes/${id}`).then((r) => r.data),
 
-  atualizar: (id: string, data: Partial<ReuniaoCreate & { status: StatusReuniao; acoes_sugeridas: AcaoSugerida[]; resumo_ia: string }>) =>
+  atualizar: (id: string, data: Partial<ReuniaoCreate & { status: StatusReuniao; acoes_sugeridas: AcaoSugerida[]; resumo_ia: string; confidencial: boolean }>) =>
     api.patch<Reuniao>(`/reunioes/${id}`, data).then((r) => r.data),
 
   processar: (id: string) =>
@@ -82,4 +88,13 @@ export const reunioesApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then((r) => r.data)
   },
+
+  solicitarAcesso: (id: string) =>
+    api.post<{ ok: boolean; mensagem: string }>(`/reunioes/${id}/solicitar-acesso`).then((r) => r.data),
+
+  concederAcesso: (reuniaoId: string, usuarioId: string) =>
+    api.post<Reuniao>(`/reunioes/${reuniaoId}/conceder-acesso/${usuarioId}`).then((r) => r.data),
+
+  revogarAcesso: (reuniaoId: string, usuarioId: string) =>
+    api.post<Reuniao>(`/reunioes/${reuniaoId}/revogar-acesso/${usuarioId}`).then((r) => r.data),
 }

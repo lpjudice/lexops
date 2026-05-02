@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { X, Sparkles, CheckCircle, XCircle, Clock, FileText, ClipboardList, BookOpen, Link } from 'lucide-react'
+import { X, Sparkles, CheckCircle, XCircle, Clock, FileText, ClipboardList, BookOpen, Link, Lock, LockOpen, UserCheck } from 'lucide-react'
 import { reunioesApi } from '../api/reunioes'
 import type { Reuniao, AcaoSugerida, TipoAcao } from '../api/reunioes'
 import { clientesApi } from '../api/clientes'
 import { processosApi } from '../api/processos'
 import ClienteCombobox from './ClienteCombobox'
+import { useAuth } from '../contexts/AuthContext'
 import styles from './RevisaoReuniaoModal.module.css'
 import p from '../pages/Page.module.css'
 
@@ -45,6 +46,7 @@ interface Props {
 
 export default function RevisaoReuniaoModal({ reuniao: initialReuniao, onClose }: Props) {
   const qc = useQueryClient()
+  const { usuario, isSuperAdmin } = useAuth()
 
   const { data: reuniao = initialReuniao } = useQuery({
     queryKey: ['reuniao', initialReuniao.id],
@@ -68,6 +70,10 @@ export default function RevisaoReuniaoModal({ reuniao: initialReuniao, onClose }
   const [resumo, setResumo] = useState(reuniao.resumo_ia ?? '')
   const [acoes, setAcoes] = useState<AcaoSugerida[]>(reuniao.acoes_sugeridas ?? [])
   const [tab, setTab] = useState<'transcricao' | 'acoes'>('acoes')
+
+  const isCreator = usuario && reuniao.criado_por_id === usuario.id
+  const canManageAccess = isCreator || isSuperAdmin
+  const acessoRestrito = reuniao.acesso_restrito
 
   useEffect(() => {
     setAcoes(reuniao.acoes_sugeridas ?? [])
@@ -115,6 +121,17 @@ export default function RevisaoReuniaoModal({ reuniao: initialReuniao, onClose }
       onClose()
     },
     onError: (e: Error) => alert(`Erro ao confirmar ações: ${e.message}`),
+  })
+
+  const toggleConfidencialMut = useMutation({
+    mutationFn: () => reunioesApi.atualizar(reuniao.id, { confidencial: !reuniao.confidencial }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['reuniao', reuniao.id] }),
+  })
+
+  const solicitarAcessoMut = useMutation({
+    mutationFn: () => reunioesApi.solicitarAcesso(reuniao.id),
+    onSuccess: (r) => alert(r.mensagem),
+    onError: () => alert('Erro ao solicitar acesso.'),
   })
 
   function toggleAcao(idx: number, aprovada: boolean | null) {
@@ -179,7 +196,45 @@ export default function RevisaoReuniaoModal({ reuniao: initialReuniao, onClose }
               <Link size={12} /> TLDR salvo no Drive
             </a>
           )}
+          {reuniao.criado_por_nome && (
+            <div className={styles.driveLink} style={{ color: '#6b7280' }}>
+              <UserCheck size={12} /> Criado por {reuniao.criado_por_nome}{isCreator ? ' (você)' : ''}
+            </div>
+          )}
+          {canManageAccess && (
+            <button
+              className={styles.driveLink}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: reuniao.confidencial ? '#9333ea' : '#6b7280' }}
+              onClick={() => toggleConfidencialMut.mutate()}
+              title={reuniao.confidencial ? 'Tornar pública' : 'Tornar confidencial'}
+            >
+              {reuniao.confidencial ? <><Lock size={12} /> Confidencial</> : <><LockOpen size={12} /> Pública</>}
+            </button>
+          )}
+          {!canManageAccess && reuniao.confidencial && !acessoRestrito && (
+            <div className={styles.driveLink} style={{ color: '#9333ea' }}>
+              <Lock size={12} /> Reunião confidencial
+            </div>
+          )}
         </div>
+
+        {/* Restricted access banner */}
+        {acessoRestrito && (
+          <div style={{ padding: '16px 20px', background: '#faf5ff', borderBottom: '1px solid #e9d5ff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#7c3aed', fontSize: 13 }}>
+              <Lock size={14} />
+              <span>Esta reunião é confidencial. Você não tem acesso ao conteúdo.</span>
+            </div>
+            <button
+              className={p.btnPrimary}
+              style={{ background: '#7c3aed', fontSize: 12, padding: '4px 12px' }}
+              onClick={() => solicitarAcessoMut.mutate()}
+              disabled={solicitarAcessoMut.isPending}
+            >
+              {solicitarAcessoMut.isPending ? 'Solicitando...' : 'Solicitar acesso'}
+            </button>
+          </div>
+        )}
 
         {/* Tabs */}
         <div className={styles.tabs}>
@@ -198,7 +253,7 @@ export default function RevisaoReuniaoModal({ reuniao: initialReuniao, onClose }
         </div>
 
         {/* Body */}
-        <div className={styles.body}>
+        <div className={styles.body} style={acessoRestrito ? { pointerEvents: 'none', opacity: 0.35 } : {}}>
           {tab === 'acoes' ? (
             <>
               {/* TLDR */}
@@ -369,7 +424,7 @@ export default function RevisaoReuniaoModal({ reuniao: initialReuniao, onClose }
         </div>
 
         {/* Footer */}
-        <div className={styles.footer}>
+        <div className={styles.footer} style={acessoRestrito ? { pointerEvents: 'none', opacity: 0.35 } : {}}>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className={p.btnTable} onClick={salvarMut.mutate as () => void} disabled={salvarMut.isPending}>
               {salvarMut.isPending ? 'Salvando...' : 'Salvar rascunho'}

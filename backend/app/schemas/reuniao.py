@@ -19,6 +19,7 @@ class ReuniaoCreate(BaseModel):
     fonte: FonteReuniao = "manual"
     drive_transcricao_file_id: str | None = None
     drive_notas_file_id: str | None = None
+    confidencial: bool = False
 
 
 class ReuniaoUpdate(BaseModel):
@@ -32,6 +33,7 @@ class ReuniaoUpdate(BaseModel):
     processo_id: uuid.UUID | None = None
     status: StatusReuniao | None = None
     acoes_sugeridas: list[dict[str, Any]] | None = None
+    confidencial: bool | None = None
 
 
 class ReuniaoOut(BaseModel):
@@ -42,6 +44,7 @@ class ReuniaoOut(BaseModel):
     google_meet_url: str | None
     cliente_id: uuid.UUID | None
     processo_id: uuid.UUID | None
+    criado_por_id: uuid.UUID | None = None
     drive_transcricao_file_id: str | None
     drive_notas_file_id: str | None
     drive_tldr_file_id: str | None
@@ -50,10 +53,16 @@ class ReuniaoOut(BaseModel):
     acoes_sugeridas: list[dict[str, Any]] | None
     status: str
     fonte: str
+    confidencial: bool = False
+    usuarios_com_acesso: list[str] | None = None
     created_at: datetime
     updated_at: datetime
+    # Enriched fields (not on the DB model directly)
     cliente_nome: str | None = None
     processo_numero: str | None = None
+    criado_por_nome: str | None = None
+    # When the meeting is confidential and the user has no access, these are masked
+    acesso_restrito: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -61,3 +70,8 @@ class ReuniaoOut(BaseModel):
 class ConfirmarAcoesRequest(BaseModel):
     """Payload para confirmar ações aprovadas. acoes_sugeridas com aprovada=True serão criadas."""
     acoes_sugeridas: list[dict[str, Any]]
+
+
+class SolicitarAcessoResponse(BaseModel):
+    ok: bool
+    mensagem: str

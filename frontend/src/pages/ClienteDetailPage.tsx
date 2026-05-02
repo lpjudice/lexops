@@ -302,15 +302,17 @@ export default function ClienteDetailPage() {
               >
                 <div className={detailStyles.timelineIcon}>
                   {item.tipo === 'reuniao'
-                    ? '📹'
+                    ? (item.meta.confidencial ? '🔒' : '📹')
                     : TIPO_ICON[item.tipo === 'anotacao' ? (item.meta.tipo as string) : item.tipo] || '•'}
                 </div>
                 <div className={detailStyles.timelineContent}>
                   <div className={detailStyles.timelineHeader}>
-                    <strong>{item.titulo}</strong>
+                    <strong style={item.tipo === 'reuniao' && item.meta.confidencial ? { color: '#7c3aed' } : undefined}>
+                      {item.titulo}
+                    </strong>
                     <span className={detailStyles.timelineData}>{formatDate(item.data)}</span>
                   </div>
-                  {item.tipo === 'reuniao' && (
+                  {item.tipo === 'reuniao' && !item.meta.confidencial && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
                       <span style={{
                         fontSize: 11, fontWeight: 700, borderRadius: 999, padding: '2px 8px',
@@ -847,9 +849,9 @@ export default function ClienteDetailPage() {
                 <div
                   key={r.id}
                   style={{
-                    background: '#fff',
+                    background: r.acesso_restrito ? '#faf5ff' : '#fff',
                     border: '1px solid',
-                    borderColor: r.status === 'pendente' ? '#fbbf24' : r.status === 'em_revisao' ? '#6ee7b7' : '#e5e7eb',
+                    borderColor: r.acesso_restrito ? '#e9d5ff' : r.status === 'pendente' ? '#fbbf24' : r.status === 'em_revisao' ? '#6ee7b7' : '#e5e7eb',
                     borderRadius: 10,
                     padding: '12px 16px',
                     cursor: 'pointer',
@@ -859,33 +861,38 @@ export default function ClienteDetailPage() {
                   }}
                   onClick={() => setReuniaoRevisando(r)}
                 >
-                  <span style={{ fontSize: 20 }}>📹</span>
+                  <span style={{ fontSize: 20 }}>{r.acesso_restrito ? '🔒' : '📹'}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: 13, color: '#1a1a1a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, color: r.acesso_restrito ? '#7c3aed' : '#1a1a1a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {r.titulo}
                     </div>
+                    {r.criado_por_nome && (
+                      <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 1 }}>por {r.criado_por_nome}</div>
+                    )}
                     {r.data_reuniao && (
                       <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
                         {new Date(r.data_reuniao).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                       </div>
                     )}
-                    {r.resumo_ia && (
+                    {!r.acesso_restrito && r.resumo_ia && (
                       <div style={{ fontSize: 12, color: '#374151', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {r.resumo_ia}
                       </div>
                     )}
                   </div>
-                  <span style={{
-                    flexShrink: 0,
-                    fontSize: 11,
-                    fontWeight: 700,
-                    borderRadius: 999,
-                    padding: '3px 10px',
-                    background: r.status === 'pendente' ? '#fef3c7' : r.status === 'em_revisao' ? '#d1fae5' : '#f3f4f6',
-                    color: r.status === 'pendente' ? '#92400e' : r.status === 'em_revisao' ? '#065f46' : '#6b7280',
-                  }}>
-                    {r.status === 'pendente' ? 'Pendente' : r.status === 'em_revisao' ? 'Em revisão' : 'Processada'}
-                  </span>
+                  {!r.acesso_restrito && (
+                    <span style={{
+                      flexShrink: 0,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      borderRadius: 999,
+                      padding: '3px 10px',
+                      background: r.status === 'pendente' ? '#fef3c7' : r.status === 'em_revisao' ? '#d1fae5' : '#f3f4f6',
+                      color: r.status === 'pendente' ? '#92400e' : r.status === 'em_revisao' ? '#065f46' : '#6b7280',
+                    }}>
+                      {r.status === 'pendente' ? 'Pendente' : r.status === 'em_revisao' ? 'Em revisão' : 'Processada'}
+                    </span>
+                  )}
                 </div>
               ))}
             </div>

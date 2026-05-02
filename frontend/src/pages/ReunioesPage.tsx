@@ -1,9 +1,10 @@
 import { useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Video, RefreshCw, Plus, Trash2, Upload } from 'lucide-react'
+import { Video, RefreshCw, Plus, Trash2, Upload, Lock } from 'lucide-react'
 import { reunioesApi } from '../api/reunioes'
 import type { Reuniao, ReuniaoCreate } from '../api/reunioes'
 import RevisaoReuniaoModal from '../components/RevisaoReuniaoModal'
+import { useAuth } from '../contexts/AuthContext'
 import styles from './Page.module.css'
 
 const STATUS_LABEL: Record<string, string> = {
@@ -39,6 +40,7 @@ const EMPTY_FORM: NovaReuniaoForm = {
 
 export default function ReunioesPage() {
   const qc = useQueryClient()
+  const { usuario, isSuperAdmin } = useAuth()
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<NovaReuniaoForm>(EMPTY_FORM)
   const [revisando, setRevisando] = useState<Reuniao | null>(null)
@@ -262,55 +264,70 @@ export default function ReunioesPage() {
               </tr>
             </thead>
             <tbody>
-              {reunioes.map((r) => (
-                <tr key={r.id} style={{ cursor: 'pointer' }} onClick={() => abrirRevisao(r)}>
-                  <td style={{ fontWeight: 600, maxWidth: 280 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <Video size={14} style={{ color: '#0f766e', flexShrink: 0 }} />
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {r.titulo}
+              {reunioes.map((r) => {
+                const isCreator = usuario && r.criado_por_id === usuario.id
+                const canEdit = !r.acesso_restrito
+                return (
+                  <tr key={r.id} style={{ cursor: 'pointer' }} onClick={() => abrirRevisao(r)}>
+                    <td style={{ fontWeight: 600, maxWidth: 280 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Video size={14} style={{ color: '#0f766e', flexShrink: 0 }} />
+                        {r.confidencial && (
+                          <Lock size={12} style={{ color: '#9333ea', flexShrink: 0 }} title="Reunião confidencial" />
+                        )}
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {r.titulo}
+                        </span>
+                      </div>
+                      {r.criado_por_nome && (
+                        <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
+                          por {r.criado_por_nome}
+                          {isCreator ? ' (você)' : ''}
+                        </div>
+                      )}
+                    </td>
+                    <td>{r.cliente_nome ?? <span style={{ color: '#aaa' }}>Não vinculado</span>}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>{formatDateTime(r.data_reuniao)}</td>
+                    <td>
+                      <span className={styles.badge} style={{ background: r.fonte === 'drive_auto' ? '#e0f2fe' : '#f3f4f6', color: r.fonte === 'drive_auto' ? '#0369a1' : '#6b7280' }}>
+                        {r.fonte === 'drive_auto' ? 'Drive' : 'Manual'}
                       </span>
-                    </div>
-                  </td>
-                  <td>{r.cliente_nome ?? <span style={{ color: '#aaa' }}>Não vinculado</span>}</td>
-                  <td style={{ whiteSpace: 'nowrap' }}>{formatDateTime(r.data_reuniao)}</td>
-                  <td>
-                    <span className={styles.badge} style={{ background: r.fonte === 'drive_auto' ? '#e0f2fe' : '#f3f4f6', color: r.fonte === 'drive_auto' ? '#0369a1' : '#6b7280' }}>
-                      {r.fonte === 'drive_auto' ? 'Drive' : 'Manual'}
-                    </span>
-                  </td>
-                  <td>
-                    <span className={`${styles.badge} ${STATUS_CSS[r.status] ?? ''}`}>
-                      {STATUS_LABEL[r.status] ?? r.status}
-                    </span>
-                  </td>
-                  <td onClick={(e) => e.stopPropagation()} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                    {!r.transcricao_texto && (
-                      <button
-                        className={styles.btnTable}
-                        disabled={uploadingId === r.id}
-                        title="Upload transcrição (PDF/DOCX/TXT)"
-                        style={{ padding: '4px 8px' }}
-                        onClick={() => {
-                          setUploadTargetId(r.id)
-                          uploadFileRef.current?.click()
-                        }}
-                      >
-                        {uploadingId === r.id ? '...' : <Upload size={12} />}
-                      </button>
-                    )}
-                    <button
-                      className={styles.btnDanger}
-                      onClick={() => {
-                        if (confirm('Excluir esta reunião?')) deletarMut.mutate(r.id)
-                      }}
-                      style={{ padding: '4px 8px' }}
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td>
+                      <span className={`${styles.badge} ${STATUS_CSS[r.status] ?? ''}`}>
+                        {STATUS_LABEL[r.status] ?? r.status}
+                      </span>
+                    </td>
+                    <td onClick={(e) => e.stopPropagation()} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                      {canEdit && !r.transcricao_texto && (
+                        <button
+                          className={styles.btnTable}
+                          disabled={uploadingId === r.id}
+                          title="Upload transcrição (PDF/DOCX/TXT)"
+                          style={{ padding: '4px 8px' }}
+                          onClick={() => {
+                            setUploadTargetId(r.id)
+                            uploadFileRef.current?.click()
+                          }}
+                        >
+                          {uploadingId === r.id ? '...' : <Upload size={12} />}
+                        </button>
+                      )}
+                      {(canEdit || isSuperAdmin) && (
+                        <button
+                          className={styles.btnDanger}
+                          onClick={() => {
+                            if (confirm('Excluir esta reunião?')) deletarMut.mutate(r.id)
+                          }}
+                          style={{ padding: '4px 8px' }}
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         )}

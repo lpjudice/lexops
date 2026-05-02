@@ -222,6 +222,13 @@ def _run_migrations() -> None:
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_reunioes_status ON reunioes(status)"
         ))
+        # Confidentiality + creator fields (additive migration)
+        for col_sql in [
+            "ALTER TABLE reunioes ADD COLUMN IF NOT EXISTS criado_por_id UUID REFERENCES usuarios(id) ON DELETE SET NULL",
+            "ALTER TABLE reunioes ADD COLUMN IF NOT EXISTS confidencial BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE reunioes ADD COLUMN IF NOT EXISTS usuarios_com_acesso JSONB DEFAULT '[]'::jsonb",
+        ]:
+            conn.execute(text(col_sql))
         conn.commit()
 
 
