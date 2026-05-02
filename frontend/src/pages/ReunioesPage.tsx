@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Video, RefreshCw, Plus, Trash2 } from 'lucide-react'
+import { Video, RefreshCw, Plus, Trash2, Upload } from 'lucide-react'
 import { reunioesApi } from '../api/reunioes'
 import type { Reuniao, ReuniaoCreate } from '../api/reunioes'
 import RevisaoReuniaoModal from '../components/RevisaoReuniaoModal'
@@ -42,6 +42,10 @@ export default function ReunioesPage() {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<NovaReuniaoForm>(EMPTY_FORM)
   const [revisando, setRevisando] = useState<Reuniao | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const uploadFileRef = useRef<HTMLInputElement>(null)
+  const [uploadingId, setUploadingId] = useState<string | null>(null)
+  const [uploadTargetId, setUploadTargetId] = useState<string | null>(null)
 
   const { data: reunioes = [], isLoading } = useQuery({
     queryKey: ['reunioes'],
@@ -62,7 +66,14 @@ export default function ReunioesPage() {
   })
 
   const criarMut = useMutation({
-    mutationFn: (data: ReuniaoCreate) => reunioesApi.criar(data),
+    mutationFn: async (data: ReuniaoCreate & { _arquivoParaUpload?: File }) => {
+      const { _arquivoParaUpload, ...payload } = data
+      const reuniao = await reunioesApi.criar(payload)
+      if (_arquivoParaUpload) {
+        await reunioesApi.uploadTranscricao(reuniao.id, _arquivoParaUpload)
+      }
+      return reuniao
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['reunioes'] })
       setShowForm(false)
@@ -87,6 +98,19 @@ export default function ReunioesPage() {
       google_meet_url: form.google_meet_url || null,
       fonte: 'manual',
     })
+  }
+
+  async function handleUploadArquivo(reuniaoId: string, file: File) {
+    setUploadingId(reuniaoId)
+    try {
+      await reunioesApi.uploadTranscricao(reuniaoId, file)
+      qc.invalidateQueries({ queryKey: ['reunioes'] })
+    } catch {
+      alert('Erro ao fazer upload do arquivo.')
+    } finally {
+      setUploadingId(null)
+      if (uploadFileRef.current) uploadFileRef.current.value = ''
+    }
   }
 
   function abrirRevisao(r: Reuniao) {
@@ -155,15 +179,52 @@ export default function ReunioesPage() {
             />
           </div>
           <div className={styles.formRow}>
-            <label className={styles.formLabel}>Transcrição (cole aqui o texto)</label>
+            <label className={styles.formLabel}>Transcrição</label>
             <textarea
               className={styles.input}
-              rows={6}
+              rows={5}
               value={form.transcricao_texto}
               onChange={(e) => setForm({ ...form, transcricao_texto: e.target.value })}
               placeholder="Cole aqui o texto da transcrição do Google Meet..."
               style={{ resize: 'vertical' }}
             />
+            <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 12, color: '#6b7280' }}>ou</span>
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".txt,.pdf,.docx"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (!file) return
+                  // Lê o arquivo localmente se for .txt para pré-visualizar
+                  if (file.name.toLowerCase().endsWith('.txt')) {
+                    const reader = new FileReader()
+                    reader.onload = (ev) => setForm({ ...form, transcricao_texto: ev.target?.result as string })
+                    reader.readAsText(file)
+                  } else {
+                    // Para PDF/DOCX, só guarda referência — será enviado via upload-transcricao após criar
+                    setForm({ ...form, _arquivoParaUpload: file } as typeof form & { _arquivoParaUpload: File })
+                    alert(`Arquivo "${file.name}" selecionado. O texto será extraído automaticamente após criar a reunião.`)
+                  }
+                  if (fileRef.current) fileRef.current.value = ''
+                }}
+              />
+              <button
+                type="button"
+                className={styles.btnTable}
+                onClick={() => fileRef.current?.click()}
+                style={{ display: 'flex', alignItems: 'center', gap: 5 }}
+              >
+                <Upload size={12} /> Upload PDF / DOCX / TXT
+              </button>
+              {(form as typeof form & { _arquivoParaUpload?: File })._arquivoParaUpload && (
+                <span style={{ fontSize: 12, color: '#0f766e' }}>
+                  📎 {(form as typeof form & { _arquivoParaUpload?: File })._arquivoParaUpload!.name}
+                </span>
+              )}
+            </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className={styles.btnPrimary} type="submit" disabled={criarMut.isPending}>
@@ -223,7 +284,21 @@ export default function ReunioesPage() {
                       {STATUS_LABEL[r.status] ?? r.status}
                     </span>
                   </td>
-                  <td onClick={(e) => e.stopPropagation()}>
+                  <td onClick={(e) => e.stopPropagation()} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                    {!r.transcricao_texto && (
+                      <button
+                        className={styles.btnTable}
+                        disabled={uploadingId === r.id}
+                        title="Upload transcrição (PDF/DOCX/TXT)"
+                        style={{ padding: '4px 8px' }}
+                        onClick={() => {
+                          setUploadTargetId(r.id)
+                          uploadFileRef.current?.click()
+                        }}
+                      >
+                        {uploadingId === r.id ? '...' : <Upload size={12} />}
+                      </button>
+                    )}
                     <button
                       className={styles.btnDanger}
                       onClick={() => {
@@ -240,6 +315,20 @@ export default function ReunioesPage() {
           </table>
         )}
       </div>
+
+      {/* Input oculto global para upload de transcrição de reunião existente */}
+      <input
+        ref={uploadFileRef}
+        type="file"
+        accept=".txt,.pdf,.docx"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          if (file && uploadTargetId) handleUploadArquivo(uploadTargetId, file)
+          setUploadTargetId(null)
+          if (uploadFileRef.current) uploadFileRef.current.value = ''
+        }}
+      />
 
       {revisando && (
         <RevisaoReuniaoModal

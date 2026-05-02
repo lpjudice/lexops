@@ -1,7 +1,8 @@
+import io
 import uuid
 from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -268,6 +269,60 @@ def confirmar_acoes(reuniao_id: uuid.UUID, data: ConfirmarAcoesRequest, db: Sess
     # Atualiza acoes_sugeridas com o estado final e marca como processada
     r.acoes_sugeridas = data.acoes_sugeridas
     r.status = "processada"
+    db.commit()
+    db.refresh(r)
+    return _enrich(r, db)
+
+
+@router.post("/{reuniao_id}/upload-transcricao", response_model=ReuniaoOut)
+async def upload_transcricao(
+    reuniao_id: uuid.UUID,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """Recebe PDF, DOCX ou TXT e extrai o texto como transcrição da reunião."""
+    r = db.query(Reuniao).filter(Reuniao.id == reuniao_id).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Reunião não encontrada")
+
+    nome = (file.filename or "").lower()
+    conteudo = await file.read()
+    texto: str | None = None
+
+    if nome.endswith(".txt") or (file.content_type or "").startswith("text/"):
+        try:
+            texto = conteudo.decode("utf-8")
+        except UnicodeDecodeError:
+            texto = conteudo.decode("latin-1", errors="replace")
+
+    elif nome.endswith(".pdf") or file.content_type == "application/pdf":
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(conteudo))
+            texto = "\n".join(page.extract_text() or "" for page in reader.pages)
+        except Exception as e:
+            raise HTTPException(status_code=422, detail=f"Não foi possível ler o PDF: {e}")
+
+    elif nome.endswith(".docx") or file.content_type in (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/msword",
+    ):
+        try:
+            from docx import Document
+            doc = Document(io.BytesIO(conteudo))
+            texto = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+        except Exception as e:
+            raise HTTPException(status_code=422, detail=f"Não foi possível ler o DOCX: {e}")
+
+    else:
+        raise HTTPException(status_code=415, detail="Formato não suportado. Envie .txt, .pdf ou .docx")
+
+    if not texto or not texto.strip():
+        raise HTTPException(status_code=422, detail="O arquivo não contém texto legível")
+
+    r.transcricao_texto = texto.strip()
+    if r.status == "pendente":
+        pass  # mantém pendente — usuário ainda precisa processar com IA
     db.commit()
     db.refresh(r)
     return _enrich(r, db)

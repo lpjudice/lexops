@@ -90,6 +90,14 @@ def _refresh_google_master_session() -> None:
         logger.warning("Scheduler: falha ao renovar conta Google master: %s", exc)
 
 
+def _renovar_drive_watch() -> None:
+    try:
+        from app.services.drive_watch import renovar_se_necessario
+        renovar_se_necessario()
+    except Exception as exc:
+        logger.warning("Scheduler: falha ao renovar Drive watch channel: %s", exc)
+
+
 def _sync_diarios_monitorados() -> None:
     try:
         from app.database import SessionLocal
@@ -181,8 +189,14 @@ def start_scheduler() -> None:
         id="sync_diario_monitorado",
         replace_existing=True,
     )
+    scheduler.add_job(
+        _renovar_drive_watch,
+        trigger=CronTrigger(hour=6, minute=0),
+        id="renovar_drive_watch",
+        replace_existing=True,
+    )
     scheduler.start()
-    logger.info("Scheduler iniciado — DataJud diário às 03:00 BRT, Diário Oficial monitorado de segunda a sexta às 08:00 BRT, jus.br noturno se ativo, manutenção do jus.br a cada 6 horas e renovação da conta Google master a cada 6 horas")
+    logger.info("Scheduler iniciado — DataJud 03:00, Diário Oficial seg-sex 08:00, Drive watch renovação diária 06:00")
 
 
 def stop_scheduler() -> None:

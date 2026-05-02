@@ -74,4 +74,12 @@ export const reunioesApi = {
     api.post<Reuniao>(`/reunioes/${id}/confirmar-acoes`, { acoes_sugeridas }).then((r) => r.data),
 
   deletar: (id: string) => api.delete(`/reunioes/${id}`),
+
+  uploadTranscricao: (id: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post<Reuniao>(`/reunioes/${id}/upload-transcricao`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then((r) => r.data)
+  },
 }

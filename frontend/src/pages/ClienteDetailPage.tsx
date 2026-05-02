@@ -13,6 +13,9 @@ import type { AnotacaoCreate, TipoAnotacao } from '../api/anotacoes'
 import ClienteIA from '../components/ClienteIA'
 import AnamneseForm from '../components/AnamneseForm'
 import PropostaForm from '../components/PropostaForm'
+import RevisaoReuniaoModal from '../components/RevisaoReuniaoModal'
+import { reunioesApi } from '../api/reunioes'
+import type { Reuniao } from '../api/reunioes'
 import styles from './Page.module.css'
 import detailStyles from './ClienteDetailPage.module.css'
 
@@ -36,7 +39,7 @@ function formatDate(d: string) {
   return new Date(d).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-type Aba = 'timeline' | 'anotacoes' | 'emails' | 'processos' | 'financeiro' | 'contratos' | 'ia'
+type Aba = 'timeline' | 'anotacoes' | 'emails' | 'processos' | 'financeiro' | 'contratos' | 'reunioes' | 'ia'
 
 export default function ClienteDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -51,6 +54,7 @@ export default function ClienteDetailPage() {
   const [batchUploading, setBatchUploading] = useState(false)
   const [batchResultado, setBatchResultado] = useState<string | null>(null)
   const batchFileRef = useRef<HTMLInputElement>(null)
+  const [reuniaoRevisando, setReuniaoRevisando] = useState<Reuniao | null>(null)
   const [propostaAberta, setPropostaAberta] = useState<string | null>(null) // anotacao.id
   const [form, setForm] = useState<AnotacaoCreate>({
     cliente_id: id!,
@@ -106,6 +110,15 @@ export default function ClienteDetailPage() {
     enabled: aba === 'emails',
     staleTime: 60_000,
   })
+
+  const { data: reunioes = [] } = useQuery({
+    queryKey: ['reunioes-cliente', id],
+    queryFn: () => reunioesApi.listar({ cliente_id: id }),
+    enabled: !!id,
+    staleTime: 60_000,
+  })
+
+  const reunioesPendentes = reunioes.filter((r: Reuniao) => r.status !== 'processada')
 
   const [syncContaGoogle, setSyncContaGoogle] = useState<string>('master')
 
@@ -237,7 +250,7 @@ export default function ClienteDetailPage() {
 
       {/* Abas */}
       <div className={detailStyles.abas}>
-        {(['timeline', 'anotacoes', 'emails', 'processos', 'financeiro', 'contratos', 'ia'] as Aba[]).map((a) => (
+        {(['timeline', 'anotacoes', 'emails', 'processos', 'financeiro', 'contratos', 'reunioes', 'ia'] as Aba[]).map((a) => (
           <button
             key={a}
             className={`${detailStyles.aba} ${aba === a ? detailStyles.abaAtiva : ''}`}
@@ -249,6 +262,16 @@ export default function ClienteDetailPage() {
              a === 'processos' ? 'Processos' :
              a === 'financeiro' ? `Financeiro${honorarios.length ? ` (${honorarios.length})` : ''}` :
              a === 'contratos' ? `Contratos${contratos.length ? ` (${contratos.length})` : ''}` :
+             a === 'reunioes' ? (
+               <>
+                 Reuniões
+                 {reunioesPendentes.length > 0 && (
+                   <span style={{ marginLeft: 5, background: '#f59e0b', color: '#fff', borderRadius: 999, fontSize: 10, fontWeight: 700, padding: '1px 6px' }}>
+                     {reunioesPendentes.length}
+                   </span>
+                 )}
+               </>
+             ) :
              'IA & Docs'}
           </button>
         ))}
@@ -772,9 +795,84 @@ export default function ClienteDetailPage() {
         </div>
       )}
 
+      {/* ── Reuniões ── */}
+      {aba === 'reunioes' && (
+        <div>
+          <div className={detailStyles.abaHeader}>
+            <span className={detailStyles.abaHeaderTitle}>
+              {reunioes.length} reunião(ões) · {reunioesPendentes.length} pendente(s)
+            </span>
+            <Link to="/reunioes" className={styles.btnTable} style={{ textDecoration: 'none' }}>
+              + Nova / Ver todas
+            </Link>
+          </div>
+          {reunioes.length === 0 ? (
+            <p className={styles.empty}>Nenhuma reunião vinculada a este cliente.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {reunioes.map((r: Reuniao) => (
+                <div
+                  key={r.id}
+                  style={{
+                    background: '#fff',
+                    border: '1px solid',
+                    borderColor: r.status === 'pendente' ? '#fbbf24' : r.status === 'em_revisao' ? '#6ee7b7' : '#e5e7eb',
+                    borderRadius: 10,
+                    padding: '12px 16px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                  }}
+                  onClick={() => setReuniaoRevisando(r)}
+                >
+                  <span style={{ fontSize: 20 }}>📹</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, color: '#1a1a1a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {r.titulo}
+                    </div>
+                    {r.data_reuniao && (
+                      <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+                        {new Date(r.data_reuniao).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    )}
+                    {r.resumo_ia && (
+                      <div style={{ fontSize: 12, color: '#374151', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {r.resumo_ia}
+                      </div>
+                    )}
+                  </div>
+                  <span style={{
+                    flexShrink: 0,
+                    fontSize: 11,
+                    fontWeight: 700,
+                    borderRadius: 999,
+                    padding: '3px 10px',
+                    background: r.status === 'pendente' ? '#fef3c7' : r.status === 'em_revisao' ? '#d1fae5' : '#f3f4f6',
+                    color: r.status === 'pendente' ? '#92400e' : r.status === 'em_revisao' ? '#065f46' : '#6b7280',
+                  }}>
+                    {r.status === 'pendente' ? 'Pendente' : r.status === 'em_revisao' ? 'Em revisão' : 'Processada'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── IA & Docs ── */}
       {aba === 'ia' && (
         <ClienteIA clienteId={id!} />
+      )}
+
+      {reuniaoRevisando && (
+        <RevisaoReuniaoModal
+          reuniao={reuniaoRevisando}
+          onClose={() => {
+            setReuniaoRevisando(null)
+            qc.invalidateQueries({ queryKey: ['reunioes-cliente', id] })
+          }}
+        />
       )}
     </div>
   )
