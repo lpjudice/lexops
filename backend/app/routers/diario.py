@@ -120,6 +120,11 @@ def _filtrar_itens_monitorados_exatos(
     return filtrados
 
 
+def _texto_chave_publicacao(texto: str | None) -> str:
+    texto_norm = _normalizar_texto_busca(texto or "")
+    return texto_norm[:300]
+
+
 def _inserir_publicacoes(itens: list[dict], db: Session) -> tuple[int, int, int]:
     """Insere publicações evitando duplicatas. Retorna (inseridas, duplicatas, erros)."""
     inseridas = duplicatas = erros = 0
@@ -131,19 +136,25 @@ def _inserir_publicacoes(itens: list[dict], db: Session) -> tuple[int, int, int]
                 existe = db.query(Publicacao).filter(
                     Publicacao.email_message_id == email_id
                 ).first()
-            elif item.get("numero_cnj"):
-                existe = db.query(Publicacao).filter(
-                    Publicacao.numero_cnj == item.get("numero_cnj"),
-                    Publicacao.data_publicacao == item.get("data_publicacao"),
-                    Publicacao.fonte == item.get("fonte"),
-                ).first()
             else:
-                existe = db.query(Publicacao).filter(
-                    Publicacao.texto_resumo == item.get("texto_resumo"),
+                texto_chave = _texto_chave_publicacao(item.get("texto_resumo") or item.get("texto_completo"))
+                q = db.query(Publicacao).filter(
                     Publicacao.data_publicacao == item.get("data_publicacao"),
-                    Publicacao.fonte == item.get("fonte"),
                     Publicacao.tribunal == item.get("tribunal"),
-                ).first()
+                )
+                if item.get("numero_cnj"):
+                    q = q.filter(Publicacao.numero_cnj == item.get("numero_cnj"))
+                else:
+                    q = q.filter(Publicacao.texto_resumo == item.get("texto_resumo"))
+                candidatos = q.all()
+                existe = next(
+                    (
+                        pub
+                        for pub in candidatos
+                        if _texto_chave_publicacao(pub.texto_resumo or pub.texto_completo) == texto_chave
+                    ),
+                    None,
+                )
 
             if existe:
                 duplicatas += 1

@@ -320,7 +320,10 @@ def _comunica_para_publicacao(item: dict, tribunal_alvo: str) -> dict | None:
     if len(texto) < 20:
         return None
 
-    tribunal_item = item.get("siglaTribunal") or tribunal_alvo
+    tribunal_item = (item.get("siglaTribunal") or tribunal_alvo or "").upper()
+    if tribunal_alvo != "DJEN" and tribunal_item != tribunal_alvo:
+        return None
+
     data_pub = (
         _normalizar_data_comunica(item.get("data_disponibilizacao"))
         or _normalizar_data_comunica(item.get("datadisponibilizacao"))
