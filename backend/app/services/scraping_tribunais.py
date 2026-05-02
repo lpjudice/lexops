@@ -106,39 +106,6 @@ def _termo_nome_buscavel(termo: str) -> bool:
     return len(tokens) == 1 and len(tokens[0]) >= 8
 
 
-def _distancia_levenshtein(a: str, b: str) -> int:
-    linhas = len(a) + 1
-    colunas = len(b) + 1
-    dp = [[0] * colunas for _ in range(linhas)]
-    for i in range(linhas):
-        dp[i][0] = i
-    for j in range(colunas):
-        dp[0][j] = j
-    for i in range(1, linhas):
-        for j in range(1, colunas):
-            custo = 0 if a[i - 1] == b[j - 1] else 1
-            dp[i][j] = min(
-                dp[i - 1][j] + 1,
-                dp[i][j - 1] + 1,
-                dp[i - 1][j - 1] + custo,
-            )
-    return dp[-1][-1]
-
-
-def _token_match_aproximado(tokens_texto: list[str], token: str) -> bool:
-    if token in tokens_texto:
-        return True
-    if len(token) <= 4:
-        return False
-    limite = 2 if len(token) >= 6 else 1
-    for token_texto in tokens_texto:
-        if abs(len(token_texto) - len(token)) > 1:
-            continue
-        if _distancia_levenshtein(token_texto, token) <= limite:
-            return True
-    return False
-
-
 def _termo_exato_no_texto(texto: str, termo: str) -> bool:
     termo_norm = _normalizar_texto_busca(termo)
     if not termo_norm:
@@ -147,38 +114,24 @@ def _termo_exato_no_texto(texto: str, termo: str) -> bool:
     return re.search(padrao, _normalizar_texto_busca(texto)) is not None
 
 
-def _termo_similar_no_texto(texto: str, termo: str) -> bool:
-    tokens_termo = _tokenizar_relevantes(termo)
-    if len(tokens_termo) < 2:
-        return False
-    tokens_texto = _tokenizar_relevantes(texto)
-    primeiro = tokens_termo[0]
-    ultimo = tokens_termo[-1]
-    encontrados = [token for token in tokens_termo if _token_match_aproximado(tokens_texto, token)]
-    if len(encontrados) < 2:
-        return False
-    return primeiro in encontrados or ultimo in encontrados
-
-
 def _texto_tem_match_monitorado(texto: str, termos: list[str] | None = None) -> bool:
     if not termos:
         return False
     for termo in termos:
-        if not _termo_nome_buscavel(termo):
+        if not (_termo_parece_cnj(termo) or _termo_nome_buscavel(termo)):
             continue
         if _termo_exato_no_texto(texto, termo):
-            return True
-        if _termo_parece_cnj(termo):
-            continue
-        if _termo_similar_no_texto(texto, termo):
             return True
     return False
 
 
 def expandir_termos_busca(termos: list[str] | None = None) -> list[str]:
     """
-    Gera variações úteis para nomes e razões sociais quando o portal
-    indexa apenas parte do termo original.
+    Retorna apenas os termos originais.
+
+    A importação do Diário precisa ser conservadora: por ora, não buscamos
+    variantes/similares, porque isso trouxe publicações que não eram de
+    clientes, processos ou nomes acompanhados.
     """
     if not termos:
         return []
@@ -202,21 +155,6 @@ def expandir_termos_busca(termos: list[str] | None = None) -> list[str]:
             continue
 
         adicionar(termo_limpo)
-
-        palavras = re.findall(r"[A-Za-zÀ-ÿ0-9]+", termo_limpo)
-        relevantes = [
-            p for p in palavras
-            if len(p) >= 4 and p.casefold() not in STOPWORDS
-        ]
-
-        if len(relevantes) >= 2:
-            adicionar(" ".join(relevantes[:2]))
-
-        if len(relevantes) >= 3:
-            if len(relevantes) == 3:
-                adicionar(f"{relevantes[0]} {relevantes[-1]}")
-            adicionar(" ".join(relevantes[:3]))
-            adicionar(f"{relevantes[0]} {relevantes[2]}")
 
     return resultado
 
@@ -353,30 +291,10 @@ def _consultas_comunica(termos: list[str] | None = None) -> list[tuple[str, int,
         if not _termo_nome_buscavel(termo_original):
             continue
 
-        palavras = re.findall(r"[A-Za-zÀ-ÿ0-9]+", termo_original)
-        relevantes = [p for p in palavras if len(p) >= 4 and p.casefold() not in STOPWORDS]
-        primeira_dupla = " ".join(relevantes[:2]) if len(relevantes) >= 2 else ""
-        primeira_terceira = f"{relevantes[0]} {relevantes[2]}" if len(relevantes) >= 3 else ""
-        primeiro_ultimo = " ".join([relevantes[0], relevantes[-1]]) if len(relevantes) == 3 else ""
-        primeira_tripla = " ".join([relevantes[0], relevantes[1], relevantes[-1]]) if len(relevantes) >= 3 else ""
-
         adicionar(termo_original, 0, "texto", termo_original, COMUNICA_MAX_PAGINAS)
         adicionar(termo_original, 1, "nomeParte", termo_original, COMUNICA_MAX_PAGINAS)
-        if len(relevantes) >= 2:
+        if not _termo_parece_cnj(termo_original):
             adicionar(termo_original, 1, "nomeAdvogado", termo_original, COMUNICA_MAX_PAGINAS)
-
-        # Similar agora exige contexto de nome, nunca palavra solta isolada.
-        for prioridade, variante, paginas in [
-            (2, primeira_dupla, 5),
-            (2, primeiro_ultimo, 5),
-            (3, primeira_terceira, 4),
-            (3, primeira_tripla, 4),
-        ]:
-            if not variante or variante.casefold() == termo_original.casefold():
-                continue
-            adicionar(termo_original, prioridade, "texto", variante, paginas)
-            adicionar(termo_original, prioridade, "nomeParte", variante, paginas)
-            adicionar(termo_original, prioridade, "nomeAdvogado", variante, paginas)
 
     if termos:
         return consultas

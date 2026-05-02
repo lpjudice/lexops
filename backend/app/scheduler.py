@@ -92,7 +92,7 @@ def _sync_diarios_monitorados() -> None:
     try:
         from app.database import SessionLocal
         from app.models.cliente import Cliente
-        from app.routers.diario import _inserir_publicacoes
+        from app.routers.diario import _filtrar_itens_monitorados_exatos, _inserir_publicacoes
         from app.services.diario_monitoring import load_monitoring_config
         from app.services.scraping_tribunais import scrape_todos
 
@@ -120,6 +120,7 @@ def _sync_diarios_monitorados() -> None:
 
             logger.info("Scheduler: sincronizando Diário Oficial de %s com %d termo(s)", ",".join(tribunais), len(termos))
             itens = scrape_todos(tribunais=tribunais, termos=termos)
+            itens = _filtrar_itens_monitorados_exatos(itens, db)
             ins, dup, err = _inserir_publicacoes(itens, db)
             logger.info("Scheduler: Diário Oficial concluído (%d novas, %d duplicatas, %d erros)", ins, dup, err)
         finally:

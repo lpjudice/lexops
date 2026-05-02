@@ -1,4 +1,5 @@
 import json
+import re
 import uuid
 from datetime import date
 
@@ -7,6 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models.cliente import Cliente
 from app.models.prazo import Prazo
 from app.models.publicacao import Publicacao
 from app.models.processo import Processo
@@ -23,6 +25,90 @@ class DiarioMonitoringConfig(BaseModel):
     tribunais: list[str]
     termos_extras: list[str]
     auto_sync: bool = True
+
+
+def _normalizar_texto_busca(texto: str) -> str:
+    texto = (texto or "").casefold()
+    substituicoes = str.maketrans(
+        "áàâãäéèêëíìîïóòôõöúùûüç",
+        "aaaaaeeeeiiiiooooouuuuc",
+    )
+    texto = texto.translate(substituicoes)
+    return re.sub(r"\s+", " ", texto).strip()
+
+
+def _normalizar_cnj(numero: str | None) -> str:
+    return re.sub(r"\D", "", numero or "")
+
+
+def _termo_exato_no_texto(texto: str, termo: str) -> bool:
+    termo_norm = _normalizar_texto_busca(termo)
+    if not termo_norm:
+        return False
+    padrao = r"(?<![a-z0-9])" + re.escape(termo_norm).replace(r"\ ", r"\s+") + r"(?![a-z0-9])"
+    return re.search(padrao, _normalizar_texto_busca(texto)) is not None
+
+
+def _nomes_monitorados(db: Session, termos_extras: list[str] | None = None) -> list[str]:
+    nomes = [c.nome.strip() for c in db.query(Cliente).all() if getattr(c, "nome", None) and c.nome.strip()]
+    nomes.extend([t.strip() for t in (termos_extras or []) if t and t.strip()])
+    vistos: set[str] = set()
+    resultado: list[str] = []
+    for nome in nomes:
+        chave = _normalizar_texto_busca(nome)
+        if not chave or chave in vistos:
+            continue
+        vistos.add(chave)
+        resultado.append(nome)
+    return resultado
+
+
+def _processos_por_cnj(db: Session) -> dict[str, Processo]:
+    processos = db.query(Processo).all()
+    return {
+        _normalizar_cnj(processo.numero_cnj): processo
+        for processo in processos
+        if _normalizar_cnj(processo.numero_cnj)
+    }
+
+
+def _item_tem_match_monitorado_exato(
+    item: dict,
+    processos_por_cnj: dict[str, Processo],
+    nomes_monitorados: list[str],
+) -> tuple[bool, uuid.UUID | None]:
+    texto = f"{item.get('texto_completo') or ''} {item.get('texto_resumo') or ''}"
+    cnj_item = _normalizar_cnj(item.get("numero_cnj"))
+    if cnj_item and cnj_item in processos_por_cnj:
+        return True, processos_por_cnj[cnj_item].id
+
+    for cnj, processo in processos_por_cnj.items():
+        if cnj and cnj in _normalizar_cnj(texto):
+            return True, processo.id
+
+    for nome in nomes_monitorados:
+        if _termo_exato_no_texto(texto, nome):
+            return True, None
+
+    return False, None
+
+
+def _filtrar_itens_monitorados_exatos(itens: list[dict], db: Session) -> list[dict]:
+    from app.services.diario_monitoring import load_monitoring_config
+
+    config = load_monitoring_config()
+    processos_por_cnj = _processos_por_cnj(db)
+    nomes_monitorados = _nomes_monitorados(db, config.get("termos_extras") or [])
+
+    filtrados: list[dict] = []
+    for item in itens:
+        ok, processo_id = _item_tem_match_monitorado_exato(item, processos_por_cnj, nomes_monitorados)
+        if not ok:
+            continue
+        if processo_id:
+            item = {**item, "processo_id": processo_id}
+        filtrados.append(item)
+    return filtrados
 
 
 def _inserir_publicacoes(itens: list[dict], db: Session) -> tuple[int, int, int]:
@@ -56,6 +142,8 @@ def _inserir_publicacoes(itens: list[dict], db: Session) -> tuple[int, int, int]
 
             # Tenta vincular automaticamente a processo cadastrado
             processo_id = None
+            if item.get("processo_id"):
+                processo_id = item.get("processo_id")
             if item.get("numero_cnj"):
                 proc = db.query(Processo).filter(
                     Processo.numero_cnj == item["numero_cnj"]
@@ -112,6 +200,7 @@ def sync_scraping(
         termos=termos or None,
         days_back=days_back,
     )
+    itens = _filtrar_itens_monitorados_exatos(itens, db)
     ins, dup, err = _inserir_publicacoes(itens, db)
     return SyncResult(inseridas=ins, duplicatas=dup, erros=err, fonte="scraping")
 

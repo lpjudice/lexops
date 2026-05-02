@@ -43,8 +43,8 @@ function formatDate(d?: string) {
   return new Date(d + 'T12:00:00').toLocaleDateString('pt-BR')
 }
 
-type MatchFilter = 'todos' | 'cadastrados' | 'exatos' | 'similares'
-type MatchKind = 'processo' | 'exato' | 'similar'
+type MatchFilter = 'todos' | 'cadastrados' | 'exatos'
+type MatchKind = 'processo' | 'exato'
 
 interface ProcessoRelacionado {
   id: string
@@ -55,9 +55,7 @@ interface ProcessoRelacionado {
 
 interface PublicacaoMatchInfo {
   exactClientNames: string[]
-  similarClientNames: string[]
   exactTermMatches: string[]
-  similarTermMatches: string[]
   probableClientNames: string[]
   relatedProcesses: ProcessoRelacionado[]
   relatedTerms: string[]
@@ -65,7 +63,6 @@ interface PublicacaoMatchInfo {
   primaryClientName?: string
   hasRegisteredProcess: boolean
   hasExactName: boolean
-  hasSimilarName: boolean
 }
 
 interface PublicacaoEnriquecida {
@@ -103,17 +100,6 @@ function uniqueStrings(values: string[]) {
   return result
 }
 
-function buildClientNameVariants(name: string) {
-  const words = name.match(/[A-Za-zÀ-ÿ0-9]+/g) ?? []
-  const filtered = words.filter((word) => word.length >= 4)
-  const variants = [name]
-  if (filtered.length >= 2) variants.push(filtered.slice(0, 2).join(' '))
-  if (filtered.length === 3) variants.push(`${filtered[0]} ${filtered[filtered.length - 1]}`)
-  if (filtered.length >= 3) variants.push(filtered.slice(0, 3).join(' '))
-  if (filtered.length >= 4) variants.push(`${filtered[0]} ${filtered[2]}`)
-  return uniqueStrings(variants)
-}
-
 function extractRelevantTokens(name: string) {
   return uniqueStrings(name.match(/[A-Za-zÀ-ÿ0-9]+/g) ?? [])
     .map((token) => normalizeText(token))
@@ -131,35 +117,6 @@ function isMonitorableTerm(value: string) {
   return tokens.length === 1 && tokens[0].length >= 8
 }
 
-function levenshteinDistance(a: string, b: string) {
-  const rows = a.length + 1
-  const cols = b.length + 1
-  const dp = Array.from({ length: rows }, () => Array<number>(cols).fill(0))
-  for (let i = 0; i < rows; i += 1) dp[i][0] = i
-  for (let j = 0; j < cols; j += 1) dp[0][j] = j
-  for (let i = 1; i < rows; i += 1) {
-    for (let j = 1; j < cols; j += 1) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1
-      dp[i][j] = Math.min(
-        dp[i - 1][j] + 1,
-        dp[i][j - 1] + 1,
-        dp[i - 1][j - 1] + cost,
-      )
-    }
-  }
-  return dp[a.length][b.length]
-}
-
-function hasFuzzyTokenMatch(textTokens: string[], token: string) {
-  if (textTokens.includes(token)) return true
-  return textTokens.some((textToken) => {
-    if (Math.abs(textToken.length - token.length) > 1) return false
-    if (token.length <= 4) return false
-    const maxDistance = token.length >= 6 ? 2 : 1
-    return levenshteinDistance(textToken, token) <= maxDistance
-  })
-}
-
 function textHasExactTerm(normalizedText: string, term: string) {
   const normalizedTerm = normalizeText(term)
   if (!normalizedTerm) return false
@@ -167,27 +124,9 @@ function textHasExactTerm(normalizedText: string, term: string) {
   return new RegExp(pattern, 'i').test(normalizedText)
 }
 
-function isLogicalSimilarMatch(textTokens: string[], name: string) {
-  const tokens = extractRelevantTokens(name)
-  if (tokens.length < 2) return false
-
-  const firstToken = tokens[0]
-  const lastToken = tokens[tokens.length - 1]
-  const matchedTokens = tokens.filter((token) => hasFuzzyTokenMatch(textTokens, token))
-
-  if (matchedTokens.length < 2) return false
-
-  const hasAnchor =
-    matchedTokens.includes(firstToken) ||
-    matchedTokens.includes(lastToken)
-
-  return hasAnchor
-}
-
 function getMatchPriority(match: PublicacaoMatchInfo) {
   if (match.hasRegisteredProcess) return 0
   if (match.hasExactName) return 1
-  if (match.hasSimilarName) return 2
   return 3
 }
 
@@ -226,11 +165,8 @@ function classifyPublication(
 ): PublicacaoMatchInfo {
   const text = `${pub.texto_completo ?? ''} ${pub.texto_resumo ?? ''}`
   const normalizedText = normalizeText(text)
-  const textTokens = uniqueStrings(normalizedText.match(/[a-z0-9]+/g) ?? [])
   const exactClientNames = new Set<string>()
-  const similarClientNames = new Set<string>()
   const exactTermMatches = new Set<string>()
-  const similarTermMatches = new Set<string>()
   const probableClientNames = new Set<string>()
   const relatedTerms = new Set<string>()
   const relatedProcesses: ProcessoRelacionado[] = []
@@ -252,12 +188,8 @@ function classifyPublication(
         matchKind: 'processo',
       })
       clientNames.forEach((name) => {
-        exactClientNames.add(name)
-        exactTermMatches.add(name)
         probableClientNames.add(name)
-        relatedTerms.add(name)
       })
-      continue
     }
 
     const exactNames = clientNames.filter((name) => isMonitorableTerm(name) && textHasExactTerm(normalizedText, name))
@@ -270,22 +202,10 @@ function classifyPublication(
       })
       continue
     }
-
-    const similarNames = clientNames.filter((name) => isMonitorableTerm(name) && isLogicalSimilarMatch(textTokens, name))
-    if (similarNames.length > 0) {
-      similarNames.forEach((name) => {
-        similarClientNames.add(name)
-        similarTermMatches.add(name)
-        probableClientNames.add(name)
-        buildClientNameVariants(name).forEach((variant) => {
-          if (variant.trim().split(/\s+/).length >= 2) relatedTerms.add(variant)
-        })
-      })
-    }
   }
 
   relatedProcesses.sort((a, b) => {
-    const rank = { processo: 0, exato: 1, similar: 2 }
+    const rank = { processo: 0, exato: 1 }
     return rank[a.matchKind] - rank[b.matchKind]
   })
 
@@ -301,22 +221,13 @@ function classifyPublication(
       relatedTerms.add(termo)
       continue
     }
-    const hasSimilar = isLogicalSimilarMatch(textTokens, termo)
-    if (hasSimilar) {
-      similarTermMatches.add(termo)
-      buildClientNameVariants(termo).forEach((variant) => {
-        if (variant.trim().split(/\s+/).length >= 2) relatedTerms.add(variant)
-      })
-    }
   }
 
   if (primary?.numero_cnj) relatedTerms.add(primary.numero_cnj)
 
   return {
     exactClientNames: [...exactClientNames],
-    similarClientNames: [...similarClientNames].filter((name) => !exactClientNames.has(name)),
     exactTermMatches: [...exactTermMatches],
-    similarTermMatches: [...similarTermMatches].filter((name) => !exactTermMatches.has(name)),
     probableClientNames: [...probableClientNames],
     relatedProcesses,
     relatedTerms: uniqueStrings([...relatedTerms]),
@@ -324,7 +235,6 @@ function classifyPublication(
     primaryClientName: [...probableClientNames][0] ?? primary?.clienteNomes[0],
     hasRegisteredProcess,
     hasExactName: exactClientNames.size > 0 || exactTermMatches.size > 0,
-    hasSimilarName: similarClientNames.size > 0 || similarTermMatches.size > 0,
   }
 }
 
@@ -570,6 +480,7 @@ export default function DiarioPage() {
   const SEM_PUB = 'Sem publicações nesta edição.'
   const publicacoesEnriquecidas = [...publicacoes]
     .map((pub) => ({ pub, match: classifyPublication(pub, processos, clientes, termosNomesMonitorados) }))
+    .filter(({ match }) => match.hasRegisteredProcess || match.hasExactName)
     .sort((a, b) => {
       const priorityA = getMatchPriority(a.match)
       const priorityB = getMatchPriority(b.match)
@@ -585,7 +496,6 @@ export default function DiarioPage() {
     if (filtroComConteudo && (pub.texto_resumo === SEM_PUB || !pub.texto_resumo)) return false
     if (filtroMatch === 'cadastrados' && !match.hasRegisteredProcess) return false
     if (filtroMatch === 'exatos' && !match.hasExactName) return false
-    if (filtroMatch === 'similares' && !match.hasSimilarName) return false
     return true
   })
 
@@ -816,12 +726,6 @@ export default function DiarioPage() {
         >
           Nomes exatos
         </button>
-        <button
-          className={`${diarioStyles.filtroBtn} ${filtroMatch === 'similares' ? diarioStyles.filtroAtivo : ''}`}
-          onClick={() => setFiltroMatch((v) => v === 'similares' ? 'todos' : 'similares')}
-        >
-          Nomes similares
-        </button>
       </div>
 
       {isLoading ? (
@@ -840,7 +744,6 @@ export default function DiarioPage() {
             const textoBase = pub.texto_completo || pub.texto_resumo || ''
             const resumoExibicao = buildRelevantExcerpt(textoBase, match.relatedTerms)
             const nomesExatos = uniqueStrings([...match.exactClientNames, ...match.exactTermMatches])
-            const nomesSimilares = uniqueStrings([...match.similarClientNames, ...match.similarTermMatches])
 
             return (
             <div
@@ -928,12 +831,9 @@ export default function DiarioPage() {
                 {match.hasExactName && (
                   <span className={`${diarioStyles.matchBadge} ${diarioStyles.matchExato}`}>Nome exato</span>
                 )}
-                {match.hasSimilarName && (
-                  <span className={`${diarioStyles.matchBadge} ${diarioStyles.matchSimilar}`}>Nome similar</span>
-                )}
               </div>
 
-              {(match.primaryClientName || match.relatedProcesses.length > 0 || nomesExatos.length > 0 || nomesSimilares.length > 0) && (
+              {(match.primaryClientName || match.relatedProcesses.length > 0 || nomesExatos.length > 0) && (
                 <div className={diarioStyles.matchDetails}>
                   {match.primaryClientName && (
                     <div>
@@ -949,11 +849,6 @@ export default function DiarioPage() {
                   {nomesExatos.length > 0 && (
                     <div>
                       <span className={diarioStyles.iaLabel}>Nome exato encontrado</span> {nomesExatos.slice(0, 3).join(' · ')}
-                    </div>
-                  )}
-                  {nomesSimilares.length > 0 && (
-                    <div>
-                      <span className={diarioStyles.iaLabel}>Nome similar encontrado</span> {nomesSimilares.slice(0, 3).join(' · ')}
                     </div>
                   )}
                 </div>
