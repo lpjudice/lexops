@@ -16,6 +16,7 @@ from app.models.tarefa import Tarefa
 from app.models.usuario import Usuario
 from app.schemas.reuniao import (
     ConfirmarAcoesRequest,
+    PedidoAcesso,
     ReuniaoCreate,
     ReuniaoOut,
     ReuniaoUpdate,
@@ -41,15 +42,20 @@ def _pode_ver_conteudo(r: Reuniao, usuario: Usuario | None) -> bool:
 
 def _enrich(r: Reuniao, db: Session, usuario: Usuario | None = None) -> ReuniaoOut:
     pode_ver = _pode_ver_conteudo(r, usuario)
+    is_creator = usuario and r.criado_por_id and str(usuario.id) == str(r.criado_por_id)
+    can_manage = usuario and (usuario.role == "super_admin" or is_creator)
 
     out = ReuniaoOut.model_validate(r)
     out.acesso_restrito = not pode_ver
 
     if not pode_ver:
-        # Mask sensitive content
+        # Mask sensitive content for restricted users
         out.transcricao_texto = None
         out.resumo_ia = None
         out.acoes_sugeridas = None
+        out.drive_tldr_file_id = None
+        out.drive_transcricao_file_id = None
+        out.drive_notas_file_id = None
         out.titulo = "Reunião confidencial"
 
     if r.cliente_id:
@@ -66,6 +72,21 @@ def _enrich(r: Reuniao, db: Session, usuario: Usuario | None = None) -> ReuniaoO
         u = db.query(Usuario).filter(Usuario.id == r.criado_por_id).first()
         if u:
             out.criado_por_nome = u.nome
+
+    # Populate pending access requests for creator / super_admin
+    if can_manage:
+        pedidos: list[PedidoAcesso] = []
+        for entry in (r.usuarios_com_acesso or []):
+            if entry.startswith("req:"):
+                uid_str = entry[4:]
+                try:
+                    uid = uuid.UUID(uid_str)
+                    req_user = db.query(Usuario).filter(Usuario.id == uid).first()
+                    if req_user:
+                        pedidos.append(PedidoAcesso(usuario_id=uid_str, nome=req_user.nome))
+                except (ValueError, TypeError):
+                    pass
+        out.pedidos_acesso = pedidos
 
     return out
 
@@ -347,10 +368,12 @@ def confirmar_acoes(
             anotacao = Anotacao(
                 cliente_id=r.cliente_id,
                 processo_id=r.processo_id,
+                reuniao_id=r.id,
                 tipo="reuniao",
                 data_evento=data_base,
                 titulo=acao.get("titulo"),
                 texto=acao.get("conteudo", ""),
+                confidencial=r.confidencial,
             )
             db.add(anotacao)
 

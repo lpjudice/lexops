@@ -227,6 +227,9 @@ def _run_migrations() -> None:
             "ALTER TABLE reunioes ADD COLUMN IF NOT EXISTS criado_por_id UUID REFERENCES usuarios(id) ON DELETE SET NULL",
             "ALTER TABLE reunioes ADD COLUMN IF NOT EXISTS confidencial BOOLEAN NOT NULL DEFAULT FALSE",
             "ALTER TABLE reunioes ADD COLUMN IF NOT EXISTS usuarios_com_acesso JSONB DEFAULT '[]'::jsonb",
+            # Anotacao: source meeting link + confidential flag
+            "ALTER TABLE anotacoes ADD COLUMN IF NOT EXISTS reuniao_id UUID REFERENCES reunioes(id) ON DELETE SET NULL",
+            "ALTER TABLE anotacoes ADD COLUMN IF NOT EXISTS confidencial BOOLEAN NOT NULL DEFAULT FALSE",
         ]:
             conn.execute(text(col_sql))
         conn.commit()

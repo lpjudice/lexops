@@ -18,6 +18,11 @@ export interface AcaoSugerida {
   conteudo?: string | null
 }
 
+export interface PedidoAcesso {
+  usuario_id: string
+  nome: string
+}
+
 export interface Reuniao {
   id: string
   titulo: string
@@ -41,6 +46,7 @@ export interface Reuniao {
   confidencial: boolean
   usuarios_com_acesso: string[] | null
   acesso_restrito: boolean
+  pedidos_acesso: PedidoAcesso[]
   created_at: string
   updated_at: string
 }

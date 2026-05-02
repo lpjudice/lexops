@@ -301,13 +301,15 @@ export default function ClienteDetailPage() {
                 } : undefined}
               >
                 <div className={detailStyles.timelineIcon}>
-                  {item.tipo === 'reuniao'
-                    ? (item.meta.confidencial ? '🔒' : '📹')
-                    : TIPO_ICON[item.tipo === 'anotacao' ? (item.meta.tipo as string) : item.tipo] || '•'}
+                  {item.meta.confidencial
+                    ? '🔒'
+                    : item.tipo === 'reuniao'
+                      ? '📹'
+                      : TIPO_ICON[item.tipo === 'anotacao' ? (item.meta.tipo as string) : item.tipo] || '•'}
                 </div>
                 <div className={detailStyles.timelineContent}>
                   <div className={detailStyles.timelineHeader}>
-                    <strong style={item.tipo === 'reuniao' && item.meta.confidencial ? { color: '#7c3aed' } : undefined}>
+                    <strong style={item.meta.confidencial ? { color: '#7c3aed' } : undefined}>
                       {item.titulo}
                     </strong>
                     <span className={detailStyles.timelineData}>{formatDate(item.data)}</span>
@@ -849,9 +851,9 @@ export default function ClienteDetailPage() {
                 <div
                   key={r.id}
                   style={{
-                    background: r.acesso_restrito ? '#faf5ff' : '#fff',
+                    background: r.confidencial ? '#faf5ff' : '#fff',
                     border: '1px solid',
-                    borderColor: r.acesso_restrito ? '#e9d5ff' : r.status === 'pendente' ? '#fbbf24' : r.status === 'em_revisao' ? '#6ee7b7' : '#e5e7eb',
+                    borderColor: r.confidencial ? '#e9d5ff' : r.status === 'pendente' ? '#fbbf24' : r.status === 'em_revisao' ? '#6ee7b7' : '#e5e7eb',
                     borderRadius: 10,
                     padding: '12px 16px',
                     cursor: 'pointer',
@@ -861,10 +863,15 @@ export default function ClienteDetailPage() {
                   }}
                   onClick={() => setReuniaoRevisando(r)}
                 >
-                  <span style={{ fontSize: 20 }}>{r.acesso_restrito ? '🔒' : '📹'}</span>
+                  <span style={{ fontSize: 20 }}>{r.acesso_restrito ? '🔒' : r.confidencial ? '🔒' : '📹'}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: 13, color: r.acesso_restrito ? '#7c3aed' : '#1a1a1a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {r.titulo}
+                    <div style={{ fontWeight: 600, fontSize: 13, color: r.acesso_restrito ? '#7c3aed' : '#1a1a1a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {r.confidencial && !r.acesso_restrito && (
+                        <span style={{ fontSize: 10, fontWeight: 700, background: '#f3e8ff', color: '#7c3aed', borderRadius: 4, padding: '1px 5px', flexShrink: 0 }}>
+                          confidencial
+                        </span>
+                      )}
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.titulo}</span>
                     </div>
                     {r.criado_por_nome && (
                       <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 1 }}>por {r.criado_por_nome}</div>

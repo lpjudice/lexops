@@ -30,6 +30,8 @@ class AnotacaoUpdate(BaseModel):
 
 class AnotacaoOut(AnotacaoBase):
     id: uuid.UUID
+    reuniao_id: uuid.UUID | None = None
+    confidencial: bool = False
     created_at: datetime
     updated_at: datetime
 

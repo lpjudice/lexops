@@ -36,6 +36,11 @@ class ReuniaoUpdate(BaseModel):
     confidencial: bool | None = None
 
 
+class PedidoAcesso(BaseModel):
+    usuario_id: str
+    nome: str
+
+
 class ReuniaoOut(BaseModel):
     id: uuid.UUID
     titulo: str
@@ -63,6 +68,8 @@ class ReuniaoOut(BaseModel):
     criado_por_nome: str | None = None
     # When the meeting is confidential and the user has no access, these are masked
     acesso_restrito: bool = False
+    # Pending access requests — populated for creator / super_admin
+    pedidos_acesso: list[PedidoAcesso] = []
 
     model_config = {"from_attributes": True}
 

@@ -5,15 +5,36 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.dependencies import get_optional_user
 from app.models.anotacao import Anotacao
 from app.models.cliente import Cliente
 from app.models.prazo import Prazo
 from app.models.publicacao import Publicacao
 from app.models.reuniao import Reuniao
+from app.models.usuario import Usuario
 from app.schemas.anotacao import AnotacaoCreate, AnotacaoOut, AnotacaoUpdate, TimelineItem
 from app.services.gmail_cliente import buscar_emails_cliente
 
 router = APIRouter(prefix="/anotacoes", tags=["anotacoes"])
+
+
+def _pode_ver_anotacao(a: Anotacao, usuario: Usuario | None, db: Session) -> bool:
+    """Returns True if user can see this annotation (confidential check via source reuniao)."""
+    if not a.confidencial:
+        return True
+    if usuario is None:
+        return False
+    if usuario.role == "super_admin":
+        return True
+    if not a.reuniao_id:
+        # Confidential annotation with no meeting link — only super_admin can see (already checked)
+        return False
+    r = db.query(Reuniao).filter(Reuniao.id == a.reuniao_id).first()
+    if not r:
+        return False
+    if r.criado_por_id and str(usuario.id) == str(r.criado_por_id):
+        return True
+    return str(usuario.id) in (r.usuarios_com_acesso or [])
 
 
 # ── CRUD de anotações ─────────────────────────────────────────────────────────
@@ -23,13 +44,16 @@ def listar_anotacoes(
     cliente_id: uuid.UUID | None = Query(None),
     processo_id: uuid.UUID | None = Query(None),
     db: Session = Depends(get_db),
+    usuario: Usuario | None = Depends(get_optional_user),
 ):
     q = db.query(Anotacao)
     if cliente_id:
         q = q.filter(Anotacao.cliente_id == cliente_id)
     if processo_id:
         q = q.filter(Anotacao.processo_id == processo_id)
-    return q.order_by(Anotacao.data_evento.desc()).all()
+    anotacoes = q.order_by(Anotacao.data_evento.desc()).all()
+    # Filter out confidential annotations the user can't see
+    return [a for a in anotacoes if _pode_ver_anotacao(a, usuario, db)]
 
 
 @router.post("/", response_model=AnotacaoOut, status_code=status.HTTP_201_CREATED)
@@ -96,6 +120,7 @@ def timeline_cliente(
     cliente_id: uuid.UUID,
     incluir_emails: bool = Query(True),
     db: Session = Depends(get_db),
+    usuario: Usuario | None = Depends(get_optional_user),
 ):
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente:
@@ -106,15 +131,27 @@ def timeline_cliente(
 
     # ── Anotações ─────────────────────────────────────────────────────────
     for a in db.query(Anotacao).filter(Anotacao.cliente_id == cliente_id).all():
-        items.append(TimelineItem(
-            tipo="anotacao",
-            data=datetime.combine(a.data_evento, datetime.min.time()).isoformat(),
-            titulo=a.titulo or a.tipo.capitalize(),
-            subtitulo=a.tipo,
-            texto=a.texto,
-            referencia_id=str(a.id),
-            meta={"tipo": a.tipo, "processo_id": str(a.processo_id) if a.processo_id else None},
-        ))
+        if not _pode_ver_anotacao(a, usuario, db):
+            # Show as confidential placeholder in timeline
+            items.append(TimelineItem(
+                tipo="anotacao",
+                data=datetime.combine(a.data_evento, datetime.min.time()).isoformat(),
+                titulo="Anotação confidencial",
+                subtitulo=a.tipo,
+                texto=None,
+                referencia_id=str(a.id),
+                meta={"tipo": a.tipo, "confidencial": True, "processo_id": str(a.processo_id) if a.processo_id else None},
+            ))
+        else:
+            items.append(TimelineItem(
+                tipo="anotacao",
+                data=datetime.combine(a.data_evento, datetime.min.time()).isoformat(),
+                titulo=a.titulo or a.tipo.capitalize(),
+                subtitulo=a.tipo,
+                texto=a.texto,
+                referencia_id=str(a.id),
+                meta={"tipo": a.tipo, "confidencial": False, "processo_id": str(a.processo_id) if a.processo_id else None},
+            ))
 
     # ── Prazos ────────────────────────────────────────────────────────────
     if processo_ids:

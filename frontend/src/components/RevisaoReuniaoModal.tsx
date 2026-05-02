@@ -134,6 +134,20 @@ export default function RevisaoReuniaoModal({ reuniao: initialReuniao, onClose }
     onError: () => alert('Erro ao solicitar acesso.'),
   })
 
+  const concederAcessoMut = useMutation({
+    mutationFn: (usuarioId: string) => reunioesApi.concederAcesso(reuniao.id, usuarioId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['reuniao', reuniao.id] }),
+    onError: () => alert('Erro ao conceder acesso.'),
+  })
+
+  const revogarAcessoMut = useMutation({
+    mutationFn: (usuarioId: string) => reunioesApi.revogarAcesso(reuniao.id, usuarioId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['reuniao', reuniao.id] }),
+    onError: () => alert('Erro ao rejeitar solicitação.'),
+  })
+
+  const pedidos = reuniao.pedidos_acesso ?? []
+
   function toggleAcao(idx: number, aprovada: boolean | null) {
     setAcoes((prev) => prev.map((a, i) => i === idx ? { ...a, aprovada } : a))
   }
@@ -217,6 +231,38 @@ export default function RevisaoReuniaoModal({ reuniao: initialReuniao, onClose }
             </div>
           )}
         </div>
+
+        {/* Pending access requests — visible only to creator / super_admin */}
+        {canManageAccess && pedidos.length > 0 && (
+          <div style={{ padding: '10px 20px', background: '#fffbeb', borderBottom: '1px solid #fde68a', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#92400e' }}>
+              🔔 {pedidos.length} solicitação(ões) de acesso pendente(s)
+            </div>
+            {pedidos.map((req) => (
+              <div key={req.usuario_id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12 }}>
+                <span style={{ color: '#374151' }}>{req.nome}</span>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button
+                    className={p.btnPrimary}
+                    style={{ fontSize: 11, padding: '2px 10px', background: '#059669' }}
+                    onClick={() => concederAcessoMut.mutate(req.usuario_id)}
+                    disabled={concederAcessoMut.isPending}
+                  >
+                    Conceder
+                  </button>
+                  <button
+                    className={p.btnTable}
+                    style={{ fontSize: 11, padding: '2px 10px', color: '#dc2626' }}
+                    onClick={() => revogarAcessoMut.mutate(req.usuario_id)}
+                    disabled={revogarAcessoMut.isPending}
+                  >
+                    Recusar
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Restricted access banner */}
         {acessoRestrito && (
