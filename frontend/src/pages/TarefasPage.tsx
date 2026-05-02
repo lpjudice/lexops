@@ -54,6 +54,7 @@ interface EditForm {
   cliente_id: string
   processo_id: string
   status: StatusTarefa
+  confidencial?: boolean
 }
 
 export default function TarefasPage() {
@@ -209,19 +210,18 @@ export default function TarefasPage() {
 
   const submitEdit = () => {
     if (!editingId) return
-    const ef = editForm as EditForm & { confidencial?: boolean }
     atualizar.mutate({
       id: editingId,
       data: {
-        titulo: ef.titulo,
-        descricao: ef.descricao || null,
-        responsavel: ef.responsavel || null,
-        data_limite: ef.data_limite || null,
-        tags: ef.tags || null,
-        cliente_id: ef.cliente_id || null,
-        processo_id: ef.processo_id || null,
-        status: ef.status,
-        ...(ef.confidencial !== undefined ? { confidencial: ef.confidencial } : {}),
+        titulo: editForm.titulo,
+        descricao: editForm.descricao || null,
+        responsavel: editForm.responsavel || null,
+        data_limite: editForm.data_limite || null,
+        tags: editForm.tags || null,
+        cliente_id: editForm.cliente_id || null,
+        processo_id: editForm.processo_id || null,
+        status: editForm.status,
+        ...(editForm.confidencial !== undefined ? { confidencial: editForm.confidencial } : {}),
       },
     })
   }
@@ -571,7 +571,7 @@ export default function TarefasPage() {
                           type="checkbox"
                           id={`conf-${tarefa.id}`}
                           checked={editForm.confidencial ?? tarefa.confidencial}
-                          onChange={(e) => setEditForm({ ...editForm, confidencial: e.target.checked } as typeof editForm & { confidencial: boolean })}
+                          onChange={(e) => setEditForm({ ...editForm, confidencial: e.target.checked })}
                         />
                         <label htmlFor={`conf-${tarefa.id}`} style={{ fontSize: 13, color: '#7c3aed', cursor: 'pointer' }}>
                           🔒 Tarefa confidencial
