@@ -273,7 +273,9 @@ export default function ReunioesPage() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <Video size={14} style={{ color: '#0f766e', flexShrink: 0 }} />
                         {r.confidencial && (
-                          <Lock size={12} style={{ color: '#9333ea', flexShrink: 0 }} title="Reunião confidencial" />
+                          <span title="Reunião confidencial" style={{ display: 'flex', flexShrink: 0 }}>
+                            <Lock size={12} style={{ color: '#9333ea' }} />
+                          </span>
                         )}
                         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {r.titulo}
