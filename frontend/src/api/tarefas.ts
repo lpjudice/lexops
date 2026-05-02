@@ -27,6 +27,8 @@ export interface Tarefa {
   usuarios_com_acesso: string[] | null
   acesso_restrito: boolean
   pedidos_acesso: PedidoAcessoTarefa[]
+  ja_solicitou: boolean
+  usuarios_com_acesso_nomes: { id: string; nome: string }[]
   created_at: string
   updated_at: string
 }

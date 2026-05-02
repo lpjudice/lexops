@@ -65,6 +65,7 @@ def _enrich(t: Tarefa, db: Session, usuario: Usuario | None = None) -> TarefaOut
     # Pending access requests for creator / super_admin
     if can_manage:
         pedidos: list[PedidoAcessoTarefa] = []
+        granted: list[dict] = []
         for entry in (t.usuarios_com_acesso or []):
             if entry.startswith("req:"):
                 uid_str = entry[4:]
@@ -74,7 +75,20 @@ def _enrich(t: Tarefa, db: Session, usuario: Usuario | None = None) -> TarefaOut
                         pedidos.append(PedidoAcessoTarefa(usuario_id=uid_str, nome=req_user.nome))
                 except (ValueError, TypeError):
                     pass
+            else:
+                try:
+                    granted_user = db.query(Usuario).filter(Usuario.id == uuid.UUID(entry)).first()
+                    if granted_user:
+                        granted.append({"id": entry, "nome": granted_user.nome})
+                except (ValueError, TypeError):
+                    pass
         out.pedidos_acesso = pedidos
+        out.usuarios_com_acesso_nomes = granted
+
+    # Compute ja_solicitou for the current user
+    if usuario is not None:
+        req_marker = f"req:{str(usuario.id)}"
+        out.ja_solicitou = req_marker in (t.usuarios_com_acesso or [])
 
     return out
 

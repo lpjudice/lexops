@@ -76,6 +76,7 @@ def _enrich(r: Reuniao, db: Session, usuario: Usuario | None = None) -> ReuniaoO
     # Populate pending access requests for creator / super_admin
     if can_manage:
         pedidos: list[PedidoAcesso] = []
+        granted: list[dict] = []
         for entry in (r.usuarios_com_acesso or []):
             if entry.startswith("req:"):
                 uid_str = entry[4:]
@@ -86,7 +87,20 @@ def _enrich(r: Reuniao, db: Session, usuario: Usuario | None = None) -> ReuniaoO
                         pedidos.append(PedidoAcesso(usuario_id=uid_str, nome=req_user.nome))
                 except (ValueError, TypeError):
                     pass
+            else:
+                try:
+                    granted_user = db.query(Usuario).filter(Usuario.id == uuid.UUID(entry)).first()
+                    if granted_user:
+                        granted.append({"id": entry, "nome": granted_user.nome})
+                except (ValueError, TypeError):
+                    pass
         out.pedidos_acesso = pedidos
+        out.usuarios_com_acesso_nomes = granted
+
+    # Compute ja_solicitou for the current user
+    if usuario is not None:
+        req_marker = f"req:{str(usuario.id)}"
+        out.ja_solicitou = req_marker in (r.usuarios_com_acesso or [])
 
     return out
 

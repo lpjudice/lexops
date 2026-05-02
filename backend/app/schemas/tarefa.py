@@ -63,6 +63,8 @@ class TarefaOut(BaseModel):
     # Access control
     acesso_restrito: bool = False
     pedidos_acesso: list[PedidoAcessoTarefa] = []
+    ja_solicitou: bool = False
+    usuarios_com_acesso_nomes: list[dict] = []  # [{id, nome}] for granted users (not pending)
 
     model_config = {"from_attributes": True}
 

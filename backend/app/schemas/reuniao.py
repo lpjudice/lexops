@@ -70,6 +70,8 @@ class ReuniaoOut(BaseModel):
     acesso_restrito: bool = False
     # Pending access requests — populated for creator / super_admin
     pedidos_acesso: list[PedidoAcesso] = []
+    ja_solicitou: bool = False
+    usuarios_com_acesso_nomes: list[dict] = []  # [{id, nome}] for granted users (not pending)
 
     model_config = {"from_attributes": True}
 

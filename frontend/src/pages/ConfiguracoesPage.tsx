@@ -2,24 +2,12 @@ import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import api from '../api/client'
+import { tarefasApi } from '../api/tarefas'
+import { reunioesApi } from '../api/reunioes'
 import { usuariosApi, type UsuarioCreate, type UsuarioUpdate } from '../api/usuarios'
 import { useAuth } from '../contexts/AuthContext'
 import styles from './Page.module.css'
 import cfg from './ConfiguracoesPage.module.css'
-
-const DEFAULT_PASTA = '/Users/lucasjudice/Dropbox/Clientes/LexOps'
-const PASTA_KEY = 'gestor_pasta_clientes'
-
-function usePastaClientes() {
-  const [pasta, setPastaState] = useState(() =>
-    localStorage.getItem(PASTA_KEY) || DEFAULT_PASTA
-  )
-  const setPasta = (v: string) => {
-    localStorage.setItem(PASTA_KEY, v)
-    setPastaState(v)
-  }
-  return [pasta, setPasta] as const
-}
 
 function useGoogleStatus() {
   return useQuery({
@@ -225,6 +213,98 @@ function MembrosSection() {
   )
 }
 
+interface AcessoItem {
+  tipo: 'tarefa' | 'reuniao' | 'anotacao'
+  titulo: string
+  usuarios: { id: string; nome: string }[]
+  id: string
+}
+
+interface AcessoGrupo {
+  cliente_nome: string
+  itens: AcessoItem[]
+}
+
+function AcessosConfidenciaisSection() {
+  const qc = useQueryClient()
+
+  const { data: grupos = [], isLoading, refetch } = useQuery({
+    queryKey: ['acesso-confidencial'],
+    queryFn: () => api.get<AcessoGrupo[]>('/system/acesso-confidencial').then((r) => r.data),
+  })
+
+  const revogarTarefa = useMutation({
+    mutationFn: ({ id, uid }: { id: string; uid: string }) => tarefasApi.revogarAcesso(id, uid),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['acesso-confidencial'] }); refetch() },
+  })
+
+  const revogarReuniao = useMutation({
+    mutationFn: ({ id, uid }: { id: string; uid: string }) => reunioesApi.revogarAcesso(id, uid),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['acesso-confidencial'] }); refetch() },
+  })
+
+  const TIPO_LABEL: Record<string, string> = {
+    tarefa: 'Tarefa',
+    reuniao: 'Reunião',
+    anotacao: 'Anotação',
+  }
+
+  const handleRevogar = (item: AcessoItem, uid: string) => {
+    if (item.tipo === 'tarefa') revogarTarefa.mutate({ id: item.id, uid })
+    else if (item.tipo === 'reuniao') revogarReuniao.mutate({ id: item.id, uid })
+    else alert('Revogação de anotações não disponível aqui.')
+  }
+
+  return (
+    <div className={cfg.secao}>
+      <div className={cfg.secaoHeader}>
+        <h2 className={cfg.secaoTitulo}>Acessos Confidenciais</h2>
+        <p className={cfg.secaoDesc}>
+          Visão geral de quem tem acesso a itens confidenciais por cliente.
+        </p>
+      </div>
+
+      {isLoading ? (
+        <div style={{ padding: '16px 24px', fontSize: 13, color: '#6b7280' }}>Carregando...</div>
+      ) : grupos.length === 0 ? (
+        <div style={{ padding: '16px 24px', fontSize: 13, color: '#9ca3af' }}>Nenhum acesso confidencial concedido.</div>
+      ) : (
+        <div>
+          {grupos.map((grupo) => (
+            <div key={grupo.cliente_nome} style={{ borderBottom: '1px solid #f3f4f6' }}>
+              <div style={{ padding: '10px 24px 4px', fontSize: 12, fontWeight: 700, color: '#374151', background: '#f9fafb', letterSpacing: '0.03em' }}>
+                {grupo.cliente_nome}
+              </div>
+              {grupo.itens.map((item) => (
+                <div key={item.id} style={{ padding: '8px 24px 8px 32px', borderTop: '1px solid #f3f4f6' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    <span style={{ fontSize: 10, fontWeight: 600, background: '#ede9fe', color: '#6d28d9', borderRadius: 4, padding: '1px 6px', whiteSpace: 'nowrap' }}>
+                      {TIPO_LABEL[item.tipo] ?? item.tipo}
+                    </span>
+                    <span style={{ fontSize: 13, color: '#1d1e20', fontWeight: 500 }}>{item.titulo}</span>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {item.usuarios.map((u) => (
+                      <span key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, background: '#f3f4f6', borderRadius: 4, padding: '2px 8px' }}>
+                        <span style={{ color: '#374151' }}>{u.nome}</span>
+                        <button
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', fontSize: 13, lineHeight: 1, padding: '0 2px' }}
+                          onClick={() => handleRevogar(item, u.id)}
+                          title="Revogar acesso"
+                        >×</button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function ConfiguracoesPage() {
   const [searchParams] = useSearchParams()
   const conviteBanner = searchParams.get('convite') === '1'
@@ -240,10 +320,6 @@ export default function ConfiguracoesPage() {
     }
   }, [googleUserResult]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const [pastaClientes, setPastaClientes] = usePastaClientes()
-  const [editandoPasta, setEditandoPasta] = useState(false)
-  const [pastaEdit, setPastaEdit] = useState(pastaClientes)
-  const [copiado, setCopiado] = useState(false)
   const conectado = googleStatus?.conectado ?? false
   const googleEmail = googleStatus?.email ?? null
 
@@ -260,13 +336,6 @@ export default function ConfiguracoesPage() {
     if (!me) return
     await api.delete(`/auth/google/user?usuario_id=${me.id}`)
     await refreshMe()
-  }
-
-  const copiarPasta = () => {
-    navigator.clipboard.writeText(pastaClientes).then(() => {
-      setCopiado(true)
-      setTimeout(() => setCopiado(false), 2000)
-    })
   }
 
   return (
@@ -400,6 +469,39 @@ export default function ConfiguracoesPage() {
           </div>
         </div>
 
+        {/* Seção: Google Drive */}
+        <div className={cfg.secao}>
+          <div className={cfg.secaoHeader}>
+            <h2 className={cfg.secaoTitulo}>Google Drive — Lexops</h2>
+            <p className={cfg.secaoDesc}>
+              Pasta raiz do escritório no Google Drive, onde ficam arquivos de clientes, contratos e reuniões.
+            </p>
+          </div>
+          <div className={cfg.item}>
+            <div className={cfg.itemLeft}>
+              <div className={cfg.itemIcon}>📂</div>
+              <div>
+                <div className={cfg.itemNome}>Raiz Lexops / Drive</div>
+                <div className={cfg.itemStatus}>
+                  {conectado
+                    ? <span className={cfg.statusOk}>● Conta master conectada</span>
+                    : <span className={cfg.statusOff}>● Conta master não conectada</span>}
+                </div>
+              </div>
+            </div>
+            {conectado && (
+              <a
+                href="https://drive.google.com/drive/my-drive"
+                target="_blank"
+                rel="noopener noreferrer"
+                className={cfg.btnAbrirPasta}
+              >
+                ↗ Abrir Drive
+              </a>
+            )}
+          </div>
+        </div>
+
         {/* Seção: IAs */}
         <div className={cfg.secao}>
           <div className={cfg.secaoHeader}>
@@ -427,66 +529,8 @@ export default function ConfiguracoesPage() {
           </div>
         </div>
 
-        {/* Seção: Pasta de Clientes */}
-        <div className={cfg.secao}>
-          <div className={cfg.secaoHeader}>
-            <h2 className={cfg.secaoTitulo}>Pasta Local de Clientes</h2>
-            <p className={cfg.secaoDesc}>
-              Pasta raiz onde ficam as subpastas dos clientes (Contratos/, IA/, Reembolsos/, etc).
-              Clique em "Abrir no Finder" para acessar diretamente.
-            </p>
-          </div>
-          <div className={cfg.item}>
-            <div className={cfg.itemLeft}>
-              <div className={cfg.itemIcon}>📁</div>
-              <div>
-                <div className={cfg.itemNome}>Diretório Base</div>
-                {editandoPasta ? (
-                  <input
-                    style={{ fontSize: 12, fontFamily: 'monospace', border: '1px solid #e5e7eb', borderRadius: 6, padding: '4px 8px', width: 400 }}
-                    value={pastaEdit}
-                    onChange={(e) => setPastaEdit(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') { setPastaClientes(pastaEdit); setEditandoPasta(false) }
-                      if (e.key === 'Escape') setEditandoPasta(false)
-                    }}
-                    autoFocus
-                  />
-                ) : (
-                  <code style={{ fontSize: 12, color: '#6b7280' }}>{pastaClientes}</code>
-                )}
-              </div>
-            </div>
-            {editandoPasta ? (
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button className={styles.btnPrimary} style={{ fontSize: 12, padding: '5px 14px' }}
-                  onClick={() => { setPastaClientes(pastaEdit); setEditandoPasta(false) }}>
-                  Salvar
-                </button>
-                <button className={styles.btnDanger} onClick={() => setEditandoPasta(false)}>Cancelar</button>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button
-                  className={cfg.btnAbrirPasta}
-                  onClick={copiarPasta}
-                  title="Copia o caminho — cole no Finder com Cmd+Shift+G"
-                >
-                  {copiado ? '✓ Copiado!' : '↗ Abrir no Finder'}
-                </button>
-                <button className={cfg.btnReconectar}
-                  onClick={() => { setPastaEdit(pastaClientes); setEditandoPasta(true) }}>
-                  Editar
-                </button>
-              </div>
-            )}
-          </div>
-          {copiado && (
-            <div style={{ fontSize: 11, color: '#6b7280', paddingLeft: 4 }}>
-              Caminho copiado — abra o Finder e use <kbd style={{ background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: 3, padding: '1px 5px' }}>Cmd+Shift+G</kbd> para navegar.
-            </div>
-          )}
-        </div>
+        {/* Seção: Acessos Confidenciais — super_admin only */}
+        {isSuperAdmin && <AcessosConfidenciaisSection />}
 
         {/* Seção: Sistema */}
         <div className={cfg.secao}>

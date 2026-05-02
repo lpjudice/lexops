@@ -269,6 +269,28 @@ export default function RevisaoReuniaoModal({ reuniao: initialReuniao, onClose }
           </div>
         )}
 
+        {/* Granted users list — visible only to creator / super_admin */}
+        {reuniao.confidencial && canManageAccess && reuniao.usuarios_com_acesso_nomes.length > 0 && (
+          <div style={{ padding: '10px 20px', background: '#f5f3ff', borderBottom: '1px solid #ede9fe', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#6d28d9' }}>
+              🔒 Acesso concedido a:
+            </div>
+            {reuniao.usuarios_com_acesso_nomes.map((u) => (
+              <div key={u.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12 }}>
+                <span style={{ color: '#374151' }}>{u.nome}</span>
+                <button
+                  className={p.btnTable}
+                  style={{ fontSize: 11, padding: '2px 10px', color: '#dc2626' }}
+                  onClick={() => revogarAcessoMut.mutate(u.id)}
+                  disabled={revogarAcessoMut.isPending}
+                >
+                  Revogar
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Restricted access banner */}
         {acessoRestrito && (
           <div style={{ padding: '16px 20px', background: '#faf5ff', borderBottom: '1px solid #e9d5ff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
@@ -276,14 +298,20 @@ export default function RevisaoReuniaoModal({ reuniao: initialReuniao, onClose }
               <Lock size={14} />
               <span>Esta reunião é confidencial. Você não tem acesso ao conteúdo.</span>
             </div>
-            <button
-              className={p.btnPrimary}
-              style={{ background: '#7c3aed', fontSize: 12, padding: '4px 12px' }}
-              onClick={() => solicitarAcessoMut.mutate()}
-              disabled={solicitarAcessoMut.isPending}
-            >
-              {solicitarAcessoMut.isPending ? 'Solicitando...' : 'Solicitar acesso'}
-            </button>
+            {reuniao.ja_solicitou ? (
+              <span style={{ fontSize: 12, background: '#f3f4f6', color: '#9ca3af', borderRadius: 6, padding: '4px 12px', border: '1px solid #e5e7eb', fontWeight: 500 }}>
+                Solicitado
+              </span>
+            ) : (
+              <button
+                className={p.btnPrimary}
+                style={{ background: '#7c3aed', fontSize: 12, padding: '4px 12px' }}
+                onClick={() => solicitarAcessoMut.mutate()}
+                disabled={solicitarAcessoMut.isPending}
+              >
+                {solicitarAcessoMut.isPending ? 'Solicitando...' : 'Solicitar acesso'}
+              </button>
+            )}
           </div>
         )}
 

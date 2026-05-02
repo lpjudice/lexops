@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { tarefasApi } from '../api/tarefas'
 import type { StatusTarefa, Tarefa } from '../api/tarefas'
@@ -74,6 +74,8 @@ export default function TarefasPage() {
 
   // ── Filters ───────────────────────────────────────────────────────────
   const [filtroStatus, setFiltroStatus] = useState<StatusTarefa | ''>('pendente')
+  const [filtroCliente, setFiltroCliente] = useState('')
+  const [sortBy, setSortBy] = useState<'prazo_asc' | 'prazo_desc' | 'cliente_az'>('prazo_asc')
 
   // ── Card UI state ─────────────────────────────────────────────────────
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -183,6 +185,33 @@ export default function TarefasPage() {
     const a = anotacoes.find((a) => a.id === id)
     return a ? (a.titulo || 'Atendimento') : null
   }
+
+  const tarefasFiltradas = useMemo(() => {
+    let arr = [...tarefas]
+    if (filtroCliente) arr = arr.filter((t) => t.cliente_id === filtroCliente)
+    if (sortBy === 'prazo_asc') {
+      arr.sort((a, b) => {
+        if (!a.data_limite && !b.data_limite) return 0
+        if (!a.data_limite) return 1
+        if (!b.data_limite) return -1
+        return a.data_limite.localeCompare(b.data_limite)
+      })
+    } else if (sortBy === 'prazo_desc') {
+      arr.sort((a, b) => {
+        if (!a.data_limite && !b.data_limite) return 0
+        if (!a.data_limite) return -1
+        if (!b.data_limite) return 1
+        return b.data_limite.localeCompare(a.data_limite)
+      })
+    } else if (sortBy === 'cliente_az') {
+      arr.sort((a, b) => {
+        const na = clienteNome(a.cliente_id) || ''
+        const nb = clienteNome(b.cliente_id) || ''
+        return na.localeCompare(nb, 'pt-BR')
+      })
+    }
+    return arr
+  }, [tarefas, filtroCliente, sortBy, clientes]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const processoOptions = processos.map((p) => {
     const cliente = clientes.find((c) => c.id === p.cliente_id)
@@ -407,14 +436,36 @@ export default function TarefasPage() {
 
       {/* ── Filters (list mode only) ─────────────────────────────────── */}
       {viewMode === 'list' && (
-        <div className={t.filtros}>
-          {STATUS_FILTER.map((s) => (
-            <button key={s}
-              className={`${t.filtroBtn} ${filtroStatus === s ? t.filtroBtnActive : ''}`}
-              onClick={() => setFiltroStatus(s)}>
-              {s === '' ? 'Todas' : STATUS_LABEL[s]}
-            </button>
-          ))}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+          <div className={t.filtros} style={{ marginBottom: 0 }}>
+            {STATUS_FILTER.map((s) => (
+              <button key={s}
+                className={`${t.filtroBtn} ${filtroStatus === s ? t.filtroBtnActive : ''}`}
+                onClick={() => setFiltroStatus(s)}>
+                {s === '' ? 'Todas' : STATUS_LABEL[s]}
+              </button>
+            ))}
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+              style={{
+                fontSize: 12, padding: '5px 10px', borderRadius: 999, border: '1px solid #e5e7eb',
+                background: '#fff', color: '#6b7280', cursor: 'pointer', fontFamily: 'inherit', marginLeft: 'auto',
+              }}
+            >
+              <option value="prazo_asc">Prazo ↑ (mais próximo)</option>
+              <option value="prazo_desc">Prazo ↓ (mais distante)</option>
+              <option value="cliente_az">Cliente A→Z</option>
+            </select>
+          </div>
+          <div style={{ maxWidth: 300 }}>
+            <ClienteCombobox
+              value={filtroCliente}
+              onChange={setFiltroCliente}
+              clientes={clientes}
+              onCreateCliente={criarClienteRapido}
+            />
+          </div>
         </div>
       )}
 
@@ -475,11 +526,11 @@ export default function TarefasPage() {
       {/* ── List ─────────────────────────────────────────────────────── */}
       {viewMode === 'list' && (isLoading ? (
         <p className={styles.empty}>Carregando...</p>
-      ) : tarefas.length === 0 ? (
+      ) : tarefasFiltradas.length === 0 ? (
         <p className={styles.empty}>Nenhuma tarefa{filtroStatus ? ` com status "${STATUS_LABEL[filtroStatus as StatusTarefa]}"` : ''}.</p>
       ) : (
         <div className={t.lista}>
-          {tarefas.map((tarefa) => {
+          {tarefasFiltradas.map((tarefa) => {
             const dias = diasRestantes(tarefa.data_limite)
             const atrasada = dias !== null && dias < 0 && tarefa.status !== 'concluido'
             const isExpanded = expandedId === tarefa.id
@@ -613,20 +664,46 @@ export default function TarefasPage() {
                         </div>
                       </div>
                       <div className={t.cardActions}>
-                        <button
-                          className={styles.btnTable}
-                          style={{ fontSize: 11 }}
-                          onClick={() => solicitarAcesso.mutate(tarefa.id)}
-                          disabled={solicitarAcesso.isPending}
-                        >
-                          Solicitar acesso
-                        </button>
+                        {tarefa.ja_solicitou ? (
+                          <span style={{ fontSize: 11, background: '#f3f4f6', color: '#9ca3af', borderRadius: 6, padding: '3px 10px', border: '1px solid #e5e7eb', fontWeight: 500 }}>
+                            Solicitado
+                          </span>
+                        ) : (
+                          <button
+                            className={styles.btnTable}
+                            style={{ fontSize: 11 }}
+                            onClick={() => solicitarAcesso.mutate(tarefa.id)}
+                            disabled={solicitarAcesso.isPending}
+                          >
+                            Solicitar acesso
+                          </button>
+                        )}
                       </div>
                     </div>
                   </>
                 ) : (
                   /* ── Card display ──────────────────────────────── */
                   <>
+                    {/* Granted users list for creator/super_admin */}
+                    {tarefa.confidencial && canManage && tarefa.usuarios_com_acesso_nomes.length > 0 && (
+                      <div style={{ padding: '6px 12px', background: '#f5f3ff', borderBottom: '1px solid #ede9fe', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: '#6d28d9' }}>
+                          🔒 Acesso concedido a:
+                        </span>
+                        {tarefa.usuarios_com_acesso_nomes.map((u) => (
+                          <span key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
+                            <span style={{ color: '#374151' }}>{u.nome}</span>
+                            <button
+                              className={styles.btnTable}
+                              style={{ fontSize: 10, padding: '1px 6px', color: '#dc2626' }}
+                              onClick={() => revogarAcesso.mutate({ tarefaId: tarefa.id, usuarioId: u.id })}
+                              title="Revogar acesso"
+                            >×</button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
                     {/* Pending access requests banner for creator/super_admin */}
                     {canManage && pedidos.length > 0 && (
                       <div style={{ padding: '6px 12px', background: '#fffbeb', borderBottom: '1px solid #fde68a', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
