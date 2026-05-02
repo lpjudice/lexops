@@ -321,7 +321,7 @@ export default function ClienteDetailPage() {
                       </span>
                       {Number(item.meta.acoes_aprovadas) > 0 && (
                         <span style={{ fontSize: 11, color: '#6b7280' }}>
-                          {item.meta.acoes_aprovadas} ação(ões) criadas
+                          {String(item.meta.acoes_aprovadas)} ação(ões) criadas
                         </span>
                       )}
                     </div>

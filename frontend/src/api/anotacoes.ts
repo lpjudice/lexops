@@ -23,7 +23,7 @@ export interface AnotacaoCreate {
   texto: string
 }
 
-export type TimelineTipo = 'anotacao' | 'prazo' | 'publicacao' | 'email'
+export type TimelineTipo = 'anotacao' | 'prazo' | 'publicacao' | 'email' | 'reuniao'
 
 export interface TimelineItem {
   tipo: TimelineTipo
