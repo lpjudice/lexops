@@ -19,6 +19,7 @@ import OrganizadorPage from './pages/OrganizadorPage'
 import JurisprudenciaPage from './pages/JurisprudenciaPage'
 import TarefasPage from './pages/TarefasPage'
 import AceitarConvitePage from './pages/AceitarConvitePage'
+import ReunioesPage from './pages/ReunioesPage'
 
 const queryClient = new QueryClient()
 
@@ -58,6 +59,7 @@ function AppRoutes() {
         <Route path="organizador" element={<OrganizadorPage />} />
         <Route path="jurisprudencia" element={<JurisprudenciaPage />} />
         <Route path="tarefas" element={<TarefasPage />} />
+        <Route path="reunioes" element={<ReunioesPage />} />
       </Route>
     </Routes>
   )

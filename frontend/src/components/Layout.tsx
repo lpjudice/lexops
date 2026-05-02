@@ -16,6 +16,7 @@ import {
   Settings,
   Scale,
   CheckSquare,
+  Video,
   Menu,
   X,
   LogOut,
@@ -60,6 +61,7 @@ const navGroups = [
       { to: '/prazos', label: 'Prazos', Icon: Calendar },
       { to: '/atendimentos', label: 'Atendimentos', Icon: Handshake },
       { to: '/tarefas', label: 'Tarefas', Icon: CheckSquare },
+      { to: '/reunioes', label: 'Reuniões', Icon: Video },
     ],
   },
   {
@@ -106,6 +108,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/financeiro': 'Financeiro',
   '/atendimentos': 'Atendimentos',
   '/tarefas': 'Tarefas',
+  '/reunioes': 'Reuniões',
   '/configuracoes': 'Configurações',
 }
 

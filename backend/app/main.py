@@ -4,7 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import Base, engine
 from app.models import email_cliente  # noqa: F401 — ensures EmailCliente table is registered
-from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, feriados, financeiro, jurisprudencia, organizador, pje, prazos, processos, reembolsos, system, tarefas, teses, usuarios
+from app.models import reuniao  # noqa: F401 — ensures Reuniao table is registered
+from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, feriados, financeiro, jurisprudencia, organizador, pje, prazos, processos, reembolsos, reunioes, system, tarefas, teses, usuarios
 
 # Cria as tabelas (Alembic gerencia em produção; aqui facilita o dev)
 Base.metadata.create_all(bind=engine)
@@ -193,6 +194,34 @@ def _run_migrations() -> None:
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_emails_cliente_id ON emails_cliente(cliente_id)"
         ))
+        # Reuniões Google Meet / Gemini
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS reunioes (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                cliente_id UUID REFERENCES clientes(id) ON DELETE CASCADE,
+                processo_id UUID REFERENCES processos(id) ON DELETE SET NULL,
+                titulo VARCHAR(500) NOT NULL,
+                data_reuniao TIMESTAMPTZ,
+                duracao_minutos INTEGER,
+                google_meet_url VARCHAR(1000),
+                drive_transcricao_file_id VARCHAR(500),
+                drive_notas_file_id VARCHAR(500),
+                drive_tldr_file_id VARCHAR(500),
+                transcricao_texto TEXT,
+                resumo_ia TEXT,
+                acoes_sugeridas JSONB DEFAULT '[]'::jsonb,
+                status VARCHAR(50) NOT NULL DEFAULT 'pendente',
+                fonte VARCHAR(50) NOT NULL DEFAULT 'manual',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_reunioes_cliente_id ON reunioes(cliente_id)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_reunioes_status ON reunioes(status)"
+        ))
         conn.commit()
 
 
@@ -260,6 +289,7 @@ app.include_router(pje.router)
 app.include_router(system.router)
 app.include_router(andamentos.router)
 app.include_router(usuarios.router)
+app.include_router(reunioes.router)
 
 
 @app.on_event("startup")
