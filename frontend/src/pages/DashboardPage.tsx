@@ -53,7 +53,10 @@ export default function DashboardPage() {
 
   // KPI visibility prefs (default hidden)
   const [kpiVis, setKpiVis] = useState<KpiPrefs>({ honorarios: false, processos: false, clientes: false })
-  useEffect(() => { setKpiVis({ honorarios: false, processos: false, clientes: false, ...loadPrefs() }) }, [])
+  useEffect(() => {
+    const { honorarios = false, processos = false, clientes = false } = loadPrefs()
+    setKpiVis({ honorarios, processos, clientes })
+  }, [])
   function toggleKpi(key: keyof KpiPrefs) {
     setKpiVis((prev) => { const next = { ...prev, [key]: !prev[key] }; savePrefs(next); return next })
   }
