@@ -100,6 +100,7 @@ export default function ProcessosPage() {
   const [filtroTribunal, setFiltroTribunal] = useState('')
   const [filtroUltMov, setFiltroUltMov] = useState<'todos' | '7d' | '30d' | '90d' | 'sem'>('todos')
   const [filtroPolo, setFiltroPolo] = useState('')
+  const [filtroCliente, setFiltroCliente] = useState('')
   const [ordemAlfa, setOrdemAlfa] = useState(false)
 
   const { data: processos = [], isLoading } = useQuery({
@@ -252,6 +253,7 @@ export default function ProcessosPage() {
     let lista = [...processos]
     if (filtroTribunal) lista = lista.filter((p) => p.tribunal === filtroTribunal)
     if (filtroPolo) lista = lista.filter((p) => p.polo === filtroPolo)
+    if (filtroCliente) lista = lista.filter((p) => p.cliente_id === filtroCliente)
     if (filtroUltMov === 'sem') {
       lista = lista.filter((p) => !p.ultimo_andamento_data)
     } else if (filtroUltMov !== 'todos') {
@@ -270,7 +272,7 @@ export default function ProcessosPage() {
       })
     }
     return lista
-  }, [processos, clientes, filtroTribunal, filtroUltMov, filtroPolo, ordemAlfa])
+  }, [processos, clientes, filtroTribunal, filtroUltMov, filtroPolo, filtroCliente, ordemAlfa])
 
   const jusbrStatusLabel = useMemo(() => {
     if (!jusbrSession?.active) return 'jus.br: sessão inativa'
@@ -524,6 +526,12 @@ export default function ProcessosPage() {
       {/* Filtros */}
       {processos.length > 0 && (
         <div className={ps.filtros}>
+          <select className={ps.filtroSelect} value={filtroCliente} onChange={(e) => setFiltroCliente(e.target.value)}>
+            <option value="">Todos os clientes</option>
+            {[...clientes].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' })).map((c) => (
+              <option key={c.id} value={c.id}>{c.nome}</option>
+            ))}
+          </select>
           <select className={ps.filtroSelect} value={filtroTribunal} onChange={(e) => setFiltroTribunal(e.target.value)}>
             <option value="">Todos os tribunais</option>
             {tribunaisUnicos.map((t) => <option key={t} value={t}>{t}</option>)}

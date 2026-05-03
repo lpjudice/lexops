@@ -45,6 +45,8 @@ function formatDate(d?: string) {
   return new Date(d + 'T12:00:00').toLocaleDateString('pt-BR')
 }
 
+type TabStatus = 'todas' | 'ativo' | 'pendente' | 'cumprido' | 'perdido'
+
 export default function PrazosPage() {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
@@ -52,6 +54,7 @@ export default function PrazosPage() {
   const [editando, setEditando] = useState<string | null>(null)
   const [editPeca, setEditPeca] = useState('')
   const [editResponsavel, setEditResponsavel] = useState('')
+  const [tabStatus, setTabStatus] = useState<TabStatus>('ativo')
 
   const { data: prazos = [], isLoading } = useQuery({
     queryKey: ['prazos'],
@@ -98,6 +101,23 @@ export default function PrazosPage() {
     const proc = getProcesso(processoId)
     return proc ? clientes.find((c) => c.id === proc.cliente_id) : undefined
   }
+
+  const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
+
+  const tabCounts: Record<TabStatus, number> = {
+    todas: prazos.length,
+    ativo: prazos.filter(p => p.status === 'pendente' && p.data_limite && new Date(p.data_limite + 'T00:00:00') >= hoje).length,
+    pendente: prazos.filter(p => p.status === 'pendente').length,
+    cumprido: prazos.filter(p => p.status === 'cumprido').length,
+    perdido: prazos.filter(p => p.status === 'perdido').length,
+  }
+
+  const prazosVisiveis = prazos.filter(p => {
+    if (tabStatus === 'todas') return true
+    if (tabStatus === 'ativo') return p.status === 'pendente' && p.data_limite && new Date(p.data_limite + 'T00:00:00') >= hoje
+    if (tabStatus === 'pendente') return p.status === 'pendente'
+    return p.status === tabStatus
+  })
 
   return (
     <div>
@@ -186,13 +206,31 @@ export default function PrazosPage() {
         </form>
       )}
 
+      {/* Status tabs */}
+      {!isLoading && prazos.length > 0 && (
+        <div className={prazosStyles.tabs}>
+          {(['todas', 'ativo', 'pendente', 'cumprido', 'perdido'] as TabStatus[]).map((tab) => (
+            <button
+              key={tab}
+              className={`${prazosStyles.tab} ${tabStatus === tab ? prazosStyles.tabActive : ''}`}
+              onClick={() => setTabStatus(tab)}
+            >
+              {tab === 'todas' ? 'Todas' : tab === 'ativo' ? 'Ativo' : tab === 'pendente' ? 'Pendente' : tab === 'cumprido' ? 'Cumprido' : 'Perdido'}
+              <span className={prazosStyles.tabCount}>{tabCounts[tab]}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {isLoading ? (
         <p className={styles.empty}>Carregando...</p>
       ) : prazos.length === 0 ? (
         <p className={styles.empty}>Nenhum prazo cadastrado.</p>
+      ) : prazosVisiveis.length === 0 ? (
+        <p className={styles.empty}>Nenhum prazo nesta categoria.</p>
       ) : (
         <div className={prazosStyles.lista}>
-          {prazos.map((p) => {
+          {prazosVisiveis.map((p) => {
             const dias = diasRestantes(p.data_limite)
             const proc = getProcesso(p.processo_id)
             const cliente = getCliente(p.processo_id)

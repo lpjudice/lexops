@@ -458,6 +458,111 @@
   margin-top: 2px;
 }
 
+/* ─── KPI Eye toggle ─────────────────────────────────────────────────── */
+.kpiEye {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #cbd5e1;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: color 0.15s;
+}
+
+.kpiEye:hover {
+  color: var(--teal);
+}
+
+/* ─── Prazo card list ────────────────────────────────────────────────── */
+.prazoCardList {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.prazoCardItem {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 16px;
+  border-bottom: 1px solid #f5f5f5;
+  transition: background 0.12s;
+}
+
+.prazoCardItem:last-child {
+  border-bottom: none;
+}
+
+.prazoCardItem:hover {
+  background: #f9fffe;
+}
+
+.prazoCardInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.prazoCardTop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.prazoCardCliente {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.prazoCardCNJ {
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  color: #6b7280;
+  background: #f3f4f6;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.prazoCardMid {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.prazoCardData {
+  font-size: 11.5px;
+  color: #6b7280;
+  font-variant-numeric: tabular-nums;
+}
+
+.prazoCardDesc {
+  font-size: 11.5px;
+  color: #9ca3af;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ─── Pub date ───────────────────────────────────────────────────────── */
+.pubData {
+  font-size: 11px;
+  color: #9ca3af;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 3px;
+}
+
 /* ─── Publicações list ───────────────────────────────────────────────── */
 .pubList {
   display: flex;
