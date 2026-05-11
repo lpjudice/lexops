@@ -37,6 +37,11 @@ export interface Publicacao {
   gera_prazo: boolean
   analise_ia?: string      // JSON serializado
   cliente_nome_pub?: string
+  match_tipo?: 'processo' | 'advogado' | 'cliente' | 'revisar'
+  match_nome?: string
+  match_categoria?: string
+  match_processo_id?: string
+  match_detalhes?: string
   url_fonte?: string
   created_at: string
 }
@@ -52,6 +57,8 @@ export interface SyncResult {
 export interface DiarioMonitoringConfig {
   tribunais: string[]
   termos_extras: string[]
+  advogados_monitorados: string[]
+  clientes_monitorados_extras: string[]
   auto_sync: boolean
 }
 
@@ -65,6 +72,11 @@ export const diarioApi = {
   syncScraping: (tribunais: string[], termos: string[] = [], days_back = 1) =>
     api.post<SyncResult>('/diario/scraping/sync', null, {
       params: { tribunais, termos, days_back },
+    }).then((r) => r.data),
+
+  syncClientes: (days_back = 1) =>
+    api.post<SyncResult>('/diario/scraping/clientes/sync', null, {
+      params: { days_back },
     }).then((r) => r.data),
 
   marcarLida: (id: string) =>
@@ -101,4 +113,7 @@ export const diarioApi = {
 
   salvarMonitoramento: (data: DiarioMonitoringConfig) =>
     api.put<DiarioMonitoringConfig>('/diario/monitoramento', data).then((r) => r.data),
+
+  reclassificar: () =>
+    api.post<SyncResult>('/diario/reclassificar').then((r) => r.data),
 }

@@ -24,6 +24,21 @@ def _run_migrations() -> None:
             "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS url_fonte TEXT"
         ))
         conn.execute(text(
+            "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS match_tipo VARCHAR(30)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS match_nome VARCHAR(500)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS match_categoria VARCHAR(50)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS match_processo_id UUID"
+        ))
+        conn.execute(text(
+            "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS match_detalhes TEXT"
+        ))
+        conn.execute(text(
             "ALTER TYPE fonte_publicacao ADD VALUE IF NOT EXISTS 'scraping_djen'"
         ))
         conn.execute(text(

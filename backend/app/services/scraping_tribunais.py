@@ -227,8 +227,14 @@ def _nome_restrito_no_texto(texto: str, termo: str) -> bool:
     texto_norm = _normalizar_texto_busca(texto)
     tokens_texto = re.findall(r"[a-z0-9]+", texto_norm)
 
-    if len(tokens) <= 3:
+    if len(tokens) == 2:
         return _frase_tem_match_simples(tokens_texto, tokens)
+    if len(tokens) == 3:
+        return (
+            _frase_tem_match_simples(tokens_texto, tokens)
+            or _frase_tem_match_simples(tokens_texto, tokens[:2])
+            or _frase_tem_match_simples(tokens_texto, [tokens[0], tokens[-1]])
+        )
 
     presentes = [token for token in tokens if _token_no_texto(texto_norm, token) or _token_tem_match_simples(tokens_texto, token)]
     return len(presentes) >= 3
