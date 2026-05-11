@@ -167,8 +167,56 @@ def _termo_exato_no_texto(texto: str, termo: str) -> bool:
     return re.search(padrao, _normalizar_texto_busca(texto)) is not None
 
 
+def _distancia_edicao_simples(a: str, b: str) -> int:
+    if a == b:
+        return 0
+    if abs(len(a) - len(b)) > 1:
+        return 2
+    if len(a) == len(b):
+        diffs = sum(1 for ca, cb in zip(a, b) if ca != cb)
+        if diffs <= 1:
+            return diffs
+        for idx in range(len(a) - 1):
+            if (
+                a[idx] == b[idx + 1]
+                and a[idx + 1] == b[idx]
+                and a[:idx] == b[:idx]
+                and a[idx + 2:] == b[idx + 2:]
+            ):
+                return 1
+        return 2
+
+    maior, menor = (a, b) if len(a) > len(b) else (b, a)
+    i = j = diferencas = 0
+    while i < len(maior) and j < len(menor):
+        if maior[i] == menor[j]:
+            i += 1
+            j += 1
+            continue
+        diferencas += 1
+        if diferencas > 1:
+            return 2
+        i += 1
+    return 1
+
+
 def _token_no_texto(texto_norm: str, token: str) -> bool:
     return re.search(r"(?<![a-z0-9])" + re.escape(token) + r"(?![a-z0-9])", texto_norm) is not None
+
+
+def _token_tem_match_simples(tokens_texto: list[str], token: str) -> bool:
+    return any(_distancia_edicao_simples(token, candidato) <= 1 for candidato in tokens_texto)
+
+
+def _frase_tem_match_simples(tokens_texto: list[str], tokens_nome: list[str]) -> bool:
+    if not tokens_nome or len(tokens_texto) < len(tokens_nome):
+        return False
+    tamanho = len(tokens_nome)
+    for inicio in range(0, len(tokens_texto) - tamanho + 1):
+        trecho = tokens_texto[inicio:inicio + tamanho]
+        if all(_distancia_edicao_simples(esperado, encontrado) <= 1 for esperado, encontrado in zip(tokens_nome, trecho)):
+            return True
+    return False
 
 
 def _nome_restrito_no_texto(texto: str, termo: str) -> bool:
@@ -177,16 +225,13 @@ def _nome_restrito_no_texto(texto: str, termo: str) -> bool:
         return False
 
     texto_norm = _normalizar_texto_busca(texto)
-    presentes = [token for token in tokens if _token_no_texto(texto_norm, token)]
-    if len(presentes) < 2:
-        return False
+    tokens_texto = re.findall(r"[a-z0-9]+", texto_norm)
 
-    primeiro = tokens[0]
-    ultimo = tokens[-1]
-    if _token_no_texto(texto_norm, primeiro) and _token_no_texto(texto_norm, ultimo):
-        return True
+    if len(tokens) <= 3:
+        return _frase_tem_match_simples(tokens_texto, tokens)
 
-    return len(tokens) >= 3 and len(presentes) >= 2
+    presentes = [token for token in tokens if _token_no_texto(texto_norm, token) or _token_tem_match_simples(tokens_texto, token)]
+    return len(presentes) >= 3
 
 
 def _texto_tem_match_monitorado(texto: str, termos: list[str] | None = None) -> bool:
@@ -231,12 +276,10 @@ def expandir_termos_busca(termos: list[str] | None = None) -> list[str]:
 
         adicionar(termo_limpo)
         tokens = _tokenizar_relevantes(termo_limpo)
-        if len(tokens) >= 2:
+        if len(tokens) >= 4:
             adicionar(f"{tokens[0]} {tokens[-1]}")
-        if 2 <= len(tokens) <= 4:
-            for token in tokens:
-                if len(token) >= 6:
-                    adicionar(token)
+            adicionar(" ".join(tokens[:3]))
+            adicionar(" ".join(tokens[-3:]))
 
     return resultado
 
@@ -381,14 +424,12 @@ def _consultas_comunica(termos: list[str] | None = None) -> list[tuple[str, int,
             adicionar(termo_original, 1, "nomeParte", termo_original, COMUNICA_MAX_PAGINAS)
             adicionar(termo_original, 1, "nomeAdvogado", termo_original, COMUNICA_MAX_PAGINAS)
             tokens = _tokenizar_relevantes(termo_original)
-            if len(tokens) >= 2:
+            if len(tokens) >= 4:
                 adicionar(termo_original, 2, "texto", f"{tokens[0]} {tokens[-1]}", COMUNICA_MAX_PAGINAS)
                 adicionar(termo_original, 2, "nomeParte", f"{tokens[0]} {tokens[-1]}", COMUNICA_MAX_PAGINAS)
                 adicionar(termo_original, 2, "nomeAdvogado", f"{tokens[0]} {tokens[-1]}", COMUNICA_MAX_PAGINAS)
-            if 2 <= len(tokens) <= 4:
-                for token in tokens:
-                    if len(token) >= 6:
-                        adicionar(termo_original, 3, "texto", token, COMUNICA_MAX_PAGINAS)
+                adicionar(termo_original, 3, "texto", " ".join(tokens[:3]), COMUNICA_MAX_PAGINAS)
+                adicionar(termo_original, 3, "texto", " ".join(tokens[-3:]), COMUNICA_MAX_PAGINAS)
 
     if termos:
         return consultas

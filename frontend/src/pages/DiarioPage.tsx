@@ -128,22 +128,72 @@ function textHasExactTerm(normalizedText: string, term: string) {
   return new RegExp(pattern, 'i').test(normalizedText)
 }
 
+function simpleEditDistance(a: string, b: string) {
+  if (a === b) return 0
+  if (Math.abs(a.length - b.length) > 1) return 2
+
+  if (a.length === b.length) {
+    let diffs = 0
+    for (let i = 0; i < a.length; i += 1) {
+      if (a[i] !== b[i]) diffs += 1
+    }
+    if (diffs <= 1) return diffs
+
+    for (let i = 0; i < a.length - 1; i += 1) {
+      if (
+        a[i] === b[i + 1] &&
+        a[i + 1] === b[i] &&
+        a.slice(0, i) === b.slice(0, i) &&
+        a.slice(i + 2) === b.slice(i + 2)
+      ) return 1
+    }
+    return 2
+  }
+
+  const longer = a.length > b.length ? a : b
+  const shorter = a.length > b.length ? b : a
+  let i = 0
+  let j = 0
+  let diffs = 0
+  while (i < longer.length && j < shorter.length) {
+    if (longer[i] === shorter[j]) {
+      i += 1
+      j += 1
+      continue
+    }
+    diffs += 1
+    if (diffs > 1) return 2
+    i += 1
+  }
+  return 1
+}
+
 function tokenInText(normalizedText: string, token: string) {
   return new RegExp(`(^|[^a-z0-9])${escapeRegExp(token)}(?=$|[^a-z0-9])`, 'i').test(normalizedText)
+}
+
+function tokenHasSimpleMatch(textTokens: string[], token: string) {
+  return textTokens.some((candidate) => simpleEditDistance(token, candidate) <= 1)
+}
+
+function phraseHasSimpleMatch(textTokens: string[], nameTokens: string[]) {
+  if (textTokens.length < nameTokens.length) return false
+  for (let start = 0; start <= textTokens.length - nameTokens.length; start += 1) {
+    const slice = textTokens.slice(start, start + nameTokens.length)
+    if (nameTokens.every((expected, index) => simpleEditDistance(expected, slice[index]) <= 1)) return true
+  }
+  return false
 }
 
 function textHasRestrictedName(normalizedText: string, term: string) {
   const tokens = extractRelevantTokens(term)
   if (tokens.length < 2) return false
 
-  const present = tokens.filter((token) => tokenInText(normalizedText, token))
-  if (present.length < 2) return false
+  const textTokens = normalizedText.match(/[a-z0-9]+/g) ?? []
+  if (tokens.length <= 3) return phraseHasSimpleMatch(textTokens, tokens)
 
-  const first = tokens[0]
-  const last = tokens[tokens.length - 1]
-  if (tokenInText(normalizedText, first) && tokenInText(normalizedText, last)) return true
-
-  return tokens.length >= 3 && present.length >= 2
+  const present = tokens.filter((token) => tokenInText(normalizedText, token) || tokenHasSimpleMatch(textTokens, token))
+  return present.length >= 3
 }
 
 function textHasMonitoredName(normalizedText: string, term: string) {
@@ -289,8 +339,11 @@ function buildHighlightTerms(match: PublicacaoMatchInfo) {
     const cleaned = cleanMonitorName(name)
     if (cleaned) terms.add(cleaned)
 
-    for (const token of extractRelevantTokens(cleaned)) {
-      if (token.length >= 5) terms.add(token)
+    const tokens = extractRelevantTokens(cleaned)
+    if (tokens.length >= 4) {
+      for (const token of tokens) {
+        if (token.length >= 5) terms.add(token)
+      }
     }
   }
 
