@@ -100,10 +100,14 @@ function uniqueStrings(values: string[]) {
   return result
 }
 
+function cleanMonitorName(value: string) {
+  return value.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
 function extractRelevantTokens(name: string) {
-  return uniqueStrings(name.match(/[A-Za-zÀ-ÿ0-9]+/g) ?? [])
+  return uniqueStrings(cleanMonitorName(name).match(/[A-Za-zÀ-ÿ0-9]+/g) ?? [])
     .map((token) => normalizeText(token))
-    .filter((token) => token.length >= 4 && !['ltda', 'advogados', 'advocacia', 'sociedade'].includes(token))
+    .filter((token) => token.length >= 4 && !['ltda', 'advogados', 'advocacia', 'sociedade', 'cliente'].includes(token))
 }
 
 function looksLikeCnj(value: string) {
@@ -118,10 +122,32 @@ function isMonitorableTerm(value: string) {
 }
 
 function textHasExactTerm(normalizedText: string, term: string) {
-  const normalizedTerm = normalizeText(term)
+  const normalizedTerm = normalizeText(cleanMonitorName(term))
   if (!normalizedTerm) return false
   const pattern = `(^|[^a-z0-9])${escapeRegExp(normalizedTerm).replace(/\ /g, '\\s+')}(?=$|[^a-z0-9])`
   return new RegExp(pattern, 'i').test(normalizedText)
+}
+
+function tokenInText(normalizedText: string, token: string) {
+  return new RegExp(`(^|[^a-z0-9])${escapeRegExp(token)}(?=$|[^a-z0-9])`, 'i').test(normalizedText)
+}
+
+function textHasRestrictedName(normalizedText: string, term: string) {
+  const tokens = extractRelevantTokens(term)
+  if (tokens.length < 2) return false
+
+  const present = tokens.filter((token) => tokenInText(normalizedText, token))
+  if (present.length < 2) return false
+
+  const first = tokens[0]
+  const last = tokens[tokens.length - 1]
+  if (tokenInText(normalizedText, first) && tokenInText(normalizedText, last)) return true
+
+  return tokens.length >= 3 && present.length >= 2
+}
+
+function textHasMonitoredName(normalizedText: string, term: string) {
+  return textHasExactTerm(normalizedText, term) || textHasRestrictedName(normalizedText, term)
 }
 
 function getMatchPriority(match: PublicacaoMatchInfo) {
@@ -154,7 +180,7 @@ function getProcessClientNames(processo: Processo, clientes: Cliente[]) {
     byId.get(processo.cliente_id) ?? '',
     ...(processo.clientes_litisconsorcio?.map((cliente) => cliente.nome ?? '') ?? []),
   ]
-  return uniqueStrings(names)
+  return uniqueStrings(names.map(cleanMonitorName))
 }
 
 function classifyPublication(
@@ -192,7 +218,7 @@ function classifyPublication(
       })
     }
 
-    const exactNames = clientNames.filter((name) => isMonitorableTerm(name) && textHasExactTerm(normalizedText, name))
+    const exactNames = clientNames.filter((name) => isMonitorableTerm(name) && textHasMonitoredName(normalizedText, name))
     if (exactNames.length > 0) {
       exactNames.forEach((name) => {
         exactClientNames.add(name)
@@ -213,12 +239,13 @@ function classifyPublication(
   const primary = relatedProcesses[0]
 
   for (const termo of termosMonitorados) {
-    const normalizedTerm = normalizeText(termo)
+    const termoLimpo = cleanMonitorName(termo)
+    const normalizedTerm = normalizeText(termoLimpo)
     if (!normalizedTerm) continue
-    if (!isMonitorableTerm(termo)) continue
-    if (textHasExactTerm(normalizedText, termo)) {
-      exactTermMatches.add(termo)
-      relatedTerms.add(termo)
+    if (!isMonitorableTerm(termoLimpo)) continue
+    if (textHasMonitoredName(normalizedText, termoLimpo)) {
+      exactTermMatches.add(termoLimpo)
+      relatedTerms.add(termoLimpo)
       continue
     }
   }
@@ -325,7 +352,7 @@ export default function DiarioPage() {
     },
   })
 
-  const termosNomesMonitorados = [...nomesClientes, ...termosCustom].filter(Boolean)
+  const termosNomesMonitorados = uniqueStrings([...nomesClientes, ...termosCustom].map(cleanMonitorName).filter(Boolean))
   const numerosProcessosMonitorados = processos.map((p) => p.numero_cnj).filter(Boolean)
   const termosBuscaDiario = uniqueStrings([
     ...numerosProcessosMonitorados,
