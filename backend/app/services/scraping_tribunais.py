@@ -291,9 +291,12 @@ def _consultas_comunica(termos: list[str] | None = None) -> list[tuple[str, int,
         if not _termo_nome_buscavel(termo_original):
             continue
 
-        adicionar(termo_original, 0, "texto", termo_original, COMUNICA_MAX_PAGINAS)
-        adicionar(termo_original, 1, "nomeParte", termo_original, COMUNICA_MAX_PAGINAS)
-        if not _termo_parece_cnj(termo_original):
+        if _termo_parece_cnj(termo_original):
+            adicionar(termo_original, -1, "numeroProcesso", re.sub(r"\D", "", termo_original), COMUNICA_MAX_PAGINAS)
+            adicionar(termo_original, 0, "texto", _formatar_numero_cnj(termo_original) or termo_original, COMUNICA_MAX_PAGINAS)
+        else:
+            adicionar(termo_original, 0, "texto", termo_original, COMUNICA_MAX_PAGINAS)
+            adicionar(termo_original, 1, "nomeParte", termo_original, COMUNICA_MAX_PAGINAS)
             adicionar(termo_original, 1, "nomeAdvogado", termo_original, COMUNICA_MAX_PAGINAS)
 
     if termos:

@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 scheduler = BackgroundScheduler(timezone="America/Sao_Paulo")
 DIARIO_TRIBUNAIS_ORDEM = ["DJEN", "TJSP", "TJES", "TJAM", "TJRJ"]
-DIARIO_DAYS_BACK = 3
+DIARIO_DAYS_BACK = 30
 
 
 def _processos_ativos(db):
@@ -101,20 +101,16 @@ def _renovar_drive_watch() -> None:
 def _sync_diarios_monitorados() -> None:
     try:
         from app.database import SessionLocal
-        from app.models.cliente import Cliente
-        from app.routers.diario import _filtrar_itens_monitorados_exatos, _inserir_publicacoes
-        from app.services.diario_monitoring import load_monitoring_config
+        from app.routers.diario import (
+            _filtrar_itens_monitorados_exatos,
+            _inserir_publicacoes,
+            _termos_monitorados_para_busca,
+        )
         from app.services.scraping_tribunais import scrape_todos
 
         db = SessionLocal()
         try:
-            config = load_monitoring_config()
-            nomes_clientes = [
-                c.nome.strip()
-                for c in db.query(Cliente).order_by(Cliente.nome).all()
-                if getattr(c, "nome", None) and c.nome.strip()
-            ]
-            termos = list(dict.fromkeys([*nomes_clientes, *(config.get("termos_extras") or [])]))
+            termos = _termos_monitorados_para_busca(db)
             if not termos:
                 logger.info("Scheduler: nenhum termo monitorado para Diário Oficial")
                 return

@@ -72,6 +72,39 @@ def _processos_por_cnj(db: Session) -> dict[str, Processo]:
     }
 
 
+def _termos_monitorados_para_busca(
+    db: Session,
+    termos_busca: list[str] | None = None,
+) -> list[str]:
+    from app.services.diario_monitoring import load_monitoring_config
+
+    config = load_monitoring_config()
+    valores: list[str] = []
+    valores.extend(
+        processo.numero_cnj.strip()
+        for processo in db.query(Processo).all()
+        if getattr(processo, "numero_cnj", None) and processo.numero_cnj.strip()
+    )
+    valores.extend(
+        cliente.nome.strip()
+        for cliente in db.query(Cliente).all()
+        if getattr(cliente, "nome", None) and cliente.nome.strip()
+    )
+    valores.extend(config.get("termos_extras") or [])
+    valores.extend(termos_busca or [])
+
+    vistos: set[str] = set()
+    resultado: list[str] = []
+    for valor in valores:
+        valor_limpo = str(valor or "").strip()
+        chave = _normalizar_cnj(valor_limpo) if len(_normalizar_cnj(valor_limpo)) == 20 else _normalizar_texto_busca(valor_limpo)
+        if not valor_limpo or not chave or chave in vistos:
+            continue
+        vistos.add(chave)
+        resultado.append(valor_limpo)
+    return resultado
+
+
 def _item_tem_match_monitorado_exato(
     item: dict,
     processos_por_cnj: dict[str, Processo],
@@ -214,13 +247,14 @@ def sync_scraping(
     tribunais_validos = [t for t in tribunais if t in {"TJES", "TJSP", "TJAM", "TJRJ", "DJEN"}]
     if not tribunais_validos:
         raise HTTPException(status_code=400, detail="Selecione ao menos um tribunal local válido.")
+    termos_monitorados = _termos_monitorados_para_busca(db, termos)
     itens = scrape_todos(
         tribunais=tribunais_validos,
         data=data,
-        termos=termos or None,
+        termos=termos_monitorados or None,
         days_back=days_back,
     )
-    itens = _filtrar_itens_monitorados_exatos(itens, db, termos)
+    itens = _filtrar_itens_monitorados_exatos(itens, db, termos_monitorados)
     ins, dup, err = _inserir_publicacoes(itens, db)
     return SyncResult(inseridas=ins, duplicatas=dup, erros=err, fonte="scraping")
 
