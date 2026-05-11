@@ -154,9 +154,7 @@ def _termo_nome_buscavel(termo: str) -> bool:
     if _termo_parece_cnj(termo):
         return True
     tokens = _tokenizar_relevantes(termo)
-    if len(tokens) >= 2:
-        return True
-    return len(tokens) == 1 and len(tokens[0]) >= 8
+    return len(tokens) >= 2
 
 
 def _termo_exato_no_texto(texto: str, termo: str) -> bool:
@@ -244,9 +242,9 @@ def _texto_tem_match_monitorado(texto: str, termos: list[str] | None = None) -> 
     if not termos:
         return False
     for termo in termos:
-        if not (_termo_parece_cnj(termo) or _termo_nome_buscavel(termo)):
-            continue
-        if _termo_exato_no_texto(texto, termo) or _nome_restrito_no_texto(texto, termo):
+        if _termo_parece_cnj(termo) and _termo_exato_no_texto(texto, termo):
+            return True
+        if _termo_nome_buscavel(termo) and (_termo_exato_no_texto(texto, termo) or _nome_restrito_no_texto(texto, termo)):
             return True
     return False
 

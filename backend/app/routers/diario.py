@@ -62,6 +62,18 @@ def _limpar_nome_monitorado(nome: str) -> str:
     return re.sub(r"\s+", " ", nome).strip()
 
 
+def _tokens_nome_monitorado(nome: str) -> list[str]:
+    tokens = re.findall(r"[a-z0-9]+", _normalizar_texto_busca(_limpar_nome_monitorado(nome)))
+    stopwords = {"da", "das", "de", "do", "dos", "e", "em", "na", "nas", "no", "nos", "ltda", "cliente"}
+    return [token for token in tokens if len(token) >= 4 and token not in stopwords]
+
+
+def _nome_monitorado_no_texto(texto: str, nome: str) -> bool:
+    if len(_tokens_nome_monitorado(nome)) < 2:
+        return False
+    return _termo_exato_no_texto(texto, nome) or _nome_restrito_no_texto(texto, nome)
+
+
 def _dedupe_valores(valores: list[str]) -> list[str]:
     vistos: set[str] = set()
     resultado: list[str] = []
@@ -150,7 +162,7 @@ def _match_publicacao_monitorada(
             }
 
     for nome in advogados_monitorados:
-        if _termo_exato_no_texto(texto, nome) or _nome_restrito_no_texto(texto, nome):
+        if _nome_monitorado_no_texto(texto, nome):
             return {
                 "match_tipo": "advogado",
                 "match_categoria": "advogado",
@@ -160,7 +172,7 @@ def _match_publicacao_monitorada(
             }
 
     for nome in clientes_monitorados or []:
-        if _termo_exato_no_texto(texto, nome) or _nome_restrito_no_texto(texto, nome):
+        if _nome_monitorado_no_texto(texto, nome):
             return {
                 "match_tipo": "cliente",
                 "match_categoria": "cliente",
