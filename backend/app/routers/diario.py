@@ -251,6 +251,29 @@ def _inserir_publicacoes(itens: list[dict], db: Session) -> tuple[int, int, int]
     return inseridas, duplicatas, erros
 
 
+def _mensagem_erro_scraping(exc: DiarioScrapingError) -> str:
+    detalhe = str(exc)
+    if re.search(r"(?<!\d)429(?!\d)", detalhe):
+        return (
+            "A fonte do Diário limitou temporariamente as consultas por excesso de buscas "
+            "em sequência. Aguarde alguns minutos e tente novamente."
+        )
+    if re.search(r"(?<!\d)403(?!\d)", detalhe):
+        return (
+            "A fonte do Diário bloqueou temporariamente a consulta automática. "
+            "Tente novamente mais tarde."
+        )
+    if re.search(r"(?<!\d)5\d{2}(?!\d)", detalhe):
+        return (
+            "A fonte do Diário está instável neste momento. "
+            "Tente novamente em alguns minutos."
+        )
+    return (
+        "Não foi possível consultar o Diário Oficial agora. "
+        "Tente novamente em alguns minutos."
+    )
+
+
 # ── Sync endpoints ─────────────────────────────────────────────────────────────
 
 @router.post("/gmail/sync", response_model=SyncResult)
@@ -287,7 +310,7 @@ def sync_scraping(
             duplicatas=0,
             erros=1,
             fonte="scraping",
-            mensagem=f"Falha ao consultar Diário Oficial: {exc}",
+            mensagem=_mensagem_erro_scraping(exc),
         )
     itens = _filtrar_itens_monitorados_exatos(itens, db, termos_monitorados)
     ins, dup, err = _inserir_publicacoes(itens, db)
