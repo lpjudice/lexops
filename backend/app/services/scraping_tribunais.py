@@ -14,6 +14,7 @@ DJEN  → legado/experimental (não usado como fonte nacional principal)
 import math
 import re
 import time
+from html import unescape
 from datetime import date, timedelta
 
 import httpx
@@ -51,6 +52,10 @@ COMUNICA_MAX_PAGINAS = 20
 COMUNICA_MAX_TENTATIVAS = 8
 COMUNICA_TIMEOUT_SECONDS = 8
 
+
+class DiarioScrapingError(RuntimeError):
+    """Falha real na fonte externa; não deve ser tratada como ausência de publicações."""
+
 FONTE_POR_TRIBUNAL = {
     "TJES": "scraping_tjes",
     "TJSP": "scraping_tjsp",
@@ -75,6 +80,13 @@ def _inferir_tipo_ato(texto: str) -> str:
 
 def _normalizar_espacos(texto: str) -> str:
     return re.sub(r"\s+", " ", (texto or "").strip())
+
+
+def _limpar_html_publicacao(texto: str) -> str:
+    texto = unescape(texto or "")
+    if "<" in texto and ">" in texto:
+        texto = BeautifulSoup(texto, "html.parser").get_text(" ", strip=True)
+    return _normalizar_espacos(unescape(texto))
 
 
 def _normalizar_texto_busca(texto: str) -> str:
@@ -319,7 +331,7 @@ def _normalizar_data_comunica(valor: str | None) -> date | None:
 
 
 def _comunica_para_publicacao(item: dict, tribunal_alvo: str) -> dict | None:
-    texto = _normalizar_espacos(item.get("texto") or "")
+    texto = _limpar_html_publicacao(item.get("texto") or "")
     if len(texto) < 20:
         return None
 
@@ -367,17 +379,12 @@ def _buscar_comunica_api(
     vistos: set[str] = set()
     resultado: list[dict] = []
     consultas = _consultas_comunica(termos)
-
-    sucesso_por_origem: dict[str, int] = {}
+    falhas: list[str] = []
 
     with httpx.Client(headers=HEADERS, timeout=COMUNICA_TIMEOUT_SECONDS, follow_redirects=True) as client:
         for origem, prioridade, campo, termo, max_paginas in consultas:
-            if origem and sucesso_por_origem.get(origem, 99) < prioridade:
-                continue
-
             pagina = 1
             paginas_limite = max_paginas
-            itens_encontrados_nesta_consulta = 0
 
             while pagina <= paginas_limite:
                 params = {
@@ -392,21 +399,27 @@ def _buscar_comunica_api(
                     params["siglaTribunal"] = tribunal
 
                 resp = None
+                ultima_falha: str | None = None
                 for tentativa in range(1, COMUNICA_MAX_TENTATIVAS + 1):
                     try:
                         resp = client.get(COMUNICA_API_URL, params=params)
                         if resp.status_code < 500:
                             break
-                    except httpx.HTTPError:
+                        ultima_falha = f"HTTP {resp.status_code}"
+                    except httpx.HTTPError as exc:
                         resp = None
+                        ultima_falha = str(exc)
                     time.sleep(min(0.6 * tentativa, 3.0))
 
                 if not resp or not resp.is_success:
+                    status = resp.status_code if resp is not None else ultima_falha or "sem resposta"
+                    falhas.append(f"{tribunal}/{campo} '{termo}': {status}")
                     break
 
                 try:
                     payload = resp.json()
                 except ValueError:
+                    falhas.append(f"{tribunal}/{campo} '{termo}': resposta inválida")
                     break
 
                 itens = payload.get("items") or []
@@ -422,7 +435,6 @@ def _buscar_comunica_api(
                         continue
                     if termos and not _texto_tem_match_monitorado(pub.get("texto_completo") or pub.get("texto_resumo") or "", termos):
                         continue
-                    itens_encontrados_nesta_consulta += 1
                     chave = str(item.get("id") or "") or "|".join(
                         [
                             pub.get("fonte", "") or "",
@@ -441,9 +453,8 @@ def _buscar_comunica_api(
                     break
                 pagina += 1
 
-            if origem and itens_encontrados_nesta_consulta > 0:
-                sucesso_por_origem[origem] = min(sucesso_por_origem.get(origem, 99), prioridade)
-
+    if falhas and not resultado:
+        raise DiarioScrapingError("; ".join(falhas[:3]))
     return resultado
 
 

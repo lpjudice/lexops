@@ -319,7 +319,8 @@ export default function DiarioPage() {
     mutationFn: () => diarioApi.syncGmail(daysBack),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['diario'] })
-      setSyncMsg(`Gmail: ${r.inseridas} novas, ${r.duplicatas} duplicatas`)
+      const erroMsg = r.erros ? `, ${r.erros} erro(s)` : ''
+      setSyncMsg(r.mensagem || `Gmail: ${r.inseridas} novas, ${r.duplicatas} duplicatas${erroMsg}`)
       setTimeout(() => setSyncMsg(null), 5000)
     },
   })
@@ -349,7 +350,8 @@ export default function DiarioPage() {
       diarioApi.syncScraping(tribunais, termosBuscaDiario, daysBack).then((r) => ({ ...r, label })),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['diario'] })
-      setSyncMsg(`${r.label}: ${r.inseridas} novas, ${r.duplicatas} duplicatas`)
+      const erroMsg = r.erros ? `, ${r.erros} erro(s)` : ''
+      setSyncMsg(r.mensagem || `${r.label}: ${r.inseridas} novas, ${r.duplicatas} duplicatas${erroMsg}`)
       setTimeout(() => setSyncMsg(null), 5000)
     },
   })
@@ -482,13 +484,14 @@ export default function DiarioPage() {
     .map((pub) => ({ pub, match: classifyPublication(pub, processos, clientes, termosNomesMonitorados) }))
     .filter(({ match }) => match.hasRegisteredProcess || match.hasExactName)
     .sort((a, b) => {
+      const dateA = new Date(`${a.pub.data_publicacao}T12:00:00`).getTime()
+      const dateB = new Date(`${b.pub.data_publicacao}T12:00:00`).getTime()
+      if (dateA !== dateB) return dateB - dateA
+
       const priorityA = getMatchPriority(a.match)
       const priorityB = getMatchPriority(b.match)
       if (priorityA !== priorityB) return priorityA - priorityB
 
-      const dateA = new Date(`${a.pub.data_publicacao}T12:00:00`).getTime()
-      const dateB = new Date(`${b.pub.data_publicacao}T12:00:00`).getTime()
-      if (dateA !== dateB) return dateB - dateA
       return new Date(b.pub.created_at).getTime() - new Date(a.pub.created_at).getTime()
     })
 

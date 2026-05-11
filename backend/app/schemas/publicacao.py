@@ -56,3 +56,4 @@ class SyncResult(BaseModel):
     duplicatas: int
     erros: int
     fonte: str
+    mensagem: str | None = None

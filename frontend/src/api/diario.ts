@@ -46,6 +46,7 @@ export interface SyncResult {
   duplicatas: number
   erros: number
   fonte: string
+  mensagem?: string
 }
 
 export interface DiarioMonitoringConfig {

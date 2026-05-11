@@ -16,7 +16,7 @@ from app.models.tese import Tese
 from app.schemas.publicacao import PublicacaoOut, PublicacaoUpdate, SyncResult
 from app.services.gmail_diario import sincronizar_gmail
 from app.services.ia_diario import analisar_publicacao
-from app.services.scraping_tribunais import scrape_todos
+from app.services.scraping_tribunais import DiarioScrapingError, scrape_todos
 
 router = APIRouter(prefix="/diario", tags=["diario"])
 
@@ -155,7 +155,7 @@ def _filtrar_itens_monitorados_exatos(
 
 def _texto_chave_publicacao(texto: str | None) -> str:
     texto_norm = _normalizar_texto_busca(texto or "")
-    return texto_norm[:300]
+    return texto_norm
 
 
 def _inserir_publicacoes(itens: list[dict], db: Session) -> tuple[int, int, int]:
@@ -248,12 +248,21 @@ def sync_scraping(
     if not tribunais_validos:
         raise HTTPException(status_code=400, detail="Selecione ao menos um tribunal local válido.")
     termos_monitorados = _termos_monitorados_para_busca(db, termos)
-    itens = scrape_todos(
-        tribunais=tribunais_validos,
-        data=data,
-        termos=termos_monitorados or None,
-        days_back=days_back,
-    )
+    try:
+        itens = scrape_todos(
+            tribunais=tribunais_validos,
+            data=data,
+            termos=termos_monitorados or None,
+            days_back=days_back,
+        )
+    except DiarioScrapingError as exc:
+        return SyncResult(
+            inseridas=0,
+            duplicatas=0,
+            erros=1,
+            fonte="scraping",
+            mensagem=f"Falha ao consultar Diário Oficial: {exc}",
+        )
     itens = _filtrar_itens_monitorados_exatos(itens, db, termos_monitorados)
     ins, dup, err = _inserir_publicacoes(itens, db)
     return SyncResult(inseridas=ins, duplicatas=dup, erros=err, fonte="scraping")
