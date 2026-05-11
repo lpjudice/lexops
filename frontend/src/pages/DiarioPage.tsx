@@ -282,6 +282,21 @@ function buildHighlightedHtml(text: string, terms: string[]) {
   return escaped.replace(regex, '<strong class="diario-highlight">$1</strong>')
 }
 
+function buildHighlightTerms(match: PublicacaoMatchInfo) {
+  const terms = new Set<string>(match.relatedTerms)
+
+  for (const name of [...match.exactClientNames, ...match.exactTermMatches]) {
+    const cleaned = cleanMonitorName(name)
+    if (cleaned) terms.add(cleaned)
+
+    for (const token of extractRelevantTokens(cleaned)) {
+      if (token.length >= 5) terms.add(token)
+    }
+  }
+
+  return uniqueStrings([...terms])
+}
+
 export default function DiarioPage() {
   const qc = useQueryClient()
   const [expandido, setExpandido] = useState<string | null>(null)
@@ -772,7 +787,8 @@ export default function DiarioPage() {
         <div className={diarioStyles.feed}>
           {publicacoesFiltradas.map(({ pub, match }) => {
             const textoBase = pub.texto_completo || pub.texto_resumo || ''
-            const resumoExibicao = buildRelevantExcerpt(textoBase, match.relatedTerms)
+            const highlightTerms = buildHighlightTerms(match)
+            const resumoExibicao = buildRelevantExcerpt(textoBase, highlightTerms)
             const nomesExatos = uniqueStrings([...match.exactClientNames, ...match.exactTermMatches])
 
             return (
@@ -915,7 +931,7 @@ export default function DiarioPage() {
               {resumoExibicao && (
                 <p
                   className={diarioStyles.resumo}
-                  dangerouslySetInnerHTML={{ __html: buildHighlightedHtml(resumoExibicao, match.relatedTerms) }}
+                  dangerouslySetInnerHTML={{ __html: buildHighlightedHtml(resumoExibicao, highlightTerms) }}
                 />
               )}
 
@@ -1011,7 +1027,7 @@ export default function DiarioPage() {
               {expandido === pub.id && pub.texto_completo && (
                 <div
                   className={diarioStyles.textoCompleto}
-                  dangerouslySetInnerHTML={{ __html: buildHighlightedHtml(pub.texto_completo, match.relatedTerms) }}
+                  dangerouslySetInnerHTML={{ __html: buildHighlightedHtml(pub.texto_completo, highlightTerms) }}
                 />
               )}
             </div>
