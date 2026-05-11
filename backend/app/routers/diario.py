@@ -16,7 +16,12 @@ from app.models.tese import Tese
 from app.schemas.publicacao import PublicacaoOut, PublicacaoUpdate, SyncResult
 from app.services.gmail_diario import sincronizar_gmail
 from app.services.ia_diario import analisar_publicacao
-from app.services.scraping_tribunais import DiarioScrapingError, scrape_todos
+from app.services.scraping_tribunais import (
+    DiarioScrapingError,
+    _limpar_html_publicacao,
+    _nome_restrito_no_texto,
+    scrape_todos,
+)
 
 router = APIRouter(prefix="/diario", tags=["diario"])
 
@@ -49,9 +54,14 @@ def _termo_exato_no_texto(texto: str, termo: str) -> bool:
     return re.search(padrao, _normalizar_texto_busca(texto)) is not None
 
 
+def _limpar_nome_monitorado(nome: str) -> str:
+    nome = re.sub(r"\([^)]*\)", " ", nome or "")
+    return re.sub(r"\s+", " ", nome).strip()
+
+
 def _nomes_monitorados(db: Session, termos_extras: list[str] | None = None) -> list[str]:
-    nomes = [c.nome.strip() for c in db.query(Cliente).all() if getattr(c, "nome", None) and c.nome.strip()]
-    nomes.extend([t.strip() for t in (termos_extras or []) if t and t.strip()])
+    nomes = [_limpar_nome_monitorado(c.nome) for c in db.query(Cliente).all() if getattr(c, "nome", None) and c.nome.strip()]
+    nomes.extend([_limpar_nome_monitorado(t) for t in (termos_extras or []) if t and t.strip()])
     vistos: set[str] = set()
     resultado: list[str] = []
     for nome in nomes:
@@ -96,7 +106,7 @@ def _termos_monitorados_para_busca(
     vistos: set[str] = set()
     resultado: list[str] = []
     for valor in valores:
-        valor_limpo = str(valor or "").strip()
+        valor_limpo = _limpar_nome_monitorado(str(valor or "").strip())
         chave = _normalizar_cnj(valor_limpo) if len(_normalizar_cnj(valor_limpo)) == 20 else _normalizar_texto_busca(valor_limpo)
         if not valor_limpo or not chave or chave in vistos:
             continue
@@ -110,7 +120,7 @@ def _item_tem_match_monitorado_exato(
     processos_por_cnj: dict[str, Processo],
     nomes_monitorados: list[str],
 ) -> tuple[bool, uuid.UUID | None]:
-    texto = f"{item.get('texto_completo') or ''} {item.get('texto_resumo') or ''}"
+    texto = f"{item.get('_match_text') or ''} {item.get('texto_completo') or ''} {item.get('texto_resumo') or ''}"
     cnj_item = _normalizar_cnj(item.get("numero_cnj"))
     if cnj_item and cnj_item in processos_por_cnj:
         return True, processos_por_cnj[cnj_item].id
@@ -120,7 +130,7 @@ def _item_tem_match_monitorado_exato(
             return True, processo.id
 
     for nome in nomes_monitorados:
-        if _termo_exato_no_texto(texto, nome):
+        if _termo_exato_no_texto(texto, nome) or _nome_restrito_no_texto(texto, nome):
             return True, None
 
     return False, None
@@ -170,7 +180,10 @@ def _inserir_publicacoes(itens: list[dict], db: Session) -> tuple[int, int, int]
                     Publicacao.email_message_id == email_id
                 ).first()
             else:
-                texto_chave = _texto_chave_publicacao(item.get("texto_resumo") or item.get("texto_completo"))
+                texto_resumo_limpo = _limpar_html_publicacao(item.get("texto_resumo") or "")
+                texto_completo_limpo = _limpar_html_publicacao(item.get("texto_completo") or "")
+                item = {**item, "texto_resumo": texto_resumo_limpo, "texto_completo": texto_completo_limpo}
+                texto_chave = _texto_chave_publicacao(texto_resumo_limpo or texto_completo_limpo)
                 q = db.query(Publicacao).filter(
                     Publicacao.data_publicacao == item.get("data_publicacao"),
                     Publicacao.tribunal == item.get("tribunal"),
@@ -190,6 +203,19 @@ def _inserir_publicacoes(itens: list[dict], db: Session) -> tuple[int, int, int]
                 )
 
             if existe:
+                alterou = False
+                for attr in ("texto_resumo", "texto_completo"):
+                    texto_atual = getattr(existe, attr) or ""
+                    texto_limpo = _limpar_html_publicacao(texto_atual)
+                    texto_novo = item.get(attr) or ""
+                    if texto_novo and texto_novo != texto_atual:
+                        setattr(existe, attr, texto_novo)
+                        alterou = True
+                    elif texto_limpo and texto_limpo != texto_atual:
+                        setattr(existe, attr, texto_limpo)
+                        alterou = True
+                if alterou:
+                    db.add(existe)
                 duplicatas += 1
                 continue
 
@@ -305,7 +331,18 @@ def listar_publicacoes(
         q = q.filter(Publicacao.data_publicacao >= data_inicio)
     if data_fim:
         q = q.filter(Publicacao.data_publicacao <= data_fim)
-    return q.order_by(Publicacao.data_publicacao.desc(), Publicacao.created_at.desc()).all()
+    publicacoes = q.order_by(Publicacao.data_publicacao.desc(), Publicacao.created_at.desc()).all()
+    alterou = False
+    for pub in publicacoes:
+        for attr in ("texto_resumo", "texto_completo"):
+            texto_atual = getattr(pub, attr) or ""
+            texto_limpo = _limpar_html_publicacao(texto_atual)
+            if texto_limpo and texto_limpo != texto_atual:
+                setattr(pub, attr, texto_limpo)
+                alterou = True
+    if alterou:
+        db.commit()
+    return publicacoes
 
 
 @router.get("/{pub_id}", response_model=PublicacaoOut)

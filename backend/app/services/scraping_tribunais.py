@@ -68,6 +68,14 @@ STOPWORDS = {
     "da", "das", "de", "do", "dos", "e", "em", "na", "nas", "no", "nos",
     "sa", "s.a", "s/a", "sociedade", "advogados", "advocacia", "ltda", "me", "epp",
 }
+COMUNICA_MATCH_KEYS = (
+    "advogado",
+    "parte",
+    "destinatario",
+    "nome",
+    "polo",
+    "representante",
+)
 
 
 def _inferir_tipo_ato(texto: str) -> str:
@@ -87,6 +95,39 @@ def _limpar_html_publicacao(texto: str) -> str:
     if "<" in texto and ">" in texto:
         texto = BeautifulSoup(texto, "html.parser").get_text(" ", strip=True)
     return _normalizar_espacos(unescape(texto))
+
+
+def _extrair_textos_match_comunica(valor, chave_pai: str = "") -> list[str]:
+    textos: list[str] = []
+    chave_norm = chave_pai.casefold()
+    chave_relevante = any(token in chave_norm for token in COMUNICA_MATCH_KEYS)
+
+    if isinstance(valor, dict):
+        for chave, subvalor in valor.items():
+            proxima_chave = f"{chave_pai}.{chave}" if chave_pai else str(chave)
+            textos.extend(_extrair_textos_match_comunica(subvalor, proxima_chave))
+    elif isinstance(valor, list):
+        for item in valor:
+            textos.extend(_extrair_textos_match_comunica(item, chave_pai))
+    elif isinstance(valor, str) and chave_relevante:
+        texto = _limpar_html_publicacao(valor)
+        if texto:
+            textos.append(texto)
+
+    return textos
+
+
+def _texto_match_comunica(item: dict, pub: dict) -> str:
+    partes = [
+        pub.get("texto_completo") or "",
+        pub.get("texto_resumo") or "",
+        pub.get("numero_cnj") or "",
+        item.get("numeroprocessocommascara") or "",
+        item.get("numeroProcesso") or "",
+        item.get("numero_processo") or "",
+    ]
+    partes.extend(_extrair_textos_match_comunica(item))
+    return _normalizar_espacos(" ".join(str(parte) for parte in partes if parte))
 
 
 def _normalizar_texto_busca(texto: str) -> str:
@@ -126,13 +167,35 @@ def _termo_exato_no_texto(texto: str, termo: str) -> bool:
     return re.search(padrao, _normalizar_texto_busca(texto)) is not None
 
 
+def _token_no_texto(texto_norm: str, token: str) -> bool:
+    return re.search(r"(?<![a-z0-9])" + re.escape(token) + r"(?![a-z0-9])", texto_norm) is not None
+
+
+def _nome_restrito_no_texto(texto: str, termo: str) -> bool:
+    tokens = _tokenizar_relevantes(termo)
+    if len(tokens) < 2:
+        return False
+
+    texto_norm = _normalizar_texto_busca(texto)
+    presentes = [token for token in tokens if _token_no_texto(texto_norm, token)]
+    if len(presentes) < 2:
+        return False
+
+    primeiro = tokens[0]
+    ultimo = tokens[-1]
+    if _token_no_texto(texto_norm, primeiro) and _token_no_texto(texto_norm, ultimo):
+        return True
+
+    return len(tokens) >= 3 and len(presentes) >= 2
+
+
 def _texto_tem_match_monitorado(texto: str, termos: list[str] | None = None) -> bool:
     if not termos:
         return False
     for termo in termos:
         if not (_termo_parece_cnj(termo) or _termo_nome_buscavel(termo)):
             continue
-        if _termo_exato_no_texto(texto, termo):
+        if _termo_exato_no_texto(texto, termo) or _nome_restrito_no_texto(texto, termo):
             return True
     return False
 
@@ -167,6 +230,13 @@ def expandir_termos_busca(termos: list[str] | None = None) -> list[str]:
             continue
 
         adicionar(termo_limpo)
+        tokens = _tokenizar_relevantes(termo_limpo)
+        if len(tokens) >= 2:
+            adicionar(f"{tokens[0]} {tokens[-1]}")
+        if 2 <= len(tokens) <= 4:
+            for token in tokens:
+                if len(token) >= 6:
+                    adicionar(token)
 
     return resultado
 
@@ -310,6 +380,15 @@ def _consultas_comunica(termos: list[str] | None = None) -> list[tuple[str, int,
             adicionar(termo_original, 0, "texto", termo_original, COMUNICA_MAX_PAGINAS)
             adicionar(termo_original, 1, "nomeParte", termo_original, COMUNICA_MAX_PAGINAS)
             adicionar(termo_original, 1, "nomeAdvogado", termo_original, COMUNICA_MAX_PAGINAS)
+            tokens = _tokenizar_relevantes(termo_original)
+            if len(tokens) >= 2:
+                adicionar(termo_original, 2, "texto", f"{tokens[0]} {tokens[-1]}", COMUNICA_MAX_PAGINAS)
+                adicionar(termo_original, 2, "nomeParte", f"{tokens[0]} {tokens[-1]}", COMUNICA_MAX_PAGINAS)
+                adicionar(termo_original, 2, "nomeAdvogado", f"{tokens[0]} {tokens[-1]}", COMUNICA_MAX_PAGINAS)
+            if 2 <= len(tokens) <= 4:
+                for token in tokens:
+                    if len(token) >= 6:
+                        adicionar(termo_original, 3, "texto", token, COMUNICA_MAX_PAGINAS)
 
     if termos:
         return consultas
@@ -433,8 +512,10 @@ def _buscar_comunica_api(
                     pub = _comunica_para_publicacao(item, tribunal)
                     if not pub:
                         continue
-                    if termos and not _texto_tem_match_monitorado(pub.get("texto_completo") or pub.get("texto_resumo") or "", termos):
+                    texto_match = _texto_match_comunica(item, pub)
+                    if termos and not _texto_tem_match_monitorado(texto_match, termos):
                         continue
+                    pub["_match_text"] = texto_match
                     chave = str(item.get("id") or "") or "|".join(
                         [
                             pub.get("fonte", "") or "",
