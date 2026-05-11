@@ -90,6 +90,8 @@ def _termos_monitorados_para_busca(
 
     config = load_monitoring_config()
     valores: list[str] = []
+    valores.extend(termos_busca or [])
+    valores.extend(config.get("termos_extras") or [])
     valores.extend(
         processo.numero_cnj.strip()
         for processo in db.query(Processo).all()
@@ -100,8 +102,6 @@ def _termos_monitorados_para_busca(
         for cliente in db.query(Cliente).all()
         if getattr(cliente, "nome", None) and cliente.nome.strip()
     )
-    valores.extend(config.get("termos_extras") or [])
-    valores.extend(termos_busca or [])
 
     vistos: set[str] = set()
     resultado: list[str] = []
