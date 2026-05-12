@@ -47,9 +47,10 @@ HEADERS = {
 }
 
 COMUNICA_API_URL = "https://comunicaapi.pje.jus.br/api/v1/comunicacao"
-COMUNICA_ITENS_POR_PAGINA = 100
-COMUNICA_MAX_PAGINAS = 20
-COMUNICA_MAX_TENTATIVAS = 8
+COMUNICA_ITENS_POR_PAGINA = 50
+COMUNICA_MAX_PAGINAS = 4
+COMUNICA_CLIENTE_MAX_PAGINAS = 1
+COMUNICA_MAX_TENTATIVAS = 3
 COMUNICA_TIMEOUT_SECONDS = 8
 
 
@@ -524,9 +525,10 @@ def _consultas_comunica(
             adicionar(termo_original, -1, "numeroProcesso", re.sub(r"\D", "", termo_original), COMUNICA_MAX_PAGINAS)
             adicionar(termo_original, 0, "texto", _formatar_numero_cnj(termo_original) or termo_original, COMUNICA_MAX_PAGINAS)
         else:
+            max_paginas_nome = COMUNICA_CLIENTE_MAX_PAGINAS if somente_nome_parte else COMUNICA_MAX_PAGINAS
             if not somente_nome_parte:
                 adicionar(termo_original, 0, "texto", termo_original, COMUNICA_MAX_PAGINAS)
-            adicionar(termo_original, 1, "nomeParte", termo_original, COMUNICA_MAX_PAGINAS)
+            adicionar(termo_original, 1, "nomeParte", termo_original, max_paginas_nome)
             if not somente_nome_parte:
                 adicionar(termo_original, 1, "nomeAdvogado", termo_original, COMUNICA_MAX_PAGINAS)
             tokens = _tokenizar_relevantes(termo_original)

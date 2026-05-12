@@ -609,7 +609,7 @@ export default function DiarioPage() {
       {syncMsg && <div className={diarioStyles.syncMsg}>{syncMsg}</div>}
 
       <div className={diarioStyles.syncMsg} style={{ background: '#1f2937', borderColor: '#374151', color: '#cbd5e1' }}>
-        Os botões por tribunal e o cron buscam apenas processos cadastrados e advogados monitorados. A busca por clientes fica separada no botão "Buscar clientes" para reduzir ruído e excesso de consultas.
+        Os botões por tribunal e o cron buscam apenas processos cadastrados e advogados monitorados. "Buscar clientes" usa modo econômico para reduzir bloqueios: DJEN nacional + TJES local/pautas.
       </div>
 
       <details className={diarioStyles.manualImportBox}>

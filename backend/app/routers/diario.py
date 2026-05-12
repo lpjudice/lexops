@@ -455,8 +455,10 @@ def sync_scraping_clientes(
     db: Session = Depends(get_db),
 ):
     """Busca manual separada por nomes de clientes em todas as fontes do Diário."""
-    tribunais_validos = ["DJEN", "TJSP", "TJES", "TJAM", "TJRJ"]
-    termos_clientes = _dedupe_valores([*_processos_monitorados_para_busca(db), *_clientes_monitorados(db)])
+    # Clientes não precisam reconsultar CNJs de processos; isso já roda na busca padrão.
+    # Mantemos DJEN como fonte nacional do Comunica e TJES local/pautas como complemento.
+    tribunais_validos = ["DJEN", "TJES"]
+    termos_clientes = _dedupe_valores(_clientes_monitorados(db))
     if not termos_clientes:
         return SyncResult(inseridas=0, duplicatas=0, erros=0, fonte="scraping_clientes", mensagem="Nenhum cliente monitorado para buscar.")
     totais = {"inseridas": 0, "duplicatas": 0, "erros": 0}
@@ -480,7 +482,7 @@ def sync_scraping_clientes(
             mensagens.append(_mensagem_erro_scraping(exc))
         except Exception:
             totais["erros"] += 1
-        time.sleep(1)
+        time.sleep(3)
     mensagem = mensagens[0] if mensagens else None
     return SyncResult(
         inseridas=totais["inseridas"],
