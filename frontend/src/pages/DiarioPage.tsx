@@ -336,11 +336,6 @@ export default function DiarioPage() {
   })
 
   const termosNomesMonitorados = [...nomesClientes, ...termosCustom].filter(Boolean)
-  const numerosProcessosMonitorados = processos.map((p) => p.numero_cnj).filter(Boolean)
-  const termosBuscaDiario = uniqueStrings([
-    ...termosNomesMonitorados,
-    ...numerosProcessosMonitorados,
-  ]).filter(isMonitorableTerm)
 
   const salvarMonitoramento = useMutation({
     mutationFn: (payload: { termos_extras: string[] }) =>
