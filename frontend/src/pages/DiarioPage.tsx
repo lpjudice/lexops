@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { diarioApi } from '../api/diario'
 import type { AnaliseIA, Publicacao, TipoAto } from '../api/diario'
 import { processosApi } from '../api/processos'
+import { clientesApi } from '../api/clientes'
 import styles from './Page.module.css'
 import diarioStyles from './DiarioPage.module.css'
 
@@ -136,6 +137,10 @@ function buildHighlightTerms(pub: Publicacao) {
   ].filter(Boolean))
 }
 
+function extractErrorMessage(error: unknown, fallback: string) {
+  return (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? fallback
+}
+
 export default function DiarioPage() {
   const qc = useQueryClient()
   const [expandido, setExpandido] = useState<string | null>(null)
@@ -178,6 +183,26 @@ export default function DiarioPage() {
     queryKey: ['processos'],
     queryFn: () => processosApi.listar(),
   })
+
+  const { data: clientes = [] } = useQuery({
+    queryKey: ['clientes'],
+    queryFn: () => clientesApi.listar(),
+  })
+
+  const clienteNomePorId = new Map(clientes.map((cliente) => [cliente.id, cliente.nome]))
+  const processoPorId = new Map(processos.map((processo) => [processo.id, processo]))
+
+  const getClienteDoProcesso = (pub: Publicacao) => {
+    const processoId = pub.processo_id || pub.match_processo_id
+    if (!processoId) return null
+    const processo = processoPorId.get(processoId)
+    if (!processo) return null
+    const nomes = [
+      clienteNomePorId.get(processo.cliente_id) ?? '',
+      ...(processo.clientes_litisconsorcio?.map((cliente) => cliente.nome ?? '') ?? []),
+    ]
+    return uniqueStrings(nomes)[0] ?? null
+  }
 
   const { data: monitoramento } = useQuery({
     queryKey: ['diario-monitoramento'],
@@ -308,6 +333,9 @@ export default function DiarioPage() {
   const analisar = useMutation({
     mutationFn: (id: string) => diarioApi.analisar(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['diario'] }),
+    onError: (e: unknown, id) => {
+      setAcaoMsg((m) => ({ ...m, [id]: `⚠ ${extractErrorMessage(e, 'Erro ao analisar publicação')}` }))
+    },
   })
 
   const criarPrazo = useMutation({
@@ -365,8 +393,8 @@ export default function DiarioPage() {
         await analisar.mutateAsync(pub.id)
       }
       await criarPrazo.mutateAsync(pub.id)
-    } catch {
-      // mensagens já tratadas nas mutations
+    } catch (e) {
+      setAcaoMsg((m) => ({ ...m, [pub.id]: m[pub.id] || `⚠ ${extractErrorMessage(e, 'Não foi possível criar o prazo')}` }))
     }
   }
 
@@ -692,6 +720,7 @@ export default function DiarioPage() {
             const textoBase = pub.texto_completo || pub.texto_resumo || ''
             const resumoExibicao = buildRelevantExcerpt(textoBase, termosDestaque)
             const matchLabel = getMatchLabel(pub)
+            const clienteDoProcesso = getClienteDoProcesso(pub)
 
             return (
             <div
@@ -788,12 +817,19 @@ export default function DiarioPage() {
               </div>
 
               <div className={diarioStyles.matchDetails}>
-                <div>
-                  <span className={diarioStyles.iaLabel}>Encontrado por</span> {matchLabel}
-                </div>
+                {tab !== 'processo' && (
+                  <div>
+                    <span className={diarioStyles.iaLabel}>Encontrado por</span> {matchLabel}
+                  </div>
+                )}
                 {pub.match_nome && (
                   <div>
                     <span className={diarioStyles.iaLabel}>{tab === 'processo' ? 'CNJ cadastrado' : 'Nome encontrado'}</span> {pub.match_nome}
+                  </div>
+                )}
+                {clienteDoProcesso && (
+                  <div>
+                    <span className={diarioStyles.iaLabel}>Cliente do processo</span> {clienteDoProcesso}
                   </div>
                 )}
               </div>
@@ -866,8 +902,14 @@ export default function DiarioPage() {
                     ) : (
                       <div className={diarioStyles.iaResultado}>
                         <div className={diarioStyles.iaGrid}>
-                          {analise.cliente_nome && (
-                            <div><span className={diarioStyles.iaLabel}>Cliente</span> {analise.cliente_nome}</div>
+                          {clienteDoProcesso && (
+                            <div><span className={diarioStyles.iaLabel}>Cliente</span> {clienteDoProcesso}</div>
+                          )}
+                          {!clienteDoProcesso && tab === 'cliente' && pub.match_nome && (
+                            <div><span className={diarioStyles.iaLabel}>Cliente</span> {pub.match_nome}</div>
+                          )}
+                          {!clienteDoProcesso && tab !== 'cliente' && analise.cliente_nome && (
+                            <div><span className={diarioStyles.iaLabel}>Nome citado (IA)</span> {analise.cliente_nome}</div>
                           )}
                           {analise.tipo_ato && (
                             <div><span className={diarioStyles.iaLabel}>Ato</span> {analise.tipo_ato}</div>

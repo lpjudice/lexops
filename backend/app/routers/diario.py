@@ -634,7 +634,10 @@ def criar_prazo_da_publicacao(pub_id: uuid.UUID, db: Session = Depends(get_db)):
         "pericia": "pericia",
     }
     tipo = MAPA_TIPO.get(analise.get("peca_necessaria", ""), "outro")
-    dias = analise.get("dias_prazo") or 15
+    try:
+        dias = int(analise.get("dias_prazo") or 15)
+    except (TypeError, ValueError):
+        dias = 15
     tipo_contagem = analise.get("tipo_contagem", "uteis")
     data_pub = analise.get("data_publicacao") or str(pub.data_publicacao)
 
@@ -648,7 +651,10 @@ def criar_prazo_da_publicacao(pub_id: uuid.UUID, db: Session = Depends(get_db)):
         if proc:
             estado = proc.estado if proc.estado != "outro" else "SP"
 
-    dp = _date.fromisoformat(data_pub) if isinstance(data_pub, str) else data_pub
+    try:
+        dp = _date.fromisoformat(data_pub) if isinstance(data_pub, str) else data_pub
+    except (TypeError, ValueError):
+        dp = pub.data_publicacao
     data_limite, data_limite_sf = calcular_prazo(
         db=db,
         data_publicacao=dp,
@@ -669,6 +675,7 @@ def criar_prazo_da_publicacao(pub_id: uuid.UUID, db: Session = Depends(get_db)):
         status="pendente",
     )
     db.add(prazo)
+    db.flush()
 
     # Vincula prazo à publicação
     pub.prazo_id = prazo.id
