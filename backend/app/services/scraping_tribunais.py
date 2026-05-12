@@ -435,6 +435,16 @@ def _extrair_data_publicacao_texto(texto: str, fallback: date) -> date:
         return fallback
 
 
+def _resposta_tjes_bloqueada(resp: httpx.Response, texto: str) -> bool:
+    texto_norm = _normalizar_texto(texto)
+    return (
+        resp.status_code in {403, 405}
+        or "human verification" in texto_norm
+        or "403 forbidden" in texto_norm
+        or "javascript is disabled" in texto_norm
+    )
+
+
 def _scrape_tjes_ediario(data: date, termos: list[str] | None = None) -> list[dict]:
     url = "https://sistemas.tjes.jus.br/ediario/index.php"
     base_params = {
@@ -446,12 +456,17 @@ def _scrape_tjes_ediario(data: date, termos: list[str] | None = None) -> list[di
     consultas = [base_params, {**base_params, "idorgao": "766"}]
     resultado: list[dict] = []
     vistos: set[str] = set()
+    bloqueios: list[str] = []
     try:
         for params in consultas:
             resp = httpx.get(url, params=params, headers=HEADERS, timeout=20, follow_redirects=True)
+            texto_html = resp.text or ""
+            if _resposta_tjes_bloqueada(resp, texto_html):
+                bloqueios.append(str(resp.status_code))
+                continue
             if not resp.is_success:
                 continue
-            soup = BeautifulSoup(resp.text, "html.parser")
+            soup = BeautifulSoup(texto_html, "html.parser")
             texto = soup.get_text(" ", strip=True)
             data_publicacao = _extrair_data_publicacao_texto(str(texto), data)
             for pub in _texto_ediario_tjes_para_publicacoes(str(texto), data_publicacao, termos=termos, url_fonte=str(resp.url)):
@@ -464,7 +479,15 @@ def _scrape_tjes_ediario(data: date, termos: list[str] | None = None) -> list[di
                     continue
                 vistos.add(chave)
                 resultado.append(pub)
+        if bloqueios and not resultado:
+            raise DiarioScrapingError(
+                "TJES local/pautas: a fonte exigiu verificação humana e bloqueou a consulta automática."
+            )
         return resultado
+    except DiarioScrapingError:
+        raise
+    except httpx.HTTPError as exc:
+        raise DiarioScrapingError(f"TJES local/pautas: falha de acesso à fonte local ({exc.__class__.__name__}).")
     except Exception:
         return []
 
@@ -713,7 +736,12 @@ def scrape_tjes(data: date | None = None, termos: list[str] | None = None) -> li
     except Exception:
         pass
 
-    publicacoes.extend(_scrape_tjes_ediario(data, termos=termos))
+    try:
+        publicacoes.extend(_scrape_tjes_ediario(data, termos=termos))
+    except DiarioScrapingError:
+        if publicacoes:
+            return publicacoes
+        raise
 
     return publicacoes
 

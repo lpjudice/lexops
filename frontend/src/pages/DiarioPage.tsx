@@ -156,6 +156,8 @@ export default function DiarioPage() {
   const [clientesExtras, setClientesExtras] = useState<string[]>([])
   const [novoAdvogado, setNovoAdvogado] = useState('')
   const [novoClienteExtra, setNovoClienteExtra] = useState('')
+  const [manualTexto, setManualTexto] = useState('')
+  const [manualData, setManualData] = useState('')
   const [pjeModalAberto, setPjeModalAberto] = useState(false)
   const [pjeCpf, setPjeCpf] = useState('')
   const [pjeSenha, setPjeSenha] = useState('')
@@ -260,6 +262,24 @@ export default function DiarioPage() {
       const erroMsg = r.erros ? `, ${r.erros} erro(s)` : ''
       setSyncMsg(r.mensagem || `Clientes: ${r.inseridas} novas, ${r.duplicatas} duplicatas${erroMsg}`)
       setTimeout(() => setSyncMsg(null), 6000)
+    },
+  })
+
+  const importarManual = useMutation({
+    mutationFn: () => diarioApi.importarManual({
+      texto: manualTexto,
+      tribunal: 'TJES',
+      data_publicacao: manualData || undefined,
+    }),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['diario'] })
+      setSyncMsg(r.mensagem || `Importação manual: ${r.inseridas} nova(s), ${r.duplicatas} duplicata(s).`)
+      if (r.inseridas > 0) setManualTexto('')
+      setTimeout(() => setSyncMsg(null), 10000)
+    },
+    onError: (e) => {
+      setSyncMsg(extractErrorMessage(e, 'Não foi possível importar o texto da pauta.'))
+      setTimeout(() => setSyncMsg(null), 10000)
     },
   })
 
@@ -591,6 +611,39 @@ export default function DiarioPage() {
       <div className={diarioStyles.syncMsg} style={{ background: '#1f2937', borderColor: '#374151', color: '#cbd5e1' }}>
         Os botões por tribunal e o cron buscam apenas processos cadastrados e advogados monitorados. A busca por clientes fica separada no botão "Buscar clientes" para reduzir ruído e excesso de consultas.
       </div>
+
+      <details className={diarioStyles.manualImportBox}>
+        <summary className={diarioStyles.manualImportSummary}>
+          Importar texto de pauta/e-Diário bloqueado
+        </summary>
+        <div className={diarioStyles.manualImportContent}>
+          <p>
+            Use quando a fonte local do TJES exigir verificação humana. Cole o texto público da pauta ou publicação; o sistema salva apenas se encontrar cliente monitorado ou CNJ cadastrado.
+          </p>
+          <div className={diarioStyles.manualImportControls}>
+            <input
+              className={diarioStyles.manualDateInput}
+              type="date"
+              value={manualData}
+              onChange={(e) => setManualData(e.target.value)}
+              title="Data de publicação"
+            />
+            <button
+              className={diarioStyles.btnTribunais}
+              disabled={importarManual.isPending || manualTexto.trim().length < 20}
+              onClick={() => importarManual.mutate()}
+            >
+              {importarManual.isPending ? 'Importando...' : 'Importar TJES'}
+            </button>
+          </div>
+          <textarea
+            className={diarioStyles.manualTextarea}
+            placeholder="Cole aqui o texto da pauta/publicação do TJES..."
+            value={manualTexto}
+            onChange={(e) => setManualTexto(e.target.value)}
+          />
+        </div>
+      </details>
 
       {/* Termos de Monitoramento */}
       <div className={diarioStyles.termosBox}>

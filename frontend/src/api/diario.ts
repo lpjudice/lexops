@@ -79,6 +79,9 @@ export const diarioApi = {
       params: { days_back },
     }).then((r) => r.data),
 
+  importarManual: (payload: { texto: string; tribunal?: string; data_publicacao?: string }) =>
+    api.post<SyncResult>('/diario/scraping/manual-import', payload).then((r) => r.data),
+
   marcarLida: (id: string) =>
     api.patch<Publicacao>(`/diario/${id}/lida`).then((r) => r.data),
 

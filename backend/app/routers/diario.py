@@ -20,7 +20,9 @@ from app.services.ia_diario import analisar_publicacao
 from app.services.scraping_tribunais import (
     DiarioScrapingError,
     _limpar_html_publicacao,
+    _montar_publicacao,
     _nome_restrito_no_texto,
+    _texto_ediario_tjes_para_publicacoes,
     scrape_todos,
 )
 
@@ -33,6 +35,12 @@ class DiarioMonitoringConfig(BaseModel):
     advogados_monitorados: list[str] = []
     clientes_monitorados_extras: list[str] = []
     auto_sync: bool = True
+
+
+class DiarioManualImportRequest(BaseModel):
+    texto: str
+    tribunal: str = "TJES"
+    data_publicacao: date | None = None
 
 
 def _normalizar_texto_busca(texto: str) -> str:
@@ -371,6 +379,11 @@ def _inserir_publicacoes(itens: list[dict], db: Session) -> tuple[int, int, int]
 
 def _mensagem_erro_scraping(exc: DiarioScrapingError) -> str:
     detalhe = str(exc)
+    if "verificação humana" in detalhe.casefold() or "human verification" in detalhe.casefold():
+        return (
+            "A fonte local do Diário exigiu verificação humana e bloqueou a consulta automática. "
+            "Use a importação manual do texto público da pauta/e-Diário para não perder a leitura."
+        )
     if re.search(r"(?<!\d)429(?!\d)", detalhe):
         return (
             "A fonte do Diário limitou temporariamente as consultas por excesso de buscas "
@@ -475,6 +488,51 @@ def sync_scraping_clientes(
         erros=totais["erros"],
         fonte="scraping_clientes",
         mensagem=mensagem,
+    )
+
+
+@router.post("/scraping/manual-import", response_model=SyncResult)
+def importar_publicacao_manual(
+    payload: DiarioManualImportRequest,
+    db: Session = Depends(get_db),
+):
+    """Importa texto público de pauta/e-Diário quando a fonte local bloqueia automação."""
+    texto = (payload.texto or "").strip()
+    if len(texto) < 20:
+        raise HTTPException(status_code=400, detail="Cole o texto da publicação ou pauta antes de importar.")
+
+    tribunal = (payload.tribunal or "TJES").upper()
+    data_pub = payload.data_publicacao or date.today()
+    if tribunal == "TJES":
+        itens = _texto_ediario_tjes_para_publicacoes(
+            texto,
+            data_pub,
+            termos=None,
+            url_fonte="importação manual",
+        )
+    else:
+        itens = []
+
+    if not itens:
+        itens = [_montar_publicacao(texto, tribunal, "manual", data_pub)]
+
+    filtrados = _filtrar_itens_monitorados(itens, db, incluir_clientes=True, incluir_advogados=False)
+    if not filtrados:
+        return SyncResult(
+            inseridas=0,
+            duplicatas=0,
+            erros=0,
+            fonte="manual",
+            mensagem="Importação lida, mas nenhum cliente monitorado ou processo cadastrado foi encontrado no texto.",
+        )
+
+    ins, dup, err = _inserir_publicacoes(filtrados, db)
+    return SyncResult(
+        inseridas=ins,
+        duplicatas=dup,
+        erros=err,
+        fonte="manual",
+        mensagem=f"Importação manual: {ins} nova(s), {dup} duplicata(s).",
     )
 
 
