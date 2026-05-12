@@ -161,6 +161,19 @@ def _match_publicacao_monitorada(
                 "match_detalhes": {"origem": "numero_cnj_no_texto"},
             }
 
+    query_campo = item.get("_query_campo")
+    query_termo = item.get("_query_termo")
+    if query_campo == "nomeParte" and query_termo:
+        for nome in clientes_monitorados or []:
+            if _normalizar_texto_busca(nome) == _normalizar_texto_busca(query_termo) and _nome_monitorado_no_texto(texto, nome):
+                return {
+                    "match_tipo": "cliente",
+                    "match_categoria": "cliente",
+                    "match_nome": nome,
+                    "match_processo_id": None,
+                    "match_detalhes": {"origem": "cliente_monitorado_nome_parte"},
+                }
+
     for nome in advogados_monitorados:
         if _nome_monitorado_no_texto(texto, nome):
             return {
@@ -442,6 +455,7 @@ def sync_scraping_clientes(
                 data=data,
                 termos=termos_clientes,
                 days_back=days_back,
+                somente_nome_parte=True,
             )
             itens = _filtrar_itens_monitorados(itens, db, incluir_clientes=True, incluir_advogados=False)
             ins, dup, err = _inserir_publicacoes(itens, db)

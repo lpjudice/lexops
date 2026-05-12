@@ -395,7 +395,70 @@ def _extrair_por_cnj_global(
     return resultado
 
 
-def _consultas_comunica(termos: list[str] | None = None) -> list[tuple[str, int, str, str, int]]:
+def _texto_ediario_tjes_para_publicacoes(
+    texto: str,
+    data_pub: date,
+    termos: list[str] | None = None,
+    url_fonte: str | None = None,
+) -> list[dict]:
+    chunks = [chunk.strip() for chunk in re.split(r"\s*\*\s*\*\s*\*\s*", texto) if chunk.strip()]
+    if len(chunks) <= 1:
+        chunks = []
+        cnjs = list(CNJ_RE.finditer(texto))
+        for idx, match in enumerate(cnjs):
+            inicio = max(0, texto.rfind("\n", 0, match.start()))
+            if inicio <= 0:
+                inicio = max(0, match.start() - 700)
+            fim = cnjs[idx + 1].start() if idx + 1 < len(cnjs) else min(len(texto), match.end() + 1500)
+            chunks.append(texto[inicio:fim].strip())
+
+    resultado: list[dict] = []
+    for chunk in chunks:
+        if termos and not _texto_tem_match_monitorado(chunk, termos):
+            continue
+        for cnj in sorted(set(CNJ_RE.findall(chunk))):
+            pub = _montar_publicacao(chunk, "TJES", "scraping_tjes", data_pub, numero_cnj=cnj)
+            if url_fonte:
+                pub["url_fonte"] = url_fonte
+            resultado.append(pub)
+    return resultado
+
+
+def _extrair_data_publicacao_texto(texto: str, fallback: date) -> date:
+    match = re.search(r"Data\s+de\s+Publica[çc][ãa]o:\s*(\d{2})/(\d{2})/(\d{4})", texto, re.IGNORECASE)
+    if not match:
+        return fallback
+    dia, mes, ano = map(int, match.groups())
+    try:
+        return date(ano, mes, dia)
+    except ValueError:
+        return fallback
+
+
+def _scrape_tjes_ediario(data: date, termos: list[str] | None = None) -> list[dict]:
+    url = "https://sistemas.tjes.jus.br/ediario/index.php"
+    params = {
+        "data": data.strftime("%Y%m%d"),
+        "layout": "fulltext",
+        "option": "com_ediario",
+        "view": "contents",
+    }
+    try:
+        resp = httpx.get(url, params=params, headers=HEADERS, timeout=20, follow_redirects=True)
+        if not resp.is_success:
+            return []
+        soup = BeautifulSoup(resp.text, "html.parser")
+        texto = soup.get_text(" ", strip=True)
+        data_publicacao = _extrair_data_publicacao_texto(str(texto), data)
+        return _texto_ediario_tjes_para_publicacoes(str(texto), data_publicacao, termos=termos, url_fonte=str(resp.url))
+    except Exception:
+        return []
+
+
+def _consultas_comunica(
+    termos: list[str] | None = None,
+    somente_nome_parte: bool = False,
+) -> list[tuple[str, int, str, str, int]]:
     """
     Gera uma lista enxuta de consultas para a API pública.
     Mantém variações úteis, mas evita dezenas de requests para um único nome.
@@ -424,11 +487,13 @@ def _consultas_comunica(termos: list[str] | None = None) -> list[tuple[str, int,
             adicionar(termo_original, -1, "numeroProcesso", re.sub(r"\D", "", termo_original), COMUNICA_MAX_PAGINAS)
             adicionar(termo_original, 0, "texto", _formatar_numero_cnj(termo_original) or termo_original, COMUNICA_MAX_PAGINAS)
         else:
-            adicionar(termo_original, 0, "texto", termo_original, COMUNICA_MAX_PAGINAS)
+            if not somente_nome_parte:
+                adicionar(termo_original, 0, "texto", termo_original, COMUNICA_MAX_PAGINAS)
             adicionar(termo_original, 1, "nomeParte", termo_original, COMUNICA_MAX_PAGINAS)
-            adicionar(termo_original, 1, "nomeAdvogado", termo_original, COMUNICA_MAX_PAGINAS)
+            if not somente_nome_parte:
+                adicionar(termo_original, 1, "nomeAdvogado", termo_original, COMUNICA_MAX_PAGINAS)
             tokens = _tokenizar_relevantes(termo_original)
-            if len(tokens) >= 4:
+            if len(tokens) >= 4 and not somente_nome_parte:
                 adicionar(termo_original, 2, "texto", f"{tokens[0]} {tokens[-1]}", COMUNICA_MAX_PAGINAS)
                 adicionar(termo_original, 2, "nomeParte", f"{tokens[0]} {tokens[-1]}", COMUNICA_MAX_PAGINAS)
                 adicionar(termo_original, 2, "nomeAdvogado", f"{tokens[0]} {tokens[-1]}", COMUNICA_MAX_PAGINAS)
@@ -492,6 +557,7 @@ def _buscar_comunica_api(
     data_inicio: date,
     data_fim: date,
     termos: list[str] | None = None,
+    somente_nome_parte: bool = False,
 ) -> list[dict]:
     """
     Consulta a API pública do DJEN/Comunica.
@@ -502,7 +568,7 @@ def _buscar_comunica_api(
 
     vistos: set[str] = set()
     resultado: list[dict] = []
-    consultas = _consultas_comunica(termos)
+    consultas = _consultas_comunica(termos, somente_nome_parte=somente_nome_parte)
     falhas: list[str] = []
 
     with httpx.Client(headers=HEADERS, timeout=COMUNICA_TIMEOUT_SECONDS, follow_redirects=True) as client:
@@ -561,6 +627,8 @@ def _buscar_comunica_api(
                     if termos and not _texto_tem_match_monitorado(texto_match, termos):
                         continue
                     pub["_match_text"] = texto_match
+                    pub["_query_campo"] = campo
+                    pub["_query_termo"] = origem
                     chave = str(item.get("id") or "") or "|".join(
                         [
                             pub.get("fonte", "") or "",
@@ -630,6 +698,8 @@ def scrape_tjes(data: date | None = None, termos: list[str] | None = None) -> li
 
     except Exception:
         pass
+
+    publicacoes.extend(_scrape_tjes_ediario(data, termos=termos))
 
     return publicacoes
 
@@ -788,6 +858,7 @@ def scrape_todos(
     data: date | None = None,
     termos: list[str] | None = None,
     days_back: int = 1,
+    somente_nome_parte: bool = False,
 ) -> list[dict]:
     """
     Roda todos os scrapers (ou só os solicitados) e retorna lista unificada.
@@ -816,7 +887,7 @@ def scrape_todos(
 
         # DJEN e os estados mais recentes ficam mais confiáveis via API pública do CNJ.
         if tribunal in {"DJEN", "TJES", "TJSP", "TJAM", "TJRJ"}:
-            novos = _buscar_comunica_api(tribunal, data_inicio, data_fim, termos=termos)
+            novos = _buscar_comunica_api(tribunal, data_inicio, data_fim, termos=termos, somente_nome_parte=somente_nome_parte)
             if novos or tribunal == "DJEN":
                 for pub in novos:
                     chave = "|".join(

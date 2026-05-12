@@ -398,6 +398,17 @@ export default function DiarioPage() {
     }
   }
 
+  const criarTeseDireto = async (pub: Publicacao) => {
+    try {
+      if (!pub.analise_ia) {
+        await analisar.mutateAsync(pub.id)
+      }
+      await criarTese.mutateAsync(pub.id)
+    } catch (e) {
+      setAcaoMsg((m) => ({ ...m, [pub.id]: m[pub.id] || `⚠ ${extractErrorMessage(e, 'Não foi possível criar a tese')}` }))
+    }
+  }
+
   const SEM_PUB = 'Sem publicações nesta edição.'
   const publicacoesEnriquecidas = [...publicacoes]
     .map((pub) => ({ pub, tab: getMatchTab(pub), termosDestaque: buildHighlightTerms(pub) }))
@@ -889,7 +900,21 @@ export default function DiarioPage() {
                           disabled={isAnalisando || !!pub.prazo_id}
                           onClick={() => criarPrazoDireto({ pub, tab, termosDestaque })}
                         >
-                          {pub.prazo_id ? 'Prazo já criado' : isAnalisando ? 'Preparando...' : '+ Criar Prazo'}
+                          {pub.prazo_id
+                            ? 'Prazo já criado'
+                            : isAnalisando
+                              ? 'Preparando...'
+                              : !pub.processo_id && !pub.match_processo_id
+                                ? 'Vincular para Prazo'
+                                : '+ Criar Prazo'}
+                        </button>
+                        <button
+                          className={diarioStyles.btnCriarTese}
+                          disabled={isAnalisando || (criarTese.isPending && criarTese.variables === pub.id)}
+                          onClick={() => criarTeseDireto(pub)}
+                        >
+                          {criarTese.isPending && criarTese.variables === pub.id
+                            ? 'Criando...' : '✦ Criar Tese IA'}
                         </button>
                       </div>
                     ) : analise.erro ? (
@@ -938,12 +963,14 @@ export default function DiarioPage() {
                               ? 'Criando...'
                               : !pub.processo_id && pub.match_processo_id
                                 ? '+ Vincular e Criar Prazo'
+                                : !pub.processo_id
+                                  ? 'Vincular para Prazo'
                                 : '+ Criar Prazo'}
                           </button>
                           <button
                             className={diarioStyles.btnCriarTese}
                             disabled={criarTese.isPending && criarTese.variables === pub.id}
-                            onClick={() => criarTese.mutate(pub.id)}
+                            onClick={() => criarTeseDireto(pub)}
                           >
                             {criarTese.isPending && criarTese.variables === pub.id
                               ? 'Criando...' : '✦ Criar Tese IA'}
@@ -955,14 +982,14 @@ export default function DiarioPage() {
                             ↻
                           </button>
                         </div>
-                        {acaoMsg[pub.id] && (
-                          <div className={diarioStyles.acaoMsg}>{acaoMsg[pub.id]}</div>
-                        )}
                       </div>
                     )}
                   </div>
                 )
               })()}
+              {acaoMsg[pub.id] && (
+                <div className={diarioStyles.acaoMsg}>{acaoMsg[pub.id]}</div>
+              )}
 
               {expandido === pub.id && pub.texto_completo && (
                 <div
