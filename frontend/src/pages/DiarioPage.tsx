@@ -357,7 +357,7 @@ export default function DiarioPage() {
 
   const syncScraping = useMutation({
     mutationFn: ({ tribunais, label }: { tribunais: string[]; label: string }) =>
-      diarioApi.syncScraping(tribunais, termosBuscaDiario, daysBack).then((r) => ({
+      diarioApi.syncScraping(tribunais, [], daysBack).then((r) => ({
         ...r,
         label,
         periodo: getSyncPeriod(daysBack),

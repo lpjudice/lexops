@@ -182,15 +182,19 @@ def _inserir_publicacoes(itens: list[dict], db: Session) -> tuple[int, int, int]
                     q = q.filter(Publicacao.numero_cnj == item.get("numero_cnj"))
                 else:
                     q = q.filter(Publicacao.texto_resumo == item.get("texto_resumo"))
-                candidatos = q.all()
-                existe = next(
-                    (
-                        pub
-                        for pub in candidatos
-                        if _texto_chave_publicacao(pub.texto_resumo or pub.texto_completo) == texto_chave
-                    ),
-                    None,
-                )
+                existe = None
+                if item.get("url_fonte"):
+                    existe = q.filter(Publicacao.url_fonte == item.get("url_fonte")).first()
+                if not existe:
+                    candidatos = q.all()
+                    existe = next(
+                        (
+                            pub
+                            for pub in candidatos
+                            if _texto_chave_publicacao(pub.texto_resumo or pub.texto_completo) == texto_chave
+                        ),
+                        None,
+                    )
 
             if existe:
                 duplicatas += 1
