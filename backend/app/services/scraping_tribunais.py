@@ -437,20 +437,34 @@ def _extrair_data_publicacao_texto(texto: str, fallback: date) -> date:
 
 def _scrape_tjes_ediario(data: date, termos: list[str] | None = None) -> list[dict]:
     url = "https://sistemas.tjes.jus.br/ediario/index.php"
-    params = {
+    base_params = {
         "data": data.strftime("%Y%m%d"),
         "layout": "fulltext",
         "option": "com_ediario",
         "view": "contents",
     }
+    consultas = [base_params, {**base_params, "idorgao": "766"}]
+    resultado: list[dict] = []
+    vistos: set[str] = set()
     try:
-        resp = httpx.get(url, params=params, headers=HEADERS, timeout=20, follow_redirects=True)
-        if not resp.is_success:
-            return []
-        soup = BeautifulSoup(resp.text, "html.parser")
-        texto = soup.get_text(" ", strip=True)
-        data_publicacao = _extrair_data_publicacao_texto(str(texto), data)
-        return _texto_ediario_tjes_para_publicacoes(str(texto), data_publicacao, termos=termos, url_fonte=str(resp.url))
+        for params in consultas:
+            resp = httpx.get(url, params=params, headers=HEADERS, timeout=20, follow_redirects=True)
+            if not resp.is_success:
+                continue
+            soup = BeautifulSoup(resp.text, "html.parser")
+            texto = soup.get_text(" ", strip=True)
+            data_publicacao = _extrair_data_publicacao_texto(str(texto), data)
+            for pub in _texto_ediario_tjes_para_publicacoes(str(texto), data_publicacao, termos=termos, url_fonte=str(resp.url)):
+                chave = "|".join([
+                    str(pub.get("data_publicacao", "")),
+                    pub.get("numero_cnj", "") or "",
+                    (pub.get("texto_resumo", "") or "")[:180],
+                ])
+                if chave in vistos:
+                    continue
+                vistos.add(chave)
+                resultado.append(pub)
+        return resultado
     except Exception:
         return []
 
