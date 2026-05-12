@@ -1,6 +1,5 @@
 import json
 import re
-import time
 import uuid
 from datetime import date
 
@@ -17,14 +16,7 @@ from app.models.tese import Tese
 from app.schemas.publicacao import PublicacaoOut, PublicacaoUpdate, SyncResult
 from app.services.gmail_diario import sincronizar_gmail
 from app.services.ia_diario import analisar_publicacao
-from app.services.scraping_tribunais import (
-    DiarioScrapingError,
-    _limpar_html_publicacao,
-    _montar_publicacao,
-    _nome_restrito_no_texto,
-    _texto_ediario_tjes_para_publicacoes,
-    scrape_todos,
-)
+from app.services.scraping_tribunais import scrape_todos
 
 router = APIRouter(prefix="/diario", tags=["diario"])
 
@@ -32,15 +24,7 @@ router = APIRouter(prefix="/diario", tags=["diario"])
 class DiarioMonitoringConfig(BaseModel):
     tribunais: list[str]
     termos_extras: list[str]
-    advogados_monitorados: list[str] = []
-    clientes_monitorados_extras: list[str] = []
     auto_sync: bool = True
-
-
-class DiarioManualImportRequest(BaseModel):
-    texto: str
-    tribunal: str = "TJES"
-    data_publicacao: date | None = None
 
 
 def _normalizar_texto_busca(texto: str) -> str:
@@ -65,33 +49,17 @@ def _termo_exato_no_texto(texto: str, termo: str) -> bool:
     return re.search(padrao, _normalizar_texto_busca(texto)) is not None
 
 
-def _limpar_nome_monitorado(nome: str) -> str:
-    nome = re.sub(r"\([^)]*\)", " ", nome or "")
-    return re.sub(r"\s+", " ", nome).strip()
-
-
-def _tokens_nome_monitorado(nome: str) -> list[str]:
-    tokens = re.findall(r"[a-z0-9]+", _normalizar_texto_busca(_limpar_nome_monitorado(nome)))
-    stopwords = {"da", "das", "de", "do", "dos", "e", "em", "na", "nas", "no", "nos", "ltda", "cliente"}
-    return [token for token in tokens if len(token) >= 4 and token not in stopwords]
-
-
-def _nome_monitorado_no_texto(texto: str, nome: str) -> bool:
-    if len(_tokens_nome_monitorado(nome)) < 2:
-        return False
-    return _termo_exato_no_texto(texto, nome) or _nome_restrito_no_texto(texto, nome)
-
-
-def _dedupe_valores(valores: list[str]) -> list[str]:
+def _nomes_monitorados(db: Session, termos_extras: list[str] | None = None) -> list[str]:
+    nomes = [c.nome.strip() for c in db.query(Cliente).all() if getattr(c, "nome", None) and c.nome.strip()]
+    nomes.extend([t.strip() for t in (termos_extras or []) if t and t.strip()])
     vistos: set[str] = set()
     resultado: list[str] = []
-    for valor in valores:
-        valor_limpo = _limpar_nome_monitorado(str(valor or "").strip())
-        chave = _normalizar_cnj(valor_limpo) if len(_normalizar_cnj(valor_limpo)) == 20 else _normalizar_texto_busca(valor_limpo)
+    for nome in nomes:
+        chave = _normalizar_texto_busca(nome)
         if not chave or chave in vistos:
             continue
         vistos.add(chave)
-        resultado.append(valor_limpo)
+        resultado.append(nome)
     return resultado
 
 
@@ -104,181 +72,90 @@ def _processos_por_cnj(db: Session) -> dict[str, Processo]:
     }
 
 
-def _advogados_monitorados() -> list[str]:
+def _termos_monitorados_para_busca(
+    db: Session,
+    termos_busca: list[str] | None = None,
+) -> list[str]:
     from app.services.diario_monitoring import load_monitoring_config
 
     config = load_monitoring_config()
-    return _dedupe_valores(config.get("advogados_monitorados") or config.get("termos_extras") or [])
-
-
-def _clientes_monitorados(db: Session) -> list[str]:
-    from app.services.diario_monitoring import load_monitoring_config
-
-    config = load_monitoring_config()
-    valores = [
+    valores: list[str] = []
+    valores.extend(termos_busca or [])
+    valores.extend(config.get("termos_extras") or [])
+    valores.extend(
         cliente.nome.strip()
         for cliente in db.query(Cliente).all()
         if getattr(cliente, "nome", None) and cliente.nome.strip()
-    ]
-    valores.extend(config.get("clientes_monitorados_extras") or [])
-    return _dedupe_valores(valores)
-
-
-def _processos_monitorados_para_busca(db: Session) -> list[str]:
-    return _dedupe_valores([
+    )
+    valores.extend(
         processo.numero_cnj.strip()
         for processo in db.query(Processo).all()
         if getattr(processo, "numero_cnj", None) and processo.numero_cnj.strip()
-    ])
+    )
+
+    vistos: set[str] = set()
+    resultado: list[str] = []
+    for valor in valores:
+        valor_limpo = str(valor or "").strip()
+        chave = _normalizar_cnj(valor_limpo) if len(_normalizar_cnj(valor_limpo)) == 20 else _normalizar_texto_busca(valor_limpo)
+        if not valor_limpo or not chave or chave in vistos:
+            continue
+        vistos.add(chave)
+        resultado.append(valor_limpo)
+    return resultado
 
 
-def _termos_monitorados_para_busca(db: Session, incluir_clientes: bool = False) -> list[str]:
-    valores = [*_processos_monitorados_para_busca(db), *_advogados_monitorados()]
-    if incluir_clientes:
-        valores.extend(_clientes_monitorados(db))
-    return _dedupe_valores(valores)
-
-
-def _match_publicacao_monitorada(
+def _item_tem_match_monitorado_exato(
     item: dict,
     processos_por_cnj: dict[str, Processo],
-    advogados_monitorados: list[str],
-    clientes_monitorados: list[str] | None = None,
-) -> dict | None:
-    texto = f"{item.get('_match_text') or ''} {item.get('texto_completo') or ''} {item.get('texto_resumo') or ''}"
+    nomes_monitorados: list[str],
+) -> tuple[bool, uuid.UUID | None]:
+    texto = f"{item.get('texto_completo') or ''} {item.get('texto_resumo') or ''}"
     cnj_item = _normalizar_cnj(item.get("numero_cnj"))
     if cnj_item and cnj_item in processos_por_cnj:
-        processo = processos_por_cnj[cnj_item]
-        return {
-            "match_tipo": "processo",
-            "match_categoria": "processo",
-            "match_nome": processo.numero_cnj,
-            "match_processo_id": processo.id,
-            "processo_id": processo.id,
-            "match_detalhes": {"origem": "numero_cnj_publicado"},
-        }
+        return True, processos_por_cnj[cnj_item].id
 
     for cnj, processo in processos_por_cnj.items():
         if cnj and cnj in _normalizar_cnj(texto):
-            return {
-                "match_tipo": "processo",
-                "match_categoria": "processo",
-                "match_nome": processo.numero_cnj,
-                "match_processo_id": processo.id,
-                "processo_id": processo.id,
-                "match_detalhes": {"origem": "numero_cnj_no_texto"},
-            }
+            return True, processo.id
 
-    query_campo = item.get("_query_campo")
-    query_termo = item.get("_query_termo")
-    if query_campo == "nomeParte" and query_termo:
-        for nome in clientes_monitorados or []:
-            if _normalizar_texto_busca(nome) == _normalizar_texto_busca(query_termo) and _nome_monitorado_no_texto(texto, nome):
-                return {
-                    "match_tipo": "cliente",
-                    "match_categoria": "cliente",
-                    "match_nome": nome,
-                    "match_processo_id": None,
-                    "match_detalhes": {"origem": "cliente_monitorado_nome_parte"},
-                }
+    for nome in nomes_monitorados:
+        if _termo_exato_no_texto(texto, nome):
+            return True, None
 
-    for nome in advogados_monitorados:
-        if _nome_monitorado_no_texto(texto, nome):
-            return {
-                "match_tipo": "advogado",
-                "match_categoria": "advogado",
-                "match_nome": nome,
-                "match_processo_id": None,
-                "match_detalhes": {"origem": "advogado_monitorado"},
-            }
-
-    for nome in clientes_monitorados or []:
-        if _nome_monitorado_no_texto(texto, nome):
-            return {
-                "match_tipo": "cliente",
-                "match_categoria": "cliente",
-                "match_nome": nome,
-                "match_processo_id": None,
-                "match_detalhes": {"origem": "cliente_monitorado"},
-            }
-
-    return None
+    return False, None
 
 
-def _aplicar_match_item(item: dict, match: dict) -> dict:
-    detalhes = match.get("match_detalhes")
-    item = {
-        **item,
-        "match_tipo": match.get("match_tipo"),
-        "match_nome": match.get("match_nome"),
-        "match_categoria": match.get("match_categoria"),
-        "match_processo_id": match.get("match_processo_id"),
-        "match_detalhes": json.dumps(detalhes or {}, ensure_ascii=False),
-    }
-    if match.get("processo_id"):
-        item["processo_id"] = match["processo_id"]
-    return item
-
-
-def _filtrar_itens_monitorados(
+def _filtrar_itens_monitorados_exatos(
     itens: list[dict],
     db: Session,
-    incluir_clientes: bool = False,
-    incluir_advogados: bool = True,
+    termos_busca: list[str] | None = None,
 ) -> list[dict]:
+    from app.services.diario_monitoring import load_monitoring_config
+
+    config = load_monitoring_config()
     processos_por_cnj = _processos_por_cnj(db)
-    advogados = _advogados_monitorados() if incluir_advogados else []
-    clientes = _clientes_monitorados(db) if incluir_clientes else []
+    termos_extras = [
+        termo
+        for termo in [*(config.get("termos_extras") or []), *(termos_busca or [])]
+        if len(_normalizar_cnj(termo)) != 20
+    ]
+    nomes_monitorados = _nomes_monitorados(db, termos_extras)
 
     filtrados: list[dict] = []
     for item in itens:
-        match = _match_publicacao_monitorada(item, processos_por_cnj, advogados, clientes)
-        if not match:
+        ok, processo_id = _item_tem_match_monitorado_exato(item, processos_por_cnj, nomes_monitorados)
+        if not ok:
             continue
-        filtrados.append(_aplicar_match_item(item, match))
+        if processo_id:
+            item = {**item, "processo_id": processo_id}
+        filtrados.append(item)
     return filtrados
-
-
-def _reclassificar_publicacao(pub: Publicacao, db: Session) -> bool:
-    item = {
-        "numero_cnj": pub.numero_cnj,
-        "texto_resumo": pub.texto_resumo,
-        "texto_completo": pub.texto_completo,
-    }
-    match = _match_publicacao_monitorada(
-        item,
-        _processos_por_cnj(db),
-        _advogados_monitorados(),
-        _clientes_monitorados(db),
-    )
-    if not match:
-        match = {
-            "match_tipo": "revisar",
-            "match_categoria": "revisar",
-            "match_nome": None,
-            "match_processo_id": None,
-            "match_detalhes": {"origem": "sem_match_confiavel"},
-        }
-    novo_processo_id = match.get("processo_id") or pub.processo_id
-    valores = {
-        "match_tipo": match.get("match_tipo"),
-        "match_nome": match.get("match_nome"),
-        "match_categoria": match.get("match_categoria"),
-        "match_processo_id": match.get("match_processo_id"),
-        "match_detalhes": json.dumps(match.get("match_detalhes") or {}, ensure_ascii=False),
-        "processo_id": novo_processo_id,
-    }
-    alterou = False
-    for attr, valor in valores.items():
-        if getattr(pub, attr) != valor:
-            setattr(pub, attr, valor)
-            alterou = True
-    return alterou
 
 
 def _texto_chave_publicacao(texto: str | None) -> str:
     texto_norm = _normalizar_texto_busca(texto or "")
-    return texto_norm
+    return texto_norm[:300]
 
 
 def _inserir_publicacoes(itens: list[dict], db: Session) -> tuple[int, int, int]:
@@ -293,10 +170,7 @@ def _inserir_publicacoes(itens: list[dict], db: Session) -> tuple[int, int, int]
                     Publicacao.email_message_id == email_id
                 ).first()
             else:
-                texto_resumo_limpo = _limpar_html_publicacao(item.get("texto_resumo") or "")
-                texto_completo_limpo = _limpar_html_publicacao(item.get("texto_completo") or "")
-                item = {**item, "texto_resumo": texto_resumo_limpo, "texto_completo": texto_completo_limpo}
-                texto_chave = _texto_chave_publicacao(texto_resumo_limpo or texto_completo_limpo)
+                texto_chave = _texto_chave_publicacao(item.get("texto_resumo") or item.get("texto_completo"))
                 q = db.query(Publicacao).filter(
                     Publicacao.data_publicacao == item.get("data_publicacao"),
                     Publicacao.tribunal == item.get("tribunal"),
@@ -316,27 +190,6 @@ def _inserir_publicacoes(itens: list[dict], db: Session) -> tuple[int, int, int]
                 )
 
             if existe:
-                alterou = False
-                for attr in ("texto_resumo", "texto_completo"):
-                    texto_atual = getattr(existe, attr) or ""
-                    texto_limpo = _limpar_html_publicacao(texto_atual)
-                    texto_novo = item.get(attr) or ""
-                    if texto_novo and texto_novo != texto_atual:
-                        setattr(existe, attr, texto_novo)
-                        alterou = True
-                    elif texto_limpo and texto_limpo != texto_atual:
-                        setattr(existe, attr, texto_limpo)
-                        alterou = True
-                for attr in ("match_tipo", "match_nome", "match_categoria", "match_processo_id", "match_detalhes"):
-                    valor_novo = item.get(attr)
-                    if valor_novo is not None and getattr(existe, attr) != valor_novo:
-                        setattr(existe, attr, valor_novo)
-                        alterou = True
-                if item.get("processo_id") and existe.processo_id != item.get("processo_id"):
-                    existe.processo_id = item.get("processo_id")
-                    alterou = True
-                if alterou:
-                    db.add(existe)
                 duplicatas += 1
                 continue
 
@@ -362,11 +215,6 @@ def _inserir_publicacoes(itens: list[dict], db: Session) -> tuple[int, int, int]
                 email_message_id=email_id,
                 processo_id=processo_id,
                 url_fonte=item.get("url_fonte"),
-                match_tipo=item.get("match_tipo"),
-                match_nome=item.get("match_nome"),
-                match_categoria=item.get("match_categoria"),
-                match_processo_id=item.get("match_processo_id"),
-                match_detalhes=item.get("match_detalhes"),
             )
             db.add(pub)
             inseridas += 1
@@ -375,34 +223,6 @@ def _inserir_publicacoes(itens: list[dict], db: Session) -> tuple[int, int, int]
 
     db.commit()
     return inseridas, duplicatas, erros
-
-
-def _mensagem_erro_scraping(exc: DiarioScrapingError) -> str:
-    detalhe = str(exc)
-    if "verificação humana" in detalhe.casefold() or "human verification" in detalhe.casefold():
-        return (
-            "A fonte local do Diário exigiu verificação humana e bloqueou a consulta automática. "
-            "Use a importação manual do texto público da pauta/e-Diário para não perder a leitura."
-        )
-    if re.search(r"(?<!\d)429(?!\d)", detalhe):
-        return (
-            "A fonte do Diário limitou temporariamente as consultas por excesso de buscas "
-            "em sequência. Aguarde alguns minutos e tente novamente."
-        )
-    if re.search(r"(?<!\d)403(?!\d)", detalhe):
-        return (
-            "A fonte do Diário bloqueou temporariamente a consulta automática. "
-            "Tente novamente mais tarde."
-        )
-    if re.search(r"(?<!\d)5\d{2}(?!\d)", detalhe):
-        return (
-            "A fonte do Diário está instável neste momento. "
-            "Tente novamente em alguns minutos."
-        )
-    return (
-        "Não foi possível consultar o Diário Oficial agora. "
-        "Tente novamente em alguns minutos."
-    )
 
 
 # ── Sync endpoints ─────────────────────────────────────────────────────────────
@@ -427,115 +247,16 @@ def sync_scraping(
     tribunais_validos = [t for t in tribunais if t in {"TJES", "TJSP", "TJAM", "TJRJ", "DJEN"}]
     if not tribunais_validos:
         raise HTTPException(status_code=400, detail="Selecione ao menos um tribunal local válido.")
-    termos_monitorados = _termos_monitorados_para_busca(db, incluir_clientes=False)
-    try:
-        itens = scrape_todos(
-            tribunais=tribunais_validos,
-            data=data,
-            termos=termos_monitorados or None,
-            days_back=days_back,
-        )
-    except DiarioScrapingError as exc:
-        return SyncResult(
-            inseridas=0,
-            duplicatas=0,
-            erros=1,
-            fonte="scraping",
-            mensagem=_mensagem_erro_scraping(exc),
-        )
-    itens = _filtrar_itens_monitorados(itens, db, incluir_clientes=False, incluir_advogados=True)
+    termos_monitorados = _termos_monitorados_para_busca(db, termos)
+    itens = scrape_todos(
+        tribunais=tribunais_validos,
+        data=data,
+        termos=termos_monitorados or None,
+        days_back=days_back,
+    )
+    itens = _filtrar_itens_monitorados_exatos(itens, db, termos_monitorados)
     ins, dup, err = _inserir_publicacoes(itens, db)
     return SyncResult(inseridas=ins, duplicatas=dup, erros=err, fonte="scraping")
-
-
-@router.post("/scraping/clientes/sync", response_model=SyncResult)
-def sync_scraping_clientes(
-    data: date | None = Query(None),
-    days_back: int = Query(1, ge=1, le=30),
-    db: Session = Depends(get_db),
-):
-    """Busca manual separada por nomes de clientes em todas as fontes do Diário."""
-    # Clientes não precisam reconsultar CNJs de processos; isso já roda na busca padrão.
-    # Mantemos DJEN como fonte nacional do Comunica e TJES local/pautas como complemento.
-    tribunais_validos = ["DJEN", "TJES"]
-    termos_clientes = _dedupe_valores(_clientes_monitorados(db))
-    if not termos_clientes:
-        return SyncResult(inseridas=0, duplicatas=0, erros=0, fonte="scraping_clientes", mensagem="Nenhum cliente monitorado para buscar.")
-    totais = {"inseridas": 0, "duplicatas": 0, "erros": 0}
-    mensagens: list[str] = []
-    for tribunal in tribunais_validos:
-        try:
-            itens = scrape_todos(
-                tribunais=[tribunal],
-                data=data,
-                termos=termos_clientes,
-                days_back=days_back,
-                somente_nome_parte=True,
-            )
-            itens = _filtrar_itens_monitorados(itens, db, incluir_clientes=True, incluir_advogados=False)
-            ins, dup, err = _inserir_publicacoes(itens, db)
-            totais["inseridas"] += ins
-            totais["duplicatas"] += dup
-            totais["erros"] += err
-        except DiarioScrapingError as exc:
-            totais["erros"] += 1
-            mensagens.append(_mensagem_erro_scraping(exc))
-        except Exception:
-            totais["erros"] += 1
-        time.sleep(3)
-    mensagem = mensagens[0] if mensagens else None
-    return SyncResult(
-        inseridas=totais["inseridas"],
-        duplicatas=totais["duplicatas"],
-        erros=totais["erros"],
-        fonte="scraping_clientes",
-        mensagem=mensagem,
-    )
-
-
-@router.post("/scraping/manual-import", response_model=SyncResult)
-def importar_publicacao_manual(
-    payload: DiarioManualImportRequest,
-    db: Session = Depends(get_db),
-):
-    """Importa texto público de pauta/e-Diário quando a fonte local bloqueia automação."""
-    texto = (payload.texto or "").strip()
-    if len(texto) < 20:
-        raise HTTPException(status_code=400, detail="Cole o texto da publicação ou pauta antes de importar.")
-
-    tribunal = (payload.tribunal or "TJES").upper()
-    data_pub = payload.data_publicacao or date.today()
-    if tribunal == "TJES":
-        itens = _texto_ediario_tjes_para_publicacoes(
-            texto,
-            data_pub,
-            termos=None,
-            url_fonte="importação manual",
-        )
-    else:
-        itens = []
-
-    if not itens:
-        itens = [_montar_publicacao(texto, tribunal, "manual", data_pub)]
-
-    filtrados = _filtrar_itens_monitorados(itens, db, incluir_clientes=True, incluir_advogados=False)
-    if not filtrados:
-        return SyncResult(
-            inseridas=0,
-            duplicatas=0,
-            erros=0,
-            fonte="manual",
-            mensagem="Importação lida, mas nenhum cliente monitorado ou processo cadastrado foi encontrado no texto.",
-        )
-
-    ins, dup, err = _inserir_publicacoes(filtrados, db)
-    return SyncResult(
-        inseridas=ins,
-        duplicatas=dup,
-        erros=err,
-        fonte="manual",
-        mensagem=f"Importação manual: {ins} nova(s), {dup} duplicata(s).",
-    )
 
 
 @router.get("/monitoramento", response_model=DiarioMonitoringConfig)
@@ -551,18 +272,6 @@ def salvar_monitoramento(body: DiarioMonitoringConfig):
 
     saved = save_monitoring_config(body.model_dump())
     return DiarioMonitoringConfig(**saved)
-
-
-@router.post("/reclassificar", response_model=SyncResult)
-def reclassificar_publicacoes(db: Session = Depends(get_db)):
-    publicacoes = db.query(Publicacao).all()
-    alteradas = 0
-    for pub in publicacoes:
-        if _reclassificar_publicacao(pub, db):
-            alteradas += 1
-    if alteradas:
-        db.commit()
-    return SyncResult(inseridas=0, duplicatas=alteradas, erros=0, fonte="reclassificacao")
 
 
 # ── CRUD ───────────────────────────────────────────────────────────────────────
@@ -587,20 +296,7 @@ def listar_publicacoes(
         q = q.filter(Publicacao.data_publicacao >= data_inicio)
     if data_fim:
         q = q.filter(Publicacao.data_publicacao <= data_fim)
-    publicacoes = q.order_by(Publicacao.data_publicacao.desc(), Publicacao.created_at.desc()).all()
-    alterou = False
-    for pub in publicacoes:
-        for attr in ("texto_resumo", "texto_completo"):
-            texto_atual = getattr(pub, attr) or ""
-            texto_limpo = _limpar_html_publicacao(texto_atual)
-            if texto_limpo and texto_limpo != texto_atual:
-                setattr(pub, attr, texto_limpo)
-                alterou = True
-        if not pub.match_tipo:
-            alterou = _reclassificar_publicacao(pub, db) or alterou
-    if alterou:
-        db.commit()
-    return publicacoes
+    return q.order_by(Publicacao.data_publicacao.desc(), Publicacao.created_at.desc()).all()
 
 
 @router.get("/{pub_id}", response_model=PublicacaoOut)
@@ -708,10 +404,7 @@ def criar_prazo_da_publicacao(pub_id: uuid.UUID, db: Session = Depends(get_db)):
         "pericia": "pericia",
     }
     tipo = MAPA_TIPO.get(analise.get("peca_necessaria", ""), "outro")
-    try:
-        dias = int(analise.get("dias_prazo") or 15)
-    except (TypeError, ValueError):
-        dias = 15
+    dias = analise.get("dias_prazo") or 15
     tipo_contagem = analise.get("tipo_contagem", "uteis")
     data_pub = analise.get("data_publicacao") or str(pub.data_publicacao)
 
@@ -725,10 +418,7 @@ def criar_prazo_da_publicacao(pub_id: uuid.UUID, db: Session = Depends(get_db)):
         if proc:
             estado = proc.estado if proc.estado != "outro" else "SP"
 
-    try:
-        dp = _date.fromisoformat(data_pub) if isinstance(data_pub, str) else data_pub
-    except (TypeError, ValueError):
-        dp = pub.data_publicacao
+    dp = _date.fromisoformat(data_pub) if isinstance(data_pub, str) else data_pub
     data_limite, data_limite_sf = calcular_prazo(
         db=db,
         data_publicacao=dp,
@@ -749,7 +439,6 @@ def criar_prazo_da_publicacao(pub_id: uuid.UUID, db: Session = Depends(get_db)):
         status="pendente",
     )
     db.add(prazo)
-    db.flush()
 
     # Vincula prazo à publicação
     pub.prazo_id = prazo.id

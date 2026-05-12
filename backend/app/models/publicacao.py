@@ -52,13 +52,6 @@ class Publicacao(Base):
     analise_ia: Mapped[str | None] = mapped_column(Text)          # JSON do Claude
     cliente_nome_pub: Mapped[str | None] = mapped_column(String(500))  # extraído da IA
 
-    # Motivo pelo qual a publicação entrou no radar do Diário.
-    match_tipo: Mapped[str | None] = mapped_column(String(30))
-    match_nome: Mapped[str | None] = mapped_column(String(500))
-    match_categoria: Mapped[str | None] = mapped_column(String(50))
-    match_processo_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    match_detalhes: Mapped[str | None] = mapped_column(Text)
-
     # Rastreabilidade
     email_message_id: Mapped[str | None] = mapped_column(String(255), unique=True)
     url_fonte: Mapped[str | None] = mapped_column(Text)  # link para o email ou página do diário

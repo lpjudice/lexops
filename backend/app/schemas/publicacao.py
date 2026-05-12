@@ -45,11 +45,6 @@ class PublicacaoOut(PublicacaoBase):
     email_message_id: str | None
     analise_ia: str | None = None
     cliente_nome_pub: str | None = None
-    match_tipo: str | None = None
-    match_nome: str | None = None
-    match_categoria: str | None = None
-    match_processo_id: uuid.UUID | None = None
-    match_detalhes: str | None = None
     url_fonte: str | None = None
     created_at: datetime
 
@@ -61,4 +56,3 @@ class SyncResult(BaseModel):
     duplicatas: int
     erros: int
     fonte: str
-    mensagem: str | None = None

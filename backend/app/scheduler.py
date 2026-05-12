@@ -102,7 +102,7 @@ def _sync_diarios_monitorados() -> None:
     try:
         from app.database import SessionLocal
         from app.routers.diario import (
-            _filtrar_itens_monitorados,
+            _filtrar_itens_monitorados_exatos,
             _inserir_publicacoes,
             _termos_monitorados_para_busca,
         )
@@ -110,7 +110,7 @@ def _sync_diarios_monitorados() -> None:
 
         db = SessionLocal()
         try:
-            termos = _termos_monitorados_para_busca(db, incluir_clientes=False)
+            termos = _termos_monitorados_para_busca(db)
             if not termos:
                 logger.info("Scheduler: nenhum termo monitorado para Diário Oficial")
                 return
@@ -129,7 +129,7 @@ def _sync_diarios_monitorados() -> None:
                         termos=termos,
                         days_back=DIARIO_DAYS_BACK,
                     )
-                    itens = _filtrar_itens_monitorados(itens, db, incluir_clientes=False, incluir_advogados=True)
+                    itens = _filtrar_itens_monitorados_exatos(itens, db, termos)
                     ins, dup, err = _inserir_publicacoes(itens, db)
                     totais["inseridas"] += ins
                     totais["duplicatas"] += dup

@@ -124,53 +124,6 @@
   margin-bottom: 16px;
 }
 
-.manualImportBox {
-  background: #fff7ed;
-  border: 1px solid #fdba74;
-  border-radius: 8px;
-  margin-bottom: 16px;
-  padding: 10px 14px;
-}
-
-.manualImportSummary {
-  color: #9a3412;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.manualImportContent {
-  color: #7c2d12;
-  font-size: 13px;
-  padding-top: 10px;
-}
-
-.manualImportControls {
-  display: flex;
-  gap: 8px;
-  margin: 8px 0;
-  flex-wrap: wrap;
-}
-
-.manualDateInput {
-  border: 1px solid #fdba74;
-  border-radius: 6px;
-  color: #7c2d12;
-  font: inherit;
-  padding: 6px 10px;
-}
-
-.manualTextarea {
-  border: 1px solid #fdba74;
-  border-radius: 8px;
-  color: #374151;
-  font: inherit;
-  min-height: 120px;
-  padding: 10px;
-  resize: vertical;
-  width: 100%;
-}
-
 .filtros {
   display: flex;
   gap: 8px;

@@ -3,7 +3,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { diarioApi } from '../api/diario'
 import type { AnaliseIA, Publicacao, TipoAto } from '../api/diario'
 import { processosApi } from '../api/processos'
+import type { Processo } from '../api/processos'
 import { clientesApi } from '../api/clientes'
+import type { Cliente } from '../api/clientes'
 import styles from './Page.module.css'
 import diarioStyles from './DiarioPage.module.css'
 
@@ -41,12 +43,44 @@ function formatDate(d?: string) {
   return new Date(d + 'T12:00:00').toLocaleDateString('pt-BR')
 }
 
-type DiarioTab = 'todos' | 'processo' | 'advogado' | 'cliente' | 'revisar'
+type MatchFilter = 'todos' | 'cadastrados' | 'exatos'
+type MatchKind = 'processo' | 'exato'
+
+interface ProcessoRelacionado {
+  id: string
+  numero_cnj: string
+  clienteNomes: string[]
+  matchKind: MatchKind
+}
+
+interface PublicacaoMatchInfo {
+  exactClientNames: string[]
+  exactTermMatches: string[]
+  probableClientNames: string[]
+  relatedProcesses: ProcessoRelacionado[]
+  relatedTerms: string[]
+  primaryProcessId?: string
+  primaryClientName?: string
+  hasRegisteredProcess: boolean
+  hasExactName: boolean
+}
 
 interface PublicacaoEnriquecida {
   pub: Publicacao
-  tab: DiarioTab
-  termosDestaque: string[]
+  match: PublicacaoMatchInfo
+}
+
+function normalizeText(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function normalizeDigits(value: string) {
+  return value.replace(/\D/g, '')
 }
 
 function escapeRegExp(value: string) {
@@ -66,33 +100,34 @@ function uniqueStrings(values: string[]) {
   return result
 }
 
-function cleanMonitorName(value: string) {
-  return value.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim()
+function extractRelevantTokens(name: string) {
+  return uniqueStrings(name.match(/[A-Za-zÀ-ÿ0-9]+/g) ?? [])
+    .map((token) => normalizeText(token))
+    .filter((token) => token.length >= 4 && !['ltda', 'advogados', 'advocacia', 'sociedade'].includes(token))
 }
 
-function getMatchTab(pub: Publicacao): DiarioTab {
-  if (pub.match_tipo === 'processo') return 'processo'
-  if (pub.match_tipo === 'advogado') return 'advogado'
-  if (pub.match_tipo === 'cliente') return 'cliente'
-  return 'revisar'
+function looksLikeCnj(value: string) {
+  return normalizeDigits(value).length === 20
 }
 
-function getMatchPriority(tab: DiarioTab) {
-  const rank: Record<DiarioTab, number> = {
-    processo: 0,
-    advogado: 1,
-    cliente: 2,
-    revisar: 3,
-    todos: 4,
-  }
-  return rank[tab] ?? 4
+function isMonitorableTerm(value: string) {
+  if (looksLikeCnj(value)) return true
+  const tokens = extractRelevantTokens(value)
+  if (tokens.length >= 2) return true
+  return tokens.length === 1 && tokens[0].length >= 8
 }
 
-function getMatchLabel(pub: Publicacao) {
-  if (pub.match_tipo === 'processo') return 'Processo cadastrado'
-  if (pub.match_tipo === 'advogado') return 'Advogado monitorado'
-  if (pub.match_tipo === 'cliente') return 'Cliente monitorado'
-  return 'Revisar'
+function textHasExactTerm(normalizedText: string, term: string) {
+  const normalizedTerm = normalizeText(term)
+  if (!normalizedTerm) return false
+  const pattern = `(^|[^a-z0-9])${escapeRegExp(normalizedTerm).replace(/\ /g, '\\s+')}(?=$|[^a-z0-9])`
+  return new RegExp(pattern, 'i').test(normalizedText)
+}
+
+function getMatchPriority(match: PublicacaoMatchInfo) {
+  if (match.hasRegisteredProcess) return 0
+  if (match.hasExactName) return 1
+  return 3
 }
 
 function buildRelevantExcerpt(text: string, terms: string[], radius = 220) {
@@ -113,6 +148,96 @@ function buildRelevantExcerpt(text: string, terms: string[], radius = 220) {
   return source.slice(0, radius * 2)
 }
 
+function getProcessClientNames(processo: Processo, clientes: Cliente[]) {
+  const byId = new Map(clientes.map((cliente) => [cliente.id, cliente.nome]))
+  const names = [
+    byId.get(processo.cliente_id) ?? '',
+    ...(processo.clientes_litisconsorcio?.map((cliente) => cliente.nome ?? '') ?? []),
+  ]
+  return uniqueStrings(names)
+}
+
+function classifyPublication(
+  pub: Publicacao,
+  processos: Processo[],
+  clientes: Cliente[],
+  termosMonitorados: string[],
+): PublicacaoMatchInfo {
+  const text = `${pub.texto_completo ?? ''} ${pub.texto_resumo ?? ''}`
+  const normalizedText = normalizeText(text)
+  const exactClientNames = new Set<string>()
+  const exactTermMatches = new Set<string>()
+  const probableClientNames = new Set<string>()
+  const relatedTerms = new Set<string>()
+  const relatedProcesses: ProcessoRelacionado[] = []
+
+  for (const processo of processos) {
+    const processDigits = normalizeDigits(processo.numero_cnj)
+    const clientNames = getProcessClientNames(processo, clientes)
+
+    const processMatched =
+      pub.processo_id === processo.id ||
+      (!!pub.numero_cnj && normalizeDigits(pub.numero_cnj) === processDigits)
+
+    if (processMatched) {
+      relatedTerms.add(processo.numero_cnj)
+      relatedProcesses.push({
+        id: processo.id,
+        numero_cnj: processo.numero_cnj,
+        clienteNomes: clientNames,
+        matchKind: 'processo',
+      })
+      clientNames.forEach((name) => {
+        probableClientNames.add(name)
+      })
+    }
+
+    const exactNames = clientNames.filter((name) => isMonitorableTerm(name) && textHasExactTerm(normalizedText, name))
+    if (exactNames.length > 0) {
+      exactNames.forEach((name) => {
+        exactClientNames.add(name)
+        exactTermMatches.add(name)
+        probableClientNames.add(name)
+        relatedTerms.add(name)
+      })
+      continue
+    }
+  }
+
+  relatedProcesses.sort((a, b) => {
+    const rank = { processo: 0, exato: 1 }
+    return rank[a.matchKind] - rank[b.matchKind]
+  })
+
+  const hasRegisteredProcess = relatedProcesses.some((processo) => processo.matchKind === 'processo')
+  const primary = relatedProcesses[0]
+
+  for (const termo of termosMonitorados) {
+    const normalizedTerm = normalizeText(termo)
+    if (!normalizedTerm) continue
+    if (!isMonitorableTerm(termo)) continue
+    if (textHasExactTerm(normalizedText, termo)) {
+      exactTermMatches.add(termo)
+      relatedTerms.add(termo)
+      continue
+    }
+  }
+
+  if (primary?.numero_cnj) relatedTerms.add(primary.numero_cnj)
+
+  return {
+    exactClientNames: [...exactClientNames],
+    exactTermMatches: [...exactTermMatches],
+    probableClientNames: [...probableClientNames],
+    relatedProcesses,
+    relatedTerms: uniqueStrings([...relatedTerms]),
+    primaryProcessId: primary?.id,
+    primaryClientName: primary?.clienteNomes[0] ?? [...probableClientNames][0],
+    hasRegisteredProcess,
+    hasExactName: exactClientNames.size > 0 || exactTermMatches.size > 0,
+  }
+}
+
 function buildHighlightedHtml(text: string, terms: string[]) {
   const escaped = text
     .replace(/&/g, '&amp;')
@@ -130,17 +255,6 @@ function buildHighlightedHtml(text: string, terms: string[]) {
   return escaped.replace(regex, '<strong class="diario-highlight">$1</strong>')
 }
 
-function buildHighlightTerms(pub: Publicacao) {
-  return uniqueStrings([
-    pub.match_nome ?? '',
-    pub.match_tipo === 'processo' ? pub.numero_cnj ?? '' : '',
-  ].filter(Boolean))
-}
-
-function extractErrorMessage(error: unknown, fallback: string) {
-  return (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? fallback
-}
-
 export default function DiarioPage() {
   const qc = useQueryClient()
   const [expandido, setExpandido] = useState<string | null>(null)
@@ -148,16 +262,13 @@ export default function DiarioPage() {
   const [processoSelecionado, setProcessoSelecionado] = useState('')
   const [filtroLida, setFiltroLida] = useState<'todas' | 'nao_lidas'>('nao_lidas')
   const [filtroComConteudo, setFiltroComConteudo] = useState(false)
-  const [abaDiario, setAbaDiario] = useState<DiarioTab>('todos')
+  const [filtroMatch, setFiltroMatch] = useState<MatchFilter>('todos')
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
   const [acaoMsg, setAcaoMsg] = useState<Record<string, string>>({})
   const [daysBack, setDaysBack] = useState(3)
-  const [advogadosMonitorados, setAdvogadosMonitorados] = useState<string[]>([])
-  const [clientesExtras, setClientesExtras] = useState<string[]>([])
-  const [novoAdvogado, setNovoAdvogado] = useState('')
-  const [novoClienteExtra, setNovoClienteExtra] = useState('')
-  const [manualTexto, setManualTexto] = useState('')
-  const [manualData, setManualData] = useState('')
+  const [termosCustom, setTermosCustom] = useState<string[]>([])
+  const [novoTermo, setNovoTermo] = useState('')
+  const [_termosAberto, _setTermosAberto] = useState(false)
   const [pjeModalAberto, setPjeModalAberto] = useState(false)
   const [pjeCpf, setPjeCpf] = useState('')
   const [pjeSenha, setPjeSenha] = useState('')
@@ -191,20 +302,7 @@ export default function DiarioPage() {
     queryFn: () => clientesApi.listar(),
   })
 
-  const clienteNomePorId = new Map(clientes.map((cliente) => [cliente.id, cliente.nome]))
-  const processoPorId = new Map(processos.map((processo) => [processo.id, processo]))
-
-  const getClienteDoProcesso = (pub: Publicacao) => {
-    const processoId = pub.processo_id || pub.match_processo_id
-    if (!processoId) return null
-    const processo = processoPorId.get(processoId)
-    if (!processo) return null
-    const nomes = [
-      clienteNomePorId.get(processo.cliente_id) ?? '',
-      ...(processo.clientes_litisconsorcio?.map((cliente) => cliente.nome ?? '') ?? []),
-    ]
-    return uniqueStrings(nomes)[0] ?? null
-  }
+  const nomesClientes = clientes.map((c) => c.nome)
 
   const { data: monitoramento } = useQuery({
     queryKey: ['diario-monitoramento'],
@@ -212,9 +310,8 @@ export default function DiarioPage() {
   })
 
   useEffect(() => {
-    if (monitoramento) {
-      setAdvogadosMonitorados(monitoramento.advogados_monitorados ?? monitoramento.termos_extras ?? [])
-      setClientesExtras(monitoramento.clientes_monitorados_extras ?? [])
+    if (monitoramento?.termos_extras) {
+      setTermosCustom(monitoramento.termos_extras)
     }
   }, [monitoramento])
 
@@ -222,72 +319,37 @@ export default function DiarioPage() {
     mutationFn: () => diarioApi.syncGmail(daysBack),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['diario'] })
-      const erroMsg = r.erros ? `, ${r.erros} erro(s)` : ''
-      setSyncMsg(r.mensagem || `Gmail: ${r.inseridas} novas, ${r.duplicatas} duplicatas${erroMsg}`)
+      setSyncMsg(`Gmail: ${r.inseridas} novas, ${r.duplicatas} duplicatas`)
       setTimeout(() => setSyncMsg(null), 5000)
     },
   })
 
+  const termosNomesMonitorados = [...nomesClientes, ...termosCustom].filter(Boolean)
+  const numerosProcessosMonitorados = processos.map((p) => p.numero_cnj).filter(Boolean)
+  const termosBuscaDiario = uniqueStrings([
+    ...numerosProcessosMonitorados,
+    ...termosNomesMonitorados,
+  ]).filter(isMonitorableTerm)
+
   const salvarMonitoramento = useMutation({
-    mutationFn: (payload: { advogados_monitorados: string[]; clientes_monitorados_extras: string[] }) =>
+    mutationFn: (payload: { termos_extras: string[] }) =>
       diarioApi.salvarMonitoramento({
         tribunais: monitoramento?.tribunais?.length ? monitoramento.tribunais : ['TJES', 'TJSP', 'TJAM'],
         auto_sync: monitoramento?.auto_sync ?? true,
-        termos_extras: payload.advogados_monitorados,
-        advogados_monitorados: payload.advogados_monitorados,
-        clientes_monitorados_extras: payload.clientes_monitorados_extras,
+        termos_extras: payload.termos_extras,
       }),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['diario-monitoramento'] })
-      setAdvogadosMonitorados(data.advogados_monitorados ?? data.termos_extras ?? [])
-      setClientesExtras(data.clientes_monitorados_extras ?? [])
+      setTermosCustom(data.termos_extras)
     },
   })
 
   const syncScraping = useMutation({
     mutationFn: ({ tribunais, label }: { tribunais: string[]; label: string }) =>
-      diarioApi.syncScraping(tribunais, [], daysBack).then((r) => ({ ...r, label })),
+      diarioApi.syncScraping(tribunais, termosBuscaDiario, daysBack).then((r) => ({ ...r, label })),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['diario'] })
-      const erroMsg = r.erros ? `, ${r.erros} erro(s)` : ''
-      setSyncMsg(r.mensagem || `${r.label}: ${r.inseridas} novas, ${r.duplicatas} duplicatas${erroMsg}`)
-      setTimeout(() => setSyncMsg(null), 5000)
-    },
-  })
-
-  const syncClientes = useMutation({
-    mutationFn: () => diarioApi.syncClientes(daysBack),
-    onSuccess: (r) => {
-      qc.invalidateQueries({ queryKey: ['diario'] })
-      const erroMsg = r.erros ? `, ${r.erros} erro(s)` : ''
-      setSyncMsg(r.mensagem || `Clientes: ${r.inseridas} novas, ${r.duplicatas} duplicatas${erroMsg}`)
-      setTimeout(() => setSyncMsg(null), 6000)
-    },
-  })
-
-  const importarManual = useMutation({
-    mutationFn: () => diarioApi.importarManual({
-      texto: manualTexto,
-      tribunal: 'TJES',
-      data_publicacao: manualData || undefined,
-    }),
-    onSuccess: (r) => {
-      qc.invalidateQueries({ queryKey: ['diario'] })
-      setSyncMsg(r.mensagem || `Importação manual: ${r.inseridas} nova(s), ${r.duplicatas} duplicata(s).`)
-      if (r.inseridas > 0) setManualTexto('')
-      setTimeout(() => setSyncMsg(null), 10000)
-    },
-    onError: (e) => {
-      setSyncMsg(extractErrorMessage(e, 'Não foi possível importar o texto da pauta.'))
-      setTimeout(() => setSyncMsg(null), 10000)
-    },
-  })
-
-  const reclassificar = useMutation({
-    mutationFn: () => diarioApi.reclassificar(),
-    onSuccess: (r) => {
-      qc.invalidateQueries({ queryKey: ['diario'] })
-      setSyncMsg(`Reclassificação: ${r.duplicatas} publicação(ões) atualizada(s).`)
+      setSyncMsg(`${r.label}: ${r.inseridas} novas, ${r.duplicatas} duplicatas`)
       setTimeout(() => setSyncMsg(null), 5000)
     },
   })
@@ -353,9 +415,6 @@ export default function DiarioPage() {
   const analisar = useMutation({
     mutationFn: (id: string) => diarioApi.analisar(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['diario'] }),
-    onError: (e: unknown, id) => {
-      setAcaoMsg((m) => ({ ...m, [id]: `⚠ ${extractErrorMessage(e, 'Erro ao analisar publicação')}` }))
-    },
   })
 
   const criarPrazo = useMutation({
@@ -379,9 +438,9 @@ export default function DiarioPage() {
     },
   })
 
-  const copiarTextoPublicacao = async (pub: Publicacao, termosDestaque: string[]) => {
+  const copiarTextoPublicacao = async (pub: Publicacao, match: PublicacaoMatchInfo) => {
     const baseText = pub.texto_completo || pub.texto_resumo || ''
-    const html = buildHighlightedHtml(baseText, termosDestaque)
+    const html = buildHighlightedHtml(baseText, match.relatedTerms)
     try {
       if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
         await navigator.clipboard.write([
@@ -400,53 +459,43 @@ export default function DiarioPage() {
   }
 
   const criarPrazoDireto = async (item: PublicacaoEnriquecida) => {
-    const { pub } = item
+    const { pub, match } = item
     try {
       if (!pub.processo_id) {
-        if (!pub.match_processo_id) {
+        if (!match.primaryProcessId) {
           setAcaoMsg((m) => ({ ...m, [pub.id]: '⚠ Vincule a publicação a um processo antes de criar o prazo.' }))
           return
         }
-        await vincular.mutateAsync({ id: pub.id, processo_id: pub.match_processo_id })
+        await vincular.mutateAsync({ id: pub.id, processo_id: match.primaryProcessId })
       }
       if (!pub.analise_ia) {
         await analisar.mutateAsync(pub.id)
       }
       await criarPrazo.mutateAsync(pub.id)
-    } catch (e) {
-      setAcaoMsg((m) => ({ ...m, [pub.id]: m[pub.id] || `⚠ ${extractErrorMessage(e, 'Não foi possível criar o prazo')}` }))
-    }
-  }
-
-  const criarTeseDireto = async (pub: Publicacao) => {
-    try {
-      if (!pub.analise_ia) {
-        await analisar.mutateAsync(pub.id)
-      }
-      await criarTese.mutateAsync(pub.id)
-    } catch (e) {
-      setAcaoMsg((m) => ({ ...m, [pub.id]: m[pub.id] || `⚠ ${extractErrorMessage(e, 'Não foi possível criar a tese')}` }))
+    } catch {
+      // mensagens já tratadas nas mutations
     }
   }
 
   const SEM_PUB = 'Sem publicações nesta edição.'
   const publicacoesEnriquecidas = [...publicacoes]
-    .map((pub) => ({ pub, tab: getMatchTab(pub), termosDestaque: buildHighlightTerms(pub) }))
+    .map((pub) => ({ pub, match: classifyPublication(pub, processos, clientes, termosNomesMonitorados) }))
+    .filter(({ match }) => match.hasRegisteredProcess || match.hasExactName)
     .sort((a, b) => {
+      const priorityA = getMatchPriority(a.match)
+      const priorityB = getMatchPriority(b.match)
+      if (priorityA !== priorityB) return priorityA - priorityB
+
       const dateA = new Date(`${a.pub.data_publicacao}T12:00:00`).getTime()
       const dateB = new Date(`${b.pub.data_publicacao}T12:00:00`).getTime()
       if (dateA !== dateB) return dateB - dateA
-
-      const priorityA = getMatchPriority(a.tab)
-      const priorityB = getMatchPriority(b.tab)
-      if (priorityA !== priorityB) return priorityA - priorityB
-
       return new Date(b.pub.created_at).getTime() - new Date(a.pub.created_at).getTime()
     })
 
-  const publicacoesFiltradas = publicacoesEnriquecidas.filter(({ pub, tab }) => {
+  const publicacoesFiltradas = publicacoesEnriquecidas.filter(({ pub, match }) => {
     if (filtroComConteudo && (pub.texto_resumo === SEM_PUB || !pub.texto_resumo)) return false
-    if (abaDiario !== 'todos' && tab !== abaDiario) return false
+    if (filtroMatch === 'cadastrados' && !match.hasRegisteredProcess) return false
+    if (filtroMatch === 'exatos' && !match.hasExactName) return false
     return true
   })
 
@@ -521,22 +570,6 @@ export default function DiarioPage() {
             </button>
           )
         })}
-        <button
-          className={diarioStyles.btnTribunais}
-          onClick={() => syncClientes.mutate()}
-          disabled={syncClientes.isPending || syncScraping.isPending}
-          style={{ minWidth: '150px', background: '#173b2f', borderColor: '#2f855a', color: '#bbf7d0' }}
-        >
-          {syncClientes.isPending ? 'Buscando clientes...' : '↓ Buscar clientes'}
-        </button>
-        <button
-          className={diarioStyles.btnTribunais}
-          onClick={() => reclassificar.mutate()}
-          disabled={reclassificar.isPending}
-          style={{ minWidth: '130px', background: '#2f2a1a', borderColor: '#a16207', color: '#fde68a' }}
-        >
-          {reclassificar.isPending ? 'Reclassificando...' : 'Reclassificar'}
-        </button>
       </div>
 
       {/* Modal PJe */}
@@ -609,65 +642,32 @@ export default function DiarioPage() {
       {syncMsg && <div className={diarioStyles.syncMsg}>{syncMsg}</div>}
 
       <div className={diarioStyles.syncMsg} style={{ background: '#1f2937', borderColor: '#374151', color: '#cbd5e1' }}>
-        Os botões por tribunal e o cron buscam apenas processos cadastrados e advogados monitorados. "Buscar clientes" usa modo econômico para reduzir bloqueios: DJEN nacional + TJES local/pautas.
+        Cada botão consulta uma fonte separada. O `DJEN` e os botões por tribunal usam a busca pública nacional quando disponível. O `PJe Comunica` continua separado, autenticado, e não substitui o `DJEN`.
       </div>
-
-      <details className={diarioStyles.manualImportBox}>
-        <summary className={diarioStyles.manualImportSummary}>
-          Importar texto de pauta/e-Diário bloqueado
-        </summary>
-        <div className={diarioStyles.manualImportContent}>
-          <p>
-            Use quando a fonte local do TJES exigir verificação humana. Cole o texto público da pauta ou publicação; o sistema salva apenas se encontrar cliente monitorado ou CNJ cadastrado.
-          </p>
-          <div className={diarioStyles.manualImportControls}>
-            <input
-              className={diarioStyles.manualDateInput}
-              type="date"
-              value={manualData}
-              onChange={(e) => setManualData(e.target.value)}
-              title="Data de publicação"
-            />
-            <button
-              className={diarioStyles.btnTribunais}
-              disabled={importarManual.isPending || manualTexto.trim().length < 20}
-              onClick={() => importarManual.mutate()}
-            >
-              {importarManual.isPending ? 'Importando...' : 'Importar TJES'}
-            </button>
-          </div>
-          <textarea
-            className={diarioStyles.manualTextarea}
-            placeholder="Cole aqui o texto da pauta/publicação do TJES..."
-            value={manualTexto}
-            onChange={(e) => setManualTexto(e.target.value)}
-          />
-        </div>
-      </details>
 
       {/* Termos de Monitoramento */}
       <div className={diarioStyles.termosBox}>
         <div className={diarioStyles.termosInline}>
           <span className={diarioStyles.termosLabel}>
             Monitoramento:
-            <span className={diarioStyles.termosInfo} title="Processos cadastrados entram automaticamente pela leitura de CNJ exato">
-              {processos.length} processo{processos.length !== 1 ? 's' : ''} (CNJ exato)
+            <span className={diarioStyles.termosInfo} title={`${nomesClientes.length} cliente(s) monitorados automaticamente`}>
+              {nomesClientes.length} cliente{nomesClientes.length !== 1 ? 's' : ''} (auto)
             </span>
           </span>
           <details className={diarioStyles.termosCollapse}>
             <summary className={diarioStyles.termosSummary}>
-              Advogados monitorados ({advogadosMonitorados.length})
+              Nomes adicionais ({termosCustom.length})
             </summary>
             <div className={diarioStyles.termosChips}>
-              {advogadosMonitorados.map((t, i) => (
+              {termosCustom.map((t, i) => (
                 <span key={i} className={diarioStyles.termoChipCustom}>
                   {t}
                   <button
                     className={diarioStyles.termoRemove}
                     onClick={() => {
-                      const next = advogadosMonitorados.filter((_, j) => j !== i)
-                      setAdvogadosMonitorados(next)
-                      salvarMonitoramento.mutate({ advogados_monitorados: next, clientes_monitorados_extras: clientesExtras })
+                      const next = termosCustom.filter((_, j) => j !== i)
+                      setTermosCustom(next)
+                      salvarMonitoramento.mutate({ termos_extras: next })
                     }}
                   >×</button>
                 </span>
@@ -675,53 +675,16 @@ export default function DiarioPage() {
               <div className={diarioStyles.termoAddInline}>
                 <input
                   className={diarioStyles.termoInputInline}
-                  placeholder="+ Adicionar advogado..."
-                  value={novoAdvogado}
-                  onChange={(e) => setNovoAdvogado(e.target.value)}
+                  placeholder="+ Adicionar nome/termo..."
+                  value={novoTermo}
+                  onChange={(e) => setNovoTermo(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && novoAdvogado.trim()) {
-                      const term = cleanMonitorName(novoAdvogado)
-                      const next = uniqueStrings([...advogadosMonitorados, term])
-                      setAdvogadosMonitorados(next)
-                      salvarMonitoramento.mutate({ advogados_monitorados: next, clientes_monitorados_extras: clientesExtras })
-                      setNovoAdvogado('')
-                    }
-                  }}
-                />
-              </div>
-            </div>
-          </details>
-          <details className={diarioStyles.termosCollapse}>
-            <summary className={diarioStyles.termosSummary}>
-              Clientes extras ({clientesExtras.length})
-            </summary>
-            <div className={diarioStyles.termosChips}>
-              {clientesExtras.map((t, i) => (
-                <span key={i} className={diarioStyles.termoChipCustom}>
-                  {t}
-                  <button
-                    className={diarioStyles.termoRemove}
-                    onClick={() => {
-                      const next = clientesExtras.filter((_, j) => j !== i)
-                      setClientesExtras(next)
-                      salvarMonitoramento.mutate({ advogados_monitorados: advogadosMonitorados, clientes_monitorados_extras: next })
-                    }}
-                  >×</button>
-                </span>
-              ))}
-              <div className={diarioStyles.termoAddInline}>
-                <input
-                  className={diarioStyles.termoInputInline}
-                  placeholder="+ Adicionar cliente/nome..."
-                  value={novoClienteExtra}
-                  onChange={(e) => setNovoClienteExtra(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && novoClienteExtra.trim()) {
-                      const term = cleanMonitorName(novoClienteExtra)
-                      const next = uniqueStrings([...clientesExtras, term])
-                      setClientesExtras(next)
-                      salvarMonitoramento.mutate({ advogados_monitorados: advogadosMonitorados, clientes_monitorados_extras: next })
-                      setNovoClienteExtra('')
+                    if (e.key === 'Enter' && novoTermo.trim()) {
+                      const term = novoTermo.trim()
+                      const next = Array.from(new Set([...termosCustom, term]))
+                      setTermosCustom(next)
+                      salvarMonitoramento.mutate({ termos_extras: next })
+                      setNovoTermo('')
                     }
                   }}
                 />
@@ -751,21 +714,18 @@ export default function DiarioPage() {
         >
           Com conteúdo
         </button>
-        {([
-          ['todos', 'Todas'],
-          ['processo', 'Processos'],
-          ['advogado', 'Advogados'],
-          ['cliente', 'Clientes'],
-          ['revisar', 'Revisar'],
-        ] as const).map(([tab, label]) => (
-          <button
-            key={tab}
-            className={`${diarioStyles.filtroBtn} ${abaDiario === tab ? diarioStyles.filtroAtivo : ''}`}
-            onClick={() => setAbaDiario(tab)}
-          >
-            {label}
-          </button>
-        ))}
+        <button
+          className={`${diarioStyles.filtroBtn} ${filtroMatch === 'cadastrados' ? diarioStyles.filtroAtivo : ''}`}
+          onClick={() => setFiltroMatch((v) => v === 'cadastrados' ? 'todos' : 'cadastrados')}
+        >
+          Processos cadastrados
+        </button>
+        <button
+          className={`${diarioStyles.filtroBtn} ${filtroMatch === 'exatos' ? diarioStyles.filtroAtivo : ''}`}
+          onClick={() => setFiltroMatch((v) => v === 'exatos' ? 'todos' : 'exatos')}
+        >
+          Nomes exatos
+        </button>
       </div>
 
       {isLoading ? (
@@ -780,11 +740,10 @@ export default function DiarioPage() {
         </p>
       ) : (
         <div className={diarioStyles.feed}>
-          {publicacoesFiltradas.map(({ pub, tab, termosDestaque }) => {
+          {publicacoesFiltradas.map(({ pub, match }) => {
             const textoBase = pub.texto_completo || pub.texto_resumo || ''
-            const resumoExibicao = buildRelevantExcerpt(textoBase, termosDestaque)
-            const matchLabel = getMatchLabel(pub)
-            const clienteDoProcesso = getClienteDoProcesso(pub)
+            const resumoExibicao = buildRelevantExcerpt(textoBase, match.relatedTerms)
+            const nomesExatos = uniqueStrings([...match.exactClientNames, ...match.exactTermMatches])
 
             return (
             <div
@@ -833,7 +792,7 @@ export default function DiarioPage() {
                   </button>
                   <button
                     className={diarioStyles.btnCopy}
-                    onClick={() => copiarTextoPublicacao(pub, termosDestaque)}
+                    onClick={() => copiarTextoPublicacao(pub, match)}
                   >
                     Copiar
                   </button>
@@ -866,37 +825,34 @@ export default function DiarioPage() {
               )}
 
               <div className={diarioStyles.matchBox}>
-                {tab === 'processo' && (
+                {match.hasRegisteredProcess && (
                   <span className={`${diarioStyles.matchBadge} ${diarioStyles.matchProcesso}`}>Processo cadastrado</span>
                 )}
-                {tab === 'advogado' && (
-                  <span className={`${diarioStyles.matchBadge} ${diarioStyles.matchExato}`}>Advogado monitorado</span>
-                )}
-                {tab === 'cliente' && (
-                  <span className={`${diarioStyles.matchBadge} ${diarioStyles.matchExato}`}>Cliente monitorado</span>
-                )}
-                {tab === 'revisar' && (
-                  <span className={`${diarioStyles.matchBadge} ${diarioStyles.matchExato}`}>Revisar</span>
+                {match.hasExactName && (
+                  <span className={`${diarioStyles.matchBadge} ${diarioStyles.matchExato}`}>Nome exato</span>
                 )}
               </div>
 
-              <div className={diarioStyles.matchDetails}>
-                {tab !== 'processo' && (
-                  <div>
-                    <span className={diarioStyles.iaLabel}>Encontrado por</span> {matchLabel}
-                  </div>
-                )}
-                {pub.match_nome && (
-                  <div>
-                    <span className={diarioStyles.iaLabel}>{tab === 'processo' ? 'CNJ cadastrado' : 'Nome encontrado'}</span> {pub.match_nome}
-                  </div>
-                )}
-                {clienteDoProcesso && (
-                  <div>
-                    <span className={diarioStyles.iaLabel}>Cliente do processo</span> {clienteDoProcesso}
-                  </div>
-                )}
-              </div>
+              {(match.primaryClientName || match.relatedProcesses.length > 0 || nomesExatos.length > 0) && (
+                <div className={diarioStyles.matchDetails}>
+                  {match.primaryClientName && (
+                    <div>
+                      <span className={diarioStyles.iaLabel}>Cliente provável</span> {match.primaryClientName}
+                    </div>
+                  )}
+                  {match.relatedProcesses.length > 0 && (
+                    <div>
+                      <span className={diarioStyles.iaLabel}>Processo exato</span>{' '}
+                      {match.relatedProcesses.slice(0, 3).map((processo) => processo.numero_cnj).join(' · ')}
+                    </div>
+                  )}
+                  {nomesExatos.length > 0 && (
+                    <div>
+                      <span className={diarioStyles.iaLabel}>Nome exato encontrado</span> {nomesExatos.slice(0, 3).join(' · ')}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {vincularId === pub.id && (
                 <div className={diarioStyles.vincularForm}>
@@ -929,7 +885,7 @@ export default function DiarioPage() {
               {resumoExibicao && (
                 <p
                   className={diarioStyles.resumo}
-                  dangerouslySetInnerHTML={{ __html: buildHighlightedHtml(resumoExibicao, termosDestaque) }}
+                  dangerouslySetInnerHTML={{ __html: buildHighlightedHtml(resumoExibicao, match.relatedTerms) }}
                 />
               )}
 
@@ -951,23 +907,9 @@ export default function DiarioPage() {
                         <button
                           className={diarioStyles.btnCriarPrazo}
                           disabled={isAnalisando || !!pub.prazo_id}
-                          onClick={() => criarPrazoDireto({ pub, tab, termosDestaque })}
+                          onClick={() => criarPrazoDireto({ pub, match })}
                         >
-                          {pub.prazo_id
-                            ? 'Prazo já criado'
-                            : isAnalisando
-                              ? 'Preparando...'
-                              : !pub.processo_id && !pub.match_processo_id
-                                ? 'Vincular para Prazo'
-                                : '+ Criar Prazo'}
-                        </button>
-                        <button
-                          className={diarioStyles.btnCriarTese}
-                          disabled={isAnalisando || (criarTese.isPending && criarTese.variables === pub.id)}
-                          onClick={() => criarTeseDireto(pub)}
-                        >
-                          {criarTese.isPending && criarTese.variables === pub.id
-                            ? 'Criando...' : '✦ Criar Tese IA'}
+                          {pub.prazo_id ? 'Prazo já criado' : isAnalisando ? 'Preparando...' : '+ Criar Prazo'}
                         </button>
                       </div>
                     ) : analise.erro ? (
@@ -980,14 +922,8 @@ export default function DiarioPage() {
                     ) : (
                       <div className={diarioStyles.iaResultado}>
                         <div className={diarioStyles.iaGrid}>
-                          {clienteDoProcesso && (
-                            <div><span className={diarioStyles.iaLabel}>Cliente</span> {clienteDoProcesso}</div>
-                          )}
-                          {!clienteDoProcesso && tab === 'cliente' && pub.match_nome && (
-                            <div><span className={diarioStyles.iaLabel}>Cliente</span> {pub.match_nome}</div>
-                          )}
-                          {!clienteDoProcesso && tab !== 'cliente' && analise.cliente_nome && (
-                            <div><span className={diarioStyles.iaLabel}>Nome citado (IA)</span> {analise.cliente_nome}</div>
+                          {analise.cliente_nome && (
+                            <div><span className={diarioStyles.iaLabel}>Cliente</span> {analise.cliente_nome}</div>
                           )}
                           {analise.tipo_ato && (
                             <div><span className={diarioStyles.iaLabel}>Ato</span> {analise.tipo_ato}</div>
@@ -1008,22 +944,20 @@ export default function DiarioPage() {
                           <button
                             className={diarioStyles.btnCriarPrazo}
                             disabled={!!pub.prazo_id || (criarPrazo.isPending && criarPrazo.variables === pub.id) || (analisar.isPending && analisar.variables === pub.id)}
-                            onClick={() => criarPrazoDireto({ pub, tab, termosDestaque })}
+                            onClick={() => criarPrazoDireto({ pub, match })}
                           >
                             {pub.prazo_id
                               ? 'Prazo já criado'
                               : criarPrazo.isPending && criarPrazo.variables === pub.id
                               ? 'Criando...'
-                              : !pub.processo_id && pub.match_processo_id
+                              : !pub.processo_id && match.primaryProcessId
                                 ? '+ Vincular e Criar Prazo'
-                                : !pub.processo_id
-                                  ? 'Vincular para Prazo'
                                 : '+ Criar Prazo'}
                           </button>
                           <button
                             className={diarioStyles.btnCriarTese}
                             disabled={criarTese.isPending && criarTese.variables === pub.id}
-                            onClick={() => criarTeseDireto(pub)}
+                            onClick={() => criarTese.mutate(pub.id)}
                           >
                             {criarTese.isPending && criarTese.variables === pub.id
                               ? 'Criando...' : '✦ Criar Tese IA'}
@@ -1035,19 +969,19 @@ export default function DiarioPage() {
                             ↻
                           </button>
                         </div>
+                        {acaoMsg[pub.id] && (
+                          <div className={diarioStyles.acaoMsg}>{acaoMsg[pub.id]}</div>
+                        )}
                       </div>
                     )}
                   </div>
                 )
               })()}
-              {acaoMsg[pub.id] && (
-                <div className={diarioStyles.acaoMsg}>{acaoMsg[pub.id]}</div>
-              )}
 
               {expandido === pub.id && pub.texto_completo && (
                 <div
                   className={diarioStyles.textoCompleto}
-                  dangerouslySetInnerHTML={{ __html: buildHighlightedHtml(pub.texto_completo, termosDestaque) }}
+                  dangerouslySetInnerHTML={{ __html: buildHighlightedHtml(pub.texto_completo, match.relatedTerms) }}
                 />
               )}
             </div>

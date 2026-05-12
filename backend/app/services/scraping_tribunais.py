@@ -14,7 +14,6 @@ DJEN  → legado/experimental (não usado como fonte nacional principal)
 import math
 import re
 import time
-from html import unescape
 from datetime import date, timedelta
 
 import httpx
@@ -49,13 +48,9 @@ HEADERS = {
 COMUNICA_API_URL = "https://comunicaapi.pje.jus.br/api/v1/comunicacao"
 COMUNICA_ITENS_POR_PAGINA = 50
 COMUNICA_MAX_PAGINAS = 4
-COMUNICA_CLIENTE_MAX_PAGINAS = 1
+COMUNICA_MAX_PAGINAS_NOME = 2
 COMUNICA_MAX_TENTATIVAS = 3
 COMUNICA_TIMEOUT_SECONDS = 8
-
-
-class DiarioScrapingError(RuntimeError):
-    """Falha real na fonte externa; não deve ser tratada como ausência de publicações."""
 
 FONTE_POR_TRIBUNAL = {
     "TJES": "scraping_tjes",
@@ -69,14 +64,6 @@ STOPWORDS = {
     "da", "das", "de", "do", "dos", "e", "em", "na", "nas", "no", "nos",
     "sa", "s.a", "s/a", "sociedade", "advogados", "advocacia", "ltda", "me", "epp",
 }
-COMUNICA_MATCH_KEYS = (
-    "advogado",
-    "parte",
-    "destinatario",
-    "nome",
-    "polo",
-    "representante",
-)
 
 
 def _inferir_tipo_ato(texto: str) -> str:
@@ -89,46 +76,6 @@ def _inferir_tipo_ato(texto: str) -> str:
 
 def _normalizar_espacos(texto: str) -> str:
     return re.sub(r"\s+", " ", (texto or "").strip())
-
-
-def _limpar_html_publicacao(texto: str) -> str:
-    texto = unescape(texto or "")
-    if "<" in texto and ">" in texto:
-        texto = BeautifulSoup(texto, "html.parser").get_text(" ", strip=True)
-    return _normalizar_espacos(unescape(texto))
-
-
-def _extrair_textos_match_comunica(valor, chave_pai: str = "") -> list[str]:
-    textos: list[str] = []
-    chave_norm = chave_pai.casefold()
-    chave_relevante = any(token in chave_norm for token in COMUNICA_MATCH_KEYS)
-
-    if isinstance(valor, dict):
-        for chave, subvalor in valor.items():
-            proxima_chave = f"{chave_pai}.{chave}" if chave_pai else str(chave)
-            textos.extend(_extrair_textos_match_comunica(subvalor, proxima_chave))
-    elif isinstance(valor, list):
-        for item in valor:
-            textos.extend(_extrair_textos_match_comunica(item, chave_pai))
-    elif isinstance(valor, str) and chave_relevante:
-        texto = _limpar_html_publicacao(valor)
-        if texto:
-            textos.append(texto)
-
-    return textos
-
-
-def _texto_match_comunica(item: dict, pub: dict) -> str:
-    partes = [
-        pub.get("texto_completo") or "",
-        pub.get("texto_resumo") or "",
-        pub.get("numero_cnj") or "",
-        item.get("numeroprocessocommascara") or "",
-        item.get("numeroProcesso") or "",
-        item.get("numero_processo") or "",
-    ]
-    partes.extend(_extrair_textos_match_comunica(item))
-    return _normalizar_espacos(" ".join(str(parte) for parte in partes if parte))
 
 
 def _normalizar_texto_busca(texto: str) -> str:
@@ -155,7 +102,9 @@ def _termo_nome_buscavel(termo: str) -> bool:
     if _termo_parece_cnj(termo):
         return True
     tokens = _tokenizar_relevantes(termo)
-    return len(tokens) >= 2
+    if len(tokens) >= 2:
+        return True
+    return len(tokens) == 1 and len(tokens[0]) >= 8
 
 
 def _termo_exato_no_texto(texto: str, termo: str) -> bool:
@@ -166,86 +115,13 @@ def _termo_exato_no_texto(texto: str, termo: str) -> bool:
     return re.search(padrao, _normalizar_texto_busca(texto)) is not None
 
 
-def _distancia_edicao_simples(a: str, b: str) -> int:
-    if a == b:
-        return 0
-    if abs(len(a) - len(b)) > 1:
-        return 2
-    if len(a) == len(b):
-        diffs = sum(1 for ca, cb in zip(a, b) if ca != cb)
-        if diffs <= 1:
-            return diffs
-        for idx in range(len(a) - 1):
-            if (
-                a[idx] == b[idx + 1]
-                and a[idx + 1] == b[idx]
-                and a[:idx] == b[:idx]
-                and a[idx + 2:] == b[idx + 2:]
-            ):
-                return 1
-        return 2
-
-    maior, menor = (a, b) if len(a) > len(b) else (b, a)
-    i = j = diferencas = 0
-    while i < len(maior) and j < len(menor):
-        if maior[i] == menor[j]:
-            i += 1
-            j += 1
-            continue
-        diferencas += 1
-        if diferencas > 1:
-            return 2
-        i += 1
-    return 1
-
-
-def _token_no_texto(texto_norm: str, token: str) -> bool:
-    return re.search(r"(?<![a-z0-9])" + re.escape(token) + r"(?![a-z0-9])", texto_norm) is not None
-
-
-def _token_tem_match_simples(tokens_texto: list[str], token: str) -> bool:
-    return any(_distancia_edicao_simples(token, candidato) <= 1 for candidato in tokens_texto)
-
-
-def _frase_tem_match_simples(tokens_texto: list[str], tokens_nome: list[str]) -> bool:
-    if not tokens_nome or len(tokens_texto) < len(tokens_nome):
-        return False
-    tamanho = len(tokens_nome)
-    for inicio in range(0, len(tokens_texto) - tamanho + 1):
-        trecho = tokens_texto[inicio:inicio + tamanho]
-        if all(_distancia_edicao_simples(esperado, encontrado) <= 1 for esperado, encontrado in zip(tokens_nome, trecho)):
-            return True
-    return False
-
-
-def _nome_restrito_no_texto(texto: str, termo: str) -> bool:
-    tokens = _tokenizar_relevantes(termo)
-    if len(tokens) < 2:
-        return False
-
-    texto_norm = _normalizar_texto_busca(texto)
-    tokens_texto = re.findall(r"[a-z0-9]+", texto_norm)
-
-    if len(tokens) == 2:
-        return _frase_tem_match_simples(tokens_texto, tokens)
-    if len(tokens) == 3:
-        return (
-            _frase_tem_match_simples(tokens_texto, tokens)
-            or _frase_tem_match_simples(tokens_texto, tokens[:2])
-            or _frase_tem_match_simples(tokens_texto, [tokens[0], tokens[-1]])
-        )
-
-    presentes = [token for token in tokens if _token_no_texto(texto_norm, token) or _token_tem_match_simples(tokens_texto, token)]
-    return len(presentes) >= 3
-
-
 def _texto_tem_match_monitorado(texto: str, termos: list[str] | None = None) -> bool:
     if not termos:
         return False
     for termo in termos:
-        if _termo_parece_cnj(termo) and _termo_exato_no_texto(texto, termo):
-            return True
-        if _termo_nome_buscavel(termo) and (_termo_exato_no_texto(texto, termo) or _nome_restrito_no_texto(texto, termo)):
+        if not (_termo_parece_cnj(termo) or _termo_nome_buscavel(termo)):
+            continue
+        if _termo_exato_no_texto(texto, termo):
             return True
     return False
 
@@ -280,11 +156,6 @@ def expandir_termos_busca(termos: list[str] | None = None) -> list[str]:
             continue
 
         adicionar(termo_limpo)
-        tokens = _tokenizar_relevantes(termo_limpo)
-        if len(tokens) >= 4:
-            adicionar(f"{tokens[0]} {tokens[-1]}")
-            adicionar(" ".join(tokens[:3]))
-            adicionar(" ".join(tokens[-3:]))
 
     return resultado
 
@@ -396,107 +267,7 @@ def _extrair_por_cnj_global(
     return resultado
 
 
-def _texto_ediario_tjes_para_publicacoes(
-    texto: str,
-    data_pub: date,
-    termos: list[str] | None = None,
-    url_fonte: str | None = None,
-) -> list[dict]:
-    chunks = [chunk.strip() for chunk in re.split(r"\s*\*\s*\*\s*\*\s*", texto) if chunk.strip()]
-    if len(chunks) <= 1:
-        chunks = []
-        cnjs = list(CNJ_RE.finditer(texto))
-        for idx, match in enumerate(cnjs):
-            inicio = max(0, texto.rfind("\n", 0, match.start()))
-            if inicio <= 0:
-                inicio = max(0, match.start() - 700)
-            fim = cnjs[idx + 1].start() if idx + 1 < len(cnjs) else min(len(texto), match.end() + 1500)
-            chunks.append(texto[inicio:fim].strip())
-
-    resultado: list[dict] = []
-    for chunk in chunks:
-        if termos and not _texto_tem_match_monitorado(chunk, termos):
-            continue
-        for cnj in sorted(set(CNJ_RE.findall(chunk))):
-            pub = _montar_publicacao(chunk, "TJES", "scraping_tjes", data_pub, numero_cnj=cnj)
-            if url_fonte:
-                pub["url_fonte"] = url_fonte
-            resultado.append(pub)
-    return resultado
-
-
-def _extrair_data_publicacao_texto(texto: str, fallback: date) -> date:
-    match = re.search(r"Data\s+de\s+Publica[çc][ãa]o:\s*(\d{2})/(\d{2})/(\d{4})", texto, re.IGNORECASE)
-    if not match:
-        return fallback
-    dia, mes, ano = map(int, match.groups())
-    try:
-        return date(ano, mes, dia)
-    except ValueError:
-        return fallback
-
-
-def _resposta_tjes_bloqueada(resp: httpx.Response, texto: str) -> bool:
-    texto_norm = _normalizar_texto(texto)
-    return (
-        resp.status_code in {403, 405}
-        or "human verification" in texto_norm
-        or "403 forbidden" in texto_norm
-        or "javascript is disabled" in texto_norm
-    )
-
-
-def _scrape_tjes_ediario(data: date, termos: list[str] | None = None) -> list[dict]:
-    url = "https://sistemas.tjes.jus.br/ediario/index.php"
-    base_params = {
-        "data": data.strftime("%Y%m%d"),
-        "layout": "fulltext",
-        "option": "com_ediario",
-        "view": "contents",
-    }
-    consultas = [base_params, {**base_params, "idorgao": "766"}]
-    resultado: list[dict] = []
-    vistos: set[str] = set()
-    bloqueios: list[str] = []
-    try:
-        for params in consultas:
-            resp = httpx.get(url, params=params, headers=HEADERS, timeout=20, follow_redirects=True)
-            texto_html = resp.text or ""
-            if _resposta_tjes_bloqueada(resp, texto_html):
-                bloqueios.append(str(resp.status_code))
-                continue
-            if not resp.is_success:
-                continue
-            soup = BeautifulSoup(texto_html, "html.parser")
-            texto = soup.get_text(" ", strip=True)
-            data_publicacao = _extrair_data_publicacao_texto(str(texto), data)
-            for pub in _texto_ediario_tjes_para_publicacoes(str(texto), data_publicacao, termos=termos, url_fonte=str(resp.url)):
-                chave = "|".join([
-                    str(pub.get("data_publicacao", "")),
-                    pub.get("numero_cnj", "") or "",
-                    (pub.get("texto_resumo", "") or "")[:180],
-                ])
-                if chave in vistos:
-                    continue
-                vistos.add(chave)
-                resultado.append(pub)
-        if bloqueios and not resultado:
-            raise DiarioScrapingError(
-                "TJES local/pautas: a fonte exigiu verificação humana e bloqueou a consulta automática."
-            )
-        return resultado
-    except DiarioScrapingError:
-        raise
-    except httpx.HTTPError as exc:
-        raise DiarioScrapingError(f"TJES local/pautas: falha de acesso à fonte local ({exc.__class__.__name__}).")
-    except Exception:
-        return []
-
-
-def _consultas_comunica(
-    termos: list[str] | None = None,
-    somente_nome_parte: bool = False,
-) -> list[tuple[str, int, str, str, int]]:
+def _consultas_comunica(termos: list[str] | None = None) -> list[tuple[str, int, str, str, int]]:
     """
     Gera uma lista enxuta de consultas para a API pública.
     Mantém variações úteis, mas evita dezenas de requests para um único nome.
@@ -523,21 +294,10 @@ def _consultas_comunica(
 
         if _termo_parece_cnj(termo_original):
             adicionar(termo_original, -1, "numeroProcesso", re.sub(r"\D", "", termo_original), COMUNICA_MAX_PAGINAS)
-            adicionar(termo_original, 0, "texto", _formatar_numero_cnj(termo_original) or termo_original, COMUNICA_MAX_PAGINAS)
         else:
-            max_paginas_nome = COMUNICA_CLIENTE_MAX_PAGINAS if somente_nome_parte else COMUNICA_MAX_PAGINAS
-            if not somente_nome_parte:
-                adicionar(termo_original, 0, "texto", termo_original, COMUNICA_MAX_PAGINAS)
-            adicionar(termo_original, 1, "nomeParte", termo_original, max_paginas_nome)
-            if not somente_nome_parte:
-                adicionar(termo_original, 1, "nomeAdvogado", termo_original, COMUNICA_MAX_PAGINAS)
-            tokens = _tokenizar_relevantes(termo_original)
-            if len(tokens) >= 4 and not somente_nome_parte:
-                adicionar(termo_original, 2, "texto", f"{tokens[0]} {tokens[-1]}", COMUNICA_MAX_PAGINAS)
-                adicionar(termo_original, 2, "nomeParte", f"{tokens[0]} {tokens[-1]}", COMUNICA_MAX_PAGINAS)
-                adicionar(termo_original, 2, "nomeAdvogado", f"{tokens[0]} {tokens[-1]}", COMUNICA_MAX_PAGINAS)
-                adicionar(termo_original, 3, "texto", " ".join(tokens[:3]), COMUNICA_MAX_PAGINAS)
-                adicionar(termo_original, 3, "texto", " ".join(tokens[-3:]), COMUNICA_MAX_PAGINAS)
+            adicionar(termo_original, 0, "nomeAdvogado", termo_original, COMUNICA_MAX_PAGINAS_NOME)
+            adicionar(termo_original, 1, "nomeParte", termo_original, COMUNICA_MAX_PAGINAS_NOME)
+            adicionar(termo_original, 2, "texto", termo_original, 1)
 
     if termos:
         return consultas
@@ -559,7 +319,7 @@ def _normalizar_data_comunica(valor: str | None) -> date | None:
 
 
 def _comunica_para_publicacao(item: dict, tribunal_alvo: str) -> dict | None:
-    texto = _limpar_html_publicacao(item.get("texto") or "")
+    texto = _normalizar_espacos(item.get("texto") or "")
     if len(texto) < 20:
         return None
 
@@ -596,7 +356,6 @@ def _buscar_comunica_api(
     data_inicio: date,
     data_fim: date,
     termos: list[str] | None = None,
-    somente_nome_parte: bool = False,
 ) -> list[dict]:
     """
     Consulta a API pública do DJEN/Comunica.
@@ -607,13 +366,18 @@ def _buscar_comunica_api(
 
     vistos: set[str] = set()
     resultado: list[dict] = []
-    consultas = _consultas_comunica(termos, somente_nome_parte=somente_nome_parte)
-    falhas: list[str] = []
+    consultas = _consultas_comunica(termos)
+
+    sucesso_por_origem: dict[str, int] = {}
 
     with httpx.Client(headers=HEADERS, timeout=COMUNICA_TIMEOUT_SECONDS, follow_redirects=True) as client:
         for origem, prioridade, campo, termo, max_paginas in consultas:
+            if origem and sucesso_por_origem.get(origem, 99) < prioridade:
+                continue
+
             pagina = 1
             paginas_limite = max_paginas
+            itens_encontrados_nesta_consulta = 0
 
             while pagina <= paginas_limite:
                 params = {
@@ -628,27 +392,21 @@ def _buscar_comunica_api(
                     params["siglaTribunal"] = tribunal
 
                 resp = None
-                ultima_falha: str | None = None
                 for tentativa in range(1, COMUNICA_MAX_TENTATIVAS + 1):
                     try:
                         resp = client.get(COMUNICA_API_URL, params=params)
                         if resp.status_code < 500:
                             break
-                        ultima_falha = f"HTTP {resp.status_code}"
-                    except httpx.HTTPError as exc:
+                    except httpx.HTTPError:
                         resp = None
-                        ultima_falha = str(exc)
                     time.sleep(min(0.6 * tentativa, 3.0))
 
                 if not resp or not resp.is_success:
-                    status = resp.status_code if resp is not None else ultima_falha or "sem resposta"
-                    falhas.append(f"{tribunal}/{campo} '{termo}': {status}")
                     break
 
                 try:
                     payload = resp.json()
                 except ValueError:
-                    falhas.append(f"{tribunal}/{campo} '{termo}': resposta inválida")
                     break
 
                 itens = payload.get("items") or []
@@ -662,12 +420,9 @@ def _buscar_comunica_api(
                     pub = _comunica_para_publicacao(item, tribunal)
                     if not pub:
                         continue
-                    texto_match = _texto_match_comunica(item, pub)
-                    if termos and not _texto_tem_match_monitorado(texto_match, termos):
+                    if termos and not _texto_tem_match_monitorado(pub.get("texto_completo") or pub.get("texto_resumo") or "", termos):
                         continue
-                    pub["_match_text"] = texto_match
-                    pub["_query_campo"] = campo
-                    pub["_query_termo"] = origem
+                    itens_encontrados_nesta_consulta += 1
                     chave = str(item.get("id") or "") or "|".join(
                         [
                             pub.get("fonte", "") or "",
@@ -686,8 +441,9 @@ def _buscar_comunica_api(
                     break
                 pagina += 1
 
-    if falhas and not resultado:
-        raise DiarioScrapingError("; ".join(falhas[:3]))
+            if origem and itens_encontrados_nesta_consulta > 0:
+                sucesso_por_origem[origem] = min(sucesso_por_origem.get(origem, 99), prioridade)
+
     return resultado
 
 
@@ -737,13 +493,6 @@ def scrape_tjes(data: date | None = None, termos: list[str] | None = None) -> li
 
     except Exception:
         pass
-
-    try:
-        publicacoes.extend(_scrape_tjes_ediario(data, termos=termos))
-    except DiarioScrapingError:
-        if publicacoes:
-            return publicacoes
-        raise
 
     return publicacoes
 
@@ -902,7 +651,6 @@ def scrape_todos(
     data: date | None = None,
     termos: list[str] | None = None,
     days_back: int = 1,
-    somente_nome_parte: bool = False,
 ) -> list[dict]:
     """
     Roda todos os scrapers (ou só os solicitados) e retorna lista unificada.
@@ -931,7 +679,7 @@ def scrape_todos(
 
         # DJEN e os estados mais recentes ficam mais confiáveis via API pública do CNJ.
         if tribunal in {"DJEN", "TJES", "TJSP", "TJAM", "TJRJ"}:
-            novos = _buscar_comunica_api(tribunal, data_inicio, data_fim, termos=termos, somente_nome_parte=somente_nome_parte)
+            novos = _buscar_comunica_api(tribunal, data_inicio, data_fim, termos=termos)
             if novos or tribunal == "DJEN":
                 for pub in novos:
                     chave = "|".join(
