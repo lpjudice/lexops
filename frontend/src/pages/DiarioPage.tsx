@@ -43,6 +43,17 @@ function formatDate(d?: string) {
   return new Date(d + 'T12:00:00').toLocaleDateString('pt-BR')
 }
 
+function formatDateForSync(date: Date) {
+  return date.toLocaleDateString('pt-BR')
+}
+
+function getSyncPeriod(daysBack: number) {
+  const end = new Date()
+  const start = new Date()
+  start.setDate(end.getDate() - Math.max(daysBack, 1) + 1)
+  return `${formatDateForSync(start)} a ${formatDateForSync(end)}`
+}
+
 type MatchFilter = 'todos' | 'cadastrados' | 'exatos'
 type MatchKind = 'processo' | 'exato'
 
@@ -327,8 +338,8 @@ export default function DiarioPage() {
   const termosNomesMonitorados = [...nomesClientes, ...termosCustom].filter(Boolean)
   const numerosProcessosMonitorados = processos.map((p) => p.numero_cnj).filter(Boolean)
   const termosBuscaDiario = uniqueStrings([
-    ...numerosProcessosMonitorados,
     ...termosNomesMonitorados,
+    ...numerosProcessosMonitorados,
   ]).filter(isMonitorableTerm)
 
   const salvarMonitoramento = useMutation({
@@ -346,11 +357,17 @@ export default function DiarioPage() {
 
   const syncScraping = useMutation({
     mutationFn: ({ tribunais, label }: { tribunais: string[]; label: string }) =>
-      diarioApi.syncScraping(tribunais, termosBuscaDiario, daysBack).then((r) => ({ ...r, label })),
+      diarioApi.syncScraping(tribunais, termosBuscaDiario, daysBack).then((r) => ({
+        ...r,
+        label,
+        periodo: getSyncPeriod(daysBack),
+      })),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['diario'] })
-      setSyncMsg(`${r.label}: ${r.inseridas} novas, ${r.duplicatas} duplicatas`)
-      setTimeout(() => setSyncMsg(null), 5000)
+      setSyncMsg(
+        `${r.label} (${r.periodo}): ${r.inseridas} novas, ${r.duplicatas} já existentes, ${r.erros} erros`,
+      )
+      setTimeout(() => setSyncMsg(null), 9000)
     },
   })
 
@@ -566,7 +583,7 @@ export default function DiarioPage() {
                 minWidth: '110px',
               }}
             >
-              {carregando ? `Buscando ${fonte.label}...` : `↓ ${fonte.label}`}
+              {carregando ? `Buscando ${fonte.label} (${getSyncPeriod(daysBack)})...` : `↓ ${fonte.label}`}
             </button>
           )
         })}

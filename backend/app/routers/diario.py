@@ -79,19 +79,22 @@ def _termos_monitorados_para_busca(
     from app.services.diario_monitoring import load_monitoring_config
 
     config = load_monitoring_config()
-    valores: list[str] = []
-    valores.extend(termos_busca or [])
-    valores.extend(config.get("termos_extras") or [])
-    valores.extend(
+    entradas: list[str] = []
+    entradas.extend(termos_busca or [])
+    entradas.extend(config.get("termos_extras") or [])
+    entradas.extend(
         cliente.nome.strip()
         for cliente in db.query(Cliente).all()
         if getattr(cliente, "nome", None) and cliente.nome.strip()
     )
-    valores.extend(
+    entradas.extend(
         processo.numero_cnj.strip()
         for processo in db.query(Processo).all()
         if getattr(processo, "numero_cnj", None) and processo.numero_cnj.strip()
     )
+    nomes = [valor for valor in entradas if len(_normalizar_cnj(str(valor or ""))) != 20]
+    processos = [valor for valor in entradas if len(_normalizar_cnj(str(valor or ""))) == 20]
+    valores = [*nomes, *processos]
 
     vistos: set[str] = set()
     resultado: list[str] = []
