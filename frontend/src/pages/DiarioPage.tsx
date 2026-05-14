@@ -708,8 +708,8 @@ export default function DiarioPage() {
         <div className={diarioStyles.termosInline}>
           <span className={diarioStyles.termosLabel}>
             Monitoramento:
-            <span className={diarioStyles.termosInfo} title={`${nomesClientes.length} cliente(s) monitorados automaticamente`}>
-              {nomesClientes.length} cliente{nomesClientes.length !== 1 ? 's' : ''} (auto)
+            <span className={diarioStyles.termosInfo} title="A busca padrão usa processos cadastrados e nomes adicionais. Clientes ficam para classificação visual quando houver match.">
+              processos + nomes adicionais
             </span>
           </span>
           <details className={diarioStyles.termosCollapse}>

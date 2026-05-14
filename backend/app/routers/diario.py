@@ -100,6 +100,7 @@ def _processos_por_cnj(db: Session) -> dict[str, Processo]:
 def _termos_monitorados_para_busca(
     db: Session,
     termos_busca: list[str] | None = None,
+    incluir_clientes: bool = False,
 ) -> list[str]:
     from app.services.diario_monitoring import load_monitoring_config
 
@@ -107,11 +108,12 @@ def _termos_monitorados_para_busca(
     entradas: list[str] = []
     entradas.extend(termos_busca or [])
     entradas.extend(config.get("termos_extras") or [])
-    entradas.extend(
-        cliente.nome.strip()
-        for cliente in db.query(Cliente).all()
-        if getattr(cliente, "nome", None) and cliente.nome.strip()
-    )
+    if incluir_clientes:
+        entradas.extend(
+            cliente.nome.strip()
+            for cliente in db.query(Cliente).all()
+            if getattr(cliente, "nome", None) and cliente.nome.strip()
+        )
     entradas.extend(
         processo.numero_cnj.strip()
         for processo in db.query(Processo).all()
