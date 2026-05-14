@@ -450,7 +450,7 @@ def listar_publicacoes(
         q = q.filter(Publicacao.data_publicacao >= data_inicio)
     if data_fim:
         q = q.filter(Publicacao.data_publicacao <= data_fim)
-    return q.order_by(Publicacao.data_publicacao.desc(), Publicacao.created_at.desc()).all()
+    return q.order_by(Publicacao.data_publicacao.desc()).all()
 
 
 @router.get("/{pub_id}", response_model=PublicacaoOut)

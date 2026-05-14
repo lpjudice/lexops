@@ -125,12 +125,6 @@ function textHasExactTerm(normalizedText: string, term: string) {
   return new RegExp(pattern, 'i').test(normalizedText)
 }
 
-function getMatchPriority(match: PublicacaoMatchInfo) {
-  if (match.hasRegisteredProcess) return 0
-  if (match.hasExactName) return 1
-  return 3
-}
-
 function buildRelevantExcerpt(text: string, terms: string[], radius = 220) {
   const source = text.trim()
   if (!source) return ''
@@ -516,14 +510,9 @@ export default function DiarioPage() {
     .map((pub) => ({ pub, match: classifyPublication(pub, processos, clientes, termosNomesMonitorados) }))
     .filter(({ match }) => match.hasRegisteredProcess || match.hasExactName)
     .sort((a, b) => {
-      const priorityA = getMatchPriority(a.match)
-      const priorityB = getMatchPriority(b.match)
-      if (priorityA !== priorityB) return priorityA - priorityB
-
       const dateA = new Date(`${a.pub.data_publicacao}T12:00:00`).getTime()
       const dateB = new Date(`${b.pub.data_publicacao}T12:00:00`).getTime()
-      if (dateA !== dateB) return dateB - dateA
-      return new Date(b.pub.created_at).getTime() - new Date(a.pub.created_at).getTime()
+      return dateB - dateA
     })
 
   const publicacoesFiltradas = publicacoesEnriquecidas.filter(({ pub, match }) => {
