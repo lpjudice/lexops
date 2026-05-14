@@ -65,6 +65,12 @@ STOPWORDS = {
     "sa", "s.a", "s/a", "sociedade", "advogados", "advocacia", "ltda", "me", "epp",
 }
 
+SOBRENOMES_FALLBACK_BLOQUEADOS = {
+    "alves", "barbosa", "costa", "dias", "ferreira", "gomes", "lima",
+    "mercado", "oliveira", "pereira", "roberto", "santos", "silva",
+    "souza", "teste",
+}
+
 
 def _inferir_tipo_ato(texto: str) -> str:
     t = texto.lower()
@@ -298,6 +304,10 @@ def _consultas_comunica(termos: list[str] | None = None) -> list[tuple[str, int,
             adicionar(termo_original, 0, "nomeAdvogado", termo_original, COMUNICA_MAX_PAGINAS_NOME)
             adicionar(termo_original, 1, "nomeParte", termo_original, COMUNICA_MAX_PAGINAS_NOME)
             adicionar(termo_original, 2, "texto", termo_original, 1)
+            tokens = _tokenizar_relevantes(termo_original)
+            sobrenome = tokens[-1] if len(tokens) >= 3 else ""
+            if len(sobrenome) >= 5 and sobrenome not in SOBRENOMES_FALLBACK_BLOQUEADOS:
+                adicionar(termo_original, 3, "texto", sobrenome, 1)
 
     if termos:
         return consultas
