@@ -210,23 +210,25 @@ def _run_scraping_job(
             job_id,
             status="rodando",
             total_days=len(dias),
-            message="Iniciando leitura dia a dia.",
+            current_label="fonte pública",
+            message="Consultando a fonte pública com termos enxutos...",
         )
+        itens_janela = scrape_todos(
+            tribunais=tribunais_validos,
+            data=None,
+            termos=termos_monitorados or None,
+            days_back=days_back,
+        )
+        itens_janela = _filtrar_itens_monitorados_exatos(itens_janela, db, termos_monitorados)
         for index, dia in enumerate(dias, start=1):
             _set_job(
                 job_id,
                 current_day=dia,
                 current_label=dia.strftime("%d/%m/%Y"),
                 completed_days=index - 1,
-                message=f"Lendo {dia.strftime('%d/%m/%Y')}...",
+                message=f"Processando {dia.strftime('%d/%m/%Y')}...",
             )
-            itens = scrape_todos(
-                tribunais=tribunais_validos,
-                data=dia,
-                termos=termos_monitorados or None,
-                days_back=1,
-            )
-            itens = _filtrar_itens_monitorados_exatos(itens, db, termos_monitorados)
+            itens = [item for item in itens_janela if item.get("data_publicacao") == dia]
             ins, dup, err = _inserir_publicacoes(itens, db)
             job = DIARIO_SYNC_JOBS[job_id]
             _set_job(
@@ -237,8 +239,7 @@ def _run_scraping_job(
                 completed_days=index,
                 message=f"{dia.strftime('%d/%m/%Y')}: {ins} novas, {dup} já existentes, {err} erros.",
             )
-            # Pequena pausa para não martelar a fonte pública em sequência.
-            time.sleep(0.8)
+            time.sleep(0.15)
         _set_job(
             job_id,
             status="concluido",
