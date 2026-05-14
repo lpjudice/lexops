@@ -24,6 +24,9 @@ def _run_migrations() -> None:
             "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS url_fonte TEXT"
         ))
         conn.execute(text(
+            "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS rejeitada BOOLEAN NOT NULL DEFAULT false"
+        ))
+        conn.execute(text(
             "ALTER TYPE fonte_publicacao ADD VALUE IF NOT EXISTS 'scraping_djen'"
         ))
         conn.execute(text(

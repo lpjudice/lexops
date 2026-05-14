@@ -23,6 +23,7 @@ class PublicacaoBase(BaseModel):
     texto_completo: str | None = None
     processo_id: uuid.UUID | None = None
     lida: bool = False
+    rejeitada: bool = False
     gera_prazo: bool = False
 
 
@@ -33,6 +34,7 @@ class PublicacaoCreate(PublicacaoBase):
 class PublicacaoUpdate(BaseModel):
     processo_id: uuid.UUID | None = None
     lida: bool | None = None
+    rejeitada: bool | None = None
     gera_prazo: bool | None = None
     prazo_id: uuid.UUID | None = None
     tipo_ato: TipoAto | None = None

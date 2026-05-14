@@ -1,13 +1,14 @@
 import json
 import re
 import uuid
-from datetime import date
+import time
+from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.models.cliente import Cliente
 from app.models.prazo import Prazo
 from app.models.publicacao import Publicacao
@@ -21,10 +22,34 @@ from app.services.scraping_tribunais import scrape_todos
 router = APIRouter(prefix="/diario", tags=["diario"])
 
 
+DIARIO_SYNC_JOBS: dict[str, dict] = {}
+
+
 class DiarioMonitoringConfig(BaseModel):
     tribunais: list[str]
     termos_extras: list[str]
     auto_sync: bool = True
+
+
+class DiarioSyncJobStart(BaseModel):
+    job_id: str
+
+
+class DiarioSyncJobStatus(BaseModel):
+    job_id: str
+    status: str
+    tribunais: list[str]
+    current_day: date | None = None
+    current_label: str | None = None
+    total_days: int
+    completed_days: int
+    inseridas: int = 0
+    duplicatas: int = 0
+    erros: int = 0
+    message: str | None = None
+    error: str | None = None
+    started_at: str
+    finished_at: str | None = None
 
 
 def _normalizar_texto_busca(texto: str) -> str:
@@ -156,6 +181,82 @@ def _filtrar_itens_monitorados_exatos(
     return filtrados
 
 
+def _periodo_dias(days_back: int, data_fim: date | None = None) -> list[date]:
+    fim = data_fim or date.today()
+    inicio = fim - timedelta(days=max(days_back, 1) - 1)
+    return [inicio + timedelta(days=offset) for offset in range((fim - inicio).days + 1)]
+
+
+def _set_job(job_id: str, **updates) -> None:
+    job = DIARIO_SYNC_JOBS.get(job_id)
+    if not job:
+        return
+    job.update(updates)
+
+
+def _run_scraping_job(
+    job_id: str,
+    tribunais_validos: list[str],
+    days_back: int,
+    termos: list[str] | None = None,
+) -> None:
+    db = SessionLocal()
+    try:
+        termos_monitorados = _termos_monitorados_para_busca(db, termos or [])
+        dias = _periodo_dias(days_back)
+        _set_job(
+            job_id,
+            status="rodando",
+            total_days=len(dias),
+            message="Iniciando leitura dia a dia.",
+        )
+        for index, dia in enumerate(dias, start=1):
+            _set_job(
+                job_id,
+                current_day=dia,
+                current_label=dia.strftime("%d/%m/%Y"),
+                completed_days=index - 1,
+                message=f"Lendo {dia.strftime('%d/%m/%Y')}...",
+            )
+            itens = scrape_todos(
+                tribunais=tribunais_validos,
+                data=dia,
+                termos=termos_monitorados or None,
+                days_back=1,
+            )
+            itens = _filtrar_itens_monitorados_exatos(itens, db, termos_monitorados)
+            ins, dup, err = _inserir_publicacoes(itens, db)
+            job = DIARIO_SYNC_JOBS[job_id]
+            _set_job(
+                job_id,
+                inseridas=job["inseridas"] + ins,
+                duplicatas=job["duplicatas"] + dup,
+                erros=job["erros"] + err,
+                completed_days=index,
+                message=f"{dia.strftime('%d/%m/%Y')}: {ins} novas, {dup} já existentes, {err} erros.",
+            )
+            # Pequena pausa para não martelar a fonte pública em sequência.
+            time.sleep(0.8)
+        _set_job(
+            job_id,
+            status="concluido",
+            current_day=None,
+            current_label=None,
+            finished_at=datetime.now(timezone.utc).isoformat(),
+            message="Leitura concluída.",
+        )
+    except Exception as exc:
+        _set_job(
+            job_id,
+            status="erro",
+            error=str(exc),
+            finished_at=datetime.now(timezone.utc).isoformat(),
+            message="Falha ao ler o Diário Oficial.",
+        )
+    finally:
+        db.close()
+
+
 def _texto_chave_publicacao(texto: str | None) -> str:
     texto_norm = _normalizar_texto_busca(texto or "")
     return texto_norm[:300]
@@ -266,6 +367,46 @@ def sync_scraping(
     return SyncResult(inseridas=ins, duplicatas=dup, erros=err, fonte="scraping")
 
 
+@router.post("/scraping/jobs", response_model=DiarioSyncJobStart)
+def iniciar_sync_scraping_job(
+    background_tasks: BackgroundTasks,
+    tribunais: list[str] = Query(default=["TJES", "TJSP", "TJAM", "TJRJ"]),
+    days_back: int = Query(1, ge=1, le=30),
+    termos: list[str] = Query(default=[]),
+):
+    tribunais_validos = [t for t in tribunais if t in {"TJES", "TJSP", "TJAM", "TJRJ", "DJEN"}]
+    if not tribunais_validos:
+        raise HTTPException(status_code=400, detail="Selecione ao menos um tribunal local válido.")
+
+    job_id = str(uuid.uuid4())
+    DIARIO_SYNC_JOBS[job_id] = {
+        "job_id": job_id,
+        "status": "pendente",
+        "tribunais": tribunais_validos,
+        "current_day": None,
+        "current_label": None,
+        "total_days": days_back,
+        "completed_days": 0,
+        "inseridas": 0,
+        "duplicatas": 0,
+        "erros": 0,
+        "message": "Leitura na fila.",
+        "error": None,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "finished_at": None,
+    }
+    background_tasks.add_task(_run_scraping_job, job_id, tribunais_validos, days_back, termos)
+    return DiarioSyncJobStart(job_id=job_id)
+
+
+@router.get("/scraping/jobs/{job_id}", response_model=DiarioSyncJobStatus)
+def obter_sync_scraping_job(job_id: str):
+    job = DIARIO_SYNC_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Leitura não encontrada")
+    return DiarioSyncJobStatus(**job)
+
+
 @router.get("/monitoramento", response_model=DiarioMonitoringConfig)
 def obter_monitoramento():
     from app.services.diario_monitoring import load_monitoring_config
@@ -286,6 +427,7 @@ def salvar_monitoramento(body: DiarioMonitoringConfig):
 @router.get("/", response_model=list[PublicacaoOut])
 def listar_publicacoes(
     lida: bool | None = Query(None),
+    rejeitada: bool | None = Query(None),
     processo_id: uuid.UUID | None = Query(None),
     tribunal: str | None = Query(None),
     data_inicio: date | None = Query(None),
@@ -295,6 +437,8 @@ def listar_publicacoes(
     q = db.query(Publicacao)
     if lida is not None:
         q = q.filter(Publicacao.lida == lida)
+    if rejeitada is not None:
+        q = q.filter(Publicacao.rejeitada == rejeitada)
     if processo_id:
         q = q.filter(Publicacao.processo_id == processo_id)
     if tribunal:
@@ -334,6 +478,30 @@ def marcar_lida(pub_id: uuid.UUID, db: Session = Depends(get_db)):
     if not pub:
         raise HTTPException(status_code=404, detail="Publicação não encontrada")
     pub.lida = True
+    pub.rejeitada = False
+    db.commit()
+    db.refresh(pub)
+    return pub
+
+
+@router.patch("/{pub_id}/rejeitar", response_model=PublicacaoOut)
+def rejeitar_publicacao(pub_id: uuid.UUID, db: Session = Depends(get_db)):
+    pub = db.query(Publicacao).filter(Publicacao.id == pub_id).first()
+    if not pub:
+        raise HTTPException(status_code=404, detail="Publicação não encontrada")
+    pub.rejeitada = True
+    db.commit()
+    db.refresh(pub)
+    return pub
+
+
+@router.patch("/{pub_id}/reabrir", response_model=PublicacaoOut)
+def reabrir_publicacao(pub_id: uuid.UUID, db: Session = Depends(get_db)):
+    pub = db.query(Publicacao).filter(Publicacao.id == pub_id).first()
+    if not pub:
+        raise HTTPException(status_code=404, detail="Publicação não encontrada")
+    pub.rejeitada = False
+    pub.lida = False
     db.commit()
     db.refresh(pub)
     return pub

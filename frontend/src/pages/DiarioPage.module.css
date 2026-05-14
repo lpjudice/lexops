@@ -124,6 +124,48 @@
   margin-bottom: 16px;
 }
 
+.syncProgressBox {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+
+.syncProgressHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.syncProgressTrack {
+  height: 8px;
+  background: #e2e8f0;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.syncProgressFill {
+  height: 100%;
+  background: linear-gradient(90deg, #00b090, #22c55e);
+  border-radius: inherit;
+  transition: width 0.25s ease;
+}
+
+.syncProgressMeta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  color: #64748b;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+
 .filtros {
   display: flex;
   gap: 8px;
@@ -166,6 +208,11 @@
 .cardLida {
   border-left-color: #d1d5db;
   opacity: 0.75;
+}
+.cardRejeitada {
+  border-left-color: #f87171;
+  background: #fff7f7;
+  opacity: 0.7;
 }
 .cardSemPub {
   border-left-color: #e5e7eb;

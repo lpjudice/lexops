@@ -34,6 +34,7 @@ export interface Publicacao {
   processo_id?: string
   prazo_id?: string
   lida: boolean
+  rejeitada: boolean
   gera_prazo: boolean
   analise_ia?: string      // JSON serializado
   cliente_nome_pub?: string
@@ -54,8 +55,29 @@ export interface DiarioMonitoringConfig {
   auto_sync: boolean
 }
 
+export interface DiarioSyncJobStart {
+  job_id: string
+}
+
+export interface DiarioSyncJobStatus {
+  job_id: string
+  status: 'pendente' | 'rodando' | 'concluido' | 'erro'
+  tribunais: string[]
+  current_day?: string | null
+  current_label?: string | null
+  total_days: number
+  completed_days: number
+  inseridas: number
+  duplicatas: number
+  erros: number
+  message?: string | null
+  error?: string | null
+  started_at: string
+  finished_at?: string | null
+}
+
 export const diarioApi = {
-  listar: (params?: { lida?: boolean; tribunal?: string; processo_id?: string }) =>
+  listar: (params?: { lida?: boolean; rejeitada?: boolean; tribunal?: string; processo_id?: string }) =>
     api.get<Publicacao[]>('/diario/', { params }).then((r) => r.data),
 
   syncGmail: (days_back = 3) =>
@@ -66,8 +88,22 @@ export const diarioApi = {
       params: { tribunais, termos, days_back },
     }).then((r) => r.data),
 
+  iniciarSyncScraping: (tribunais: string[], days_back = 1) =>
+    api.post<DiarioSyncJobStart>('/diario/scraping/jobs', null, {
+      params: { tribunais, days_back },
+    }).then((r) => r.data),
+
+  syncScrapingStatus: (job_id: string) =>
+    api.get<DiarioSyncJobStatus>(`/diario/scraping/jobs/${job_id}`).then((r) => r.data),
+
   marcarLida: (id: string) =>
     api.patch<Publicacao>(`/diario/${id}/lida`).then((r) => r.data),
+
+  rejeitar: (id: string) =>
+    api.patch<Publicacao>(`/diario/${id}/rejeitar`).then((r) => r.data),
+
+  reabrir: (id: string) =>
+    api.patch<Publicacao>(`/diario/${id}/reabrir`).then((r) => r.data),
 
   vincularProcesso: (id: string, processo_id: string) =>
     api.patch<Publicacao>(`/diario/${id}`, { processo_id }).then((r) => r.data),

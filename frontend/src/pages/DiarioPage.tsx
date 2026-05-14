@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { diarioApi } from '../api/diario'
-import type { AnaliseIA, Publicacao, TipoAto } from '../api/diario'
+import type { AnaliseIA, DiarioSyncJobStatus, Publicacao, TipoAto } from '../api/diario'
 import { processosApi } from '../api/processos'
 import type { Processo } from '../api/processos'
 import { clientesApi } from '../api/clientes'
@@ -55,6 +55,7 @@ function getSyncPeriod(daysBack: number) {
 }
 
 type MatchFilter = 'todos' | 'cadastrados' | 'exatos'
+type DiarioEstadoFiltro = 'abertas' | 'tratadas' | 'rejeitadas' | 'todas'
 type MatchKind = 'processo' | 'exato'
 
 interface ProcessoRelacionado {
@@ -271,10 +272,12 @@ export default function DiarioPage() {
   const [expandido, setExpandido] = useState<string | null>(null)
   const [vincularId, setVincularId] = useState<string | null>(null)
   const [processoSelecionado, setProcessoSelecionado] = useState('')
-  const [filtroLida, setFiltroLida] = useState<'todas' | 'nao_lidas'>('nao_lidas')
+  const [filtroEstado, setFiltroEstado] = useState<DiarioEstadoFiltro>('abertas')
   const [filtroComConteudo, setFiltroComConteudo] = useState(false)
   const [filtroMatch, setFiltroMatch] = useState<MatchFilter>('todos')
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
+  const [syncJobId, setSyncJobId] = useState<string | null>(null)
+  const [syncJobLabel, setSyncJobLabel] = useState<string | null>(null)
   const [acaoMsg, setAcaoMsg] = useState<Record<string, string>>({})
   const [daysBack, setDaysBack] = useState(3)
   const [termosCustom, setTermosCustom] = useState<string[]>([])
@@ -291,11 +294,42 @@ export default function DiarioPage() {
     try { return JSON.parse(pub.analise_ia) } catch { return null }
   }
 
+  const filtroPublicacoes =
+    filtroEstado === 'abertas'
+      ? { lida: false, rejeitada: false }
+      : filtroEstado === 'tratadas'
+        ? { lida: true, rejeitada: false }
+        : filtroEstado === 'rejeitadas'
+          ? { rejeitada: true }
+          : {}
+
   const { data: publicacoes = [], isLoading } = useQuery({
-    queryKey: ['diario', filtroLida],
-    queryFn: () =>
-      diarioApi.listar(filtroLida === 'nao_lidas' ? { lida: false } : {}),
+    queryKey: ['diario', filtroEstado],
+    queryFn: () => diarioApi.listar(filtroPublicacoes),
   })
+
+  const { data: syncJob } = useQuery<DiarioSyncJobStatus>({
+    queryKey: ['diario-sync-job', syncJobId],
+    queryFn: () => diarioApi.syncScrapingStatus(syncJobId!),
+    enabled: !!syncJobId,
+    refetchInterval: syncJobId ? 1000 : false,
+  })
+
+  useEffect(() => {
+    if (!syncJob || (syncJob.status !== 'concluido' && syncJob.status !== 'erro')) return
+    qc.invalidateQueries({ queryKey: ['diario'] })
+    const label = syncJobLabel ?? syncJob.tribunais.join(', ')
+    if (syncJob.status === 'concluido') {
+      setSyncMsg(
+        `${label}: ${syncJob.inseridas} novas, ${syncJob.duplicatas} já existentes, ${syncJob.erros} erros`,
+      )
+    } else {
+      setSyncMsg(`${label}: falha na leitura. ${syncJob.error ?? ''}`.trim())
+    }
+    setSyncJobId(null)
+    setSyncJobLabel(null)
+    setTimeout(() => setSyncMsg(null), 9000)
+  }, [qc, syncJob, syncJobLabel])
 
   const { data: googleStatus } = useQuery({
     queryKey: ['google-status'],
@@ -352,17 +386,11 @@ export default function DiarioPage() {
 
   const syncScraping = useMutation({
     mutationFn: ({ tribunais, label }: { tribunais: string[]; label: string }) =>
-      diarioApi.syncScraping(tribunais, [], daysBack).then((r) => ({
-        ...r,
-        label,
-        periodo: getSyncPeriod(daysBack),
-      })),
+      diarioApi.iniciarSyncScraping(tribunais, daysBack).then((r) => ({ ...r, label })),
     onSuccess: (r) => {
-      qc.invalidateQueries({ queryKey: ['diario'] })
-      setSyncMsg(
-        `${r.label} (${r.periodo}): ${r.inseridas} novas, ${r.duplicatas} já existentes, ${r.erros} erros`,
-      )
-      setTimeout(() => setSyncMsg(null), 9000)
+      setSyncJobId(r.job_id)
+      setSyncJobLabel(r.label)
+      setSyncMsg(`${r.label}: iniciando leitura dia a dia...`)
     },
   })
 
@@ -409,6 +437,16 @@ export default function DiarioPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['diario'] }),
   })
 
+  const rejeitar = useMutation({
+    mutationFn: (id: string) => diarioApi.rejeitar(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['diario'] }),
+  })
+
+  const reabrir = useMutation({
+    mutationFn: (id: string) => diarioApi.reabrir(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['diario'] }),
+  })
+
   const vincular = useMutation({
     mutationFn: ({ id, processo_id }: { id: string; processo_id: string }) =>
       diarioApi.vincularProcesso(id, processo_id),
@@ -417,11 +455,6 @@ export default function DiarioPage() {
       setVincularId(null)
       setProcessoSelecionado('')
     },
-  })
-
-  const deletar = useMutation({
-    mutationFn: (id: string) => diarioApi.deletar(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['diario'] }),
   })
 
   const analisar = useMutation({
@@ -511,6 +544,14 @@ export default function DiarioPage() {
     return true
   })
 
+  const syncEmAndamento = syncScraping.isPending || !!syncJobId
+  const syncPercentual = syncJob?.total_days
+    ? Math.round((syncJob.completed_days / syncJob.total_days) * 100)
+    : 0
+  const abertasCount = publicacoesEnriquecidas.filter(
+    ({ pub }) => !pub.lida && !pub.rejeitada && pub.texto_resumo !== 'Sem publicações nesta edição.',
+  ).length
+
   return (
     <div>
       {googleStatus && !googleStatus.conectado && (
@@ -528,9 +569,9 @@ export default function DiarioPage() {
       <div className={styles.pageHeader}>
         <h1 className={styles.pageTitle}>
           Diário Oficial
-          {publicacoesEnriquecidas.filter(({ pub }) => !pub.lida && pub.texto_resumo !== 'Sem publicações nesta edição.').length > 0 && (
+          {abertasCount > 0 && (
             <span className={diarioStyles.badge}>
-              {publicacoesEnriquecidas.filter(({ pub }) => !pub.lida && pub.texto_resumo !== 'Sem publicações nesta edição.').length}
+              {abertasCount}
             </span>
           )}
         </h1>
@@ -566,19 +607,19 @@ export default function DiarioPage() {
 
       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
         {FONTES_DIARIO.map((fonte) => {
-          const carregando = syncScraping.isPending && syncScraping.variables?.label === fonte.label
+          const carregando = syncEmAndamento && syncJobLabel === fonte.label
           return (
             <button
               key={fonte.key}
               className={diarioStyles.btnTribunais}
               onClick={() => syncScraping.mutate({ tribunais: [...fonte.tribunais], label: fonte.label })}
-              disabled={syncScraping.isPending}
+              disabled={syncEmAndamento}
               style={{
-                opacity: syncScraping.isPending && !carregando ? 0.7 : 1,
+                opacity: syncEmAndamento && !carregando ? 0.7 : 1,
                 minWidth: '110px',
               }}
             >
-              {carregando ? `Buscando ${fonte.label} (${getSyncPeriod(daysBack)})...` : `↓ ${fonte.label}`}
+              {carregando ? `Lendo ${syncJob?.current_label ?? fonte.label}...` : `↓ ${fonte.label}`}
             </button>
           )
         })}
@@ -653,6 +694,22 @@ export default function DiarioPage() {
 
       {syncMsg && <div className={diarioStyles.syncMsg}>{syncMsg}</div>}
 
+      {syncJob && (
+        <div className={diarioStyles.syncProgressBox}>
+          <div className={diarioStyles.syncProgressHeader}>
+            <span>{syncJobLabel ?? syncJob.tribunais.join(', ')}</span>
+            <strong>{syncPercentual}%</strong>
+          </div>
+          <div className={diarioStyles.syncProgressTrack}>
+            <div className={diarioStyles.syncProgressFill} style={{ width: `${syncPercentual}%` }} />
+          </div>
+          <div className={diarioStyles.syncProgressMeta}>
+            <span>{syncJob.message ?? 'Lendo Diário Oficial...'}</span>
+            <span>{syncJob.completed_days}/{syncJob.total_days} dias</span>
+          </div>
+        </div>
+      )}
+
       <div className={diarioStyles.syncMsg} style={{ background: '#1f2937', borderColor: '#374151', color: '#cbd5e1' }}>
         Cada botão consulta uma fonte separada. O `DJEN` e os botões por tribunal usam a busca pública nacional quando disponível. O `PJe Comunica` continua separado, autenticado, e não substitui o `DJEN`.
       </div>
@@ -708,14 +765,26 @@ export default function DiarioPage() {
 
       <div className={diarioStyles.filtros}>
         <button
-          className={`${diarioStyles.filtroBtn} ${filtroLida === 'nao_lidas' ? diarioStyles.filtroAtivo : ''}`}
-          onClick={() => setFiltroLida('nao_lidas')}
+          className={`${diarioStyles.filtroBtn} ${filtroEstado === 'abertas' ? diarioStyles.filtroAtivo : ''}`}
+          onClick={() => setFiltroEstado('abertas')}
         >
-          Não lidas
+          Em aberto
         </button>
         <button
-          className={`${diarioStyles.filtroBtn} ${filtroLida === 'todas' ? diarioStyles.filtroAtivo : ''}`}
-          onClick={() => setFiltroLida('todas')}
+          className={`${diarioStyles.filtroBtn} ${filtroEstado === 'tratadas' ? diarioStyles.filtroAtivo : ''}`}
+          onClick={() => setFiltroEstado('tratadas')}
+        >
+          Tratadas
+        </button>
+        <button
+          className={`${diarioStyles.filtroBtn} ${filtroEstado === 'rejeitadas' ? diarioStyles.filtroAtivo : ''}`}
+          onClick={() => setFiltroEstado('rejeitadas')}
+        >
+          Rejeitadas
+        </button>
+        <button
+          className={`${diarioStyles.filtroBtn} ${filtroEstado === 'todas' ? diarioStyles.filtroAtivo : ''}`}
+          onClick={() => setFiltroEstado('todas')}
         >
           Todas
         </button>
@@ -746,8 +815,12 @@ export default function DiarioPage() {
         <p className={styles.empty}>
           {filtroComConteudo
             ? 'Nenhuma publicação com conteúdo encontrada.'
-            : filtroLida === 'nao_lidas'
-              ? 'Nenhuma publicação não lida. Use os botões acima para sincronizar.'
+            : filtroEstado === 'abertas'
+              ? 'Nenhuma publicação em aberto. Use os botões acima para sincronizar.'
+              : filtroEstado === 'tratadas'
+                ? 'Nenhuma publicação tratada ainda.'
+                : filtroEstado === 'rejeitadas'
+                  ? 'Nenhuma publicação rejeitada.'
               : 'Nenhuma publicação importada ainda.'}
         </p>
       ) : (
@@ -760,7 +833,7 @@ export default function DiarioPage() {
             return (
             <div
               key={pub.id}
-              className={`${diarioStyles.card} ${pub.lida ? diarioStyles.cardLida : ''} ${pub.texto_resumo === 'Sem publicações nesta edição.' ? diarioStyles.cardSemPub : ''}`}
+              className={`${diarioStyles.card} ${pub.lida ? diarioStyles.cardLida : ''} ${pub.rejeitada ? diarioStyles.cardRejeitada : ''} ${pub.texto_resumo === 'Sem publicações nesta edição.' ? diarioStyles.cardSemPub : ''}`}
             >
               <div className={diarioStyles.cardHeader}>
                 <div className={diarioStyles.cardMeta}>
@@ -788,7 +861,14 @@ export default function DiarioPage() {
                   <span className={diarioStyles.data}>{formatDate(pub.data_publicacao)}</span>
                 </div>
                 <div className={diarioStyles.cardActions}>
-                  {!pub.lida && (
+                  {pub.rejeitada ? (
+                    <button
+                      className={diarioStyles.btnLida}
+                      onClick={() => reabrir.mutate(pub.id)}
+                    >
+                      Reabrir
+                    </button>
+                  ) : !pub.lida && (
                     <button
                       className={diarioStyles.btnLida}
                       onClick={() => marcarLida.mutate(pub.id)}
@@ -810,7 +890,8 @@ export default function DiarioPage() {
                   </button>
                   <button
                     className={styles.btnDanger}
-                    onClick={() => { if (confirm('Remover?')) deletar.mutate(pub.id) }}
+                    onClick={() => { if (confirm('Rejeitar esta publicação?')) rejeitar.mutate(pub.id) }}
+                    disabled={pub.rejeitada}
                   >
                     ×
                   </button>

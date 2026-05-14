@@ -43,6 +43,7 @@ class Publicacao(Base):
 
     # Controle
     lida: Mapped[bool] = mapped_column(Boolean, default=False)
+    rejeitada: Mapped[bool] = mapped_column(Boolean, default=False)
     gera_prazo: Mapped[bool] = mapped_column(Boolean, default=False)
     prazo_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("prazos.id"), nullable=True
