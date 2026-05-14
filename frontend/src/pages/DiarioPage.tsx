@@ -43,17 +43,6 @@ function formatDate(d?: string) {
   return new Date(d + 'T12:00:00').toLocaleDateString('pt-BR')
 }
 
-function formatDateForSync(date: Date) {
-  return date.toLocaleDateString('pt-BR')
-}
-
-function getSyncPeriod(daysBack: number) {
-  const end = new Date()
-  const start = new Date()
-  start.setDate(end.getDate() - Math.max(daysBack, 1) + 1)
-  return `${formatDateForSync(start)} a ${formatDateForSync(end)}`
-}
-
 type MatchFilter = 'todos' | 'cadastrados' | 'exatos'
 type DiarioEstadoFiltro = 'abertas' | 'tratadas' | 'rejeitadas' | 'todas'
 type MatchKind = 'processo' | 'exato'
