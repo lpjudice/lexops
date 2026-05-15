@@ -38,7 +38,7 @@ function fmtData(d: string) {
   return new Date(d + 'T12:00:00').toLocaleDateString('pt-BR')
 }
 function podeEditarDespesas(status: StatusReembolso) {
-  return status === 'rascunho' || status === 'aguardando_pagamento'
+  return status === 'rascunho' || status === 'aguardando_pagamento' || status === 'enviado'
 }
 
 export default function ReembolsosPage() {
@@ -511,7 +511,7 @@ export default function ReembolsosPage() {
                           ☁ Ver pasta no Drive
                         </a>
                       )}
-                      {r.status === 'aguardando_pagamento' && (
+                      {(r.status === 'aguardando_pagamento' || r.status === 'enviado') && (
                         <button
                           className={`${styles.btnPrimary} ${cs.btnPago}`}
                           onClick={() => { if (confirm('Marcar como pago?')) marcarPago.mutate(r.id) }}
