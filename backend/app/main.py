@@ -59,6 +59,12 @@ def _run_migrations() -> None:
             "ALTER TABLE reembolsos ADD COLUMN IF NOT EXISTS drive_link VARCHAR(1000)"
         ))
         conn.execute(text(
+            "ALTER TABLE reembolsos ADD COLUMN IF NOT EXISTS email_destinatario VARCHAR(255)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE reembolsos ADD COLUMN IF NOT EXISTS ultimo_lembrete_em TIMESTAMPTZ"
+        ))
+        conn.execute(text(
             "ALTER TABLE signatarios ADD COLUMN IF NOT EXISTS clicksign_request_key VARCHAR(255)"
         ))
         conn.execute(text(

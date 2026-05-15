@@ -62,6 +62,8 @@ class ReembolsoOut(BaseModel):
     total: float
     pdf_path: str | None
     drive_link: str | None = None
+    email_destinatario: str | None = None
+    ultimo_lembrete_em: datetime | None = None
     itens: list[ItemReembolsoOut]
     created_at: datetime
     updated_at: datetime

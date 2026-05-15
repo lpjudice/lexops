@@ -24,6 +24,8 @@ export interface Reembolso {
   total: number
   pdf_path?: string
   drive_link?: string
+  email_destinatario?: string | null
+  ultimo_lembrete_em?: string | null
   itens: ItemReembolso[]
   created_at: string
   updated_at: string

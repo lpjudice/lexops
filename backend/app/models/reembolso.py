@@ -36,6 +36,9 @@ class Reembolso(Base):
     pdf_path: Mapped[str | None] = mapped_column(String(500))
     # Link do PDF no Google Drive (após upload)
     drive_link: Mapped[str | None] = mapped_column(String(1000))
+    # E-mail usado para envio e controle de lembretes automáticos.
+    email_destinatario: Mapped[str | None] = mapped_column(String(255))
+    ultimo_lembrete_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

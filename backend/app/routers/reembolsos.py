@@ -1,7 +1,7 @@
 import base64
 import json
 import uuid
-from datetime import date as date_type
+from datetime import date as date_type, datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -69,8 +69,9 @@ def _build_email_html(
     r: Reembolso,
     header_color: str = "#00b090",
     is_cancelamento: bool = False,
+    is_lembrete: bool = False,
 ) -> str:
-    """Builds the HTML email body. Red header + cancellation message when is_cancelamento=True."""
+    """Builds the HTML email body."""
     itens_rows = "".join(
         f"""<tr>
           <td style="padding:8px 12px;border-bottom:1px solid #f0f0f0;font-size:13px;color:#374151;">{item.data.strftime('%d/%m/%Y')}</td>
@@ -96,6 +97,17 @@ def _build_email_html(
             f"Informamos que a <strong>Nota de Reembolso de Despesas</strong> referente a "
             f"<strong style='color:#1d1e20;'>{r.titulo}</strong> foi <strong>cancelada</strong>. "
             f"Em caso de dúvidas, entre em contato com nosso escritório."
+        )
+    elif is_lembrete:
+        headline = "Lembrete — Nota de Reembolso de Despesas"
+        box_bg = "#fff7ed"
+        box_border = "#fed7aa"
+        box_color = "#9a3412"
+        total_color = "#ea580c"
+        intro = (
+            f"Este é um lembrete da <strong>Nota de Reembolso de Despesas</strong> referente a: "
+            f"<strong style='color:#1d1e20;'>{r.titulo}</strong>. "
+            f"Caso o pagamento já tenha sido realizado, por favor desconsidere esta mensagem."
         )
     else:
         headline = "Nota de Reembolso de Despesas"
@@ -679,5 +691,7 @@ def enviar_email(
     )
 
     r.status = "enviado"
+    r.email_destinatario = destinatario
+    r.ultimo_lembrete_em = datetime.now(timezone.utc)
     db.commit()
     return {"ok": True, "message_id": result.get("id")}

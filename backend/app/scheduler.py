@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -12,6 +13,7 @@ logger = logging.getLogger(__name__)
 scheduler = BackgroundScheduler(timezone="America/Sao_Paulo")
 DIARIO_TRIBUNAIS_ORDEM = ["DJEN", "TJSP", "TJES", "TJAM", "TJRJ"]
 DIARIO_DAYS_BACK = 30
+REEMBOLSO_REMINDER_INTERVAL = timedelta(days=3)
 
 
 def _processos_ativos(db):
@@ -156,6 +158,76 @@ def _sync_diarios_monitorados() -> None:
         logger.warning("Scheduler: falha na sincronização automática do Diário Oficial: %s", exc)
 
 
+def _enviar_lembretes_reembolso() -> None:
+    try:
+        from app.database import SessionLocal
+        from app.models.cliente import Cliente
+        from app.models.reembolso import Reembolso
+        from app.routers.reembolsos import (
+            BCC_EMAIL_FIXO,
+            _build_email_html,
+            _get_pdf_with_drive_link,
+            _refresh_if_needed,
+            _send_gmail,
+        )
+
+        access_token = _refresh_if_needed()
+        if not access_token:
+            logger.info("Scheduler: conta Google indisponível para lembretes de reembolso")
+            return
+
+        now = datetime.now(timezone.utc)
+        db = SessionLocal()
+        try:
+            reembolsos = (
+                db.query(Reembolso)
+                .filter(Reembolso.status.in_(["enviado", "aguardando_pagamento"]))
+                .all()
+            )
+            enviados = 0
+            for r in reembolsos:
+                destinatario = (r.email_destinatario or "").strip()
+                if not destinatario:
+                    cliente = db.query(Cliente).filter(Cliente.id == r.cliente_id).first()
+                    destinatario = (cliente.email or "").strip() if cliente and cliente.email else ""
+                if not destinatario:
+                    logger.info("Scheduler: reembolso %s sem e-mail para lembrete", r.id)
+                    continue
+
+                ultimo = r.ultimo_lembrete_em
+                if ultimo and ultimo.tzinfo is None:
+                    ultimo = ultimo.replace(tzinfo=timezone.utc)
+                if ultimo and now - ultimo < REEMBOLSO_REMINDER_INTERVAL:
+                    continue
+
+                try:
+                    cliente = db.query(Cliente).filter(Cliente.id == r.cliente_id).first()
+                    cliente_nome = cliente.nome if cliente else "cliente"
+                    pdf_bytes = _get_pdf_with_drive_link(r, db)
+                    html = _build_email_html(r, header_color="#ea580c", is_lembrete=True)
+                    _send_gmail(
+                        access_token=access_token,
+                        to=destinatario,
+                        subject=f"Lembrete — Nota de Reembolso de Despesas — {r.titulo}",
+                        html=html,
+                        pdf_bytes=pdf_bytes,
+                        pdf_filename=f"Nota de Reembolso - {cliente_nome}.pdf",
+                        bcc=[BCC_EMAIL_FIXO],
+                    )
+                    r.email_destinatario = destinatario
+                    r.ultimo_lembrete_em = now
+                    db.commit()
+                    enviados += 1
+                except Exception as exc:
+                    db.rollback()
+                    logger.warning("Scheduler: falha ao lembrar reembolso %s: %s", r.id, exc)
+            logger.info("Scheduler: lembretes de reembolso concluídos (%d enviados)", enviados)
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.warning("Scheduler: falha geral nos lembretes de reembolso: %s", exc)
+
+
 def start_scheduler() -> None:
     if scheduler.running:
         logger.info("Scheduler já estava ativo")
@@ -191,8 +263,14 @@ def start_scheduler() -> None:
         id="renovar_drive_watch",
         replace_existing=True,
     )
+    scheduler.add_job(
+        _enviar_lembretes_reembolso,
+        trigger=CronTrigger(hour=9, minute=10),
+        id="lembretes_reembolso",
+        replace_existing=True,
+    )
     scheduler.start()
-    logger.info("Scheduler iniciado — DataJud 03:00, Diário Oficial seg-sex 08:00, Drive watch renovação diária 06:00")
+    logger.info("Scheduler iniciado — DataJud 03:00, Diário Oficial seg-sex 08:00, Drive watch 06:00, lembretes de reembolso 09:10")
 
 
 def stop_scheduler() -> None:
