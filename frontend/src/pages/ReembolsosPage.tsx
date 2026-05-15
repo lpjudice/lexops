@@ -37,6 +37,9 @@ function fmtValor(v: number) {
 function fmtData(d: string) {
   return new Date(d + 'T12:00:00').toLocaleDateString('pt-BR')
 }
+function podeEditarDespesas(status: StatusReembolso) {
+  return status === 'rascunho' || status === 'aguardando_pagamento'
+}
 
 export default function ReembolsosPage() {
   const qc = useQueryClient()
@@ -105,8 +108,8 @@ export default function ReembolsosPage() {
   })
 
   const editarItemValor = useMutation({
-    mutationFn: ({ rid, iid, valor, natureza }: { rid: string; iid: string; valor: number; natureza: string }) =>
-      reembolsosApi.atualizarItem(rid, iid, { valor, natureza }),
+    mutationFn: ({ rid, iid, data }: { rid: string; iid: string; data: Partial<ItemReembolsoCreate> }) =>
+      reembolsosApi.atualizarItem(rid, iid, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['reembolsos'] })
       setEditandoItem(null)
@@ -313,24 +316,21 @@ export default function ReembolsosPage() {
                             <td>{fmtData(it.data)}</td>
                             <td>{it.descricao}</td>
                             <td>
-                              {r.status === 'rascunho' && editandoItem?.itemId === it.id ? (
+                              {podeEditarDespesas(r.status) ? (
                                 <select
                                   className={styles.input}
-                                  value={editandoItem.natureza}
-                                  onChange={(e) => setEditandoItem({ ...editandoItem, natureza: e.target.value })}
+                                  value={editandoItem?.itemId === it.id ? editandoItem.natureza : it.natureza}
+                                  disabled={editarItemValor.isPending}
+                                  onChange={(e) => {
+                                    const natureza = e.target.value
+                                    if (editandoItem?.itemId === it.id) setEditandoItem({ ...editandoItem, natureza })
+                                    editarItemValor.mutate({ rid: r.id, iid: it.id, data: { natureza } })
+                                  }}
                                 >
                                   {NATUREZAS.map((n) => <option key={n} value={n}>{n}</option>)}
                                 </select>
                               ) : (
-                                <span
-                                  style={{ cursor: r.status === 'rascunho' ? 'pointer' : undefined }}
-                                  title={r.status === 'rascunho' ? 'Clique para editar categoria' : undefined}
-                                  onClick={() => {
-                                    if (r.status === 'rascunho') iniciarEdicaoItem(it)
-                                  }}
-                                >
-                                  {it.natureza}{r.status === 'rascunho' && ' ✎'}
-                                </span>
+                                <span>{it.natureza}</span>
                               )}
                             </td>
                             <td>
@@ -339,7 +339,7 @@ export default function ReembolsosPage() {
                                   <span style={{ color: '#15803d', fontSize: 12 }} title={it.documento_comprobatorio || it.comprovante_path}>
                                     ✓ Anexado{it.documento_comprobatorio ? ` (${it.documento_comprobatorio})` : ''}
                                   </span>
-                                  {r.status === 'rascunho' && (
+                                  {podeEditarDespesas(r.status) && (
                                     <button
                                       className={cs.btnRemoveComprovante}
                                       title="Remover comprovante"
@@ -366,7 +366,7 @@ export default function ReembolsosPage() {
                               )}
                             </td>
                             <td className={cs.tdValor}>
-                              {r.status === 'rascunho' && editandoItem?.itemId === it.id ? (
+                              {podeEditarDespesas(r.status) && editandoItem?.itemId === it.id ? (
                                 <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                                   <CurrencyInput
                                     className={styles.input}
@@ -377,20 +377,20 @@ export default function ReembolsosPage() {
                                 </div>
                               ) : (
                                 <span
-                                  style={{ cursor: r.status === 'rascunho' ? 'pointer' : undefined }}
-                                  title={r.status === 'rascunho' ? 'Clique para editar' : undefined}
+                                  style={{ cursor: podeEditarDespesas(r.status) ? 'pointer' : undefined }}
+                                  title={podeEditarDespesas(r.status) ? 'Clique para editar' : undefined}
                                   onClick={() => {
-                                    if (r.status === 'rascunho') {
+                                    if (podeEditarDespesas(r.status)) {
                                       iniciarEdicaoItem(it)
                                     }
                                   }}
                                 >
-                                  {fmtValor(it.valor)}{r.status === 'rascunho' && ' ✎'}
+                                  {fmtValor(it.valor)}{podeEditarDespesas(r.status) && ' ✎'}
                                 </span>
                               )}
                             </td>
                             <td>
-                              {r.status === 'rascunho' && (
+                              {podeEditarDespesas(r.status) && (
                                 editandoItem?.itemId === it.id ? (
                                   <div style={{ display: 'flex', gap: 4 }}>
                                     <button
@@ -400,8 +400,7 @@ export default function ReembolsosPage() {
                                       onClick={() => editarItemValor.mutate({
                                         rid: r.id,
                                         iid: it.id,
-                                        valor: editandoItem.valor,
-                                        natureza: editandoItem.natureza,
+                                        data: { valor: editandoItem.valor, natureza: editandoItem.natureza },
                                       })}
                                     >✓</button>
                                     <button className={styles.btnDanger} onClick={() => setEditandoItem(null)}>×</button>
