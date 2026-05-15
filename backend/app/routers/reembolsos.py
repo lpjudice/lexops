@@ -11,7 +11,9 @@ from sqlalchemy.orm import Session
 import httpx
 
 from app.database import get_db
+from app.dependencies import get_current_user
 from app.models.reembolso import ItemReembolso, Reembolso
+from app.models.usuario import Usuario
 from app.schemas.reembolso import (
     ItemReembolsoCreate, ItemReembolsoOut, ItemReembolsoUpdate,
     ReembolsoCreate, ReembolsoOut, ReembolsoUpdate,
@@ -23,6 +25,7 @@ UPLOADS_DIR = Path("/app/uploads/reembolsos")
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 router = APIRouter(prefix="/reembolsos", tags=["reembolsos"])
+BCC_EMAIL_FIXO = "pj@pimentajudice.com.br"
 
 
 def _get_access_token() -> str | None:
@@ -45,6 +48,21 @@ def _refresh_if_needed() -> str | None:
 
 def _fmt_brl(v: float) -> str:
     return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _folder_prefix_date(r: Reembolso) -> str:
+    base_date = r.created_at.date() if r.created_at else r.data_emissao
+    return base_date.strftime("%Y-%m-%d")
+
+
+def _sanitize_folder_segment(value: str) -> str:
+    sanitized = " ".join((value or "").strip().split())
+    sanitized = sanitized.replace("/", "-").replace("\\", "-").replace(":", " -")
+    return sanitized[:120] or "Reembolso"
+
+
+def _reembolso_folder_name(r: Reembolso) -> str:
+    return f"{_folder_prefix_date(r)} - {_sanitize_folder_segment(r.titulo)} - {str(r.id)[:8]}"
 
 
 def _build_email_html(
@@ -166,7 +184,15 @@ def _build_email_html(
 </html>"""
 
 
-def _send_gmail(access_token: str, to: str, subject: str, html: str, pdf_bytes: bytes | None = None, pdf_filename: str | None = None) -> dict:
+def _send_gmail(
+    access_token: str,
+    to: str,
+    subject: str,
+    html: str,
+    pdf_bytes: bytes | None = None,
+    pdf_filename: str | None = None,
+    bcc: list[str] | None = None,
+) -> dict:
     import email.mime.application as mime_app
     import email.mime.multipart as mime_multi
     import email.mime.text as mime_text
@@ -179,6 +205,8 @@ def _send_gmail(access_token: str, to: str, subject: str, html: str, pdf_bytes: 
         outer["to"] = to
         outer["from"] = "me"
         outer["subject"] = subject
+        if bcc:
+            outer["bcc"] = ", ".join(bcc)
         outer.attach(html_part)
         anexo = mime_app.MIMEApplication(pdf_bytes, _subtype="pdf")
         anexo.add_header("Content-Disposition", "attachment", filename=pdf_filename or "nota.pdf")
@@ -188,6 +216,8 @@ def _send_gmail(access_token: str, to: str, subject: str, html: str, pdf_bytes: 
         html_part["to"] = to
         html_part["from"] = "me"
         html_part["subject"] = subject
+        if bcc:
+            html_part["bcc"] = ", ".join(bcc)
         msg_bytes = html_part.as_bytes()
 
     raw = base64.urlsafe_b64encode(msg_bytes).decode()
@@ -231,7 +261,7 @@ def _get_pdf_with_drive_link(r: Reembolso, db: Session) -> bytes:
     drive_folder_link: str | None = None
     try:
         from app.services.google_drive import get_folder_link
-        drive_folder_link = get_folder_link(cliente_nome, "Reembolsos", sub_subfolder=r.titulo)
+        drive_folder_link = get_folder_link(cliente_nome, "Reembolsos", sub_subfolder=_reembolso_folder_name(r))
     except Exception:
         pass
 
@@ -298,13 +328,15 @@ def deletar_reembolso(reembolso_id: uuid.UUID, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Reembolso não encontrado")
     try:
         from app.models.cliente import Cliente
-        from app.services.google_drive import deletar_arquivo
+        from app.services.google_drive import deletar_arquivo, deletar_pasta
         cliente = db.query(Cliente).filter(Cliente.id == r.cliente_id).first()
         if cliente:
-            deletar_arquivo(cliente.nome, "Reembolsos", f"nota_reembolso_{reembolso_id}.pdf", sub_subfolder=r.titulo)
+            folder_name = _reembolso_folder_name(r)
+            deletar_arquivo(cliente.nome, "Reembolsos", f"nota_reembolso_{reembolso_id}.pdf", sub_subfolder=folder_name)
             for item in r.itens or []:
                 if item.comprovante_path:
-                    deletar_arquivo(cliente.nome, "Reembolsos", Path(item.comprovante_path).name, sub_subfolder=r.titulo)
+                    deletar_arquivo(cliente.nome, "Reembolsos", Path(item.comprovante_path).name, sub_subfolder=folder_name)
+            deletar_pasta(cliente.nome, "Reembolsos", folder_name)
     except Exception:
         pass
     db.delete(r)
@@ -335,6 +367,7 @@ def cancelar_reembolso(reembolso_id: uuid.UUID, db: Session = Depends(get_db)):
                     to=cliente.email,
                     subject=f"[CANCELADA] Nota de Reembolso — {r.titulo}",
                     html=html,
+                    bcc=[BCC_EMAIL_FIXO],
                 )
     except Exception:
         pass
@@ -465,7 +498,7 @@ def upload_comprovante(
                 mime = "image/jpeg" if ext_lower in (".jpg", ".jpeg") else \
                        "image/png" if ext_lower == ".png" else "application/pdf"
                 upload_arquivo(conteudo, nome_arquivo, cliente.nome, "Reembolsos", mime,
-                               sub_subfolder=reembolso.titulo)
+                               sub_subfolder=_reembolso_folder_name(reembolso))
     except Exception:
         pass
 
@@ -497,7 +530,7 @@ def remover_comprovante(
             if reembolso:
                 cliente = db.query(Cliente).filter(Cliente.id == reembolso.cliente_id).first()
                 if cliente:
-                    deletar_arquivo(cliente.nome, "Reembolsos", nome_drive, sub_subfolder=reembolso.titulo)
+                    deletar_arquivo(cliente.nome, "Reembolsos", nome_drive, sub_subfolder=_reembolso_folder_name(reembolso))
         except Exception:
             pass
         item.comprovante_path = None
@@ -524,7 +557,7 @@ def remover_item(
             if reembolso:
                 cliente = db.query(Cliente).filter(Cliente.id == reembolso.cliente_id).first()
                 if cliente:
-                    deletar_arquivo(cliente.nome, "Reembolsos", Path(item.comprovante_path).name, sub_subfolder=reembolso.titulo)
+                    deletar_arquivo(cliente.nome, "Reembolsos", Path(item.comprovante_path).name, sub_subfolder=_reembolso_folder_name(reembolso))
         except Exception:
             pass
     db.delete(item)
@@ -560,9 +593,10 @@ def gerar_nota_pdf(reembolso_id: uuid.UUID, db: Session = Depends(get_db)):
     drive_folder_link: str | None = None
     try:
         from app.services.google_drive import upload_pdf, get_folder_link
-        upload_pdf(pdf_bytes, nome_arquivo, cliente_nome, "Reembolsos", sub_subfolder=r.titulo)
+        folder_name = _reembolso_folder_name(r)
+        upload_pdf(pdf_bytes, nome_arquivo, cliente_nome, "Reembolsos", sub_subfolder=folder_name)
         # Store the folder link (not the file link) for easier navigation
-        drive_folder_link = get_folder_link(cliente_nome, "Reembolsos", sub_subfolder=r.titulo)
+        drive_folder_link = get_folder_link(cliente_nome, "Reembolsos", sub_subfolder=folder_name)
         if drive_folder_link:
             r.drive_link = drive_folder_link
             db.commit()
@@ -595,7 +629,9 @@ def download_pdf(reembolso_id: uuid.UUID, db: Session = Depends(get_db)):
 def enviar_email(
     reembolso_id: uuid.UUID,
     destinatario: str,
+    copiar_usuario: bool = False,
     db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
 ):
     r = db.query(Reembolso).filter(Reembolso.id == reembolso_id).first()
     if not r:
@@ -613,6 +649,13 @@ def enviar_email(
     destino = UPLOADS_DIR / nome_arquivo
     destino.write_bytes(pdf_bytes)
     r.pdf_path = str(destino)
+    try:
+        from app.services.google_drive import get_folder_link, upload_pdf
+        folder_name = _reembolso_folder_name(r)
+        upload_pdf(pdf_bytes, nome_arquivo, cliente_nome, "Reembolsos", sub_subfolder=folder_name)
+        r.drive_link = get_folder_link(cliente_nome, "Reembolsos", sub_subfolder=folder_name)
+    except Exception:
+        pass
     db.commit()
 
     access_token = _refresh_if_needed()
@@ -620,6 +663,11 @@ def enviar_email(
         raise HTTPException(status_code=503, detail="Google não autenticado. Faça o OAuth em /auth/google")
 
     html = _build_email_html(r)
+    bcc = [BCC_EMAIL_FIXO]
+    if copiar_usuario:
+        usuario_email = getattr(usuario, "email", None) or getattr(usuario, "google_email", None)
+        if usuario_email and usuario_email not in {destinatario, BCC_EMAIL_FIXO}:
+            bcc.append(usuario_email)
     result = _send_gmail(
         access_token=access_token,
         to=destinatario,
@@ -627,6 +675,7 @@ def enviar_email(
         html=html,
         pdf_bytes=pdf_bytes,
         pdf_filename=f"Nota de Reembolso - {cliente_nome}.pdf",
+        bcc=bcc,
     )
 
     r.status = "enviado"

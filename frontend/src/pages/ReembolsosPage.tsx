@@ -1,11 +1,12 @@
 import { useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { reembolsosApi } from '../api/reembolsos'
-import type { ReembolsoCreate, ItemReembolsoCreate, StatusReembolso } from '../api/reembolsos'
+import type { ItemReembolso, ReembolsoCreate, ItemReembolsoCreate, StatusReembolso } from '../api/reembolsos'
 import { clientesApi } from '../api/clientes'
 import { processosApi } from '../api/processos'
 import CurrencyInput from '../components/CurrencyInput'
 import ComboBox from '../components/ComboBox'
+import { useAuth } from '../contexts/AuthContext'
 import styles from './Page.module.css'
 import cs from './ReembolsosPage.module.css'
 
@@ -40,6 +41,7 @@ function fmtData(d: string) {
 export default function ReembolsosPage() {
   const qc = useQueryClient()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const { usuario } = useAuth()
 
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<ReembolsoCreate>(EMPTY_FORM)
@@ -47,8 +49,8 @@ export default function ReembolsosPage() {
   const [itemForm, setItemForm] = useState<ItemReembolsoCreate>(EMPTY_ITEM)
   const [itemFile, setItemFile] = useState<File | null>(null)
   const [emailMap, setEmailMap] = useState<Record<string, string>>({})
-  const [editandoItem, setEditandoItem] = useState<string | null>(null)
-  const [novoItemValor, setNovoItemValor] = useState(0)
+  const [copiarUsuarioMap, setCopiarUsuarioMap] = useState<Record<string, boolean>>({})
+  const [editandoItem, setEditandoItem] = useState<{ itemId: string; valor: number; natureza: string } | null>(null)
   // Track which reembolso id has a pending cancel+dup action
   const [cancelDupPending, setCancelDupPending] = useState<string | null>(null)
 
@@ -103,8 +105,8 @@ export default function ReembolsosPage() {
   })
 
   const editarItemValor = useMutation({
-    mutationFn: ({ rid, iid, valor }: { rid: string; iid: string; valor: number }) =>
-      reembolsosApi.atualizarItem(rid, iid, { valor }),
+    mutationFn: ({ rid, iid, valor, natureza }: { rid: string; iid: string; valor: number; natureza: string }) =>
+      reembolsosApi.atualizarItem(rid, iid, { valor, natureza }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['reembolsos'] })
       setEditandoItem(null)
@@ -139,8 +141,8 @@ export default function ReembolsosPage() {
   })
 
   const enviarEmail = useMutation({
-    mutationFn: ({ id, dest }: { id: string; dest: string }) =>
-      reembolsosApi.enviarEmail(id, dest),
+    mutationFn: ({ id, dest, copiarUsuario }: { id: string; dest: string; copiarUsuario: boolean }) =>
+      reembolsosApi.enviarEmail(id, dest, copiarUsuario),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['reembolsos'] }),
     onError: (e: any) => alert(`Erro ao enviar: ${e?.response?.data?.detail || e?.message}`),
   })
@@ -171,6 +173,11 @@ export default function ReembolsosPage() {
   }
 
   const clienteNome = (id: string) => clientes.find((c) => c.id === id)?.nome ?? '—'
+  const emailUsuario = usuario?.google_email || usuario?.email || ''
+
+  const iniciarEdicaoItem = (item: ItemReembolso) => {
+    setEditandoItem({ itemId: item.id, valor: item.valor, natureza: item.natureza })
+  }
 
   return (
     <div>
@@ -273,7 +280,11 @@ export default function ReembolsosPage() {
                   </button>
                   <button
                     className={styles.btnDanger}
-                    onClick={() => { if (confirm('Remover reembolso?')) deletar.mutate(r.id) }}
+                    onClick={() => {
+                      if (confirm('Remover reembolso? Isso também apagará a pasta correspondente no Drive.')) {
+                        deletar.mutate(r.id)
+                      }
+                    }}
                   >
                     ×
                   </button>
@@ -301,7 +312,27 @@ export default function ReembolsosPage() {
                           <tr key={it.id}>
                             <td>{fmtData(it.data)}</td>
                             <td>{it.descricao}</td>
-                            <td>{it.natureza}</td>
+                            <td>
+                              {r.status === 'rascunho' && editandoItem?.itemId === it.id ? (
+                                <select
+                                  className={styles.input}
+                                  value={editandoItem.natureza}
+                                  onChange={(e) => setEditandoItem({ ...editandoItem, natureza: e.target.value })}
+                                >
+                                  {NATUREZAS.map((n) => <option key={n} value={n}>{n}</option>)}
+                                </select>
+                              ) : (
+                                <span
+                                  style={{ cursor: r.status === 'rascunho' ? 'pointer' : undefined }}
+                                  title={r.status === 'rascunho' ? 'Clique para editar categoria' : undefined}
+                                  onClick={() => {
+                                    if (r.status === 'rascunho') iniciarEdicaoItem(it)
+                                  }}
+                                >
+                                  {it.natureza}{r.status === 'rascunho' && ' ✎'}
+                                </span>
+                              )}
+                            </td>
                             <td>
                               {it.comprovante_path ? (
                                 <span className={cs.comprovanteLine}>
@@ -335,21 +366,14 @@ export default function ReembolsosPage() {
                               )}
                             </td>
                             <td className={cs.tdValor}>
-                              {r.status === 'rascunho' && editandoItem === it.id ? (
+                              {r.status === 'rascunho' && editandoItem?.itemId === it.id ? (
                                 <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                                   <CurrencyInput
                                     className={styles.input}
-                                    value={novoItemValor}
-                                    onChange={setNovoItemValor}
+                                    value={editandoItem.valor}
+                                    onChange={(valor) => setEditandoItem({ ...editandoItem, valor })}
                                     placeholder="0,00"
                                   />
-                                  <button
-                                    className={styles.btnPrimary}
-                                    style={{ padding: '4px 10px', fontSize: 12 }}
-                                    disabled={!novoItemValor || editarItemValor.isPending}
-                                    onClick={() => editarItemValor.mutate({ rid: r.id, iid: it.id, valor: novoItemValor })}
-                                  >✓</button>
-                                  <button className={styles.btnDanger} onClick={() => setEditandoItem(null)}>×</button>
                                 </div>
                               ) : (
                                 <span
@@ -357,8 +381,7 @@ export default function ReembolsosPage() {
                                   title={r.status === 'rascunho' ? 'Clique para editar' : undefined}
                                   onClick={() => {
                                     if (r.status === 'rascunho') {
-                                      setEditandoItem(it.id)
-                                      setNovoItemValor(it.valor)
+                                      iniciarEdicaoItem(it)
                                     }
                                   }}
                                 >
@@ -367,11 +390,35 @@ export default function ReembolsosPage() {
                               )}
                             </td>
                             <td>
-                              {r.status === 'rascunho' && editandoItem !== it.id && (
-                                <button
-                                  className={styles.btnDanger}
-                                  onClick={() => removerItem.mutate({ rid: r.id, iid: it.id })}
-                                >×</button>
+                              {r.status === 'rascunho' && (
+                                editandoItem?.itemId === it.id ? (
+                                  <div style={{ display: 'flex', gap: 4 }}>
+                                    <button
+                                      className={styles.btnPrimary}
+                                      style={{ padding: '4px 10px', fontSize: 12 }}
+                                      disabled={!editandoItem.valor || editarItemValor.isPending}
+                                      onClick={() => editarItemValor.mutate({
+                                        rid: r.id,
+                                        iid: it.id,
+                                        valor: editandoItem.valor,
+                                        natureza: editandoItem.natureza,
+                                      })}
+                                    >✓</button>
+                                    <button className={styles.btnDanger} onClick={() => setEditandoItem(null)}>×</button>
+                                  </div>
+                                ) : (
+                                  <div style={{ display: 'flex', gap: 6 }}>
+                                    <button
+                                      className={styles.btnPrimary}
+                                      style={{ padding: '4px 10px', fontSize: 12 }}
+                                      onClick={() => iniciarEdicaoItem(it)}
+                                    >✎</button>
+                                    <button
+                                      className={styles.btnDanger}
+                                      onClick={() => removerItem.mutate({ rid: r.id, iid: it.id })}
+                                    >×</button>
+                                  </div>
+                                )
                               )}
                             </td>
                           </tr>
@@ -508,13 +555,23 @@ export default function ReembolsosPage() {
                           value={emailMap[r.id] ?? (clientes.find((c) => c.id === r.cliente_id)?.email ?? '')}
                           onChange={(e) => setEmailMap({ ...emailMap, [r.id]: e.target.value })}
                         />
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#475569' }}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(copiarUsuarioMap[r.id])}
+                            disabled={!emailUsuario}
+                            onChange={(e) => setCopiarUsuarioMap({ ...copiarUsuarioMap, [r.id]: e.target.checked })}
+                          />
+                          Me enviar cópia oculta{emailUsuario ? ` (${emailUsuario})` : ''}
+                        </label>
                         <button
                           className={`${styles.btnPrimary} ${cs.btnEmail}`}
                           disabled={enviarEmail.isPending || (!emailMap[r.id] && !clientes.find((c) => c.id === r.cliente_id)?.email)}
                           onClick={() => {
                             const dest = emailMap[r.id] || clientes.find((c) => c.id === r.cliente_id)?.email || ''
-                            if (dest && confirm(`Enviar nota por e-mail para ${dest}?`))
-                              enviarEmail.mutate({ id: r.id, dest })
+                            const copiarUsuario = Boolean(copiarUsuarioMap[r.id] && emailUsuario)
+                            if (dest && confirm(`Enviar nota por e-mail para ${dest}?${copiarUsuario ? ' Você também receberá uma cópia oculta.' : ''}`))
+                              enviarEmail.mutate({ id: r.id, dest, copiarUsuario })
                           }}
                         >
                           ✉ Enviar por E-mail

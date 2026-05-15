@@ -95,6 +95,29 @@ def _get_or_create_subfolder(name: str, parent_id: str, headers: dict) -> str:
     return r.json()["id"]
 
 
+def _find_subfolder(name: str, parent_id: str, headers: dict) -> str | None:
+    """Returns the Drive ID of an existing subfolder, without creating it."""
+    query = (
+        f"name='{_escape_drive_query(name)}' "
+        f"and mimeType='application/vnd.google-apps.folder' "
+        f"and '{parent_id}' in parents and trashed=false"
+    )
+    r = httpx.get(
+        f"{DRIVE_META}/files",
+        headers=headers,
+        params={
+            "q": query,
+            "fields": "files(id,name)",
+            "supportsAllDrives": True,
+            "includeItemsFromAllDrives": True,
+        },
+        timeout=30,
+    )
+    r.raise_for_status()
+    files = r.json().get("files", [])
+    return files[0]["id"] if files else None
+
+
 def _is_unauthorized(exc: Exception) -> bool:
     return (
         isinstance(exc, httpx.HTTPStatusError)
@@ -366,6 +389,77 @@ def get_folder_link(nome_cliente: str, subfolder: str, sub_subfolder: str | None
     except Exception:
         tokens2 = _refresh(tokens)
         return _do(tokens2)
+
+
+def find_folder_link(nome_cliente: str, subfolder: str, sub_subfolder: str | None = None) -> str | None:
+    """Returns the folder link only if the folder already exists."""
+    tokens = _load_tokens()
+    if not tokens:
+        return None
+
+    def _do(tkns: dict) -> str | None:
+        h = _auth_headers(tkns)
+        cliente_folder_id = _find_subfolder(nome_cliente, DRIVE_FOLDER_ID, h)
+        if not cliente_folder_id:
+            return None
+        folder_id = _find_subfolder(subfolder, cliente_folder_id, h)
+        if not folder_id:
+            return None
+        if sub_subfolder:
+            folder_id = _find_subfolder(sub_subfolder, folder_id, h)
+        if not folder_id:
+            return None
+        return f"https://drive.google.com/drive/folders/{folder_id}"
+
+    try:
+        return _do(tokens)
+    except Exception:
+        tokens2 = _refresh(tokens)
+        try:
+            return _do(tokens2)
+        except Exception:
+            return None
+
+
+def deletar_pasta(nome_cliente: str, subfolder: str, sub_subfolder: str) -> bool:
+    """Moves the matching Drive subfolder to trash, if it exists."""
+    tokens = _load_tokens()
+    if not tokens:
+        return False
+
+    def _do(tkns: dict) -> bool:
+        h = _auth_headers(tkns)
+        cliente_folder_id = _find_subfolder(nome_cliente, DRIVE_FOLDER_ID, h)
+        if not cliente_folder_id:
+            return False
+        folder_id = _find_subfolder(subfolder, cliente_folder_id, h)
+        if not folder_id:
+            return False
+        target_id = _find_subfolder(sub_subfolder, folder_id, h)
+        if not target_id:
+            return False
+        resp = httpx.patch(
+            f"{DRIVE_META}/files/{target_id}",
+            headers={**h, "Content-Type": "application/json"},
+            params={"supportsAllDrives": True},
+            content=json.dumps({"trashed": True}),
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return True
+
+    try:
+        return _do(tokens)
+    except Exception as exc:
+        if not _is_unauthorized(exc):
+            logger.warning("Falha ao deletar pasta do Drive: %s", exc)
+            return False
+        tokens2 = _refresh(tokens)
+        try:
+            return _do(tokens2)
+        except Exception as exc2:
+            logger.warning("Falha ao deletar pasta do Drive apos refresh: %s", exc2)
+            return False
 
 
 def drive_disponivel() -> bool:

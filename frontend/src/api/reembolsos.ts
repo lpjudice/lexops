@@ -88,6 +88,6 @@ export const reembolsosApi = {
   gerarPdf: (id: string) =>
     api.post(`/reembolsos/${id}/gerar-pdf`, null, { responseType: 'blob' }).then((r) => r.data as Blob),
 
-  enviarEmail: (id: string, destinatario: string) =>
-    api.post(`/reembolsos/${id}/enviar-email`, null, { params: { destinatario } }).then((r) => r.data),
+  enviarEmail: (id: string, destinatario: string, copiarUsuario = false) =>
+    api.post(`/reembolsos/${id}/enviar-email`, null, { params: { destinatario, copiar_usuario: copiarUsuario } }).then((r) => r.data),
 }
