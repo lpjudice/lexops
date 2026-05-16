@@ -10,6 +10,7 @@ import {
   saveStoredJusbrToken,
 } from '../utils/jusbrToken'
 import { inferTribunalFromCnj } from '../utils/cnj'
+import axios from 'axios'
 
 interface Props {
   processos: Processo[]
@@ -34,6 +35,16 @@ function suportaDataJud(p: Processo) {
 // Any tribunal with a CNJ number can theoretically be found in jus.br
 function suportaJusBR(p: Processo) {
   return !!p.numero_cnj && !!p.tribunal
+}
+
+function extractApiErrorMessage(error: unknown, fallback: string): string {
+  if (axios.isAxiosError(error)) {
+    const detail = error.response?.data?.detail
+    if (typeof detail === 'string' && detail.trim()) return detail
+    if (typeof error.message === 'string' && error.message.trim()) return error.message
+  }
+  if (error instanceof Error && error.message.trim()) return error.message
+  return fallback
 }
 
 export default function SincronizarModal({ processos, onClose }: Props) {
@@ -112,6 +123,7 @@ export default function SincronizarModal({ processos, onClose }: Props) {
     onSuccess: async (_, capture) => {
       saveStoredJusbrToken(capture)
       await refetchJusbrSession()
+      setShowInstrucoes(false)
       syncJusBR.mutate()
     },
   })
@@ -171,7 +183,7 @@ export default function SincronizarModal({ processos, onClose }: Props) {
           <div className={styles.avisoJusBR}>
             <strong>jus.br v4</strong> retorna nomes reais dos documentos e dados completos via PDPJ, com preferência por <strong>cURL</strong> ou <strong>headers</strong> autenticados e sessão compartilhada do app inteiro.
             {jusbrAtivo
-              ? ` Sessão ativa no backend.${tokenExpiry ? ` Expira em ${tokenExpiry}.` : ''}`
+              ? ` Sessão ativa no backend.${tokenExpiry ? ` Expira em ${tokenExpiry}.` : ''} Tipo salvo: ${jusbrSession?.capture_kind ?? 'não informado'}. Cookies: ${jusbrSession?.has_cookies ? 'sim' : 'não'}.`
               : ' Clique em "Sincronizar" para conectar uma vez, de preferência com cURL ou headers completos do portal, e reutilizar nos outros processos.'}
             {jusbrAtivo && (
               <>
@@ -292,6 +304,8 @@ export default function SincronizarModal({ processos, onClose }: Props) {
           onClose={() => setShowInstrucoes(false)}
           onToken={handleJusBRToken}
           initialToken=""
+          isSubmitting={configurarSessao.isPending}
+          error={configurarSessao.isError ? extractApiErrorMessage(configurarSessao.error, 'Não foi possível configurar a sessão do jus.br.') : null}
         />
       )}
     </div>

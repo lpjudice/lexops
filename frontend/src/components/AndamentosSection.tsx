@@ -226,10 +226,17 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
 
   const configurarSessao = useMutation({
     mutationFn: (capture: string) => andamentosApi.configurarSessaoJusBR(capture),
+    onMutate: () => {
+      setJusbrJobError(null)
+    },
     onSuccess: async (_, capture) => {
       saveStoredJusbrToken(capture)
       await refetchJusbrSession()
+      setShowTokenModal(false)
       startJusBR.mutate()
+    },
+    onError: (error: unknown) => {
+      setJusbrJobError(extractApiErrorMessage(error, 'Não foi possível configurar a sessão do jus.br.'))
     },
   })
 
@@ -310,6 +317,8 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
           <span>
             Sessão do <strong>jus.br v4</strong> ativa no backend e reutilizada automaticamente para todos os processos.
             {tokenExpiry ? ` Expira em ${tokenExpiry}.` : ''}
+            {jusbrSession?.capture_kind ? ` Tipo salvo: ${jusbrSession.capture_kind}.` : ''}
+            {` Cookies: ${jusbrSession?.has_cookies ? 'sim' : 'não'}.`}
             {!jusbrSession?.has_cookies ? ' Para baixar documentos, reconecte com cURL ou headers completos do portal.' : ''}
             {!jusbrSession?.has_cookies && detectedHost ? ` Captura atual: ${detectedHost}.` : ''}
           </span>
@@ -411,6 +420,8 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
           onClose={() => setShowTokenModal(false)}
           onToken={handleToken}
           initialToken=""
+          isSubmitting={configurarSessao.isPending}
+          error={configurarSessao.isError ? extractApiErrorMessage(configurarSessao.error, 'Não foi possível configurar a sessão do jus.br.') : null}
         />
       )}
     </div>

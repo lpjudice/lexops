@@ -628,6 +628,11 @@ async def sincronizar_processo_jusbr(
             "Andamentos sincronizados. Para baixar documentos pelo jus.br, reconecte usando o cURL ou headers "
             "de uma requisicao autenticada do portal, nao apenas o JSON do token."
         )
+    elif docs_total == 0 and session_data and not session_data.get("cookies"):
+        log.mensagem = (
+            "Andamentos sincronizados. A sessao salva nao trouxe cookies do portal; para tentar baixar documentos, "
+            "copie um cURL/headers de uma requisicao autenticada que contenha o header Cookie."
+        )
     log.finalizado_em = datetime.now(timezone.utc)
     db.commit()
     progress(

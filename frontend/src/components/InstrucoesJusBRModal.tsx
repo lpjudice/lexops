@@ -11,6 +11,8 @@ interface Props {
   onClose: () => void
   onToken: (capture: string) => void
   initialToken?: string
+  isSubmitting?: boolean
+  error?: string | null
 }
 
 type OS = 'macos' | 'windows'
@@ -76,7 +78,7 @@ const STEPS: Record<OS, Record<Browser, StepGroup>> = {
   },
 }
 
-export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = '' }: Props) {
+export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = '', isSubmitting = false, error = null }: Props) {
   const [os, setOs] = useState<OS>('macos')
   const [browser, setBrowser] = useState<Browser>('chrome')
   const [token, setToken] = useState(initialToken)
@@ -88,9 +90,8 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
   const networkStepIdx = allSteps.findIndex(s => s.includes('token'))
 
   function handleConfirm() {
-    if (!canSubmitJusbrCapture(token)) return
+    if (!canSubmitJusbrCapture(token) || isSubmitting) return
     onToken(token)
-    onClose()
   }
 
   async function handlePasteClipboard() {
@@ -226,6 +227,11 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
                 Expiração detectada no access token: {tokenExpiry}
               </p>
             )}
+            {error && (
+              <p className={styles.tokenError}>
+                {error}
+              </p>
+            )}
           </div>
         </div>
 
@@ -234,9 +240,9 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
           <button
             className={styles.btnConfirm}
             onClick={handleConfirm}
-            disabled={!canSubmit}
+            disabled={!canSubmit || isSubmitting}
           >
-            Conectar sessão do jus.br
+            {isSubmitting ? 'Salvando sessão...' : 'Conectar sessão do jus.br'}
           </button>
         </div>
       </div>

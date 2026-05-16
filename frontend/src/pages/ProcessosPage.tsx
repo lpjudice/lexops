@@ -851,6 +851,8 @@ export default function ProcessosPage() {
           onClose={() => setShowTokenModal(false)}
           onToken={(capture) => configurarSessao.mutate(capture)}
           initialToken=""
+          isSubmitting={configurarSessao.isPending}
+          error={configurarSessao.isError ? prefillErro : null}
         />
       )}
     </div>
