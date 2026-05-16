@@ -500,6 +500,7 @@ async def buscar_processo_pdpj_raw(
     numero_norm, tribunal_norm, candidates = _build_candidate_requests(numero_cnj, tribunal, session_data)
     tribunal_inferido = inferir_tribunal_pelo_cnj(numero_cnj)
 
+    permission_denied_msg: str | None = None
     async with httpx.AsyncClient(timeout=20) as client:
         for method, url, params, body in candidates:
             try:
@@ -514,11 +515,12 @@ async def buscar_processo_pdpj_raw(
                 exp = _jwt_exp(token)
                 extra = f" Token expira em {exp.strftime('%d/%m/%Y %H:%M:%S')}." if exp else ""
                 if resp.status_code == 403 and exp and exp > datetime.now():
-                    raise PermissionError(
+                    permission_denied_msg = (
                         "Sessao do jus.br valida, mas sem permissao para este processo ou tribunal neste endpoint. "
                         "Confirme se o processo abre no portal com o mesmo login."
                         f"{extra}"
                     )
+                    continue
                 raise PermissionError(
                     "Token expirado ou sem permissão. "
                     "Abra o portal jus.br, faça login e capture um novo token pela aba Network."
@@ -542,7 +544,13 @@ async def buscar_processo_pdpj_raw(
                         pass
                     elif item.get("tribunal") or item.get("siglaTribunal") or item.get("tramitacoes"):
                         continue
+                for base in [*(session_data.get("api_bases") or []), *_BASES]:
+                    if url.startswith(base):
+                        item["_pdpj_base_url"] = base
+                        break
                 return item
+    if permission_denied_msg:
+        raise PermissionError(permission_denied_msg)
     return None
 
 
@@ -573,13 +581,14 @@ async def buscar_via_pdpj(
     )
 
     async with httpx.AsyncClient(timeout=20) as client:
-        matched_base = next(iter(session_data.get("api_bases") or []), _BASES[0])
         inline_movimentos: list[dict] = _extract_inline_movimentos(processo_data) if processo_data else []
-        documentos_por_id = await _buscar_documentos_processo(client, headers, numero_cnj)
 
         if not processo_data:
             logger.warning("PDPJ: process %s not found after probing all endpoints", numero_cnj)
             return []
+
+        matched_base = str(processo_data.get("_pdpj_base_url") or next(iter(session_data.get("api_bases") or []), _BASES[0]))
+        documentos_por_id = await _buscar_documentos_processo(client, headers, numero_cnj)
 
         processo_id = str(
             processo_data.get("id")
@@ -601,6 +610,7 @@ async def buscar_via_pdpj(
             ]
 
             items = []
+            movimentos_permission_denied = False
             for url in mov_candidates:
                 try:
                     mr = await client.get(url, headers=headers)
@@ -610,7 +620,8 @@ async def buscar_via_pdpj(
                 logger.info("PDPJ movimentos probe %s → %s", url, mr.status_code)
 
                 if mr.status_code in (401, 403):
-                    raise PermissionError("Token expirado ao buscar movimentos. Renove o token.")
+                    movimentos_permission_denied = True
+                    continue
                 if mr.status_code != 200:
                     continue
 
@@ -624,6 +635,11 @@ async def buscar_via_pdpj(
                     items = _extract_inline_movimentos(md)
                 if items:
                     break
+            if not items and movimentos_permission_denied:
+                raise PermissionError(
+                    "Sessao do jus.br valida, mas os movimentos deste processo nao foram liberados pelos endpoints testados. "
+                    "Confirme se o processo abre no portal com o mesmo login."
+                )
 
         andamentos: list[Andamento] = []
         for m in items:

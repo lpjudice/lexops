@@ -270,7 +270,7 @@ export default function SincronizarModal({ processos, onClose }: Props) {
                     {r.status === 'ok' && r.novos_andamentos > 0
                       ? `+${r.novos_andamentos} novo(s)`
                       : r.status === 'ok'
-                      ? 'Atualizado'
+                      ? 'Sem novo andamento'
                       : r.status === 'nenhum'
                       ? 'Nenhum encontrado'
                       : `Erro: ${r.mensagem}`}
