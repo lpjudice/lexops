@@ -36,9 +36,15 @@ _BASES = [
 def _parse_data(raw: str | None) -> date | None:
     if not raw:
         return None
+    raw_str = str(raw).strip()
+    if re.fullmatch(r"\d{8}(\d{6})?", raw_str):
+        try:
+            return datetime.strptime(raw_str[:8], "%Y%m%d").date()
+        except Exception:
+            pass
     for prefix_len in (10, 19, 24, 27):
         try:
-            chunk = raw[:prefix_len]
+            chunk = raw_str[:prefix_len]
             return datetime.fromisoformat(chunk.replace("Z", "+00:00")).date()
         except Exception:
             pass
@@ -361,6 +367,29 @@ def _jwt_exp(token: str) -> datetime | None:
     return None
 
 
+def _jwt_payload(token: str) -> dict:
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return {}
+        payload = parts[1]
+        payload += "=" * (-len(payload) % 4)
+        data = json.loads(base64.urlsafe_b64decode(payload.encode()).decode())
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _cpf_operador_from_token(token: str) -> str | None:
+    payload = _jwt_payload(token)
+    for key in ("preferred_username", "cpf", "cpfUsuario", "cpf_usuario", "sub"):
+        value = payload.get(key)
+        digits = re.sub(r"\D", "", str(value or ""))
+        if len(digits) == 11:
+            return digits
+    return None
+
+
 def _items_from_response(data: object) -> list[dict]:
     if isinstance(data, list):
         return [item for item in data if isinstance(item, dict)]
@@ -425,6 +454,10 @@ def _build_headers(token: str, session_data: dict | None = None) -> dict[str, st
     extra_headers = session_data.get("extra_headers") or {}
     if isinstance(extra_headers, dict):
         headers.update({str(k): str(v) for k, v in extra_headers.items()})
+    if not any(k.lower() == "x-pdpj-cpf-usuario-operador" for k in headers):
+        cpf_operador = _cpf_operador_from_token(token)
+        if cpf_operador:
+            headers["X-PDPJ-CPF-USUARIO-OPERADOR"] = cpf_operador
     if session_data.get("cookies"):
         headers["Cookie"] = str(session_data["cookies"])
     return headers
@@ -464,6 +497,8 @@ def _build_candidate_requests(numero_cnj: str, tribunal: str, session_data: dict
             continue
         seen_bases.append(base)
         candidates += [
+            ("GET", f"{base}/processos/{numero_cnj}", {"loadMovimentos": "true"}, None),
+            ("GET", f"{base}/processos/{numero_norm}", {"loadMovimentos": "true"}, None),
             ("GET", f"{base}/processos", {"numeroProcesso": numero_cnj}, None),
             ("GET", f"{base}/processos", {"numeroProcesso": numero_norm}, None),
             ("GET", f"{base}/processos", {"numeroProcesso": numero_cnj, "retornarMovimentos": "true"}, None),
@@ -476,6 +511,8 @@ def _build_candidate_requests(numero_cnj: str, tribunal: str, session_data: dict
             ("GET", f"{base}/processo/{numero_cnj}", {}, None),
             ("GET", f"{base}/consulta/processos", {"numeroProcesso": numero_cnj}, None),
             ("GET", f"{base}/consulta/processos", {"numeroProcesso": numero_norm}, None),
+            ("GET", f"{base}/processos/consultar-processos", {"numeroProcesso": numero_cnj}, None),
+            ("GET", f"{base}/processos/consultar-processos", {"numeroProcesso": numero_norm}, None),
         ]
         for candidato in tribunais_candidatos:
             candidates += [
@@ -536,8 +573,16 @@ async def buscar_processo_pdpj_raw(
 
             items = _items_from_response(data)
             for item in items:
+                request_num = (
+                    params.get("numeroProcesso")
+                    or params.get("numero")
+                    or (numero_cnj if numero_cnj in url or numero_norm in url else "")
+                )
                 n_raw = (item.get("numeroProcesso") or item.get("numero") or "")
-                if re.sub(r"\D", "", n_raw) != numero_norm:
+                if not n_raw and request_num and re.sub(r"\D", "", str(request_num)) == numero_norm:
+                    item["numeroProcesso"] = numero_cnj
+                    n_raw = numero_cnj
+                if re.sub(r"\D", "", str(n_raw)) != numero_norm:
                     continue
                 if tribunal_norm and not _tribunal_matches(item, tribunal_norm):
                     if tribunal_inferido and _tribunal_matches(item, tribunal_inferido):
@@ -600,24 +645,34 @@ async def buscar_via_pdpj(
             items = inline_movimentos
         else:
         # ── Fetch movimentos ──────────────────────────────────────────────────
-            mov_candidates = [
-                f"{matched_base}/processos/{processo_id}/movimentos",
-                f"{matched_base}/processos/{numero_cnj}/movimentos",
-                f"{matched_base}/processos/{numero_norm}/movimentos",
-                f"{matched_base}/processos/{processo_id}/andamentos",
-                f"{matched_base}/movimentos?processoId={processo_id}",
-                f"{matched_base}/movimentos?numeroProcesso={numero_norm}",
+            gateway_root = "https://gateway.cloud.pje.jus.br/cabecalho-processual"
+            mov_candidates: list[tuple[str, dict | None]] = [
+                (f"{matched_base}/processos/{processo_id}/movimentos", None),
+                (f"{matched_base}/processos/{numero_cnj}/movimentos", None),
+                (f"{matched_base}/processos/{numero_norm}/movimentos", None),
+                (f"{gateway_root}/api/v1/processos/{numero_cnj}/movimentos", None),
+                (f"{gateway_root}/api/v1/processos/{numero_norm}/movimentos", None),
+                (f"{gateway_root}/api/v2/processos/consulta/movimentos", {"numeroProcesso": numero_cnj}),
+                (f"{gateway_root}/api/v2/processos/consulta/movimentos", {"numeroProcesso": numero_norm}),
+                (f"{matched_base}/processos/{processo_id}/andamentos", None),
+                (f"{matched_base}/movimentos", {"processoId": processo_id}),
+                (f"{matched_base}/movimentos", {"numeroProcesso": numero_norm}),
             ]
 
             items = []
             movimentos_permission_denied = False
-            for url in mov_candidates:
+            seen_mov_candidates: set[tuple[str, str]] = set()
+            for url, params in mov_candidates:
+                key = (url, json.dumps(params or {}, sort_keys=True))
+                if key in seen_mov_candidates:
+                    continue
+                seen_mov_candidates.add(key)
                 try:
-                    mr = await client.get(url, headers=headers)
+                    mr = await client.get(url, headers=headers, params=params)
                 except Exception:
                     continue
 
-                logger.info("PDPJ movimentos probe %s → %s", url, mr.status_code)
+                logger.info("PDPJ movimentos probe %s params=%s → %s", url, params, mr.status_code)
 
                 if mr.status_code in (401, 403):
                     movimentos_permission_denied = True
