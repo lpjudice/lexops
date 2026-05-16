@@ -5,6 +5,8 @@ import logging
 import mimetypes
 import os
 import re
+import unicodedata
+from difflib import SequenceMatcher
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -211,6 +213,59 @@ def _arquivo_andamento_util(andamento: AndamentoProcesso) -> bool:
     if andamento.arquivo_drive_link:
         return True
     return _arquivo_local_valido(andamento.arquivo_path)
+
+
+def _normalizar_descricao_andamento(texto: str | None) -> str:
+    texto = re.sub(r"<[^>]+>", " ", texto or "")
+    texto = texto.split(" — ", 1)[0]
+    texto = texto.split(" – ", 1)[0]
+    texto = unicodedata.normalize("NFKD", texto)
+    texto = "".join(ch for ch in texto if not unicodedata.combining(ch))
+    texto = texto.lower()
+    texto = re.sub(r"#\{[^}]+\}", " ", texto)
+    texto = re.sub(r"[^a-z0-9]+", " ", texto)
+    return re.sub(r"\s+", " ", texto).strip()
+
+
+def _descricoes_compativeis(nova: str | None, existente: str | None) -> bool:
+    nova_norm = _normalizar_descricao_andamento(nova)
+    existente_norm = _normalizar_descricao_andamento(existente)
+    if not nova_norm or not existente_norm:
+        return False
+    if nova_norm == existente_norm:
+        return True
+    menor, maior = sorted([nova_norm, existente_norm], key=len)
+    if len(menor) >= 18 and menor in maior:
+        return True
+    return SequenceMatcher(None, nova_norm, existente_norm).ratio() >= 0.74
+
+
+def _buscar_andamento_existente_compativel(
+    db: Session,
+    processo: Processo,
+    data_andamento: date | None,
+    descricao: str | None,
+    hash_unico: str,
+) -> AndamentoProcesso | None:
+    existente = db.query(AndamentoProcesso).filter(AndamentoProcesso.hash_unico == hash_unico).first()
+    if existente:
+        return existente
+
+    candidatos = (
+        db.query(AndamentoProcesso)
+        .filter(
+            AndamentoProcesso.processo_id == processo.id,
+            AndamentoProcesso.data_andamento == data_andamento,
+            AndamentoProcesso.fonte.ilike("JusBR%"),
+        )
+        .order_by(AndamentoProcesso.created_at.asc())
+        .all()
+    )
+    compat = [c for c in candidatos if _descricoes_compativeis(descricao, c.descricao)]
+    if not compat:
+        return None
+    compat.sort(key=lambda c: (not _arquivo_andamento_util(c), c.created_at or datetime.min.replace(tzinfo=timezone.utc)))
+    return compat[0]
 
 
 def _sequenciais_documentos(processo: Processo, raw_andamentos: list) -> dict[str, int]:
@@ -453,7 +508,7 @@ async def sincronizar_processo_jusbr(
             str(a.data_andamento) if a.data_andamento else None,
             a.descricao,
         )
-        existente = db.query(AndamentoProcesso).filter(AndamentoProcesso.hash_unico == h).first()
+        existente = _buscar_andamento_existente_compativel(db, processo, a.data_andamento, a.descricao, h)
         if existente:
             precisa_reprocessar = not _arquivo_andamento_util(existente)
             if precisa_reprocessar and a.arquivo_nome and a.arquivo_bytes:
@@ -568,6 +623,11 @@ async def sincronizar_processo_jusbr(
     log.status = "ok"
     if docs_detectados_sem_arquivo > 0 and session_data and not session_data.get("cookies"):
         log.mensagem = _mensagem_sessao_documentos(session_data)
+    elif docs_total == 0 and session_data and session_data.get("capture_kind") == "token_json":
+        log.mensagem = (
+            "Andamentos sincronizados. Para baixar documentos pelo jus.br, reconecte usando o cURL ou headers "
+            "de uma requisicao autenticada do portal, nao apenas o JSON do token."
+        )
     log.finalizado_em = datetime.now(timezone.utc)
     db.commit()
     progress(
