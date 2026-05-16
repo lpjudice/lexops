@@ -80,6 +80,40 @@ def _json_from_capture(raw_capture: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+def _token_json_from_capture(raw_capture: str) -> dict | None:
+    data = _json_from_capture(raw_capture)
+    if not isinstance(data, dict):
+        return None
+    if data.get("access_token"):
+        return data
+
+    # Chrome/Firefox HAR exports keep the response body nested as text.
+    candidates: list[object] = [
+        data.get("response", {}).get("content", {}).get("text") if isinstance(data.get("response"), dict) else None,
+    ]
+    log = data.get("log")
+    entries = log.get("entries") if isinstance(log, dict) else None
+    if isinstance(entries, list):
+        for entry in entries:
+            if isinstance(entry, dict):
+                response = entry.get("response")
+                if isinstance(response, dict):
+                    content = response.get("content")
+                    if isinstance(content, dict):
+                        candidates.append(content.get("text"))
+
+    for candidate in candidates:
+        if not isinstance(candidate, str) or "access_token" not in candidate:
+            continue
+        try:
+            nested = json.loads(candidate)
+        except Exception:
+            continue
+        if isinstance(nested, dict) and nested.get("access_token"):
+            return nested
+    return None
+
+
 def _token_endpoint_from_issuer(issuer: str | None) -> str | None:
     if not issuer:
         return None
@@ -121,11 +155,29 @@ def _iso_from_offset(seconds: int | float | None, now: datetime) -> str | None:
 
 
 def _captured_form_data(parts: list[str]) -> str:
+    chunks: list[str] = []
     for i, part in enumerate(parts):
         lower = part.lower()
-        if lower in {"--data", "--data-raw", "--data-binary", "-d"} and i + 1 < len(parts):
-            return parts[i + 1]
-    return ""
+        if lower in {"--data", "--data-raw", "--data-binary", "--data-urlencode", "-d"} and i + 1 < len(parts):
+            chunks.append(parts[i + 1])
+    return "&".join(chunk.strip("&") for chunk in chunks if chunk)
+
+
+def _plain_headers_from_capture(raw_capture: str) -> dict[str, str]:
+    if raw_capture.lstrip().lower().startswith("curl "):
+        return {}
+    headers: dict[str, str] = {}
+    text = raw_capture.replace("\\r\\n", "\n").replace("\\n", "\n")
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or ":" not in line:
+            continue
+        name, value = line.split(":", 1)
+        name = name.strip()
+        if not name or " " in name:
+            continue
+        headers[name.lower()] = value.strip()
+    return headers
 
 
 def _exchange_sso_code_for_tokens(
@@ -140,8 +192,16 @@ def _exchange_sso_code_for_tokens(
         raise ValueError("Nao foi possivel localizar o corpo da requisicao no cURL informado.")
 
     form = dict(parse_qsl(body, keep_blank_values=True))
-    if form.get("grant_type") != "authorization_code" or not form.get("code"):
+    grant_type = form.get("grant_type")
+    if grant_type == "authorization_code" and not form.get("code"):
         raise ValueError("O cURL colado nao contem um authorization_code valido do login do jus.br.")
+    if grant_type == "refresh_token" and not form.get("refresh_token"):
+        raise ValueError("O cURL colado nao contem um refresh_token valido do jus.br.")
+    if grant_type not in {"authorization_code", "refresh_token"}:
+        raise ValueError(
+            "O cURL de token do jus.br nao trouxe grant_type reconhecido. "
+            "Cole o JSON da aba Response da requisicao de token ou um cURL/headers com Authorization: Bearer."
+        )
 
     req_headers = {
         "Content-Type": headers.get("content-type") or "application/x-www-form-urlencoded",
@@ -160,10 +220,10 @@ def _exchange_sso_code_for_tokens(
     )
     if response.status_code != 200:
         raise ValueError(
-            "Esse cURL e da etapa de login do jus.br, e o codigo dessa etapa e descartavel. "
-            "Depois de entrar no portal, copie o cURL ou os headers de uma requisicao autenticada "
-            "com URL portaldeservicos.pdpj.jus.br/api/..., nao da requisicao "
-            "/protocol/openid-connect/token."
+            "O jus.br recusou a conversao desse cURL de login/token. "
+            "Se ele for da primeira entrada no portal, o codigo provavelmente ja foi usado pelo navegador. "
+            "Abra essa mesma requisicao na aba Network/Rede e cole aqui o JSON da aba Response, "
+            "ou copie qualquer requisicao autenticada que tenha Authorization: Bearer."
         )
 
     try:
@@ -177,7 +237,7 @@ def _exchange_sso_code_for_tokens(
 
 
 def _parse_capture(raw_capture: str) -> dict:
-    json_payload = _json_from_capture(raw_capture)
+    json_payload = _token_json_from_capture(raw_capture)
     if json_payload and json_payload.get("access_token"):
         token = str(json_payload.get("access_token") or "").strip()
         if not token:
@@ -206,7 +266,7 @@ def _parse_capture(raw_capture: str) -> dict:
     parts = shlex.split(normalized)
 
     detected_url = ""
-    headers: dict[str, str] = {}
+    headers: dict[str, str] = _plain_headers_from_capture(raw_capture)
     cookie = ""
     body = ""
 
@@ -249,11 +309,27 @@ def _parse_capture(raw_capture: str) -> dict:
     }
 
     if not token and detected_url and "/protocol/openid-connect/token" in detected_url:
-        raise ValueError(
-            "Esse cURL e da etapa de login do jus.br, e nao serve para salvar a sessao de documentos. "
-            "Entre no portal, abra a aba Network/Rede e copie o cURL ou os headers de uma requisicao "
-            "autenticada cuja URL comece com portaldeservicos.pdpj.jus.br/api/...."
-        )
+        payload = _exchange_sso_code_for_tokens(detected_url, headers, body, cookie or None)
+        token = str(payload.get("access_token") or "").strip()
+        refresh_token = str(payload.get("refresh_token") or "").strip() or None
+        if not token:
+            raise ValueError("Nao foi possivel extrair um access_token valido do cURL de token do jus.br.")
+        now = datetime.now(timezone.utc)
+        return {
+            "token": token,
+            "refresh_token": refresh_token,
+            "token_type": str(payload.get("token_type") or "Bearer").strip() or "Bearer",
+            "cookies": cookie or None,
+            "referer": headers.get("referer") or "https://portaldeservicos.pdpj.jus.br/home",
+            "detected_url": detected_url,
+            "api_bases": ["https://portaldeservicos.pdpj.jus.br/api/v2"],
+            "extra_headers": extra_headers,
+            "token_endpoint": detected_url,
+            "captured_at": now.isoformat(),
+            "expires_at": _jwt_exp_iso(token) or _iso_from_offset(payload.get("expires_in"), now),
+            "refresh_expires_at": _jwt_exp_iso(refresh_token) or _iso_from_offset(payload.get("refresh_expires_in"), now),
+            "capture_kind": "sso_curl",
+        }
 
     if not token:
         raise ValueError("Nao foi possivel extrair um token valido da captura do jus.br.")

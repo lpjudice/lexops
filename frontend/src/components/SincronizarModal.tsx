@@ -184,7 +184,7 @@ export default function SincronizarModal({ processos, onClose }: Props) {
             <strong>jus.br v4</strong> retorna nomes reais dos documentos e dados completos via PDPJ, com preferência por <strong>cURL</strong> ou <strong>headers</strong> autenticados e sessão compartilhada do app inteiro.
             {jusbrAtivo
               ? ` Sessão ativa no backend.${tokenExpiry ? ` Expira em ${tokenExpiry}.` : ''} Tipo salvo: ${jusbrSession?.capture_kind ?? 'não informado'}. Cookies: ${jusbrSession?.has_cookies ? 'sim' : 'não'}.`
-              : ' Clique em "Sincronizar" para conectar uma vez, de preferência com cURL ou headers completos do portal, e reutilizar nos outros processos.'}
+              : ' Clique em "Sincronizar" para conectar uma vez com JSON de token, cURL ou headers autenticados, e reutilizar nos outros processos.'}
             {jusbrAtivo && (
               <>
                 {' '}

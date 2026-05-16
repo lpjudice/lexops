@@ -103,6 +103,12 @@ def _adicionar_url_documento(raw: str, base: str, acc: list[str]) -> None:
     _adicionar_candidato(acc, normalizada)
     if raw.startswith("/processos/") and "/api/" in base:
         _adicionar_candidato(acc, f"{base.rstrip('/')}{raw}")
+    if raw.startswith("/"):
+        # Some PDPJ payloads return gateway-relative document paths while the
+        # process metadata came from another microservice.
+        _adicionar_candidato(acc, f"https://gateway.cloud.pje.jus.br{raw}")
+        if raw.startswith("/pje-consulta-api/"):
+            _adicionar_candidato(acc, f"https://api-publica.cloud.pje.jus.br{raw}")
 
 
 def _coletar_urls_documento(obj: object, base: str, acc: list[str]) -> None:
@@ -236,14 +242,24 @@ async def _baixar_documento_movimento(
             "",
         )
     if doc_id:
+        gateway_root = "https://gateway.cloud.pje.jus.br"
+        consulta_root = "https://api-publica.cloud.pje.jus.br/pje-consulta-api/api/v1"
         for url in (
             f"{matched_base}/documentos/{doc_id}",
             f"{matched_base}/documentos/{doc_id}/download",
             f"{matched_base}/documentos/{doc_id}/arquivo",
+            f"{matched_base}/documentos/{doc_id}/binario",
             f"{matched_base}/processos/{processo_id}/documentos/{doc_id}",
             f"{matched_base}/processos/{processo_id}/documentos/{doc_id}/binario",
             f"{matched_base}/processos/{processo_id}/documentos/{doc_id}/texto",
             f"{matched_base}/processos/{processo_id}/documentos/{doc_id}/download",
+            f"{gateway_root}/documento/api/v1/documentos/{doc_id}",
+            f"{gateway_root}/documento/api/v1/documentos/{doc_id}/binario",
+            f"{gateway_root}/documento/api/v1/documentos/{doc_id}/download",
+            f"{gateway_root}/pje-consulta-api/api/v1/documentos/{doc_id}",
+            f"{gateway_root}/pje-consulta-api/api/v1/documentos/{doc_id}/binario",
+            f"{consulta_root}/documentos/{doc_id}",
+            f"{consulta_root}/documentos/{doc_id}/binario",
         ):
             _adicionar_candidato(candidatos, url)
 
@@ -254,7 +270,8 @@ async def _baixar_documento_movimento(
         except Exception:
             continue
         if resp.status_code in (401, 403):
-            raise PermissionError("Token expirado ao baixar documento do jus.br. Renove a sessão.")
+            logger.info("PDPJ documento download %s → %s; tentando proximo candidato", url, resp.status_code)
+            continue
         if resp.status_code != 200 or not resp.content:
             continue
 
@@ -325,14 +342,41 @@ async def _buscar_documentos_processo(
     client: httpx.AsyncClient,
     headers: dict[str, str],
     numero_cnj: str,
+    matched_base: str | None = None,
+    processo_id: str | None = None,
+    session_data: dict | None = None,
 ) -> dict[str, dict]:
-    candidatos = [
-        f"https://portaldeservicos.pdpj.jus.br/api/v2/processos/{numero_cnj}",
-        f"https://portaldeservicos.pdpj.jus.br/api/v2/processos/{normalizar_cnj(numero_cnj)}",
-    ]
-    params = {"incluirDocumentos": "true"}
+    numero_norm = normalizar_cnj(numero_cnj)
+    bases: list[str] = []
+    for base in [matched_base, *((session_data or {}).get("api_bases") or []), *_BASES]:
+        if isinstance(base, str) and base and base not in bases:
+            bases.append(base.rstrip("/"))
 
-    for url in candidatos:
+    candidatos: list[tuple[str, dict | None]] = []
+    ids = [numero_cnj, numero_norm]
+    if processo_id and processo_id not in ids:
+        ids.append(processo_id)
+    for base in bases:
+        for ident in ids:
+            candidatos += [
+                (f"{base}/processos/{ident}", {"incluirDocumentos": "true"}),
+                (f"{base}/processos/{ident}", {"retornarDocumentos": "true"}),
+                (f"{base}/processos/{ident}/documentos", None),
+                (f"{base}/processos/{ident}/movimentos", {"incluirDocumentos": "true"}),
+            ]
+        candidatos += [
+            (f"{base}/processos", {"numeroProcesso": numero_cnj, "incluirDocumentos": "true"}),
+            (f"{base}/processos", {"numeroProcesso": numero_norm, "incluirDocumentos": "true"}),
+            (f"{base}/documentos", {"numeroProcesso": numero_cnj}),
+            (f"{base}/documentos", {"numeroProcesso": numero_norm}),
+        ]
+
+    vistos: set[tuple[str, str]] = set()
+    for url, params in candidatos:
+        key = (url, json.dumps(params or {}, sort_keys=True))
+        if key in vistos:
+            continue
+        vistos.add(key)
         try:
             resp = await client.get(url, headers=headers, params=params)
         except Exception:
@@ -466,20 +510,20 @@ def _build_headers(token: str, session_data: dict | None = None) -> dict[str, st
 
 def _build_document_headers(headers: dict[str, str]) -> dict[str, str]:
     allowed = {
-        "Authorization",
-        "Accept-Language",
-        "Origin",
-        "Referer",
-        "Cookie",
-        "User-Agent",
-        "Sec-Ch-Ua",
-        "Sec-Ch-Ua-Mobile",
-        "Sec-Ch-Ua-Platform",
-        "Sec-Fetch-Dest",
-        "Sec-Fetch-Mode",
-        "Sec-Fetch-Site",
+        "authorization",
+        "accept-language",
+        "origin",
+        "referer",
+        "cookie",
+        "user-agent",
+        "sec-ch-ua",
+        "sec-ch-ua-mobile",
+        "sec-ch-ua-platform",
+        "sec-fetch-dest",
+        "sec-fetch-mode",
+        "sec-fetch-site",
     }
-    doc_headers = {key: value for key, value in headers.items() if key in allowed}
+    doc_headers = {key: value for key, value in headers.items() if key.lower() in allowed}
     doc_headers["Accept"] = "application/pdf,text/html,application/octet-stream,*/*"
     doc_headers.setdefault("Referer", "https://portaldeservicos.pdpj.jus.br/")
     return doc_headers
@@ -634,12 +678,18 @@ async def buscar_via_pdpj(
             return []
 
         matched_base = str(processo_data.get("_pdpj_base_url") or next(iter(session_data.get("api_bases") or []), _BASES[0]))
-        documentos_por_id = await _buscar_documentos_processo(client, headers, numero_cnj)
-
         processo_id = str(
             processo_data.get("id")
             or processo_data.get("processoId")
             or numero_norm
+        )
+        documentos_por_id = await _buscar_documentos_processo(
+            client,
+            headers,
+            numero_cnj,
+            matched_base=matched_base,
+            processo_id=processo_id,
+            session_data=session_data,
         )
 
         if inline_movimentos:

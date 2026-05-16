@@ -319,7 +319,7 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
             {tokenExpiry ? ` Expira em ${tokenExpiry}.` : ''}
             {jusbrSession?.capture_kind ? ` Tipo salvo: ${jusbrSession.capture_kind}.` : ''}
             {` Cookies: ${jusbrSession?.has_cookies ? 'sim' : 'não'}.`}
-            {!jusbrSession?.has_cookies ? ' Para baixar documentos, reconecte com cURL ou headers completos do portal.' : ''}
+            {!jusbrSession?.has_cookies ? ' Se documentos não vierem, renove com JSON de token ou cURL/headers que tenham Authorization: Bearer.' : ''}
             {!jusbrSession?.has_cookies && detectedHost ? ` Captura atual: ${detectedHost}.` : ''}
           </span>
           <button

@@ -61,7 +61,7 @@ export function detectJusbrInputKind(raw: string): JusbrInputKind {
 
 export function canSubmitJusbrCapture(raw: string): boolean {
   const kind = detectJusbrInputKind(raw)
-  return kind === 'token_json' || kind === 'token' || kind === 'curl' || kind === 'headers'
+  return kind === 'token_json' || kind === 'token' || kind === 'curl' || kind === 'sso_curl' || kind === 'headers'
 }
 
 export function getJusbrTokenMeta(token: string): { exp: number | null; expired: boolean } {

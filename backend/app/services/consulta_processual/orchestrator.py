@@ -296,24 +296,26 @@ def _mensagem_sessao_documentos(session_data: dict | None) -> str:
 
     if capture_kind == "token_json":
         return (
-            "Os andamentos foram sincronizados, mas os documentos nao baixaram porque a sessao atual veio so do JSON de token. "
-            "Para documentos, conecte o jus.br usando o cURL ou os headers de uma requisicao autenticada do portal."
+            "Os andamentos foram sincronizados, mas os documentos indicados pelo jus.br nao abriram nos endpoints testados. "
+            "A sessao veio do JSON de token; se isso persistir, tente colar um cURL/headers de qualquer requisicao autenticada "
+            "que tenha Authorization: Bearer."
         )
     if host.startswith("sso.") or "sso.cloud.pje.jus.br" in host:
         return (
-            "Os andamentos foram sincronizados, mas os documentos nao baixaram porque o cURL atual parece ser da autenticacao SSO, "
-            "e nao de uma chamada do portal de processos. Copie o cURL de uma requisicao em "
-            "portaldeservicos.pdpj.jus.br/api/... e sincronize novamente."
+            "Os andamentos foram sincronizados, mas os documentos indicados pelo jus.br nao abriram nos endpoints testados. "
+            "A sessao veio de um cURL de login/token; se isso persistir, cole o JSON da aba Response da requisicao de token "
+            "ou um cURL/headers de qualquer requisicao autenticada que tenha Authorization: Bearer."
         )
     if detected_url and "portaldeservicos.pdpj.jus.br/api" not in detected_url:
         return (
-            "Os andamentos foram sincronizados, mas os documentos nao baixaram porque a captura atual nao veio de uma chamada "
-            "portaldeservicos.pdpj.jus.br/api/.... Copie o cURL ou os headers de uma requisicao autenticada do portal e tente de novo."
+            "Os andamentos foram sincronizados, mas os documentos indicados pelo jus.br nao abriram nos endpoints testados. "
+            "A captura atual veio de outra chamada autenticada; ela pode servir para movimentos, mas alguns tribunais exigem "
+            "uma chamada que tambem liste ou abra documentos."
         )
     return (
-        "Os andamentos foram sincronizados, mas alguns documentos nao puderam ser baixados. "
-        "O cURL ou os headers atuais nao trouxeram os cookies necessarios da sessao do portal. "
-        "Copie uma requisicao autenticada do proprio portal de processos e sincronize novamente."
+        "Os andamentos foram sincronizados, mas alguns documentos indicados pelo jus.br nao puderam ser baixados. "
+        "Tente renovar a sessao com o JSON da resposta de token ou com um cURL/headers de requisicao autenticada "
+        "que tenha Authorization: Bearer."
     )
 
 
@@ -625,13 +627,11 @@ async def sincronizar_processo_jusbr(
         log.mensagem = _mensagem_sessao_documentos(session_data)
     elif docs_total == 0 and session_data and session_data.get("capture_kind") == "token_json":
         log.mensagem = (
-            "Andamentos sincronizados. Para baixar documentos pelo jus.br, reconecte usando o cURL ou headers "
-            "de uma requisicao autenticada do portal, nao apenas o JSON do token."
+            "Andamentos sincronizados. O jus.br nao retornou metadados de documento para estes movimentos nos endpoints testados."
         )
     elif docs_total == 0 and session_data and not session_data.get("cookies"):
         log.mensagem = (
-            "Andamentos sincronizados. A sessao salva nao trouxe cookies do portal; para tentar baixar documentos, "
-            "copie um cURL/headers de uma requisicao autenticada que contenha o header Cookie."
+            "Andamentos sincronizados. O jus.br nao retornou metadados de documento para estes movimentos nos endpoints testados."
         )
     log.finalizado_em = datetime.now(timezone.utc)
     db.commit()
