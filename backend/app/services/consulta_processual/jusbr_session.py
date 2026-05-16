@@ -160,8 +160,10 @@ def _exchange_sso_code_for_tokens(
     )
     if response.status_code != 200:
         raise ValueError(
-            "Nao foi possivel converter o cURL de login em sessao do jus.br. "
-            f"O endpoint de token respondeu {response.status_code}."
+            "Esse cURL e da etapa de login do jus.br, e o codigo dessa etapa e descartavel. "
+            "Depois de entrar no portal, copie o cURL ou os headers de uma requisicao autenticada "
+            "com URL portaldeservicos.pdpj.jus.br/api/..., nao da requisicao "
+            "/protocol/openid-connect/token."
         )
 
     try:
@@ -247,27 +249,11 @@ def _parse_capture(raw_capture: str) -> dict:
     }
 
     if not token and detected_url and "/protocol/openid-connect/token" in detected_url:
-        payload = _exchange_sso_code_for_tokens(detected_url, headers, body, cookie or None)
-        token = str(payload.get("access_token") or "").strip()
-        refresh_token = str(payload.get("refresh_token") or "").strip() or None
-        if not token:
-            raise ValueError("Nao foi possivel extrair um access_token valido do cURL de login do jus.br.")
-        now = datetime.now(timezone.utc)
-        return {
-            "token": token,
-            "refresh_token": refresh_token,
-            "token_type": str(payload.get("token_type") or "Bearer").strip() or "Bearer",
-            "cookies": cookie or None,
-            "referer": headers.get("referer") or "https://portaldeservicos.pdpj.jus.br/home",
-            "detected_url": detected_url,
-            "api_bases": ["https://portaldeservicos.pdpj.jus.br/api/v2"],
-            "extra_headers": extra_headers,
-            "token_endpoint": detected_url,
-            "captured_at": now.isoformat(),
-            "expires_at": _jwt_exp_iso(token) or _iso_from_offset(payload.get("expires_in"), now),
-            "refresh_expires_at": _jwt_exp_iso(refresh_token) or _iso_from_offset(payload.get("refresh_expires_in"), now),
-            "capture_kind": "sso_curl",
-        }
+        raise ValueError(
+            "Esse cURL e da etapa de login do jus.br, e nao serve para salvar a sessao de documentos. "
+            "Entre no portal, abra a aba Network/Rede e copie o cURL ou os headers de uma requisicao "
+            "autenticada cuja URL comece com portaldeservicos.pdpj.jus.br/api/...."
+        )
 
     if not token:
         raise ValueError("Nao foi possivel extrair um token valido da captura do jus.br.")
