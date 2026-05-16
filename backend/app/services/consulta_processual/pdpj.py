@@ -338,7 +338,8 @@ async def _buscar_documentos_processo(
         except Exception:
             continue
         if resp.status_code in (401, 403):
-            raise PermissionError("Token expirado ao buscar documentos do jus.br. Renove a sessão.")
+            logger.info("PDPJ documentos probe %s → %s; seguindo sem índice de documentos", url, resp.status_code)
+            continue
         if resp.status_code != 200:
             continue
         try:
