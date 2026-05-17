@@ -180,6 +180,105 @@ def _plain_headers_from_capture(raw_capture: str) -> dict[str, str]:
     return headers
 
 
+def _capture_context_from_raw(raw_capture: str) -> dict:
+    normalized = raw_capture.replace("\\r\\n", " ").replace("\\n", " ").strip()
+    try:
+        parts = shlex.split(normalized)
+    except Exception:
+        parts = []
+
+    detected_url = ""
+    headers: dict[str, str] = _plain_headers_from_capture(raw_capture)
+    cookie = ""
+    body = ""
+
+    i = 0
+    while i < len(parts):
+        part = parts[i]
+        lower = part.lower()
+
+        if part.startswith("http://") or part.startswith("https://"):
+            detected_url = part
+        elif lower == "--url" and i + 1 < len(parts):
+            detected_url = parts[i + 1]
+            i += 1
+        elif lower in {"-h", "--header"} and i + 1 < len(parts):
+            header = parts[i + 1]
+            if ":" in header:
+                name, value = header.split(":", 1)
+                headers[name.strip().lower()] = value.strip()
+            i += 1
+        elif lower in {"-b", "--cookie"} and i + 1 < len(parts):
+            cookie = parts[i + 1].strip()
+            i += 1
+        i += 1
+
+    body = _captured_form_data(parts)
+    if not cookie and "cookie" in headers:
+        cookie = headers["cookie"]
+
+    extra_headers = {
+        key: value
+        for key, value in headers.items()
+        if key not in {"authorization", "cookie", "content-length", "host"}
+    }
+    token = headers.get("authorization", "")
+    if token.lower().startswith("bearer "):
+        token = token[7:].strip()
+    if not token:
+        token = _token_from_text(raw_capture)
+
+    return {
+        "detected_url": detected_url,
+        "headers": headers,
+        "cookie": cookie,
+        "body": body,
+        "extra_headers": extra_headers,
+        "token": token,
+    }
+
+
+def _merge_session_data(current: dict | None, incoming: dict, raw_capture: str | None = None) -> dict:
+    if not current:
+        return incoming
+    merged = dict(current)
+
+    # A token-bearing capture is authoritative for token fields. A cookie/header
+    # capture complements the existing token session instead of downgrading it.
+    if incoming.get("token"):
+        incoming_has_only_context = not incoming.get("refresh_token") and not incoming.get("expires_at")
+        if not incoming_has_only_context or not merged.get("token"):
+            for key in ("token", "refresh_token", "token_type", "token_endpoint", "expires_at", "refresh_expires_at"):
+                if incoming.get(key):
+                    merged[key] = incoming.get(key)
+
+    for key in ("cookies", "referer", "detected_url"):
+        if incoming.get(key):
+            merged[key] = incoming.get(key)
+
+    api_bases: list[str] = []
+    for base in [*(incoming.get("api_bases") or []), *(merged.get("api_bases") or [])]:
+        if isinstance(base, str) and base and base not in api_bases:
+            api_bases.append(base)
+    merged["api_bases"] = api_bases
+
+    extra_headers = {}
+    if isinstance(merged.get("extra_headers"), dict):
+        extra_headers.update(merged["extra_headers"])
+    if isinstance(incoming.get("extra_headers"), dict):
+        extra_headers.update(incoming["extra_headers"])
+    merged["extra_headers"] = extra_headers
+
+    kind = incoming.get("capture_kind")
+    if kind:
+        previous = str(merged.get("capture_kind") or "")
+        merged["capture_kind"] = kind if not previous else f"{previous}+{kind}"
+    merged["captured_at"] = datetime.now(timezone.utc).isoformat()
+    if raw_capture:
+        merged["last_capture_had_cookie"] = bool(incoming.get("cookies"))
+    return merged
+
+
 def _exchange_sso_code_for_tokens(
     detected_url: str,
     headers: dict[str, str],
@@ -262,51 +361,13 @@ def _parse_capture(raw_capture: str) -> dict:
             "capture_kind": "token_json",
         }
 
-    normalized = raw_capture.replace("\\r\\n", " ").replace("\\n", " ").strip()
-    parts = shlex.split(normalized)
-
-    detected_url = ""
-    headers: dict[str, str] = _plain_headers_from_capture(raw_capture)
-    cookie = ""
-    body = ""
-
-    i = 0
-    while i < len(parts):
-        part = parts[i]
-        lower = part.lower()
-
-        if part.startswith("http://") or part.startswith("https://"):
-            detected_url = part
-        elif lower == "--url" and i + 1 < len(parts):
-            detected_url = parts[i + 1]
-            i += 1
-        elif lower in {"-h", "--header"} and i + 1 < len(parts):
-            header = parts[i + 1]
-            if ":" in header:
-                name, value = header.split(":", 1)
-                headers[name.strip().lower()] = value.strip()
-            i += 1
-        elif lower in {"-b", "--cookie"} and i + 1 < len(parts):
-            cookie = parts[i + 1].strip()
-            i += 1
-        i += 1
-
-    body = _captured_form_data(parts)
-
-    token = headers.get("authorization", "")
-    if token.lower().startswith("bearer "):
-        token = token[7:].strip()
-    if not token:
-        token = _token_from_text(raw_capture)
-
-    if not cookie and "cookie" in headers:
-        cookie = headers["cookie"]
-
-    extra_headers = {
-        key: value
-        for key, value in headers.items()
-        if key not in {"authorization", "cookie", "content-length", "host"}
-    }
+    context = _capture_context_from_raw(raw_capture)
+    detected_url = context["detected_url"]
+    headers = context["headers"]
+    cookie = context["cookie"]
+    body = context["body"]
+    token = context["token"]
+    extra_headers = context["extra_headers"]
 
     if not token and detected_url and "/protocol/openid-connect/token" in detected_url:
         payload = _exchange_sso_code_for_tokens(detected_url, headers, body, cookie or None)
@@ -352,7 +413,31 @@ def _parse_capture(raw_capture: str) -> dict:
 
 
 def save_session_from_capture(raw_capture: str) -> dict:
-    data = _parse_capture(raw_capture)
+    current = load_session()
+    try:
+        data = _parse_capture(raw_capture)
+    except ValueError as exc:
+        context = _capture_context_from_raw(raw_capture)
+        if current and (context.get("cookie") or context.get("extra_headers") or context.get("detected_url")):
+            data = {
+                "token": current.get("token"),
+                "refresh_token": current.get("refresh_token"),
+                "token_type": current.get("token_type") or "Bearer",
+                "cookies": context.get("cookie") or current.get("cookies"),
+                "referer": context.get("headers", {}).get("referer") or current.get("referer"),
+                "detected_url": context.get("detected_url") or current.get("detected_url"),
+                "api_bases": _derive_api_bases(context.get("detected_url")) or current.get("api_bases") or [],
+                "extra_headers": context.get("extra_headers") or {},
+                "token_endpoint": current.get("token_endpoint"),
+                "captured_at": datetime.now(timezone.utc).isoformat(),
+                "expires_at": current.get("expires_at"),
+                "refresh_expires_at": current.get("refresh_expires_at"),
+                "capture_kind": "context_curl_or_headers",
+                "capture_warning": str(exc),
+            }
+        else:
+            raise
+    data = _merge_session_data(current, data, raw_capture)
     _ensure_parent()
     SESSION_FILE.write_text(json.dumps(data, ensure_ascii=False))
     return data
