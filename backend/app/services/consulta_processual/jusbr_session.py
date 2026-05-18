@@ -319,10 +319,11 @@ def _exchange_sso_code_for_tokens(
     )
     if response.status_code != 200:
         raise ValueError(
-            "O jus.br recusou a conversao desse cURL de login/token. "
-            "Se ele for da primeira entrada no portal, o codigo provavelmente ja foi usado pelo navegador. "
-            "Abra essa mesma requisicao na aba Network/Rede e cole aqui o JSON da aba Response, "
-            "ou copie qualquer requisicao autenticada que tenha Authorization: Bearer."
+            "Esse cURL é da etapa de login do jus.br e o código dele é descartável. "
+            "Quando o navegador já usou essa requisição, o app não consegue reutilizar o mesmo código. "
+            "Na mesma linha da aba Network/Rede, abra a aba Response e cole o JSON que contém access_token "
+            "e refresh_token. Depois, se os documentos ainda não vierem, cole também uma requisição autenticada "
+            "do portal que tenha Authorization: Bearer."
         )
 
     try:

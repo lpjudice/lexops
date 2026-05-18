@@ -105,7 +105,7 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
           : kind === 'process_response'
           ? 'Resposta de processo detectada. Ela ajuda no diagnóstico, mas não conecta a sessão. Cole o JSON de token ou cURL/headers com Authorization: Bearer.'
           : kind === 'sso_curl'
-          ? 'cURL de login/token detectado. Vou tentar converter; se o jus.br recusar, cole o JSON da aba Response dessa requisição.'
+          ? 'cURL de login/token detectado. Esse código é descartável; se o navegador já usou a requisição, cole o JSON da aba Response dessa mesma linha.'
           : kind === 'curl'
           ? 'cURL detectado. O token será extraído automaticamente.'
           : kind === 'headers'
@@ -166,7 +166,7 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
               <span className={styles.networkHintIcon}>💡</span>
               <span>
                 Para baixar <strong>documentos reais</strong>, cole o <strong>JSON da resposta de token</strong> ou copie o <strong>cURL/headers</strong> de qualquer requisição autenticada que tenha <strong>Authorization: Bearer</strong>.
-                Se for a chamada <strong>/protocol/openid-connect/token</strong>, o cURL pode falhar porque o código de login é descartável; nesse caso, use o JSON da aba Response.
+                Se for a chamada <strong>/protocol/openid-connect/token</strong>, copie preferencialmente o <strong>JSON da aba Response</strong>. O cURL dessa linha usa um código descartável e pode não ser reutilizável depois que o navegador já entrou.
               </span>
             </div>
           )}
@@ -228,7 +228,7 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
             )}
             {inputKind === 'sso_curl' && (
               <p className={styles.tokenError}>
-                Esse é um cURL de login/token. O app vai tentar converter, mas se o jus.br recusar, cole o JSON da aba Response dessa mesma requisição.
+                Esse é um cURL de login/token. Se a sessão ainda estiver vazia, ele normalmente não basta porque o código já foi consumido pelo navegador. Abra essa mesma requisição e cole o JSON da aba Response, com access_token e refresh_token.
               </p>
             )}
             {tokenExpiry && (
