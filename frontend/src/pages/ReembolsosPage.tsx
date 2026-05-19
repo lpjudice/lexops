@@ -18,6 +18,15 @@ const STATUS_LABEL: Record<StatusReembolso, string> = {
   cancelado: 'Cancelado',
 }
 
+type FiltroReembolso = 'abertos' | 'pagos' | 'cancelados' | 'todos'
+type OrdenacaoReembolso =
+  | 'criado_recente'
+  | 'criado_antigo'
+  | 'vencimento_proximo'
+  | 'vencimento_distante'
+  | 'valor_maior'
+  | 'valor_menor'
+
 const NATUREZAS = [
   'Custas judiciais', 'Honorários periciais', 'Transporte', 'Hospedagem',
   'Alimentação', 'Correios/Cartório', 'Diligências', 'Outro',
@@ -40,6 +49,14 @@ function fmtData(d: string) {
 function podeEditarDespesas(status: StatusReembolso) {
   return status === 'rascunho' || status === 'aguardando_pagamento' || status === 'enviado'
 }
+function isAberto(status: StatusReembolso) {
+  return status !== 'pago' && status !== 'cancelado'
+}
+function timeValue(value?: string | null, fallback = Number.MAX_SAFE_INTEGER) {
+  if (!value) return fallback
+  const parsed = new Date(value).getTime()
+  return Number.isNaN(parsed) ? fallback : parsed
+}
 
 export default function ReembolsosPage() {
   const qc = useQueryClient()
@@ -54,6 +71,8 @@ export default function ReembolsosPage() {
   const [emailMap, setEmailMap] = useState<Record<string, string>>({})
   const [copiarUsuarioMap, setCopiarUsuarioMap] = useState<Record<string, boolean>>({})
   const [editandoItem, setEditandoItem] = useState<{ itemId: string; valor: number; natureza: string } | null>(null)
+  const [filtro, setFiltro] = useState<FiltroReembolso>('abertos')
+  const [ordenacao, setOrdenacao] = useState<OrdenacaoReembolso>('criado_recente')
   // Track which reembolso id has a pending cancel+dup action
   const [cancelDupPending, setCancelDupPending] = useState<string | null>(null)
 
@@ -177,6 +196,29 @@ export default function ReembolsosPage() {
 
   const clienteNome = (id: string) => clientes.find((c) => c.id === id)?.nome ?? '—'
   const emailUsuario = usuario?.google_email || usuario?.email || ''
+  const reembolsosAbertos = reembolsos.filter((r) => isAberto(r.status))
+  const totalAberto = reembolsosAbertos.reduce((sum, r) => sum + r.total, 0)
+  const filtros: Array<{ value: FiltroReembolso; label: string; count: number }> = [
+    { value: 'abertos', label: 'Em aberto', count: reembolsosAbertos.length },
+    { value: 'pagos', label: 'Pagos', count: reembolsos.filter((r) => r.status === 'pago').length },
+    { value: 'cancelados', label: 'Cancelados', count: reembolsos.filter((r) => r.status === 'cancelado').length },
+    { value: 'todos', label: 'Todos', count: reembolsos.length },
+  ]
+  const reembolsosVisiveis = reembolsos
+    .filter((r) => {
+      if (filtro === 'abertos') return isAberto(r.status)
+      if (filtro === 'pagos') return r.status === 'pago'
+      if (filtro === 'cancelados') return r.status === 'cancelado'
+      return true
+    })
+    .sort((a, b) => {
+      if (ordenacao === 'criado_antigo') return timeValue(a.created_at, 0) - timeValue(b.created_at, 0)
+      if (ordenacao === 'vencimento_proximo') return timeValue(a.data_vencimento) - timeValue(b.data_vencimento)
+      if (ordenacao === 'vencimento_distante') return timeValue(b.data_vencimento, 0) - timeValue(a.data_vencimento, 0)
+      if (ordenacao === 'valor_maior') return b.total - a.total
+      if (ordenacao === 'valor_menor') return a.total - b.total
+      return timeValue(b.created_at, 0) - timeValue(a.created_at, 0)
+    })
 
   const iniciarEdicaoItem = (item: ItemReembolso) => {
     setEditandoItem({ itemId: item.id, valor: item.valor, natureza: item.natureza })
@@ -258,8 +300,50 @@ export default function ReembolsosPage() {
       ) : reembolsos.length === 0 ? (
         <p className={styles.empty}>Nenhum reembolso cadastrado.</p>
       ) : (
-        <div className={cs.lista}>
-          {reembolsos.map((r) => (
+        <>
+          <div className={cs.listControls}>
+            <div className={cs.openSummary}>
+              <span className={cs.summaryLabel}>Total em aberto</span>
+              <strong>{fmtValor(totalAberto)}</strong>
+              <span>{reembolsosAbertos.length} nota{reembolsosAbertos.length === 1 ? '' : 's'} não paga{reembolsosAbertos.length === 1 ? '' : 's'}</span>
+            </div>
+            <div className={cs.filtersArea}>
+              <div className={cs.filterChips} aria-label="Filtrar reembolsos">
+                {filtros.map((item) => (
+                  <button
+                    key={item.value}
+                    type="button"
+                    className={`${cs.filterChip} ${filtro === item.value ? cs.filterChipActive : ''}`}
+                    onClick={() => setFiltro(item.value)}
+                  >
+                    {item.label}
+                    <span>{item.count}</span>
+                  </button>
+                ))}
+              </div>
+              <label className={cs.sortControl}>
+                <span>Ordenar</span>
+                <select
+                  className={styles.input}
+                  value={ordenacao}
+                  onChange={(e) => setOrdenacao(e.target.value as OrdenacaoReembolso)}
+                >
+                  <option value="criado_recente">Criação: mais recente</option>
+                  <option value="criado_antigo">Criação: mais antiga</option>
+                  <option value="vencimento_proximo">Vencimento: próximo</option>
+                  <option value="vencimento_distante">Vencimento: distante</option>
+                  <option value="valor_maior">Valor: maior primeiro</option>
+                  <option value="valor_menor">Valor: menor primeiro</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          {reembolsosVisiveis.length === 0 ? (
+            <p className={styles.empty}>Nenhum reembolso neste filtro.</p>
+          ) : (
+            <div className={cs.lista}>
+              {reembolsosVisiveis.map((r) => (
             <div key={r.id} className={`${cs.card} ${r.status === 'cancelado' ? cs.cardCancelado : ''}`}>
               {/* Cabeçalho */}
               <div className={cs.cardTop}>
@@ -581,8 +665,10 @@ export default function ReembolsosPage() {
                 </div>
               )}
             </div>
-          ))}
-        </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   )
