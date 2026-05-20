@@ -228,6 +228,22 @@ def _enviar_lembretes_reembolso() -> None:
         logger.warning("Scheduler: falha geral nos lembretes de reembolso: %s", exc)
 
 
+def _sync_diario2_gmail() -> None:
+    try:
+        from app.routers.diario2 import sync_diario2_job
+
+        result = sync_diario2_job(days_back=7)
+        logger.info(
+            "Scheduler: Diário 2 Gmail concluído (%d novas, %d duplicatas, %d sem publicação, %d erros)",
+            result.inseridas,
+            result.duplicatas,
+            result.sem_publicacoes,
+            result.erros,
+        )
+    except Exception as exc:
+        logger.warning("Scheduler: falha na sincronização automática do Diário 2 Gmail: %s", exc)
+
+
 def start_scheduler() -> None:
     if scheduler.running:
         logger.info("Scheduler já estava ativo")
@@ -258,6 +274,18 @@ def start_scheduler() -> None:
         replace_existing=True,
     )
     scheduler.add_job(
+        _sync_diario2_gmail,
+        trigger=CronTrigger(day_of_week="mon-fri", hour=9, minute=0),
+        id="sync_diario2_gmail_0900",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _sync_diario2_gmail,
+        trigger=CronTrigger(day_of_week="mon-fri", hour=11, minute=0),
+        id="sync_diario2_gmail_1100",
+        replace_existing=True,
+    )
+    scheduler.add_job(
         _renovar_drive_watch,
         trigger=CronTrigger(hour=6, minute=0),
         id="renovar_drive_watch",
@@ -270,7 +298,7 @@ def start_scheduler() -> None:
         replace_existing=True,
     )
     scheduler.start()
-    logger.info("Scheduler iniciado — DataJud 03:00, Diário Oficial seg-sex 08:00, Drive watch 06:00, lembretes de reembolso 09:10")
+    logger.info("Scheduler iniciado — DataJud 03:00, Diário Oficial 08:00, Diário 2 Gmail 09:00/11:00, Drive watch 06:00, lembretes de reembolso 09:10")
 
 
 def stop_scheduler() -> None:

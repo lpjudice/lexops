@@ -8,6 +8,7 @@ import ClientesPage from './pages/ClientesPage'
 import ProcessosPage from './pages/ProcessosPage'
 import PrazosPage from './pages/PrazosPage'
 import DiarioPage from './pages/DiarioPage'
+import Diario2Page from './pages/Diario2Page'
 import ClienteDetailPage from './pages/ClienteDetailPage'
 import ContratosPage from './pages/ContratosPage'
 import TesesPage from './pages/TesesPage'
@@ -50,6 +51,7 @@ function AppRoutes() {
         <Route path="processos" element={<ProcessosPage />} />
         <Route path="prazos" element={<PrazosPage />} />
         <Route path="diario" element={<DiarioPage />} />
+        <Route path="diario2" element={<Diario2Page />} />
         <Route path="contratos" element={<ContratosPage />} />
         <Route path="teses" element={<TesesPage />} />
         <Route path="reembolsos" element={<ReembolsosPage />} />

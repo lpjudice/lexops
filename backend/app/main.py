@@ -5,7 +5,7 @@ from app.config import settings
 from app.database import Base, engine
 from app.models import email_cliente  # noqa: F401 — ensures EmailCliente table is registered
 from app.models import reuniao  # noqa: F401 — ensures Reuniao table is registered
-from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, feriados, financeiro, jurisprudencia, organizador, pje, prazos, processos, reembolsos, reunioes, system, tarefas, teses, usuarios, webhooks
+from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, jurisprudencia, organizador, pje, prazos, processos, reembolsos, reunioes, system, tarefas, teses, usuarios, webhooks
 
 # Cria as tabelas (Alembic gerencia em produção; aqui facilita o dev)
 Base.metadata.create_all(bind=engine)
@@ -322,6 +322,7 @@ app.include_router(processos.router)
 app.include_router(prazos.router)
 app.include_router(feriados.router)
 app.include_router(diario.router)
+app.include_router(diario2.router)
 app.include_router(teses.router)
 app.include_router(reembolsos.router)
 app.include_router(financeiro.router)
