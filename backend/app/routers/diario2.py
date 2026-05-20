@@ -440,7 +440,6 @@ def _inserir_publicacoes_gmail(itens: list[dict[str, Any]], db: Session) -> tupl
         antigos = (
             db.query(Publicacao)
             .filter(Publicacao.fonte == "gmail")
-            .filter(Publicacao.match_categoria == "diario2")
             .filter(Publicacao.email_message_id.like(f"{base_id}_%"))
             .all()
         )
@@ -480,11 +479,6 @@ def _inserir_publicacoes_gmail(itens: list[dict[str, Any]], db: Session) -> tupl
                 processo_id = item.get("processo_id") or _vincular_processo(db, item)
                 if processo_id and existe.processo_id != processo_id:
                     existe.processo_id = processo_id
-                if existe.match_categoria != "diario2":
-                    existe.match_categoria = "diario2"
-                    existe.match_nome = LUCAS_GMAIL
-                    if not existe.match_tipo:
-                        existe.match_tipo = "advogado"
                 if texto_mudou:
                     existe.analise_ia = None
                 db.add(existe)
@@ -508,9 +502,6 @@ def _inserir_publicacoes_gmail(itens: list[dict[str, Any]], db: Session) -> tupl
                 email_message_id=email_id,
                 processo_id=processo_id,
                 url_fonte=item.get("url_fonte"),
-                match_tipo="processo" if processo_id else ("advogado" if item.get("numero_cnj") else "gmail"),
-                match_nome=LUCAS_GMAIL,
-                match_categoria="diario2",
             )
             db.add(pub)
             inseridas += 1
@@ -578,7 +569,7 @@ def _query_publicacoes(db: Session, data_inicio: date | None = None, data_fim: d
             joinedload(Publicacao.prazo),
         )
         .filter(Publicacao.fonte == "gmail")
-        .filter(Publicacao.match_categoria == "diario2")
+        .filter(Publicacao.email_message_id.isnot(None))
     )
     if data_inicio:
         q = q.filter(Publicacao.data_publicacao >= data_inicio)
