@@ -267,8 +267,15 @@
 }
 
 /* ─── Tabela de itens ────────────────────────────────────────────────── */
+.tableScroll {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .itensTable {
   width: 100%;
+  min-width: 760px;
   border-collapse: collapse;
   font-size: 13px;
 }
@@ -442,6 +449,40 @@
 }
 .btnDuplicar:hover { background: #e0e7ff; border-color: #a5b4fc; }
 .btnDuplicar:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btnRestaurar {
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 18px;
+  border-radius: 8px;
+  border: 1px solid #a7f3d0;
+  background: #ecfdf5;
+  color: #047857;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.btnRestaurar:hover { background: #d1fae5; border-color: #6ee7b7; }
+.btnRestaurar:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btnExcluirCancelado {
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 18px;
+  border-radius: 8px;
+  border: 1px solid #fecaca;
+  background: #fff7f7;
+  color: #b91c1c;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.btnExcluirCancelado:hover { background: #fee2e2; border-color: #fca5a5; }
+.btnExcluirCancelado:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ─── Comprovante line in table ──────────────────────────────────────── */
 .comprovanteLine {

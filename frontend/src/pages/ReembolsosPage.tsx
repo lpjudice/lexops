@@ -174,6 +174,11 @@ export default function ReembolsosPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['reembolsos'] }),
   })
 
+  const restaurar = useMutation({
+    mutationFn: (id: string) => reembolsosApi.atualizar(id, { status: 'rascunho' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['reembolsos'] }),
+  })
+
   const cancelar = useMutation({
     mutationFn: (id: string) => reembolsosApi.cancelar(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['reembolsos'] }),
@@ -365,16 +370,18 @@ export default function ReembolsosPage() {
                   >
                     {expandido === r.id ? '▲' : '▼'}
                   </button>
-                  <button
-                    className={styles.btnDanger}
-                    onClick={() => {
-                      if (confirm('Remover reembolso? Isso também apagará a pasta correspondente no Drive.')) {
-                        deletar.mutate(r.id)
-                      }
-                    }}
-                  >
-                    ×
-                  </button>
+                  {r.status !== 'cancelado' && (
+                    <button
+                      className={styles.btnDanger}
+                      onClick={() => {
+                        if (confirm('Remover reembolso? Isso também apagará a pasta correspondente no Drive.')) {
+                          deletar.mutate(r.id)
+                        }
+                      }}
+                    >
+                      ×
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -383,145 +390,147 @@ export default function ReembolsosPage() {
                   {/* Tabela de itens */}
                   <div>
                     <div className={cs.sectionTitle}>Despesas</div>
-                    <table className={cs.itensTable}>
-                      <thead>
-                        <tr>
-                          <th>Data</th>
-                          <th>Descrição</th>
-                          <th>Natureza</th>
-                          <th>Comprovante</th>
-                          <th style={{ textAlign: 'right' }}>Valor</th>
-                          <th></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {r.itens.map((it) => (
-                          <tr key={it.id}>
-                            <td>{fmtData(it.data)}</td>
-                            <td>{it.descricao}</td>
-                            <td>
-                              {podeEditarDespesas(r.status) ? (
-                                <select
-                                  className={styles.input}
-                                  value={editandoItem?.itemId === it.id ? editandoItem.natureza : it.natureza}
-                                  disabled={editarItemValor.isPending}
-                                  onChange={(e) => {
-                                    const natureza = e.target.value
-                                    if (editandoItem?.itemId === it.id) setEditandoItem({ ...editandoItem, natureza })
-                                    editarItemValor.mutate({ rid: r.id, iid: it.id, data: { natureza } })
-                                  }}
-                                >
-                                  {NATUREZAS.map((n) => <option key={n} value={n}>{n}</option>)}
-                                </select>
-                              ) : (
-                                <span>{it.natureza}</span>
-                              )}
-                            </td>
-                            <td>
-                              {it.comprovante_path ? (
-                                <span className={cs.comprovanteLine}>
-                                  <span style={{ color: '#15803d', fontSize: 12 }} title={it.documento_comprobatorio || it.comprovante_path}>
-                                    ✓ Anexado{it.documento_comprobatorio ? ` (${it.documento_comprobatorio})` : ''}
-                                  </span>
-                                  {podeEditarDespesas(r.status) && (
-                                    <button
-                                      className={cs.btnRemoveComprovante}
-                                      title="Remover comprovante"
-                                      onClick={() => {
-                                        if (confirm('Remover comprovante?'))
-                                          removerComprovante.mutate({ rid: r.id, iid: it.id })
-                                      }}
-                                    >×</button>
-                                  )}
-                                </span>
-                              ) : (
-                                <label className={cs.btnAnexar} title="Anexar comprovante">
-                                  📎 Anexar
-                                  <input
-                                    type="file"
-                                    style={{ display: 'none' }}
-                                    accept="image/*,.pdf"
-                                    onChange={(e) => {
-                                      const f = e.target.files?.[0]
-                                      if (f) uploadComprovante.mutate({ rid: r.id, iid: it.id, file: f })
-                                    }}
-                                  />
-                                </label>
-                              )}
-                            </td>
-                            <td className={cs.tdValor}>
-                              {podeEditarDespesas(r.status) && editandoItem?.itemId === it.id ? (
-                                <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                                  <CurrencyInput
+                    <div className={cs.tableScroll}>
+                      <table className={cs.itensTable}>
+                        <thead>
+                          <tr>
+                            <th>Data</th>
+                            <th>Descrição</th>
+                            <th>Natureza</th>
+                            <th>Comprovante</th>
+                            <th style={{ textAlign: 'right' }}>Valor</th>
+                            <th></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {r.itens.map((it) => (
+                            <tr key={it.id}>
+                              <td>{fmtData(it.data)}</td>
+                              <td>{it.descricao}</td>
+                              <td>
+                                {podeEditarDespesas(r.status) ? (
+                                  <select
                                     className={styles.input}
-                                    value={editandoItem.valor}
-                                    onChange={(valor) => setEditandoItem({ ...editandoItem, valor })}
-                                    placeholder="0,00"
-                                  />
-                                </div>
-                              ) : (
-                                <span
-                                  style={{ cursor: podeEditarDespesas(r.status) ? 'pointer' : undefined }}
-                                  title={podeEditarDespesas(r.status) ? 'Clique para editar' : undefined}
-                                  onClick={() => {
-                                    if (podeEditarDespesas(r.status)) {
-                                      iniciarEdicaoItem(it)
-                                    }
-                                  }}
-                                >
-                                  {fmtValor(it.valor)}{podeEditarDespesas(r.status) && ' ✎'}
-                                </span>
-                              )}
-                            </td>
-                            <td>
-                              {podeEditarDespesas(r.status) && (
-                                editandoItem?.itemId === it.id ? (
-                                  <div style={{ display: 'flex', gap: 4 }}>
-                                    <button
-                                      className={styles.btnPrimary}
-                                      style={{ padding: '4px 10px', fontSize: 12 }}
-                                      disabled={!editandoItem.valor || editarItemValor.isPending}
-                                      onClick={() => editarItemValor.mutate({
-                                        rid: r.id,
-                                        iid: it.id,
-                                        data: { valor: editandoItem.valor, natureza: editandoItem.natureza },
-                                      })}
-                                    >✓</button>
-                                    <button className={styles.btnDanger} onClick={() => setEditandoItem(null)}>×</button>
+                                    value={editandoItem?.itemId === it.id ? editandoItem.natureza : it.natureza}
+                                    disabled={editarItemValor.isPending}
+                                    onChange={(e) => {
+                                      const natureza = e.target.value
+                                      if (editandoItem?.itemId === it.id) setEditandoItem({ ...editandoItem, natureza })
+                                      editarItemValor.mutate({ rid: r.id, iid: it.id, data: { natureza } })
+                                    }}
+                                  >
+                                    {NATUREZAS.map((n) => <option key={n} value={n}>{n}</option>)}
+                                  </select>
+                                ) : (
+                                  <span>{it.natureza}</span>
+                                )}
+                              </td>
+                              <td>
+                                {it.comprovante_path ? (
+                                  <span className={cs.comprovanteLine}>
+                                    <span style={{ color: '#15803d', fontSize: 12 }} title={it.documento_comprobatorio || it.comprovante_path}>
+                                      ✓ Anexado{it.documento_comprobatorio ? ` (${it.documento_comprobatorio})` : ''}
+                                    </span>
+                                    {podeEditarDespesas(r.status) && (
+                                      <button
+                                        className={cs.btnRemoveComprovante}
+                                        title="Remover comprovante"
+                                        onClick={() => {
+                                          if (confirm('Remover comprovante?'))
+                                            removerComprovante.mutate({ rid: r.id, iid: it.id })
+                                        }}
+                                      >×</button>
+                                    )}
+                                  </span>
+                                ) : (
+                                  <label className={cs.btnAnexar} title="Anexar comprovante">
+                                    📎 Anexar
+                                    <input
+                                      type="file"
+                                      style={{ display: 'none' }}
+                                      accept="image/*,.pdf"
+                                      onChange={(e) => {
+                                        const f = e.target.files?.[0]
+                                        if (f) uploadComprovante.mutate({ rid: r.id, iid: it.id, file: f })
+                                      }}
+                                    />
+                                  </label>
+                                )}
+                              </td>
+                              <td className={cs.tdValor}>
+                                {podeEditarDespesas(r.status) && editandoItem?.itemId === it.id ? (
+                                  <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                                    <CurrencyInput
+                                      className={styles.input}
+                                      value={editandoItem.valor}
+                                      onChange={(valor) => setEditandoItem({ ...editandoItem, valor })}
+                                      placeholder="0,00"
+                                    />
                                   </div>
                                 ) : (
-                                  <div style={{ display: 'flex', gap: 6 }}>
-                                    <button
-                                      className={styles.btnPrimary}
-                                      style={{ padding: '4px 10px', fontSize: 12 }}
-                                      onClick={() => iniciarEdicaoItem(it)}
-                                    >✎</button>
-                                    <button
-                                      className={styles.btnDanger}
-                                      onClick={() => removerItem.mutate({ rid: r.id, iid: it.id })}
-                                    >×</button>
-                                  </div>
-                                )
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                        {r.itens.length > 0 && (
-                          <tr className={cs.totalRow}>
-                            <td colSpan={4} style={{ textAlign: 'right' }}>Total</td>
-                            <td className={cs.tdValor}>{fmtValor(r.total)}</td>
-                            <td></td>
-                          </tr>
-                        )}
-                        {r.itens.length === 0 && (
-                          <tr>
-                            <td colSpan={6} style={{ color: '#9ca3af', textAlign: 'center', padding: '14px' }}>
-                              Nenhuma despesa adicionada.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
+                                  <span
+                                    style={{ cursor: podeEditarDespesas(r.status) ? 'pointer' : undefined }}
+                                    title={podeEditarDespesas(r.status) ? 'Clique para editar' : undefined}
+                                    onClick={() => {
+                                      if (podeEditarDespesas(r.status)) {
+                                        iniciarEdicaoItem(it)
+                                      }
+                                    }}
+                                  >
+                                    {fmtValor(it.valor)}{podeEditarDespesas(r.status) && ' ✎'}
+                                  </span>
+                                )}
+                              </td>
+                              <td>
+                                {podeEditarDespesas(r.status) && (
+                                  editandoItem?.itemId === it.id ? (
+                                    <div style={{ display: 'flex', gap: 4 }}>
+                                      <button
+                                        className={styles.btnPrimary}
+                                        style={{ padding: '4px 10px', fontSize: 12 }}
+                                        disabled={!editandoItem.valor || editarItemValor.isPending}
+                                        onClick={() => editarItemValor.mutate({
+                                          rid: r.id,
+                                          iid: it.id,
+                                          data: { valor: editandoItem.valor, natureza: editandoItem.natureza },
+                                        })}
+                                      >✓</button>
+                                      <button className={styles.btnDanger} onClick={() => setEditandoItem(null)}>×</button>
+                                    </div>
+                                  ) : (
+                                    <div style={{ display: 'flex', gap: 6 }}>
+                                      <button
+                                        className={styles.btnPrimary}
+                                        style={{ padding: '4px 10px', fontSize: 12 }}
+                                        onClick={() => iniciarEdicaoItem(it)}
+                                      >✎</button>
+                                      <button
+                                        className={styles.btnDanger}
+                                        onClick={() => removerItem.mutate({ rid: r.id, iid: it.id })}
+                                      >×</button>
+                                    </div>
+                                  )
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                          {r.itens.length > 0 && (
+                            <tr className={cs.totalRow}>
+                              <td colSpan={4} style={{ textAlign: 'right' }}>Total</td>
+                              <td className={cs.tdValor}>{fmtValor(r.total)}</td>
+                              <td></td>
+                            </tr>
+                          )}
+                          {r.itens.length === 0 && (
+                            <tr>
+                              <td colSpan={6} style={{ color: '#9ca3af', textAlign: 'center', padding: '14px' }}>
+                                Nenhuma despesa adicionada.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
 
                   {/* Formulário novo item */}
@@ -623,6 +632,30 @@ export default function ReembolsosPage() {
                             onClick={() => handleCancelarEDuplicar(r.id)}
                           >
                             {cancelDupPending === r.id ? 'Aguarde...' : '⧉ Cancelar e Duplicar'}
+                          </button>
+                        </>
+                      )}
+                      {r.status === 'cancelado' && (
+                        <>
+                          <button
+                            className={cs.btnRestaurar}
+                            disabled={restaurar.isPending}
+                            onClick={() => {
+                              if (confirm('Restaurar esta nota como rascunho? Nenhum e-mail será enviado.'))
+                                restaurar.mutate(r.id)
+                            }}
+                          >
+                            Restaurar como Rascunho
+                          </button>
+                          <button
+                            className={cs.btnExcluirCancelado}
+                            disabled={deletar.isPending}
+                            onClick={() => {
+                              if (confirm('Excluir definitivamente este reembolso cancelado? Isso também apagará a pasta correspondente no Drive.'))
+                                deletar.mutate(r.id)
+                            }}
+                          >
+                            Excluir Definitivamente
                           </button>
                         </>
                       )}
