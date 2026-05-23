@@ -50,6 +50,18 @@ def _fmt_brl(v: float) -> str:
     return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def _usuario_email(usuario: Usuario) -> str | None:
+    return getattr(usuario, "email", None) or getattr(usuario, "google_email", None)
+
+
+def _bcc_com_usuario(usuario: Usuario, destinatario: str | None = None) -> list[str]:
+    bcc = [BCC_EMAIL_FIXO]
+    usuario_email = _usuario_email(usuario)
+    if usuario_email and usuario_email not in {BCC_EMAIL_FIXO, destinatario}:
+        bcc.append(usuario_email)
+    return bcc
+
+
 def _folder_prefix_date(r: Reembolso) -> str:
     base_date = r.created_at.date() if r.created_at else r.data_emissao
     return base_date.strftime("%Y-%m-%d")
@@ -70,6 +82,8 @@ def _build_email_html(
     header_color: str = "#00b090",
     is_cancelamento: bool = False,
     is_lembrete: bool = False,
+    is_quitacao: bool = False,
+    is_quitacao_erro: bool = False,
 ) -> str:
     """Builds the HTML email body."""
     itens_rows = "".join(
@@ -97,6 +111,28 @@ def _build_email_html(
             f"Informamos que a <strong>Nota de Reembolso de Despesas</strong> referente a "
             f"<strong style='color:#1d1e20;'>{r.titulo}</strong> foi <strong>cancelada</strong>. "
             f"Em caso de dúvidas, entre em contato com nosso escritório."
+        )
+    elif is_quitacao_erro:
+        headline = "Desconsiderar quitação — Nota de Reembolso"
+        box_bg = "#fff7ed"
+        box_border = "#fed7aa"
+        box_color = "#9a3412"
+        total_color = "#ea580c"
+        intro = (
+            f"Informamos que a quitação enviada anteriormente para a "
+            f"<strong>Nota de Reembolso de Despesas</strong> referente a "
+            f"<strong style='color:#1d1e20;'>{r.titulo}</strong> foi emitida em erro. "
+            f"Por favor, desconsidere o e-mail de quitação anterior."
+        )
+    elif is_quitacao:
+        headline = "Quitação — Nota de Reembolso de Despesas"
+        box_bg = "#f0fdf9"
+        box_border = "#a7f3d0"
+        box_color = "#065f46"
+        total_color = "#00b090"
+        intro = (
+            f"Confirmamos a quitação da <strong>Nota de Reembolso de Despesas</strong> referente a: "
+            f"<strong style='color:#1d1e20;'>{r.titulo}</strong>."
         )
     elif is_lembrete:
         headline = "Lembrete — Nota de Reembolso de Despesas"
@@ -148,7 +184,7 @@ def _build_email_html(
                 <td style="padding:16px 20px;">
                   {vencimento_row}
                   <p style="margin:0;font-size:15px;color:{box_color};">
-                    <strong>{'Total cancelado' if is_cancelamento else 'Total a reembolsar'}:</strong>
+                    <strong>{'Total cancelado' if is_cancelamento else 'Total quitado' if is_quitacao else 'Total em aberto' if is_quitacao_erro else 'Total a reembolsar'}:</strong>
                     <span style="font-size:20px;font-weight:700;color:{total_color};margin-left:8px;">{_fmt_brl(r.total)}</span>
                   </p>
                 </td>
@@ -289,6 +325,18 @@ def _get_pdf_with_drive_link(r: Reembolso, db: Session) -> bytes:
     )
 
 
+def _destinatario_reembolso(r: Reembolso, db: Session) -> tuple[str, str]:
+    from app.models.cliente import Cliente
+
+    cliente = db.query(Cliente).filter(Cliente.id == r.cliente_id).first()
+    destinatario = (r.email_destinatario or "").strip()
+    if not destinatario and cliente and cliente.email:
+        destinatario = cliente.email.strip()
+    if not destinatario:
+        raise HTTPException(status_code=400, detail="Reembolso sem e-mail do cliente/destinatário")
+    return destinatario, cliente.nome if cliente else "cliente"
+
+
 # ── CRUD Reembolso ────────────────────────────────────────────────────────────
 
 @router.get("/", response_model=list[ReembolsoOut])
@@ -384,6 +432,75 @@ def cancelar_reembolso(reembolso_id: uuid.UUID, db: Session = Depends(get_db)):
     except Exception:
         pass
 
+    return r
+
+
+@router.post("/{reembolso_id}/marcar-pago", response_model=ReembolsoOut)
+def marcar_reembolso_pago(
+    reembolso_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    r = db.query(Reembolso).filter(Reembolso.id == reembolso_id).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Reembolso não encontrado")
+    if r.status == "pago":
+        return r
+    if r.status == "cancelado":
+        raise HTTPException(status_code=400, detail="Reembolso cancelado não pode ser marcado como pago")
+
+    destinatario, _cliente_nome = _destinatario_reembolso(r, db)
+    access_token = _refresh_if_needed()
+    if not access_token:
+        raise HTTPException(status_code=503, detail="Google não autenticado. Faça o OAuth em /auth/google")
+
+    html = _build_email_html(r, header_color="#00b090", is_quitacao=True)
+    _send_gmail(
+        access_token=access_token,
+        to=destinatario,
+        subject=f"Quitação — Nota de Reembolso de Despesas — {r.titulo}",
+        html=html,
+        bcc=_bcc_com_usuario(usuario, destinatario),
+    )
+
+    r.status = "pago"
+    r.email_destinatario = destinatario
+    db.commit()
+    db.refresh(r)
+    return r
+
+
+@router.post("/{reembolso_id}/reverter-pagamento", response_model=ReembolsoOut)
+def reverter_pagamento_reembolso(
+    reembolso_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    r = db.query(Reembolso).filter(Reembolso.id == reembolso_id).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Reembolso não encontrado")
+    if r.status != "pago":
+        raise HTTPException(status_code=400, detail="Somente reembolsos pagos podem ter a quitação revertida")
+
+    destinatario, _cliente_nome = _destinatario_reembolso(r, db)
+    access_token = _refresh_if_needed()
+    if not access_token:
+        raise HTTPException(status_code=503, detail="Google não autenticado. Faça o OAuth em /auth/google")
+
+    html = _build_email_html(r, header_color="#ea580c", is_quitacao_erro=True)
+    _send_gmail(
+        access_token=access_token,
+        to=destinatario,
+        subject=f"Desconsiderar quitação — Nota de Reembolso — {r.titulo}",
+        html=html,
+        bcc=_bcc_com_usuario(usuario, destinatario),
+    )
+
+    r.status = "enviado" if r.email_destinatario else "aguardando_pagamento"
+    r.email_destinatario = destinatario
+    r.ultimo_lembrete_em = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(r)
     return r
 
 
@@ -677,7 +794,7 @@ def enviar_email(
     html = _build_email_html(r)
     bcc = [BCC_EMAIL_FIXO]
     if copiar_usuario:
-        usuario_email = getattr(usuario, "email", None) or getattr(usuario, "google_email", None)
+        usuario_email = _usuario_email(usuario)
         if usuario_email and usuario_email not in {destinatario, BCC_EMAIL_FIXO}:
             bcc.append(usuario_email)
     result = _send_gmail(

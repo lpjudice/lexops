@@ -62,6 +62,12 @@ export const reembolsosApi = {
   cancelar: (id: string) =>
     api.post<Reembolso>(`/reembolsos/${id}/cancelar`).then((r) => r.data),
 
+  marcarPago: (id: string) =>
+    api.post<Reembolso>(`/reembolsos/${id}/marcar-pago`).then((r) => r.data),
+
+  reverterPagamento: (id: string) =>
+    api.post<Reembolso>(`/reembolsos/${id}/reverter-pagamento`).then((r) => r.data),
+
   duplicar: (id: string) =>
     api.post<Reembolso>(`/reembolsos/${id}/duplicar`).then((r) => r.data),
 

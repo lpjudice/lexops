@@ -386,6 +386,23 @@
   box-shadow: 0 4px 14px rgba(0, 176, 144, 0.28) !important;
 }
 
+.btnReverterPago {
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 18px;
+  border-radius: 8px;
+  border: 1px solid #fed7aa;
+  background: #fff7ed;
+  color: #c2410c;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.btnReverterPago:hover { background: #ffedd5; border-color: #fdba74; }
+.btnReverterPago:disabled { opacity: 0.5; cursor: not-allowed; }
+
 .btnDrive {
   display: inline-flex;
   align-items: center;

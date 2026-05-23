@@ -170,8 +170,15 @@ export default function ReembolsosPage() {
   })
 
   const marcarPago = useMutation({
-    mutationFn: (id: string) => reembolsosApi.atualizar(id, { status: 'pago' }),
+    mutationFn: (id: string) => reembolsosApi.marcarPago(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['reembolsos'] }),
+    onError: (e: any) => alert(`Erro ao marcar como pago: ${e?.response?.data?.detail || e?.message}`),
+  })
+
+  const reverterPagamento = useMutation({
+    mutationFn: (id: string) => reembolsosApi.reverterPagamento(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['reembolsos'] }),
+    onError: (e: any) => alert(`Erro ao reverter quitação: ${e?.response?.data?.detail || e?.message}`),
   })
 
   const restaurar = useMutation({
@@ -607,9 +614,22 @@ export default function ReembolsosPage() {
                       {(r.status === 'aguardando_pagamento' || r.status === 'enviado') && (
                         <button
                           className={`${styles.btnPrimary} ${cs.btnPago}`}
-                          onClick={() => { if (confirm('Marcar como pago?')) marcarPago.mutate(r.id) }}
+                          disabled={marcarPago.isPending}
+                          onClick={() => { if (confirm('Marcar como pago e enviar e-mail de quitação ao cliente?')) marcarPago.mutate(r.id) }}
                         >
                           ✓ Marcar como Pago
+                        </button>
+                      )}
+                      {r.status === 'pago' && (
+                        <button
+                          className={cs.btnReverterPago}
+                          disabled={reverterPagamento.isPending}
+                          onClick={() => {
+                            if (confirm('Reverter a quitação e avisar o cliente para desconsiderar o e-mail anterior?'))
+                              reverterPagamento.mutate(r.id)
+                          }}
+                        >
+                          Reverter Quitação
                         </button>
                       )}
 
