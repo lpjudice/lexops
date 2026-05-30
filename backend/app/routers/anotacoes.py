@@ -84,7 +84,7 @@ def criar_anotacao(data: AnotacaoCreate, db: Session = Depends(get_db)):
             data=anotacao.data_evento if hasattr(anotacao.data_evento, 'strftime') else None,
         )
         from app.services.google_drive import upload_arquivo
-        upload_arquivo(pdf_bytes, nome_arquivo, cliente.nome, "IA")
+        upload_arquivo(pdf_bytes, nome_arquivo, cliente.nome, "Anotações")
     except Exception:
         pass
     return anotacao

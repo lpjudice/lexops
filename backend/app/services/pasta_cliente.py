@@ -38,6 +38,7 @@ HOST_DIR = _base_dir()
 SUBPASTAS: dict[str, str] = {
     "contratos":       "Contratos",
     "reembolsos":      "Reembolsos",
+    "anotacoes":       "Anotações",
     "ia":              "IA",
     "publicacoes":     "Publicações",
     "teses":           "Teses",
