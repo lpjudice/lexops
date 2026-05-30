@@ -29,6 +29,7 @@ class Andamento:
     arquivo_nome: str | None = None
     arquivo_bytes: bytes | None = None
     arquivo_mimetype: str | None = None
+    arquivo_url: str | None = None  # PDPJ hrefBinario (downloaded lazily by the orchestrator)
     documento_detectado: bool = False
 
 

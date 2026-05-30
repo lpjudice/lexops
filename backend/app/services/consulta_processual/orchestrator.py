@@ -422,6 +422,27 @@ async def sincronizar_processo(processo: Processo, db: Session) -> Sincronizacao
     return log
 
 
+async def _baixar_conteudo_documento(
+    a,
+    token: str | None,
+    session_data: dict | None,
+) -> tuple[bytes | None, str | None]:
+    """Download the document bytes for an andamento on demand (lazy).
+
+    Returns ``(conteudo, mimetype)``. Only called for new rows or rows missing a
+    usable file, so the full case file is never re-downloaded every sync.
+    """
+    if not getattr(a, "arquivo_url", None):
+        return getattr(a, "arquivo_bytes", None), a.arquivo_mimetype
+    from .pdpj import baixar_documento_jusbr
+
+    resultado = await baixar_documento_jusbr(a.arquivo_url, token=token, session_data=session_data)
+    if not resultado:
+        return None, a.arquivo_mimetype
+    conteudo, mimetype = resultado
+    return conteudo, (mimetype or a.arquivo_mimetype)
+
+
 async def sincronizar_processo_jusbr(
     processo: Processo,
     db: Session,
@@ -513,7 +534,11 @@ async def sincronizar_processo_jusbr(
         existente = _buscar_andamento_existente_compativel(db, processo, a.data_andamento, a.descricao, h)
         if existente:
             precisa_reprocessar = not _arquivo_andamento_util(existente)
-            if precisa_reprocessar and a.arquivo_nome and a.arquivo_bytes:
+            conteudo_doc = None
+            mimetype_doc = a.arquivo_mimetype
+            if precisa_reprocessar and a.arquivo_nome:
+                conteudo_doc, mimetype_doc = await _baixar_conteudo_documento(a, token, session_data)
+            if precisa_reprocessar and a.arquivo_nome and conteudo_doc:
                 docs_processados += 1
                 progress(
                     stage="documentos",
@@ -526,8 +551,8 @@ async def sincronizar_processo_jusbr(
                     processo,
                     db,
                     a.arquivo_nome,
-                    a.arquivo_bytes,
-                    a.arquivo_mimetype,
+                    conteudo_doc,
+                    mimetype_doc,
                     data_andamento=a.data_andamento,
                     descricao=a.descricao,
                     tipo=a.tipo,
@@ -555,7 +580,11 @@ async def sincronizar_processo_jusbr(
                     uploaded=docs_enviados,
                 )
             continue
-        if a.arquivo_nome and a.arquivo_bytes:
+        conteudo_doc = None
+        mimetype_doc = a.arquivo_mimetype
+        if a.arquivo_nome:
+            conteudo_doc, mimetype_doc = await _baixar_conteudo_documento(a, token, session_data)
+        if a.arquivo_nome and conteudo_doc:
             docs_processados += 1
             progress(
                 stage="documentos",
@@ -570,8 +599,8 @@ async def sincronizar_processo_jusbr(
             processo,
             db,
             a.arquivo_nome,
-            a.arquivo_bytes,
-            a.arquivo_mimetype,
+            conteudo_doc,
+            mimetype_doc,
             data_andamento=a.data_andamento,
             descricao=a.descricao,
             tipo=a.tipo,

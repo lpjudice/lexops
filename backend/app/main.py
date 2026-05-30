@@ -5,6 +5,7 @@ from app.config import settings
 from app.database import Base, engine
 from app.models import email_cliente  # noqa: F401 — ensures EmailCliente table is registered
 from app.models import reuniao  # noqa: F401 — ensures Reuniao table is registered
+from app.models import jusbr_session as _jusbr_session_model  # noqa: F401 — ensures JusbrSession table is registered
 from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, jurisprudencia, organizador, pje, prazos, processos, reembolsos, reunioes, system, tarefas, teses, usuarios, webhooks
 
 # Cria as tabelas (Alembic gerencia em produção; aqui facilita o dev)
@@ -147,6 +148,14 @@ def _run_migrations() -> None:
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_sincronizacao_processo_id ON sincronizacao_logs(processo_id)"
         ))
+        # Sessão jus.br/PDPJ compartilhada — persistida no Postgres (sobrevive a deploys)
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS jusbr_sessions (
+                id INTEGER PRIMARY KEY DEFAULT 1,
+                data JSONB NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
         # Controle de acesso — usuários
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS usuarios (

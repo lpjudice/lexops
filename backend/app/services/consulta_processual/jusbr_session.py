@@ -10,11 +10,77 @@ from urllib.parse import parse_qsl, urlparse
 import httpx
 
 
+# Legacy on-disk location (Fly volume). Kept only as a one-time migration source;
+# the session now lives in Postgres so it survives deploys / machine swaps.
 SESSION_FILE = Path("/app/backend/uploads/jusbr_session.json")
 
 
-def _ensure_parent() -> None:
-    SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+def _db_load() -> dict | None:
+    from app.database import SessionLocal
+    from app.models.jusbr_session import JusbrSession
+
+    db = SessionLocal()
+    try:
+        row = db.query(JusbrSession).filter(JusbrSession.id == 1).first()
+        if row and isinstance(row.data, dict) and row.data.get("token"):
+            return dict(row.data)
+        return None
+    except Exception:
+        return None
+    finally:
+        db.close()
+
+
+def _db_save(data: dict) -> None:
+    from app.database import SessionLocal
+    from app.models.jusbr_session import JusbrSession
+
+    db = SessionLocal()
+    try:
+        row = db.query(JusbrSession).filter(JusbrSession.id == 1).first()
+        if row:
+            row.data = data
+        else:
+            db.add(JusbrSession(id=1, data=data))
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _db_clear() -> None:
+    from app.database import SessionLocal
+    from app.models.jusbr_session import JusbrSession
+
+    db = SessionLocal()
+    try:
+        db.query(JusbrSession).filter(JusbrSession.id == 1).delete()
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _raw_load() -> dict | None:
+    """Load the persisted session, migrating the legacy volume file if present."""
+    data = _db_load()
+    if data:
+        return data
+    if SESSION_FILE.exists():
+        try:
+            file_data = json.loads(SESSION_FILE.read_text())
+        except Exception:
+            return None
+        if isinstance(file_data, dict) and file_data.get("token"):
+            _db_save(file_data)
+            return file_data
+    return None
+
+
+def _raw_save(data: dict) -> None:
+    _db_save(data)
 
 
 def _token_from_text(raw: str) -> str:
@@ -439,8 +505,7 @@ def save_session_from_capture(raw_capture: str) -> dict:
         else:
             raise
     data = _merge_session_data(current, data, raw_capture)
-    _ensure_parent()
-    SESSION_FILE.write_text(json.dumps(data, ensure_ascii=False))
+    _raw_save(data)
     return data
 
 
@@ -492,16 +557,13 @@ def _refresh_session(data: dict) -> dict | None:
     merged["expires_at"] = _jwt_exp_iso(merged["token"]) or _iso_from_offset(refreshed.get("expires_in"), now)
     merged["refresh_expires_at"] = _jwt_exp_iso(merged["refresh_token"]) or _iso_from_offset(refreshed.get("refresh_expires_in"), now)
     merged["captured_at"] = now.isoformat()
-    _ensure_parent()
-    SESSION_FILE.write_text(json.dumps(merged, ensure_ascii=False))
+    _raw_save(merged)
     return merged
 
 
 def refresh_session_if_needed(buffer_minutes: int = 60) -> dict | None:
-    if not SESSION_FILE.exists():
-        return None
     try:
-        data = json.loads(SESSION_FILE.read_text())
+        data = _raw_load()
         if not isinstance(data, dict) or not data.get("token"):
             return None
         expires_at = data.get("expires_at")
@@ -523,10 +585,8 @@ def refresh_session_if_needed(buffer_minutes: int = 60) -> dict | None:
 
 
 def load_session() -> dict | None:
-    if not SESSION_FILE.exists():
-        return None
     try:
-        data = json.loads(SESSION_FILE.read_text())
+        data = _raw_load()
         if not isinstance(data, dict) or not data.get("token"):
             return None
         if _is_expired(data.get("expires_at")):
@@ -540,8 +600,12 @@ def load_session() -> dict | None:
 
 
 def clear_session() -> None:
+    _db_clear()
     if SESSION_FILE.exists():
-        SESSION_FILE.unlink()
+        try:
+            SESSION_FILE.unlink()
+        except Exception:
+            pass
 
 
 def session_status() -> dict:
