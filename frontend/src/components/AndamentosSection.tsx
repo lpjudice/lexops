@@ -97,7 +97,7 @@ function SyncBanner({ result, ultimoAndamentoPre }: {
 
 export default function AndamentosSection({ processoId, ultimoAndamentoData, ultimoCheck }: Props) {
   const qc = useQueryClient()
-  const [fonte, setFonte] = useState<Fonte>('datajud')
+  const [fonte, setFonte] = useState<Fonte>('jusbr')
   const [offset, setOffset] = useState(0)
   const [showTokenModal, setShowTokenModal] = useState(false)
   const [ultimoAndamentoPre, setUltimoAndamentoPre] = useState<string | null | undefined>(ultimoAndamentoData)
