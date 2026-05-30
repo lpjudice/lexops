@@ -15,9 +15,12 @@ URLs anymore.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
+import os
+import random
 import re
 from datetime import date, datetime
 
@@ -30,6 +33,51 @@ logger = logging.getLogger(__name__)
 
 PORTAL_ROOT = "https://portaldeservicos.pdpj.jus.br"
 PDPJ_API_BASE = f"{PORTAL_ROOT}/api/v2"
+
+# ── Rate limiting / transient-error handling ────────────────────────────────────
+# The PDPJ throttles bursts (HTTP 503 "Serviço indisponível", sometimes 429). The
+# first sync of a process fires one request per document, so a few large processes
+# in a row trip the limit. We self-pace: a small delay between document downloads
+# plus automatic retry-with-backoff (honoring Retry-After) on transient statuses,
+# so the caller never has to guess a fixed wait. All knobs are env-tunable.
+_TRANSIENT_STATUS = {429, 502, 503, 504}
+_MAX_RETRIES = int(os.getenv("PDPJ_MAX_RETRIES", "4"))
+_BACKOFF_BASE_SECONDS = float(os.getenv("PDPJ_BACKOFF_BASE_SECONDS", "2.0"))
+_BACKOFF_CAP_SECONDS = float(os.getenv("PDPJ_BACKOFF_CAP_SECONDS", "30.0"))
+_DOC_DELAY_SECONDS = float(os.getenv("PDPJ_DOC_DELAY_SECONDS", "0.4"))
+# Delay between processes in a batch sync (used by the andamentos router).
+PROCESS_DELAY_SECONDS = float(os.getenv("PDPJ_PROCESS_DELAY_SECONDS", "1.5"))
+
+
+def _retry_delay_seconds(resp: httpx.Response, attempt: int) -> float:
+    """Seconds to wait before the next retry: Retry-After if present, else backoff."""
+    retry_after = resp.headers.get("Retry-After")
+    if retry_after:
+        try:
+            return min(float(retry_after), _BACKOFF_CAP_SECONDS)
+        except ValueError:
+            pass
+    return min(_BACKOFF_BASE_SECONDS * (2 ** attempt), _BACKOFF_CAP_SECONDS) + random.uniform(0, 0.5)
+
+
+async def _get_with_retry(
+    client: httpx.AsyncClient,
+    url: str,
+    headers: dict[str, str],
+) -> httpx.Response:
+    """GET that auto-retries transient PDPJ errors (429/502/503/504) with backoff."""
+    attempt = 0
+    while True:
+        resp = await client.get(url, headers=headers)
+        if resp.status_code not in _TRANSIENT_STATUS or attempt >= _MAX_RETRIES:
+            return resp
+        delay = _retry_delay_seconds(resp, attempt)
+        logger.warning(
+            "PDPJ %s -> %s; retry %d/%d em %.1fs",
+            url, resp.status_code, attempt + 1, _MAX_RETRIES, delay,
+        )
+        await asyncio.sleep(delay)
+        attempt += 1
 
 # Max time gap (seconds) for treating a documento as the attachment of a
 # movimento. A "juntada" movimento and its bundled documents share (near-)
@@ -371,10 +419,15 @@ async def baixar_documento_jusbr(
     if not token or not arquivo_url:
         return None
 
+    # Space out document downloads so a large first-sync burst doesn't trip the
+    # PDPJ rate limit; transient 503/429 are retried inside _get_with_retry.
+    if _DOC_DELAY_SECONDS > 0:
+        await asyncio.sleep(_DOC_DELAY_SECONDS)
+
     headers = _build_document_headers(_build_headers(token, session_data))
     try:
         async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
-            resp = await client.get(arquivo_url, headers=headers)
+            resp = await _get_with_retry(client, arquivo_url, headers)
     except Exception as exc:
         logger.info("PDPJ documento download falhou %s: %s", arquivo_url, exc)
         return None
@@ -383,6 +436,7 @@ async def baixar_documento_jusbr(
         logger.info("PDPJ documento %s → %s (sem download)", arquivo_url, resp.status_code)
         return None
     if resp.status_code != 200 or not resp.content:
+        logger.info("PDPJ documento %s → %s (sem conteudo util)", arquivo_url, resp.status_code)
         return None
 
     content_type = resp.headers.get("content-type", "")
@@ -450,7 +504,7 @@ async def _fetch_processo_v2(
     for ident in identificadores:
         url = f"{PDPJ_API_BASE}/processos/{ident}"
         try:
-            resp = await client.get(url, headers=headers)
+            resp = await _get_with_retry(client, url, headers)
         except httpx.RequestError as exc:
             raise ConnectionError(f"Falha ao conectar ao jus.br/PDPJ: {exc}") from exc
 

@@ -337,15 +337,17 @@ async def sincronizar_batch_jusbr(
     body: BatchJusBRSyncBody,
     db: Session = Depends(get_db),
 ):
+    import asyncio
     from app.services.consulta_processual.orchestrator import sincronizar_processo_jusbr as _sync
     from app.services.consulta_processual.jusbr_session import load_session
+    from app.services.consulta_processual.pdpj import PROCESS_DELAY_SECONDS
 
     session_data = load_session() if not body.token else None
     if not body.token and not session_data:
         raise HTTPException(status_code=400, detail="Sessao do jus.br nao configurada.")
 
     results = []
-    for pid in body.processo_ids:
+    for indice, pid in enumerate(body.processo_ids):
         try:
             pid_uuid = uuid.UUID(pid)
         except ValueError:
@@ -361,6 +363,9 @@ async def sincronizar_batch_jusbr(
                 novos_andamentos=0, mensagem="Processo não encontrado",
             ))
             continue
+        # Pausa entre processos para não estourar o rate limit do PDPJ.
+        if indice > 0 and PROCESS_DELAY_SECONDS > 0:
+            await asyncio.sleep(PROCESS_DELAY_SECONDS)
         log = await _sync(p, db, token=body.token, session_data=session_data)
         db.refresh(p)
         results.append(SincronizacaoResult(
