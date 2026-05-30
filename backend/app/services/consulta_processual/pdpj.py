@@ -102,16 +102,43 @@ def _cpf_operador_from_token(token: str) -> str | None:
 
 # ── Headers ─────────────────────────────────────────────────────────────────────
 
+# The portal sits behind a WAF/edge that returns a generic "<html>403 Forbidden"
+# (NOT a JSON PDPJ error) when the request doesn't look like a browser — the most
+# common trigger is a non-browser User-Agent (httpx's default). Sending a realistic
+# Chrome UA + the client-hint / fetch-metadata headers a real browser emits is what
+# lets a token-only session through. These are defaults: a cURL/headers capture that
+# carries its own values overrides them.
+_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "pt-BR,pt;q=0.9",
+    "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+}
+
+
 def _build_headers(token: str, session_data: dict | None = None) -> dict[str, str]:
     session_data = session_data or {}
-    headers = {
+    headers = dict(_BROWSER_HEADERS)
+    headers.update({
         "Authorization": f"Bearer {token}",
         "Accept": "application/json",
         "Origin": PORTAL_ROOT,
         "Referer": session_data.get("referer") or f"{PORTAL_ROOT}/",
-    }
+    })
     extra_headers = session_data.get("extra_headers") or {}
-    if isinstance(extra_headers, dict):
+    if isinstance(extra_headers, dict) and extra_headers:
+        # A capture's own headers win — drop our defaults that collide case-insensitively.
+        extra_lower = {str(k).lower() for k in extra_headers}
+        for key in list(headers):
+            if key.lower() in extra_lower:
+                del headers[key]
         headers.update({str(k): str(v) for k, v in extra_headers.items()})
     if not any(k.lower() == "x-pdpj-cpf-usuario-operador" for k in headers):
         cpf_operador = _cpf_operador_from_token(token)
