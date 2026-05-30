@@ -31,6 +31,7 @@ class Andamento:
     arquivo_mimetype: str | None = None
     arquivo_url: str | None = None  # PDPJ hrefBinario (downloaded lazily by the orchestrator)
     documento_detectado: bool = False
+    documento_id: str | None = None  # identificador estável e único do documento (anti-colisão de dedup)
 
 
 class BaseScraper:

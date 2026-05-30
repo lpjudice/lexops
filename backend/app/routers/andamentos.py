@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+import os
 import threading
 import uuid
 import mimetypes
@@ -104,6 +105,55 @@ def _set_job(job_id: str, **updates) -> None:
         job["updated_at"] = datetime.now(timezone.utc)
 
 
+# Quantas rodadas o job pode re-executar sozinho para terminar de baixar
+# documentos que faltaram (0 ou 1 desliga o auto-continuar).
+_AUTO_CONTINUE_ROUNDS = int(os.getenv("JUSBR_AUTO_CONTINUE_ROUNDS", "6"))
+
+
+def _erro_transitorio(msg: str | None) -> bool:
+    low = (msg or "").lower()
+    return any(
+        k in low
+        for k in ("indispon", "503", "502", "504", "timeout", "temporariamente",
+                  "tente novamente", "conectar", "tempo")
+    )
+
+
+async def _sincronizar_jusbr_com_retomada(processo, db, token, session_data, progress_callback):
+    """Sincroniza e re-executa automaticamente enquanto faltarem documentos E
+    houver progresso. A dedup é idempotente, então cada rodada pula o que já foi
+    baixado e continua de onde parou. Para em erro permanente (auth/permissão)
+    ou quando uma rodada não baixa nada de novo (evita loop infinito)."""
+    from app.services.consulta_processual.orchestrator import sincronizar_processo_jusbr as _sync
+    from app.services.consulta_processual.pdpj import PROCESS_DELAY_SECONDS
+
+    ultimo_log = None
+    prev_enviados = -1
+    rounds = max(1, _AUTO_CONTINUE_ROUNDS)
+    for rodada in range(rounds):
+        log = await _sync(
+            processo, db, token=token, session_data=session_data,
+            progress_callback=progress_callback,
+        )
+        db.refresh(processo)
+        ultimo_log = log
+        total = int(getattr(log, "docs_total", 0) or 0)
+        enviados = int(getattr(log, "docs_enviados", 0) or 0)
+
+        if log.status == "erro":
+            if _erro_transitorio(log.mensagem) and rodada < rounds - 1:
+                await asyncio.sleep(PROCESS_DELAY_SECONDS or 1.5)
+                continue
+            break  # erro permanente → propaga o log de erro
+        if total <= 0 or enviados >= total:
+            break  # nada pendente
+        if enviados <= prev_enviados:
+            break  # rodada sem progresso → para
+        prev_enviados = enviados
+        await asyncio.sleep(PROCESS_DELAY_SECONDS or 1.5)
+    return ultimo_log
+
+
 def _run_jusbr_sync_job(job_id: str, processo_id: uuid.UUID, token: str | None = None) -> None:
     from app.services.consulta_processual.jusbr_session import load_session
     from app.services.consulta_processual.orchestrator import sincronizar_processo_jusbr as _sync
@@ -130,7 +180,7 @@ def _run_jusbr_sync_job(job_id: str, processo_id: uuid.UUID, token: str | None =
                 uploaded=int(payload.get("uploaded") or 0),
             )
 
-        log = asyncio.run(_sync(processo, db, token=token, session_data=session_data, progress_callback=progress))
+        log = asyncio.run(_sincronizar_jusbr_com_retomada(processo, db, token, session_data, progress))
         db.refresh(processo)
         _set_job(
             job_id,
@@ -194,7 +244,7 @@ def _run_jusbr_batch_job(job_id: str, processo_ids: list[str], token: str | None
                 )
 
                 try:
-                    log = await _sync(processo, db, token=token, session_data=session_data)
+                    log = await _sincronizar_jusbr_com_retomada(processo, db, token, session_data, None)
                     db.refresh(processo)
                     _append_batch_result(job_id, _job_result_from_log(log, processo), indice + 1, cnj)
                 except Exception as exc:  # noqa: BLE001

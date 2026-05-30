@@ -311,6 +311,26 @@ def _doc_descricao(doc: dict) -> str:
     return tipo or "Documento"
 
 
+def _doc_identificador(doc: dict) -> str | None:
+    """Identificador estável e único do documento, usado para dedup sem colisão.
+
+    Prefere ids explícitos do PDPJ; cai para o ``hrefBinario`` (URL única do
+    binário) e, por último, a sequência. Mantém o dedup correto mesmo quando dois
+    documentos do mesmo movimento têm nome/descrição idênticos.
+    """
+    for key in ("idCodexDocumento", "idUnicoDocumento", "idDocumento", "idOrigem", "id"):
+        v = doc.get(key)
+        if v is not None and str(v).strip():
+            return str(v).strip()[:500]
+    href = doc.get("hrefBinario") or doc.get("hrefTexto")
+    if isinstance(href, str) and href.strip():
+        return href.strip()[:500]
+    seq = doc.get("sequencia")
+    if seq is not None:
+        return f"seq:{seq}"
+    return None
+
+
 def _nome_documento(doc: dict, fallback: str) -> str:
     nome = (
         doc.get("nome")
@@ -643,6 +663,7 @@ async def buscar_via_pdpj(
                 arquivo_mimetype=_doc_mimetype(doc),
                 arquivo_url=_documento_url_from_href(doc.get("hrefBinario") or doc.get("hrefTexto")),
                 documento_detectado=True,
+                documento_id=_doc_identificador(doc),
             ))
 
     # 2) Documents that matched no movimento become their own rows (lossless).
@@ -658,6 +679,7 @@ async def buscar_via_pdpj(
             arquivo_mimetype=_doc_mimetype(doc),
             arquivo_url=_documento_url_from_href(doc.get("hrefBinario") or doc.get("hrefTexto")),
             documento_detectado=True,
+            documento_id=_doc_identificador(doc),
         ))
 
     return andamentos

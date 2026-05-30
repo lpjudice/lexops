@@ -248,11 +248,31 @@ def _buscar_andamento_existente_compativel(
     data_andamento: date | None,
     descricao: str | None,
     hash_unico: str,
+    documento_id: str | None = None,
 ) -> AndamentoProcesso | None:
+    # 1) Casamento preciso por identidade do documento — estável entre syncs e
+    #    imune a colisão de descrições iguais no mesmo movimento.
+    if documento_id:
+        por_doc = (
+            db.query(AndamentoProcesso)
+            .filter(
+                AndamentoProcesso.processo_id == processo.id,
+                AndamentoProcesso.documento_id == documento_id,
+            )
+            .first()
+        )
+        if por_doc:
+            return por_doc
+
+    # 2) Casamento exato por hash.
     existente = db.query(AndamentoProcesso).filter(AndamentoProcesso.hash_unico == hash_unico).first()
     if existente:
         return existente
 
+    # 3) Fallback aproximado por descrição (cobre descrições reescritas e linhas
+    #    pré-migração sem documento_id). Quando temos documento_id, ignoramos
+    #    candidatos já vinculados a OUTRO documento — assim dois documentos de
+    #    nome idêntico não colapsam um no outro.
     candidatos = (
         db.query(AndamentoProcesso)
         .filter(
@@ -263,6 +283,11 @@ def _buscar_andamento_existente_compativel(
         .order_by(AndamentoProcesso.created_at.asc())
         .all()
     )
+    if documento_id:
+        candidatos = [
+            c for c in candidatos
+            if not getattr(c, "documento_id", None) or c.documento_id == documento_id
+        ]
     compat = [c for c in candidatos if _descricoes_compativeis(descricao, c.descricao)]
     if not compat:
         return None
@@ -279,6 +304,7 @@ def _sequenciais_documentos(processo: Processo, raw_andamentos: list) -> dict[st
             str(processo.id),
             str(andamento.data_andamento) if andamento.data_andamento else None,
             andamento.descricao,
+            getattr(andamento, "documento_id", None),
         )
         documentos.append((andamento.data_andamento or date.max, idx, h))
     documentos.sort(key=lambda item: (item[0], item[1]))
@@ -528,13 +554,19 @@ async def sincronizar_processo_jusbr(
     docs_enviados = 0
     sequenciais_docs = _sequenciais_documentos(processo, raw_andamentos)
     for a in raw_andamentos:
+        doc_id = getattr(a, "documento_id", None)
         h = AndamentoProcesso.calcular_hash(
             str(processo.id),
             str(a.data_andamento) if a.data_andamento else None,
             a.descricao,
+            doc_id,
         )
-        existente = _buscar_andamento_existente_compativel(db, processo, a.data_andamento, a.descricao, h)
+        existente = _buscar_andamento_existente_compativel(db, processo, a.data_andamento, a.descricao, h, doc_id)
         if existente:
+            # Backfill do identificador em linhas antigas, para que os próximos
+            # syncs casem de forma precisa (sem depender da descrição).
+            if doc_id and not existente.documento_id:
+                existente.documento_id = doc_id
             precisa_reprocessar = not _arquivo_andamento_util(existente)
             conteudo_doc = None
             mimetype_doc = a.arquivo_mimetype
@@ -621,6 +653,7 @@ async def sincronizar_processo_jusbr(
             arquivo_nome=arquivo_nome,
             arquivo_path=arquivo_path,
             arquivo_drive_link=arquivo_drive_link,
+            documento_id=doc_id,
             hash_unico=h,
             lido=False,
             notificado=False,
@@ -661,6 +694,9 @@ async def sincronizar_processo_jusbr(
     processo.ultimo_check = datetime.now(timezone.utc)
     log.novos_andamentos = novos
     log.status = "ok"
+    # Sinais (não persistidos) para o auto-continuar do job decidir se re-roda.
+    log.docs_total = docs_total
+    log.docs_enviados = docs_enviados
     if docs_detectados_sem_arquivo > 0 and session_data and not session_data.get("cookies"):
         log.mensagem = _mensagem_sessao_documentos(session_data)
     elif docs_total == 0 and session_data and session_data.get("capture_kind") == "token_json":

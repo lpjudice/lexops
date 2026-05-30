@@ -133,6 +133,14 @@ def _run_migrations() -> None:
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_andamentos_hash ON andamentos_processo(hash_unico)"
         ))
+        # Identificador único do documento (anti-colisão de dedup quando dois
+        # documentos do mesmo movimento têm descrição idêntica).
+        conn.execute(text(
+            "ALTER TABLE andamentos_processo ADD COLUMN IF NOT EXISTS documento_id VARCHAR(500)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_andamentos_documento_id ON andamentos_processo(processo_id, documento_id)"
+        ))
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS sincronizacao_logs (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
