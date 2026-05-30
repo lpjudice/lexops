@@ -50,7 +50,7 @@ function extractApiErrorMessage(error: unknown, fallback: string): string {
 
 export default function SincronizarModal({ processos, onClose }: Props) {
   const qc = useQueryClient()
-  const [fonte, setFonte] = useState<Fonte>('datajud')
+  const [fonte, setFonte] = useState<Fonte>('jusbr')
   const [showInstrucoes, setShowInstrucoes] = useState(false)
   const [resultados, setResultados] = useState<SincronizacaoResult[] | null>(null)
   const { data: jusbrSession, refetch: refetchJusbrSession } = useQuery<JusbrSessionStatus>({

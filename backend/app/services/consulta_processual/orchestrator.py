@@ -566,6 +566,9 @@ async def sincronizar_processo_jusbr(
                 existente.arquivo_drive_link = arquivo_drive_link
                 if arquivo_drive_link:
                     docs_enviados += 1
+                # Commit incremental: grava já este documento para que um
+                # travamento/refresh não force o re-download do que já baixou.
+                db.commit()
             elif precisa_reprocessar and a.documento_detectado:
                 docs_processados += 1
                 docs_detectados_sem_arquivo += 1
@@ -635,6 +638,10 @@ async def sincronizar_processo_jusbr(
                 uploaded=docs_enviados,
             )
         novos += 1
+        # Commit incremental: persiste cada andamento assim que baixado, para
+        # permitir retomada idempotente após travamento/refresh (não re-baixa
+        # o que já foi salvo com link no Drive).
+        db.commit()
 
     if novos > 0:
         mais_recente = max(
