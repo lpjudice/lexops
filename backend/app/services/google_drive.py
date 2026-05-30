@@ -12,6 +12,7 @@ Scopes required: https://www.googleapis.com/auth/drive.file
 import json
 import logging
 import os
+import threading
 
 import httpx
 from app.services.google_master_tokens import load_master_google_tokens, save_master_google_tokens
@@ -54,12 +55,48 @@ def _escape_drive_query(s: str) -> str:
     return s.replace("\\", "\\\\").replace("'", "\\'")
 
 
-def _get_or_create_subfolder(name: str, parent_id: str, headers: dict) -> str:
-    """
-    Returns the Drive ID of a subfolder named `name` inside `parent_id`.
-    Creates it if it doesn't exist. Returns the first match if multiple exist
-    (avoids creating duplicates in concurrent calls).
-    """
+# ── Anti-duplicação de pastas ─────────────────────────────────────────────
+# A busca do Drive tem consistência eventual: logo após criar uma pasta, uma
+# nova busca pode não enxergá-la ainda. Em uploads em sequência rápida (sync em
+# lote) ou em paralelo (dois menus no mesmo cliente novo), isso fazia o código
+# criar uma 2ª pasta com o mesmo nome. Combatemos com:
+#   1. cache em memória por (pai, nome) → id  (resolve o mesmo-processo);
+#   2. trava por (pai, nome) ao criar         (serializa criações concorrentes);
+#   3. reconciliação pós-criação              (mantém a mais antiga e descarta
+#      extras VAZIAS — nunca apaga pasta com conteúdo).
+_folder_cache: dict[tuple[str, str], str] = {}
+_folder_cache_guard = threading.Lock()
+_folder_locks: dict[tuple[str, str], threading.Lock] = {}
+_folder_locks_guard = threading.Lock()
+
+
+def _cache_get(parent_id: str, name: str) -> str | None:
+    with _folder_cache_guard:
+        return _folder_cache.get((parent_id, name))
+
+
+def _cache_set(parent_id: str, name: str, folder_id: str) -> None:
+    with _folder_cache_guard:
+        _folder_cache[(parent_id, name)] = folder_id
+
+
+def _cache_evict(parent_id: str, name: str) -> None:
+    with _folder_cache_guard:
+        _folder_cache.pop((parent_id, name), None)
+
+
+def _lock_for(parent_id: str, name: str) -> threading.Lock:
+    key = (parent_id, name)
+    with _folder_locks_guard:
+        lk = _folder_locks.get(key)
+        if lk is None:
+            lk = threading.Lock()
+            _folder_locks[key] = lk
+        return lk
+
+
+def _listar_pastas(name: str, parent_id: str, headers: dict) -> list[dict]:
+    """Lista pastas-irmãs com este nome (ordenadas da mais antiga p/ a mais nova)."""
     query = (
         f"name='{_escape_drive_query(name)}' "
         f"and mimeType='application/vnd.google-apps.folder' "
@@ -70,29 +107,118 @@ def _get_or_create_subfolder(name: str, parent_id: str, headers: dict) -> str:
         headers=headers,
         params={
             "q": query,
-            "fields": "files(id,name)",
+            "fields": "files(id,name,createdTime)",
+            "orderBy": "createdTime",
             "supportsAllDrives": True,
             "includeItemsFromAllDrives": True,
         },
+        timeout=30,
     )
     if r.is_success:
-        files = r.json().get("files", [])
-        if files:
-            return files[0]["id"]  # usa o primeiro; ignora duplicatas pré-existentes
+        return r.json().get("files", [])
+    return []
 
-    # Create it
-    r = httpx.post(
+
+def _pasta_vazia(folder_id: str, headers: dict) -> bool:
+    """True somente se a pasta não contém nenhum item não-lixeira."""
+    r = httpx.get(
         f"{DRIVE_META}/files",
+        headers=headers,
+        params={
+            "q": f"'{folder_id}' in parents and trashed=false",
+            "fields": "files(id)",
+            "pageSize": 1,
+            "supportsAllDrives": True,
+            "includeItemsFromAllDrives": True,
+        },
+        timeout=30,
+    )
+    if not r.is_success:
+        return False  # em dúvida, nunca remove
+    return len(r.json().get("files", [])) == 0
+
+
+def _trash_folder(folder_id: str, headers: dict) -> None:
+    httpx.patch(
+        f"{DRIVE_META}/files/{folder_id}",
         headers={**headers, "Content-Type": "application/json"},
         params={"supportsAllDrives": True},
-        content=json.dumps({
-            "name": name,
-            "mimeType": "application/vnd.google-apps.folder",
-            "parents": [parent_id],
-        }),
+        content=json.dumps({"trashed": True}),
+        timeout=30,
     )
-    r.raise_for_status()
-    return r.json()["id"]
+
+
+def _consolidar_pastas(folders: list[dict], headers: dict) -> str:
+    """Recebe pastas-irmãs de mesmo nome; mantém a MAIS ANTIGA e descarta as
+    extras apenas se estiverem VAZIAS (nunca apaga pasta com conteúdo).
+    Retorna o id da pasta principal."""
+    ordenadas = sorted(folders, key=lambda f: f.get("createdTime") or "")
+    principal = ordenadas[0]["id"]
+    for extra in ordenadas[1:]:
+        try:
+            if _pasta_vazia(extra["id"], headers):
+                _trash_folder(extra["id"], headers)
+            else:
+                logger.warning(
+                    "Pasta duplicada NAO-vazia mantida no Drive (id=%s) — limpar manualmente",
+                    extra["id"],
+                )
+        except Exception:
+            pass
+    return principal
+
+
+def _get_or_create_subfolder(name: str, parent_id: str, headers: dict) -> str:
+    """
+    Retorna o id da subpasta `name` dentro de `parent_id`, criando se necessário.
+    Idempotente e à prova de corrida (cache em memória + trava por (pai, nome) +
+    reconciliação de duplicatas geradas por consistência eventual do Drive).
+    """
+    name = (name or "").strip()
+
+    cached = _cache_get(parent_id, name)
+    if cached:
+        return cached
+
+    existentes = _listar_pastas(name, parent_id, headers)
+    if existentes:
+        fid = _consolidar_pastas(existentes, headers) if len(existentes) > 1 else existentes[0]["id"]
+        _cache_set(parent_id, name, fid)
+        return fid
+
+    # Serializa a criação no processo para o caso mais comum (sync em lote):
+    # várias criações em sequência rápida da mesma pasta nova.
+    with _lock_for(parent_id, name):
+        cached = _cache_get(parent_id, name)
+        if cached:
+            return cached
+        existentes = _listar_pastas(name, parent_id, headers)
+        if existentes:
+            fid = _consolidar_pastas(existentes, headers) if len(existentes) > 1 else existentes[0]["id"]
+            _cache_set(parent_id, name, fid)
+            return fid
+
+        r = httpx.post(
+            f"{DRIVE_META}/files",
+            headers={**headers, "Content-Type": "application/json"},
+            params={"supportsAllDrives": True},
+            content=json.dumps({
+                "name": name,
+                "mimeType": "application/vnd.google-apps.folder",
+                "parents": [parent_id],
+            }),
+            timeout=30,
+        )
+        r.raise_for_status()
+        novo_id = r.json()["id"]
+
+        # Reconciliação: se outro processo criou em paralelo e o índice já
+        # reflete ambas, mantém a mais antiga e descarta extras vazias.
+        todas = _listar_pastas(name, parent_id, headers)
+        if len(todas) > 1:
+            novo_id = _consolidar_pastas(todas, headers)
+        _cache_set(parent_id, name, novo_id)
+        return novo_id
 
 
 def _find_subfolder(name: str, parent_id: str, headers: dict) -> str | None:
@@ -446,6 +572,7 @@ def deletar_pasta(nome_cliente: str, subfolder: str, sub_subfolder: str) -> bool
             timeout=30,
         )
         resp.raise_for_status()
+        _cache_evict(folder_id, sub_subfolder)
         return True
 
     try:
