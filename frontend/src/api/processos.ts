@@ -50,6 +50,7 @@ export interface Processo {
   ultimo_andamento_data?: string | null
   ultimo_andamento_desc?: string | null
   ultimo_check?: string | null
+  ultimo_sync_status?: 'ok' | 'incompleto' | 'erro' | null
   tentativas_falha?: number
   andamentos_nao_lidos?: number
   created_at: string

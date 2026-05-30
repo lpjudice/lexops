@@ -347,6 +347,18 @@ def _mensagem_sessao_documentos(session_data: dict | None) -> str:
     )
 
 
+def _aplicar_status_sync(processo, status: str, docs_total: int = 0, docs_enviados: int = 0) -> None:
+    """Grava no processo o indicador visual da última sincronização:
+    'erro' (vermelho), 'incompleto' (amarelo — faltaram documentos) ou
+    'ok' (verde)."""
+    if status == "erro":
+        processo.ultimo_sync_status = "erro"
+    elif docs_total and docs_enviados < docs_total:
+        processo.ultimo_sync_status = "incompleto"
+    else:
+        processo.ultimo_sync_status = "ok"
+
+
 async def sincronizar_processo(processo: Processo, db: Session) -> SincronizacaoLog:
     log = SincronizacaoLog(
         processo_id=processo.id,
@@ -364,6 +376,7 @@ async def sincronizar_processo(processo: Processo, db: Session) -> Sincronizacao
             f"Número CNJ inválido: '{processo.numero_cnj}'. "
             "Formato esperado: NNNNNNN-DD.AAAA.J.TT.OOOO (ex: 0001234-56.2023.8.08.0001)."
         )
+        _aplicar_status_sync(processo, "erro")
         log.finalizado_em = datetime.now(timezone.utc)
         db.commit()
         return log
@@ -372,6 +385,7 @@ async def sincronizar_processo(processo: Processo, db: Session) -> Sincronizacao
     if not tribunal:
         log.status = "erro"
         log.mensagem = "Tribunal não informado. Edite o processo e preencha o campo Tribunal."
+        _aplicar_status_sync(processo, "erro")
         log.finalizado_em = datetime.now(timezone.utc)
         db.commit()
         return log
@@ -385,6 +399,7 @@ async def sincronizar_processo(processo: Processo, db: Session) -> Sincronizacao
         log.mensagem = _classificar_erro(exc)
         processo.tentativas_falha = (processo.tentativas_falha or 0) + 1
         processo.ultimo_check = datetime.now(timezone.utc)
+        _aplicar_status_sync(processo, "erro")
         log.finalizado_em = datetime.now(timezone.utc)
         db.commit()
         return log
@@ -398,6 +413,7 @@ async def sincronizar_processo(processo: Processo, db: Session) -> Sincronizacao
         )
         processo.tentativas_falha = 0
         processo.ultimo_check = datetime.now(timezone.utc)
+        _aplicar_status_sync(processo, "ok")
         log.finalizado_em = datetime.now(timezone.utc)
         db.commit()
         return log
@@ -445,6 +461,7 @@ async def sincronizar_processo(processo: Processo, db: Session) -> Sincronizacao
     processo.ultimo_check = datetime.now(timezone.utc)
     log.novos_andamentos = novos
     log.status = "ok"
+    _aplicar_status_sync(processo, "ok")
     log.finalizado_em = datetime.now(timezone.utc)
     db.commit()
     return log
@@ -497,6 +514,7 @@ async def sincronizar_processo_jusbr(
             f"Número CNJ inválido: '{processo.numero_cnj}'. "
             "Formato esperado: NNNNNNN-DD.AAAA.J.TT.OOOO."
         )
+        _aplicar_status_sync(processo, "erro")
         log.finalizado_em = datetime.now(timezone.utc)
         db.commit()
         return log
@@ -505,6 +523,7 @@ async def sincronizar_processo_jusbr(
     if not tribunal:
         log.status = "erro"
         log.mensagem = "Tribunal não informado. Edite o processo e preencha o campo Tribunal."
+        _aplicar_status_sync(processo, "erro")
         log.finalizado_em = datetime.now(timezone.utc)
         db.commit()
         return log
@@ -523,6 +542,7 @@ async def sincronizar_processo_jusbr(
         log.mensagem = _classificar_erro(exc)
         processo.tentativas_falha = (processo.tentativas_falha or 0) + 1
         processo.ultimo_check = datetime.now(timezone.utc)
+        _aplicar_status_sync(processo, "erro")
         log.finalizado_em = datetime.now(timezone.utc)
         db.commit()
         return log
@@ -535,6 +555,7 @@ async def sincronizar_processo_jusbr(
         )
         processo.tentativas_falha = 0
         processo.ultimo_check = datetime.now(timezone.utc)
+        _aplicar_status_sync(processo, "ok")
         log.finalizado_em = datetime.now(timezone.utc)
         db.commit()
         return log
@@ -697,6 +718,7 @@ async def sincronizar_processo_jusbr(
     # Sinais (não persistidos) para o auto-continuar do job decidir se re-roda.
     log.docs_total = docs_total
     log.docs_enviados = docs_enviados
+    _aplicar_status_sync(processo, "ok", docs_total=docs_total, docs_enviados=docs_enviados)
     if docs_detectados_sem_arquivo > 0 and session_data and not session_data.get("cookies"):
         log.mensagem = _mensagem_sessao_documentos(session_data)
     elif docs_total == 0 and session_data and session_data.get("capture_kind") == "token_json":

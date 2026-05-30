@@ -22,6 +22,8 @@ export interface SincronizacaoResult {
   novos_andamentos: number
   mensagem: string | null
   ultimo_andamento_data?: string | null   // YYYY-MM-DD
+  documentos_baixados?: number             // arquivos enviados ao Drive nesta sync
+  documentos_total?: number                // total de arquivos detectados no processo
 }
 
 export interface JusbrSyncJobStart {
@@ -51,6 +53,9 @@ export interface JusbrBatchJobStatus {
   processed: number
   current_index: number
   current_cnj: string | null
+  current_total: number
+  current_processed: number
+  current_uploaded: number
   results: SincronizacaoResult[]
   error: string | null
   started_at: string

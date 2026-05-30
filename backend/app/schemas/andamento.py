@@ -28,3 +28,5 @@ class SincronizacaoResult(BaseModel):
     novos_andamentos: int
     mensagem: str | None
     ultimo_andamento_data: date | None = None   # data do andamento mais recente no DB
+    documentos_baixados: int = 0                 # arquivos enviados ao Drive nesta sync
+    documentos_total: int = 0                    # total de arquivos detectados no processo

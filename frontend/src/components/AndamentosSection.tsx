@@ -451,6 +451,9 @@ function AndamentoCard({ andamento: a }: { andamento: Andamento }) {
         )}
       </div>
       <p className={styles.descricao}>{a.descricao}</p>
+      <span className={styles.atualizadoEm}>
+        Última atualização: {formatDateTime(a.created_at)}
+      </span>
     </div>
   )
 }

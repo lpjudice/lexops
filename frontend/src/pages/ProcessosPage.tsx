@@ -574,6 +574,26 @@ export default function ProcessosPage() {
                   title="Clique para ver detalhes"
                   onClick={() => setDetalheAberto(detalheAberto === p.id ? null : p.id)}
                 >
+                  <span
+                    className={`${ps.syncDot} ${
+                      p.ultimo_sync_status === 'ok'
+                        ? ps.syncDotOk
+                        : p.ultimo_sync_status === 'incompleto'
+                        ? ps.syncDotIncompleto
+                        : p.ultimo_sync_status === 'erro'
+                        ? ps.syncDotErro
+                        : ps.syncDotNone
+                    }`}
+                    title={
+                      p.ultimo_sync_status === 'ok'
+                        ? 'Última sincronização: OK (todos os documentos baixados)'
+                        : p.ultimo_sync_status === 'incompleto'
+                        ? 'Última sincronização: faltaram documentos — verificar manualmente'
+                        : p.ultimo_sync_status === 'erro'
+                        ? 'Última sincronização: erro — verificar manualmente'
+                        : 'Ainda não sincronizado'
+                    }
+                  />
                   <code className={ps.cnj}>{p.numero_cnj}</code>
                   <span className={ps.clienteNome}>{clienteNome(p.cliente_id)}</span>
                   {p.polo && <span className={ps.poloTag}>{POLO_LABEL[p.polo as PoloProcesso]}</span>}

@@ -75,6 +75,9 @@ class JusBRBatchJobStatus(BaseModel):
     processed: int = 0           # processos já finalizados
     current_index: int = 0       # índice (1-based) do processo em andamento
     current_cnj: str | None = None
+    current_total: int = 0       # documentos detectados no processo atual
+    current_processed: int = 0   # documentos processados no processo atual
+    current_uploaded: int = 0    # documentos enviados ao Drive no processo atual
     results: list[SincronizacaoResult] = []
     error: str | None = None
     started_at: datetime
@@ -93,6 +96,8 @@ def _job_result_from_log(log, processo: Processo) -> dict:
         "novos_andamentos": log.novos_andamentos,
         "mensagem": log.mensagem,
         "ultimo_andamento_data": processo.ultimo_andamento_data,
+        "documentos_baixados": int(getattr(log, "docs_enviados", 0) or 0),
+        "documentos_total": int(getattr(log, "docs_total", 0) or 0),
     }
 
 
@@ -240,11 +245,25 @@ def _run_jusbr_batch_job(job_id: str, processo_ids: list[str], token: str | None
                     stage="processando",
                     current_index=indice + 1,
                     current_cnj=cnj,
+                    current_total=0,
+                    current_processed=0,
+                    current_uploaded=0,
                     message=f"Sincronizando {indice + 1}/{len(processo_ids)}: {cnj or pid}",
                 )
 
+                def _progresso_processo(payload: dict) -> None:
+                    _set_job(
+                        job_id,
+                        stage=payload.get("stage") or "processando",
+                        current_total=int(payload.get("total") or 0),
+                        current_processed=int(payload.get("processed") or 0),
+                        current_uploaded=int(payload.get("uploaded") or 0),
+                    )
+
                 try:
-                    log = await _sincronizar_jusbr_com_retomada(processo, db, token, session_data, None)
+                    log = await _sincronizar_jusbr_com_retomada(
+                        processo, db, token, session_data, _progresso_processo
+                    )
                     db.refresh(processo)
                     _append_batch_result(job_id, _job_result_from_log(log, processo), indice + 1, cnj)
                 except Exception as exc:  # noqa: BLE001
@@ -556,6 +575,9 @@ def iniciar_sincronizacao_batch_jusbr(
             "processed": 0,
             "current_index": 0,
             "current_cnj": None,
+            "current_total": 0,
+            "current_processed": 0,
+            "current_uploaded": 0,
             "results": [],
             "error": None,
             "started_at": now,

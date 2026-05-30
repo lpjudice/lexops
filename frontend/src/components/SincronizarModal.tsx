@@ -83,10 +83,14 @@ export default function SincronizarModal({ processos, onClose }: Props) {
   // jus.br batch agora roda em background (job + polling) para não prender a tela
   // nem estourar timeout ao sincronizar muitos processos.
   const [batchJobId, setBatchJobId] = useState<string | null>(null)
+  // Ordem dos processos enviados ao lote — usada para casar cada linha de
+  // progresso com seu resultado (os resultados voltam na mesma ordem).
+  const [batchOrder, setBatchOrder] = useState<string[]>([])
 
   const startJusBRBatch = useMutation({
     mutationFn: () =>
       andamentosApi.iniciarSincronizacaoBatchJusBR(Array.from(selecionados)),
+    onMutate: () => setBatchOrder(Array.from(selecionados)),
     onSuccess: (data) => setBatchJobId(data.job_id),
   })
 
@@ -273,9 +277,70 @@ export default function SincronizarModal({ processos, onClose }: Props) {
             )}
 
             {batchRunning && (
-              <p className={styles.semSupporte}>
-                {batchJob?.message ?? 'Sincronizando em segundo plano...'}
-              </p>
+              <div className={styles.progressoLista}>
+                {batchOrder.map((pid, i) => {
+                  const results = batchJob?.results ?? []
+                  const cnj = processos.find((p) => p.id === pid)?.numero_cnj ?? pid
+                  const feito = i < results.length
+                  const ativo = i === results.length
+                  const r = feito ? results[i] : null
+
+                  if (feito && r) {
+                    const erro = r.status === 'erro'
+                    const baixados = r.documentos_baixados ?? 0
+                    const resumo = erro
+                      ? `Erro${r.mensagem ? `: ${r.mensagem}` : ''}`
+                      : [
+                          r.novos_andamentos > 0 ? `+${r.novos_andamentos} novo(s)` : 'sem novos',
+                          baixados > 0 ? `${baixados} arquivo(s)` : null,
+                        ].filter(Boolean).join(' · ')
+                    return (
+                      <div
+                        key={pid}
+                        className={`${styles.progressoItem} ${erro ? styles.progressoItemErro : styles.progressoItemFeito}`}
+                      >
+                        <div className={styles.progressoLinha}>
+                          <span className={styles.progressoCnj}>{cnj}</span>
+                          <span className={styles.progressoStatus}>{erro ? '✕ ' : '✓ '}{resumo}</span>
+                        </div>
+                      </div>
+                    )
+                  }
+
+                  if (ativo) {
+                    const total = batchJob?.current_total ?? 0
+                    const proc = batchJob?.current_processed ?? 0
+                    const enviados = batchJob?.current_uploaded ?? 0
+                    const pct = total > 0 ? Math.min(100, Math.round((proc / total) * 100)) : null
+                    return (
+                      <div key={pid} className={`${styles.progressoItem} ${styles.progressoItemAtivo}`}>
+                        <div className={styles.progressoLinha}>
+                          <span className={styles.progressoCnj}>{cnj}</span>
+                          <span className={styles.progressoStatus}>
+                            {total > 0 ? `${pct}% · ${enviados}/${total} doc` : 'processando…'}
+                          </span>
+                        </div>
+                        <div className={styles.barra}>
+                          {pct !== null ? (
+                            <div className={styles.barraFill} style={{ width: `${pct}%` }} />
+                          ) : (
+                            <div className={`${styles.barraFill} ${styles.barraIndeterminada}`} />
+                          )}
+                        </div>
+                      </div>
+                    )
+                  }
+
+                  return (
+                    <div key={pid} className={`${styles.progressoItem} ${styles.progressoItemPendente}`}>
+                      <div className={styles.progressoLinha}>
+                        <span className={styles.progressoCnj}>{cnj}</span>
+                        <span className={styles.progressoStatus}>na fila</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
             )}
 
             <div className={styles.modalFooter}>
@@ -310,9 +375,9 @@ export default function SincronizarModal({ processos, onClose }: Props) {
                   </span>
                   <span className={styles.resultadoStatus}>
                     {r.status === 'ok' && r.novos_andamentos > 0
-                      ? `+${r.novos_andamentos} novo(s)`
+                      ? `+${r.novos_andamentos} novo(s)${(r.documentos_baixados ?? 0) > 0 ? ` · ${r.documentos_baixados} arquivo(s)` : ''}`
                       : r.status === 'ok'
-                      ? 'Sem novo andamento'
+                      ? `Sem novo andamento${(r.documentos_baixados ?? 0) > 0 ? ` · ${r.documentos_baixados} arquivo(s)` : ''}`
                       : r.status === 'nenhum'
                       ? 'Nenhum encontrado'
                       : `Erro: ${r.mensagem}`}

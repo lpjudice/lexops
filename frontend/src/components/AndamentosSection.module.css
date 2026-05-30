@@ -283,6 +283,14 @@
   white-space: pre-wrap;
 }
 
+.atualizadoEm {
+  display: block;
+  margin-top: 6px;
+  font-size: 10.5px;
+  color: #9ca3af;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ── jus.br token renew button ──────────────────────────────────────── */
 .btnTokenReset {
   font-size: 14px;

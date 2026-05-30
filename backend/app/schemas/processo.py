@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel
@@ -87,6 +87,14 @@ class ProcessoOut(ProcessoBase):
     id: uuid.UUID
     created_at: datetime
     updated_at: datetime
+    # Metadados de sincronização (antes não eram serializados).
+    ultimo_andamento_data: date | None = None
+    ultimo_andamento_desc: str | None = None
+    ultimo_check: datetime | None = None
+    tentativas_falha: int = 0
+    andamentos_nao_lidos: int = 0
+    # Indicador da última sincronização (ok | incompleto | erro) → ponto colorido na lista.
+    ultimo_sync_status: str | None = None
     clientes_litisconsorcio: list[ProcessoClienteOut] = []
 
     model_config = {"from_attributes": True}

@@ -141,6 +141,10 @@ def _run_migrations() -> None:
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_andamentos_documento_id ON andamentos_processo(processo_id, documento_id)"
         ))
+        # Indicador visual da última sincronização (ok | incompleto | erro).
+        conn.execute(text(
+            "ALTER TABLE processos ADD COLUMN IF NOT EXISTS ultimo_sync_status VARCHAR(20)"
+        ))
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS sincronizacao_logs (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

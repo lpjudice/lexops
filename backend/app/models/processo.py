@@ -68,6 +68,9 @@ class Processo(Base):
     ultimo_andamento_data: Mapped[date | None] = mapped_column(Date, nullable=True)
     ultimo_andamento_desc: Mapped[str | None] = mapped_column(String(500), nullable=True)
     ultimo_check: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Indicador visual da última sincronização: 'ok' (verde), 'incompleto'
+    # (amarelo — faltaram documentos) ou 'erro' (vermelho).
+    ultimo_sync_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
     tentativas_falha: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     andamentos_nao_lidos: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
