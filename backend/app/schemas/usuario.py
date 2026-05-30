@@ -38,6 +38,7 @@ class UsuarioOut(UsuarioBase):
     primeiro_acesso: bool = False
     clientes_ids: list[uuid.UUID] = []
     google_email: str | None = None
+    google_email_extra: str | None = None
 
     model_config = {"from_attributes": True}
 

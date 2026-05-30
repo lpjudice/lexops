@@ -14,6 +14,7 @@ export interface Usuario {
   clientes_ids: string[]
   primeiro_acesso: boolean
   google_email?: string | null
+  google_email_extra?: string | null
 }
 
 export interface LoginRequest {

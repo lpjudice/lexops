@@ -125,17 +125,30 @@ export default function ClienteDetailPage() {
 
   const reunioesPendentes = reunioes.filter((r: Reuniao) => r.status !== 'processada')
 
-  const [syncContaGoogle, setSyncContaGoogle] = useState<string>('master')
+  const [syncContaGoogle, setSyncContaGoogle] = useState<string>('todas')
 
-  // Non-super-admins only see emails from master + their own account
-  const visibleEmails = isSuperAdmin
-    ? emailsGmail
-    : emailsGmail.filter((e: EmailCliente) =>
-        e.conta_google === 'master' || (me && e.conta_google === me.id)
-      )
+  // Server already filters private emails by viewer; render all returned emails.
+  const visibleEmails = emailsGmail
+
+  // Build the list of accounts to sync based on the dropdown selection.
+  const buildContas = (): string[] => {
+    if (syncContaGoogle === 'todas') {
+      const contas = ['master']
+      if (me?.google_email) contas.push(me.id)
+      if (me?.google_email_extra) contas.push(`${me.id}:extra`)
+      return contas
+    }
+    return [syncContaGoogle]
+  }
 
   const sincronizarEmails = useMutation({
-    mutationFn: () => clientesApi.sincronizarEmails(id!, syncContaGoogle),
+    mutationFn: () => clientesApi.sincronizarEmails(id!, buildContas()),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['emails-gmail', id] }),
+  })
+
+  const marcarPrivacidade = useMutation({
+    mutationFn: ({ emailId, privado }: { emailId: string; privado: boolean }) =>
+      clientesApi.marcarEmailPrivacidade(id!, emailId, privado),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['emails-gmail', id] }),
   })
 
@@ -527,8 +540,10 @@ export default function ClienteDetailPage() {
                 value={syncContaGoogle}
                 onChange={(e) => setSyncContaGoogle(e.target.value)}
               >
+                <option value="todas">Todas as contas conectadas</option>
                 <option value="master">Conta master (escritório)</option>
                 {me?.google_email && <option value={me.id}>Minha conta ({me.google_email})</option>}
+                {me?.google_email_extra && <option value={`${me.id}:extra`}>Conta extra ({me.google_email_extra})</option>}
               </select>
               <button
                 className={styles.btnPrimary}
@@ -571,6 +586,11 @@ export default function ClienteDetailPage() {
                             {e.conta_email.split('@')[0]}
                           </span>
                         )}
+                        {e.privado && (
+                          <span className={detailStyles.contaTag} title="Visível somente para você e super admins" style={{ background: '#fef3c7', color: '#92400e' }}>
+                            🔒 Privado
+                          </span>
+                        )}
                       </div>
                       <div className={detailStyles.emailMeta}>
                         De: {e.remetente || '—'}
@@ -579,6 +599,20 @@ export default function ClienteDetailPage() {
                     </div>
                     <div className={detailStyles.emailHeaderRight}>
                       <span className={detailStyles.anotacaoData}>{e.data ? formatDate(e.data) : '—'}</span>
+                      {(!e.privado || isSuperAdmin || (me && e.privado_por === me.id)) && (
+                        <button
+                          className={styles.btnTable}
+                          style={{ fontSize: 11, padding: '2px 8px' }}
+                          onClick={(ev) => {
+                            ev.stopPropagation()
+                            marcarPrivacidade.mutate({ emailId: e.id, privado: !e.privado })
+                          }}
+                          disabled={marcarPrivacidade.isPending}
+                          title={e.privado ? 'Tornar visível a todos' : 'Marcar como privado'}
+                        >
+                          {e.privado ? '🔓 Tornar público' : '🔒 Privado'}
+                        </button>
+                      )}
                       <a
                         href={`https://mail.google.com/mail/u/0/#all/${e.gmail_message_id}`}
                         target="_blank"

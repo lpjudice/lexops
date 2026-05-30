@@ -310,15 +310,16 @@ export default function ConfiguracoesPage() {
   const conviteBanner = searchParams.get('convite') === '1'
   const googleMasterResult = searchParams.get('google')
   const googleUserResult = searchParams.get('google_user') // 'conectado' | 'erro' | null
+  const googleUserExtraResult = searchParams.get('google_user_extra') // 'conectado' | 'erro' | null
   const { data: googleStatus } = useGoogleStatus()
   const { usuario: me, isSuperAdmin, refreshMe } = useAuth()
 
   // Refresh me after Google OAuth callback so google_email updates immediately
   useEffect(() => {
-    if (googleUserResult === 'conectado') {
+    if (googleUserResult === 'conectado' || googleUserExtraResult === 'conectado') {
       refreshMe()
     }
-  }, [googleUserResult]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [googleUserResult, googleUserExtraResult]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const conectado = googleStatus?.conectado ?? false
   const googleEmail = googleStatus?.email ?? null
@@ -335,6 +336,17 @@ export default function ConfiguracoesPage() {
   const handleDisconnectPersonalGoogle = async () => {
     if (!me) return
     await api.delete(`/auth/google/user?usuario_id=${me.id}`)
+    await refreshMe()
+  }
+
+  const handleConnectExtraGoogle = () => {
+    if (!me) return
+    window.location.href = `/api/auth/google/user/extra?usuario_id=${me.id}`
+  }
+
+  const handleDisconnectExtraGoogle = async () => {
+    if (!me) return
+    await api.delete(`/auth/google/user/extra?usuario_id=${me.id}`)
     await refreshMe()
   }
 
@@ -388,6 +400,22 @@ export default function ConfiguracoesPage() {
           </div>
         </div>
       )}
+      {googleUserExtraResult === 'conectado' && (
+        <div className={`${cfg.conviteBanner} ${cfg.bannerSucesso}`}>
+          <div className={cfg.conviteBannerTexto}>
+            <strong>Conta Google extra conectada com sucesso!</strong>
+            <span> Os emails dessa conta também serão incluídos na busca por clientes.</span>
+          </div>
+        </div>
+      )}
+      {googleUserExtraResult === 'erro' && (
+        <div className={`${cfg.conviteBanner} ${cfg.bannerErro}`}>
+          <div className={cfg.conviteBannerTexto}>
+            <strong>Erro ao conectar conta Google extra.</strong>
+            <span> Tente novamente.</span>
+          </div>
+        </div>
+      )}
 
       <div className={cfg.secoes}>
         {/* Seção: Controle de Acesso */}
@@ -436,7 +464,7 @@ export default function ConfiguracoesPage() {
             <h2 className={cfg.secaoTitulo}>Minha Conta Google</h2>
             <p className={cfg.secaoDesc}>
               Conecte sua conta pessoal do escritório para sincronizar emails trocados com clientes.
-              Cada membro pode conectar a sua própria conta.
+              Cada membro pode conectar a sua própria conta, além de uma conta extra opcional.
             </p>
           </div>
           <div className={cfg.item}>
@@ -462,6 +490,34 @@ export default function ConfiguracoesPage() {
               </button>
               {me?.google_email && (
                 <button className={styles.btnDanger} onClick={handleDisconnectPersonalGoogle}>
+                  Desconectar
+                </button>
+              )}
+            </div>
+          </div>
+          <div className={cfg.item}>
+            <div className={cfg.itemLeft}>
+              <div className={cfg.itemIcon}>G</div>
+              <div>
+                <div className={cfg.itemNome}>Conta extra</div>
+                <div className={cfg.itemStatus}>
+                  {me?.google_email_extra ? (
+                    <>
+                      <span className={cfg.statusOk}>● Conectado</span>
+                      <div className={cfg.contaEmail}>{me.google_email_extra}</div>
+                    </>
+                  ) : (
+                    <span className={cfg.statusOff}>● Não conectado</span>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button className={me?.google_email_extra ? cfg.btnReconectar : styles.btnPrimary} onClick={handleConnectExtraGoogle}>
+                {me?.google_email_extra ? 'Reconectar' : 'Conectar conta extra'}
+              </button>
+              {me?.google_email_extra && (
+                <button className={styles.btnDanger} onClick={handleDisconnectExtraGoogle}>
                   Desconectar
                 </button>
               )}

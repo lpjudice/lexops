@@ -28,6 +28,9 @@ class Usuario(Base):
     primeiro_acesso: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # Per-user personal Google OAuth tokens
     google_tokens: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Conta Gmail EXTRA do usuário (3ª fonte de busca de emails). Slot próprio —
+    # não sobrescreve a conta principal do usuário nem a conta master do escritório.
+    google_tokens_extra: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

@@ -52,28 +52,42 @@ def save_tokens_master(tokens: dict) -> None:
     save_master_google_tokens(tokens)
 
 
-def load_tokens_user(usuario_id: str, db_session: Any) -> dict | None:
+def _split_conta(conta_google: str) -> tuple[str, bool]:
+    """Separa o id do usuário do sufixo ':extra'. Retorna (usuario_id, is_extra)."""
+    if conta_google.endswith(":extra"):
+        return conta_google[: -len(":extra")], True
+    return conta_google, False
+
+
+def load_tokens_user(usuario_id: str, db_session: Any, extra: bool = False) -> dict | None:
     from app.models.usuario import Usuario
     u = db_session.query(Usuario).filter(Usuario.id == uuid.UUID(usuario_id)).first()
-    if not u or not u.google_tokens:
+    if not u:
         return None
-    return u.google_tokens
+    tk = u.google_tokens_extra if extra else u.google_tokens
+    return tk or None
 
 
-def save_tokens_user(usuario_id: str, tokens: dict, db_session: Any) -> None:
+def save_tokens_user(usuario_id: str, tokens: dict, db_session: Any, extra: bool = False) -> None:
     from app.models.usuario import Usuario
     u = db_session.query(Usuario).filter(Usuario.id == uuid.UUID(usuario_id)).first()
     if u:
-        u.google_tokens = tokens
+        if extra:
+            u.google_tokens_extra = tokens
+        else:
+            u.google_tokens = tokens
         db_session.commit()
 
 
 def get_valid_tokens(conta_google: str, db_session: Any) -> dict | None:
-    """Load tokens for a given account, refreshing if needed."""
+    """Load tokens for a given account, refreshing if needed.
+    conta_google: 'master' | '<usuario_id>' | '<usuario_id>:extra'."""
     if conta_google == "master":
         tokens = load_tokens_master()
+        uid, is_extra = None, False
     else:
-        tokens = load_tokens_user(conta_google, db_session)
+        uid, is_extra = _split_conta(conta_google)
+        tokens = load_tokens_user(uid, db_session, extra=is_extra)
 
     if not tokens:
         return None
@@ -93,7 +107,7 @@ def get_valid_tokens(conta_google: str, db_session: Any) -> dict | None:
             if conta_google == "master":
                 save_tokens_master(new_tokens)
             else:
-                save_tokens_user(conta_google, new_tokens, db_session)
+                save_tokens_user(uid, new_tokens, db_session, extra=is_extra)
             return new_tokens
         except Exception as e:
             print(f"[gmail_sync] refresh failed for {conta_google}: {e}", flush=True)

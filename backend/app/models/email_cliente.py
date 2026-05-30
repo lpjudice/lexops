@@ -32,6 +32,11 @@ class EmailCliente(Base):
     data: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     lido: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
+    # Privacidade: por padrão todo email puxado é visível a todos os usuários.
+    # Quando privado=True, só quem marcou (privado_por) e super-admins enxergam.
+    privado: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    privado_por: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     cliente: Mapped["Cliente"] = relationship("Cliente")  # noqa: F821

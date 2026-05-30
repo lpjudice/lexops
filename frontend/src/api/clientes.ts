@@ -61,6 +61,8 @@ export interface EmailCliente {
   thread_id: string | null
   data: string | null
   lido: boolean
+  privado: boolean
+  privado_por: string | null
   created_at: string
 }
 
@@ -94,9 +96,15 @@ export const clientesApi = {
   listarEmails: (clienteId: string) =>
     api.get<EmailCliente[]>(`/clientes/${clienteId}/emails`).then(r => r.data),
 
-  sincronizarEmails: (clienteId: string, conta_google: string) =>
+  sincronizarEmails: (clienteId: string, contas: string[]) =>
     api.post<{ synced: number; new: number; error: string | null }>(
       `/clientes/${clienteId}/emails/sync`,
-      { conta_google },
+      { contas },
+    ).then(r => r.data),
+
+  marcarEmailPrivacidade: (clienteId: string, emailId: string, privado: boolean) =>
+    api.patch<{ id: string; privado: boolean }>(
+      `/clientes/${clienteId}/emails/${emailId}/privacidade`,
+      { privado },
     ).then(r => r.data),
 }

@@ -97,23 +97,31 @@ def _user_redirect_uri() -> str:
     return f"{backend_url}/auth/google/user/callback"
 
 
-@router.get("/google/user")
-def google_user_login(usuario_id: str):
-    """Redirect the user to Google consent screen for their personal Gmail."""
+def _user_consent_redirect(state: str) -> RedirectResponse:
     cfg = _get_client_config()
-    redirect_uri = _user_redirect_uri()
     params = {
         "client_id": cfg["client_id"],
-        "redirect_uri": redirect_uri,
+        "redirect_uri": _user_redirect_uri(),
         "response_type": "code",
         "scope": USER_SCOPES,
         "access_type": "offline",
         "prompt": "consent",
-        "state": usuario_id,  # passed back in callback
+        "state": state,  # passed back in callback
     }
     qs = "&".join(f"{k}={v}" for k, v in params.items())
-    url = f"https://accounts.google.com/o/oauth2/v2/auth?{qs}"
-    return RedirectResponse(url)
+    return RedirectResponse(f"https://accounts.google.com/o/oauth2/v2/auth?{qs}")
+
+
+@router.get("/google/user")
+def google_user_login(usuario_id: str):
+    """Redirect the user to Google consent screen for their personal Gmail."""
+    return _user_consent_redirect(usuario_id)
+
+
+@router.get("/google/user/extra")
+def google_user_extra_login(usuario_id: str):
+    """Conecta uma 2ª caixa de Gmail (extra) do usuário, em slot próprio."""
+    return _user_consent_redirect(f"{usuario_id}:extra")
 
 
 @router.get("/google/user/callback")
@@ -135,8 +143,13 @@ def google_user_callback(code: str, state: str, db: Session = Depends(get_db)):
         },
     )
 
+    # state pode ser "<usuario_id>" (conta principal) ou "<usuario_id>:extra" (extra)
+    is_extra = state.endswith(":extra")
+    usuario_id = state[: -len(":extra")] if is_extra else state
+    feedback = "google_user_extra" if is_extra else "google_user"
+
     if not resp.is_success:
-        return RedirectResponse(f"{_frontend_url()}/configuracoes?google_user=erro")
+        return RedirectResponse(f"{_frontend_url()}/configuracoes?{feedback}=erro")
 
     tokens = resp.json()
 
@@ -149,17 +162,20 @@ def google_user_callback(code: str, state: str, db: Session = Depends(get_db)):
     if r.is_success:
         tokens["email"] = r.json().get("emailAddress", "")
 
-    # Store in DB
+    # Store in DB — slot principal ou extra, sem um sobrescrever o outro
     try:
-        u = db.query(Usuario).filter(Usuario.id == uuid.UUID(state)).first()
+        u = db.query(Usuario).filter(Usuario.id == uuid.UUID(usuario_id)).first()
         if u:
-            u.google_tokens = tokens
+            if is_extra:
+                u.google_tokens_extra = tokens
+            else:
+                u.google_tokens = tokens
             db.commit()
     except Exception as e:
         print(f"[auth] failed to save user tokens: {e}", flush=True)
-        return RedirectResponse(f"{_frontend_url()}/configuracoes?google_user=erro")
+        return RedirectResponse(f"{_frontend_url()}/configuracoes?{feedback}=erro")
 
-    return RedirectResponse(f"{_frontend_url()}/configuracoes?google_user=conectado")
+    return RedirectResponse(f"{_frontend_url()}/configuracoes?{feedback}=conectado")
 
 
 @router.get("/google/user/status")
@@ -180,5 +196,27 @@ def google_user_disconnect(usuario_id: str, db: Session = Depends(get_db)):
     u = db.query(Usuario).filter(Usuario.id == uuid.UUID(usuario_id)).first()
     if u:
         u.google_tokens = None
+        db.commit()
+    return {"ok": True}
+
+
+@router.get("/google/user/extra/status")
+def google_user_extra_status(usuario_id: str, db: Session = Depends(get_db)):
+    """Whether the user has an EXTRA Google account connected."""
+    from app.models.usuario import Usuario
+    u = db.query(Usuario).filter(Usuario.id == uuid.UUID(usuario_id)).first()
+    if not u or not u.google_tokens_extra:
+        return {"conectado": False, "email": None}
+    email = u.google_tokens_extra.get("email") if isinstance(u.google_tokens_extra, dict) else None
+    return {"conectado": True, "email": email}
+
+
+@router.delete("/google/user/extra")
+def google_user_extra_disconnect(usuario_id: str, db: Session = Depends(get_db)):
+    """Remove the EXTRA Google tokens for this user."""
+    from app.models.usuario import Usuario
+    u = db.query(Usuario).filter(Usuario.id == uuid.UUID(usuario_id)).first()
+    if u:
+        u.google_tokens_extra = None
         db.commit()
     return {"ok": True}

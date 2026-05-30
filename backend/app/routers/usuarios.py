@@ -32,6 +32,8 @@ def _usuario_to_out(u: Usuario, db: Session) -> UsuarioOut:
     out.clientes_ids = [r.cliente_id for r in rows]
     if isinstance(u.google_tokens, dict):
         out.google_email = u.google_tokens.get("email")
+    if isinstance(u.google_tokens_extra, dict):
+        out.google_email_extra = u.google_tokens_extra.get("email")
     return out
 
 

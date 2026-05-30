@@ -10,8 +10,10 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.dependencies import get_current_user
 from app.models.cliente import Cliente
 from app.models.processo import Processo
+from app.models.usuario import Usuario
 from app.schemas.cliente import ClienteCreate, ClienteOut, ClienteUpdate, ClienteWithProcessos
 from app.schemas.processo import ProcessoOut
 
@@ -457,7 +459,13 @@ def chat_cliente(
 # ── Emails ────────────────────────────────────────────────────────────────────
 
 class EmailSyncRequest(BaseModel):
-    conta_google: str = "master"  # "master" or str(usuario_id)
+    # Uma conta ("master" | "<uid>" | "<uid>:extra") ou várias (grupo).
+    conta_google: str = "master"
+    contas: list[str] | None = None
+
+
+class EmailPrivacidadeRequest(BaseModel):
+    privado: bool
 
 
 class EmailOut(BaseModel):
@@ -472,13 +480,19 @@ class EmailOut(BaseModel):
     thread_id: str | None
     data: str | None  # ISO datetime string
     lido: bool
+    privado: bool = False
+    privado_por: uuid.UUID | None = None
     created_at: str
 
     model_config = {"from_attributes": True}
 
 
 @router.get("/{cliente_id}/emails", response_model=list[EmailOut])
-def listar_emails(cliente_id: uuid.UUID, db: Session = Depends(get_db)):
+def listar_emails(
+    cliente_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current: Usuario = Depends(get_current_user),
+):
     from app.models.email_cliente import EmailCliente
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente:
@@ -489,6 +503,7 @@ def listar_emails(cliente_id: uuid.UUID, db: Session = Depends(get_db)):
         .order_by(EmailCliente.data.desc().nullslast())
         .all()
     )
+    is_super = current.role == "super_admin"
     return [
         {
             "id": e.id,
@@ -502,36 +517,89 @@ def listar_emails(cliente_id: uuid.UUID, db: Session = Depends(get_db)):
             "thread_id": e.thread_id,
             "data": e.data.isoformat() if e.data else None,
             "lido": e.lido,
+            "privado": bool(e.privado),
+            "privado_por": e.privado_por,
             "created_at": e.created_at.isoformat(),
         }
         for e in emails
+        # Público por padrão; privado só aparece p/ quem marcou e super-admins.
+        if (not e.privado) or is_super or (e.privado_por == current.id)
     ]
 
 
 @router.post("/{cliente_id}/emails/sync")
-def sincronizar_emails(cliente_id: uuid.UUID, body: EmailSyncRequest, db: Session = Depends(get_db)):
+def sincronizar_emails(
+    cliente_id: uuid.UUID,
+    body: EmailSyncRequest,
+    db: Session = Depends(get_db),
+    current: Usuario = Depends(get_current_user),
+):
     from app.services.gmail_sync import sync_emails_for_client
 
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
 
-    # Collect client email addresses to search Gmail for
+    # Endereços do cliente a procurar no Gmail
     emails_cliente: list[str] = []
     if cliente.email:
         emails_cliente.append(cliente.email)
 
-    result = sync_emails_for_client(
-        cliente_id=str(cliente_id),
-        conta_google=body.conta_google,
-        db_session=db,
-        emails_cliente=emails_cliente,
+    # Grupo de contas a varrer. Um usuário só pode usar 'master' ou as PRÓPRIAS
+    # contas (principal/extra) — não as de outro usuário.
+    contas = body.contas if body.contas else [body.conta_google]
+    permitidas = {"master", str(current.id), f"{current.id}:extra"}
+    contas = [c for c in contas if c in permitidas]
+    if not contas:
+        raise HTTPException(status_code=400, detail="Nenhuma conta válida selecionada.")
+
+    total_synced = 0
+    total_new = 0
+    erros: list[str] = []
+    for conta in contas:
+        result = sync_emails_for_client(
+            cliente_id=str(cliente_id),
+            conta_google=conta,
+            db_session=db,
+            emails_cliente=emails_cliente,
+        )
+        total_synced += int(result.get("synced") or 0)
+        total_new += int(result.get("new") or 0)
+        if result.get("error"):
+            erros.append(f"{conta}: {result['error']}")
+
+    # Só falha de fato se TODAS as contas erraram.
+    if erros and len(erros) == len(contas):
+        raise HTTPException(status_code=400, detail=" | ".join(erros))
+
+    return {"synced": total_synced, "new": total_new, "error": " | ".join(erros) or None}
+
+
+@router.patch("/{cliente_id}/emails/{email_id}/privacidade")
+def marcar_email_privacidade(
+    cliente_id: uuid.UUID,
+    email_id: uuid.UUID,
+    body: EmailPrivacidadeRequest,
+    db: Session = Depends(get_db),
+    current: Usuario = Depends(get_current_user),
+):
+    from app.models.email_cliente import EmailCliente
+    e = (
+        db.query(EmailCliente)
+        .filter(EmailCliente.id == email_id, EmailCliente.cliente_id == cliente_id)
+        .first()
     )
-
-    if result.get("error"):
-        raise HTTPException(status_code=400, detail=result["error"])
-
-    return result
+    if not e:
+        raise HTTPException(status_code=404, detail="Email não encontrado")
+    is_super = current.role == "super_admin"
+    # Tornar privado: qualquer usuário pode. Tornar público de novo: só quem
+    # marcou ou um super-admin.
+    if not body.privado and e.privado and not (is_super or e.privado_por == current.id):
+        raise HTTPException(status_code=403, detail="Apenas quem marcou como privado pode reverter.")
+    e.privado = body.privado
+    e.privado_por = current.id if body.privado else None
+    db.commit()
+    return {"id": str(e.id), "privado": e.privado}
 
 
 @router.post("/{cliente_id}/pasta-arquivos/refresh")

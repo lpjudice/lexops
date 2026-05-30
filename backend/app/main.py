@@ -149,6 +149,17 @@ def _run_migrations() -> None:
         conn.execute(text(
             "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS drive_folder_id VARCHAR(255)"
         ))
+        # Conta Gmail extra por usuário (3ª fonte de busca de emails).
+        conn.execute(text(
+            "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS google_tokens_extra JSONB"
+        ))
+        # Privacidade dos emails de cliente (padrão público; privado restringe).
+        conn.execute(text(
+            "ALTER TABLE emails_cliente ADD COLUMN IF NOT EXISTS privado BOOLEAN NOT NULL DEFAULT false"
+        ))
+        conn.execute(text(
+            "ALTER TABLE emails_cliente ADD COLUMN IF NOT EXISTS privado_por UUID"
+        ))
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS sincronizacao_logs (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
