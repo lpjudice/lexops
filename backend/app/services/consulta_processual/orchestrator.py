@@ -53,6 +53,8 @@ def _classificar_erro(exc: Exception) -> str:
         return msg
     if isinstance(exc, ValueError):
         return msg
+    if "pdpj" in low or "jus.br" in low or "indispon" in low:
+        return msg
     if "timeout" in low or "timed out" in low:
         return "DataJud não respondeu a tempo. Tente novamente em instantes."
     if isinstance(exc, ConnectionError) or "connection" in low:

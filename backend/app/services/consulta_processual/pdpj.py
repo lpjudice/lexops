@@ -381,6 +381,84 @@ def _raise_auth_error(status_code: int, token: str) -> None:
     )
 
 
+def _short_body(resp: httpx.Response, limit: int = 600) -> str:
+    """Truncated, secret-safe snippet of a response body for diagnostics."""
+    try:
+        text = resp.text or ""
+    except Exception:
+        return ""
+    text = re.sub(r"(?i)bearer\s+[A-Za-z0-9._\-]+", "Bearer ***", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:limit]
+
+
+async def _fetch_processo_v2(
+    client: httpx.AsyncClient,
+    numero_cnj: str,
+    numero_norm: str,
+    headers: dict[str, str],
+    token: str,
+) -> dict | None:
+    """GET the process from PDPJ v2, tolerating the CNJ-format ambiguity.
+
+    Tries the 20-digit form first, then the formatted CNJ on 403/404 (the
+    document ``hrefBinario`` uses the formatted form, so the endpoint accepts it
+    too). Raises ``PermissionError`` only when *every* attempt is 401/403,
+    ``ConnectionError`` on 5xx. Logs status + masked body for each attempt so the
+    real PDPJ error (e.g. "operador não informado") is visible in ``fly logs``.
+    """
+    cpf_op = next((v for k, v in headers.items() if k.lower() == "x-pdpj-cpf-usuario-operador"), None)
+    logger.info(
+        "PDPJ v2: consultando %s | cpf_operador=%s | cookies=%s",
+        numero_cnj,
+        (f"***{cpf_op[-2:]}" if cpf_op else "AUSENTE"),
+        ("sim" if any(k.lower() == "cookie" for k in headers) else "nao"),
+    )
+
+    identificadores = [numero_norm]
+    if numero_cnj and numero_cnj != numero_norm:
+        identificadores.append(numero_cnj)
+
+    last_auth_status: int | None = None
+    for ident in identificadores:
+        url = f"{PDPJ_API_BASE}/processos/{ident}"
+        try:
+            resp = await client.get(url, headers=headers)
+        except httpx.RequestError as exc:
+            raise ConnectionError(f"Falha ao conectar ao jus.br/PDPJ: {exc}") from exc
+
+        if resp.status_code == 200:
+            logger.info("PDPJ v2 GET %s -> 200", url)
+            try:
+                data = resp.json()
+            except Exception:
+                logger.warning("PDPJ v2 %s: 200 com corpo nao-JSON", url)
+                return None
+            item = _selecionar_processo(data, numero_norm)
+            if not item:
+                logger.warning("PDPJ v2 %s: 200 sem processo no corpo", url)
+            return item
+
+        body = _short_body(resp)
+        logger.warning("PDPJ v2 GET %s -> %s | body=%s", url, resp.status_code, body)
+
+        if resp.status_code in (401, 403):
+            last_auth_status = resp.status_code
+            continue
+        if resp.status_code == 404:
+            continue
+        if resp.status_code >= 500:
+            raise ConnectionError(
+                f"O jus.br/PDPJ respondeu indisponível (HTTP {resp.status_code}). "
+                "Tente novamente em instantes."
+            )
+        return None
+
+    if last_auth_status is not None:
+        _raise_auth_error(last_auth_status, token)
+    return None
+
+
 async def buscar_processo_pdpj_raw(
     numero_cnj: str,
     tribunal: str = "",
@@ -399,25 +477,9 @@ async def buscar_processo_pdpj_raw(
 
     headers = _build_headers(token, session_data)
     numero_norm = normalizar_cnj(numero_cnj)
-    url = f"{PDPJ_API_BASE}/processos/{numero_norm}"
 
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-        try:
-            resp = await client.get(url, headers=headers)
-        except httpx.RequestError as exc:
-            raise ConnectionError(f"Falha ao conectar ao jus.br/PDPJ: {exc}") from exc
-
-        logger.info("PDPJ v2 GET (raw) %s → %s", url, resp.status_code)
-
-        if resp.status_code in (401, 403):
-            _raise_auth_error(resp.status_code, token)
-        if resp.status_code == 404 or resp.status_code != 200:
-            return None
-        try:
-            data = resp.json()
-        except Exception:
-            return None
-        return _selecionar_processo(data, numero_norm)
+        return await _fetch_processo_v2(client, numero_cnj, numero_norm, headers, token)
 
 
 async def buscar_via_pdpj(
@@ -438,40 +500,29 @@ async def buscar_via_pdpj(
 
     headers = _build_headers(token, session_data)
     numero_norm = normalizar_cnj(numero_cnj)
-    url = f"{PDPJ_API_BASE}/processos/{numero_norm}"
 
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-        try:
-            resp = await client.get(url, headers=headers)
-        except httpx.RequestError as exc:
-            raise ConnectionError(f"Falha ao conectar ao jus.br/PDPJ: {exc}") from exc
+        item = await _fetch_processo_v2(client, numero_cnj, numero_norm, headers, token)
 
-        logger.info("PDPJ v2 GET %s → %s", url, resp.status_code)
-
-        if resp.status_code in (401, 403):
-            _raise_auth_error(resp.status_code, token)
-        if resp.status_code == 404:
-            return []
-        if resp.status_code != 200:
-            logger.warning("PDPJ v2 status inesperado %s para %s", resp.status_code, numero_cnj)
-            return []
-
-        try:
-            data = resp.json()
-        except Exception:
-            return []
-
-        item = _selecionar_processo(data, numero_norm)
-        if not item:
-            logger.warning("PDPJ v2: processo %s nao retornado", numero_cnj)
-            return []
+    if not item:
+        logger.warning("PDPJ v2: processo %s nao retornado", numero_cnj)
+        return []
 
     tram = _tramitacao(item)
     movimentos = [m for m in (tram.get("movimentos") or []) if isinstance(m, dict)]
     documentos = [d for d in (tram.get("documentos") or []) if isinstance(d, dict)]
     grau = tram.get("grau") if isinstance(tram.get("grau"), str) else None
 
+    logger.info(
+        "PDPJ v2 %s: tram_keys=%s movimentos=%d documentos=%d",
+        numero_cnj, list(tram.keys())[:12], len(movimentos), len(documentos),
+    )
+
     grupos, orfaos = _agrupar_documentos_por_movimento(movimentos, documentos)
+    logger.info(
+        "PDPJ v2 %s: grupos=%d docs_agrupados=%d orfaos=%d",
+        numero_cnj, len(grupos), sum(len(v) for v in grupos.values()), len(orfaos),
+    )
 
     andamentos: list[Andamento] = []
 

@@ -164,7 +164,7 @@ export default function SincronizarModal({ processos, onClose }: Props) {
               onClick={() => handleFonteChange('jusbr')}
               title="jus.br — sessão compartilhada com preferência por cURL ou headers autenticados"
             >
-              jus.br v4
+              jus.br v5
             </button>
           </div>
           {fonte === 'jusbr' && jusbrAtivo && (
@@ -181,7 +181,7 @@ export default function SincronizarModal({ processos, onClose }: Props) {
         {/* JusBR info */}
         {fonte === 'jusbr' && (
           <div className={styles.avisoJusBR}>
-            <strong>jus.br v4</strong> retorna nomes reais dos documentos e dados completos via PDPJ, com preferência por <strong>cURL</strong> ou <strong>headers</strong> autenticados e sessão compartilhada do app inteiro.
+            <strong>jus.br v5</strong> retorna nomes reais dos documentos e dados completos via PDPJ, com preferência por <strong>cURL</strong> ou <strong>headers</strong> autenticados e sessão compartilhada do app inteiro.
             {jusbrAtivo
               ? ` Sessão ativa no backend.${tokenExpiry ? ` Expira em ${tokenExpiry}.` : ''} Tipo salvo: ${jusbrSession?.capture_kind ?? 'não informado'}. Cookies: ${jusbrSession?.has_cookies ? 'sim' : 'não'}.`
               : ' Clique em "Sincronizar" para conectar uma vez com JSON de token, cURL ou headers autenticados, e reutilizar nos outros processos.'}
