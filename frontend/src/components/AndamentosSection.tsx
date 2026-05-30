@@ -4,6 +4,7 @@ import axios from 'axios'
 import { andamentosApi } from '../api/andamentos'
 import type { Andamento, JusbrSessionStatus, JusbrSyncJobStatus, SincronizacaoResult } from '../api/andamentos'
 import InstrucoesJusBRModal from './InstrucoesJusBRModal'
+import { JUSBR_VERSION } from '../jusbrVersion'
 import styles from './AndamentosSection.module.css'
 import {
   clearStoredJusbrToken,
@@ -270,7 +271,7 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
               onClick={() => handleFonte('jusbr')}
               title="jus.br — sessão compartilhada do portal com diagnostico melhorado"
             >
-              jus.br v4
+              jus.br {JUSBR_VERSION}
             </button>
           </div>
 
@@ -298,7 +299,7 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
             {isSyncing ? (
               <span className={styles.syncingLabel}><span className={styles.spinner} /> Buscando…</span>
             ) : fonte === 'jusbr' && !jusbrAtivo ? (
-              '🔑 Conectar jus.br v4'
+              `🔑 Conectar jus.br ${JUSBR_VERSION}`
             ) : (
               '⟳ Sincronizar'
             )}
@@ -309,13 +310,13 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
       {/* jus.br token info bar */}
       {fonte === 'jusbr' && !jusbrAtivo && !isSyncing && !syncData && (
         <div className={styles.jusBRInfo}>
-          <span>O modo <strong>jus.br v4</strong> usa uma sessão compartilhada do portal. Para baixar <strong>documentos reais</strong>, conecte de preferência com <strong>cURL</strong> ou <strong>headers</strong> autenticados; a resposta de <strong>/processos</strong> não ativa o botão.</span>
+          <span>O modo <strong>jus.br {JUSBR_VERSION}</strong> usa uma sessão compartilhada do portal. Para baixar <strong>documentos reais</strong>, conecte de preferência com <strong>cURL</strong> ou <strong>headers</strong> autenticados; a resposta de <strong>/processos</strong> não ativa o botão.</span>
         </div>
       )}
       {fonte === 'jusbr' && jusbrAtivo && !isSyncing && !syncData && (
         <div className={styles.jusBRInfo}>
           <span>
-            Sessão do <strong>jus.br v4</strong> ativa no backend e reutilizada automaticamente para todos os processos.
+            Sessão do <strong>jus.br {JUSBR_VERSION}</strong> ativa no backend e reutilizada automaticamente para todos os processos.
             {tokenExpiry ? ` Expira em ${tokenExpiry}.` : ''}
             {jusbrSession?.capture_kind ? ` Tipo salvo: ${jusbrSession.capture_kind}.` : ''}
             {` Cookies: ${jusbrSession?.has_cookies ? 'sim' : 'não'}.`}

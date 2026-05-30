@@ -4,6 +4,7 @@ import { andamentosApi } from '../api/andamentos'
 import type { JusbrSessionStatus, SincronizacaoResult } from '../api/andamentos'
 import type { Processo } from '../api/processos'
 import InstrucoesJusBRModal from './InstrucoesJusBRModal'
+import { JUSBR_VERSION } from '../jusbrVersion'
 import styles from './SincronizarModal.module.css'
 import {
   clearStoredJusbrToken,
@@ -164,7 +165,7 @@ export default function SincronizarModal({ processos, onClose }: Props) {
               onClick={() => handleFonteChange('jusbr')}
               title="jus.br — sessão compartilhada com preferência por cURL ou headers autenticados"
             >
-              jus.br v5
+              jus.br {JUSBR_VERSION}
             </button>
           </div>
           {fonte === 'jusbr' && jusbrAtivo && (
@@ -181,7 +182,7 @@ export default function SincronizarModal({ processos, onClose }: Props) {
         {/* JusBR info */}
         {fonte === 'jusbr' && (
           <div className={styles.avisoJusBR}>
-            <strong>jus.br v5</strong> retorna nomes reais dos documentos e dados completos via PDPJ, com preferência por <strong>cURL</strong> ou <strong>headers</strong> autenticados e sessão compartilhada do app inteiro.
+            <strong>jus.br {JUSBR_VERSION}</strong> retorna nomes reais dos documentos e dados completos via PDPJ, com preferência por <strong>cURL</strong> ou <strong>headers</strong> autenticados e sessão compartilhada do app inteiro.
             {jusbrAtivo
               ? ` Sessão ativa no backend.${tokenExpiry ? ` Expira em ${tokenExpiry}.` : ''} Tipo salvo: ${jusbrSession?.capture_kind ?? 'não informado'}. Cookies: ${jusbrSession?.has_cookies ? 'sim' : 'não'}.`
               : ' Clique em "Sincronizar" para conectar uma vez com JSON de token, cURL ou headers autenticados, e reutilizar nos outros processos.'}
@@ -262,7 +263,7 @@ export default function SincronizarModal({ processos, onClose }: Props) {
                 {isSyncing
                   ? `Sincronizando ${selecionados.size}...`
                   : fonte === 'jusbr' && !jusbrAtivo
-                  ? `🔑 Conectar jus.br v4 e sincronizar ${selecionados.size}`
+                  ? `🔑 Conectar jus.br ${JUSBR_VERSION} e sincronizar ${selecionados.size}`
                   : `Sincronizar ${selecionados.size} processo(s)`}
               </button>
             </div>

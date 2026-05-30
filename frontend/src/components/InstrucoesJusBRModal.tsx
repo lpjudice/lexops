@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { JUSBR_VERSION } from '../jusbrVersion'
 import styles from './InstrucoesJusBRModal.module.css'
 import {
   canSubmitJusbrCapture,
@@ -132,7 +133,7 @@ export default function InstrucoesJusBRModal({ onClose, onToken, initialToken = 
             <span className={styles.headerIcon}>🔑</span>
             <div>
               <h2 className={styles.title}>Conectar jus.br</h2>
-              <p className={styles.subtitle}>v4: prefira cURL ou headers autenticados para baixar documentos; resposta de /processos não substitui a sessão</p>
+              <p className={styles.subtitle}>{JUSBR_VERSION}: prefira cURL ou headers autenticados para baixar documentos; resposta de /processos não substitui a sessão</p>
             </div>
           </div>
           <button className={styles.btnClose} onClick={onClose}>×</button>
