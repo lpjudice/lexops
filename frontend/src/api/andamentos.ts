@@ -42,6 +42,21 @@ export interface JusbrSyncJobStatus {
   updated_at: string
 }
 
+export interface JusbrBatchJobStatus {
+  job_id: string
+  status: 'rodando' | 'concluido' | 'erro'
+  stage: string
+  message: string | null
+  total: number
+  processed: number
+  current_index: number
+  current_cnj: string | null
+  results: SincronizacaoResult[]
+  error: string | null
+  started_at: string
+  updated_at: string
+}
+
 export interface AndamentoCount {
   total: number
   nao_lidos: number
@@ -94,6 +109,16 @@ export const andamentosApi = {
   sincronizarBatchJusBR: (processoIds: string[], token?: string) =>
     api
       .post<SincronizacaoResult[]>('/andamentos/sincronizar-batch-jusbr', { processo_ids: processoIds, token })
+      .then((r) => r.data),
+
+  iniciarSincronizacaoBatchJusBR: (processoIds: string[], token?: string) =>
+    api
+      .post<JusbrSyncJobStart>('/andamentos/sincronizar-batch-jusbr-job', { processo_ids: processoIds, token })
+      .then((r) => r.data),
+
+  statusSincronizacaoBatchJusBR: (jobId: string) =>
+    api
+      .get<JusbrBatchJobStatus>(`/andamentos/sincronizar-batch-jusbr-job/${jobId}`)
       .then((r) => r.data),
 
   obterSessaoJusBR: () =>

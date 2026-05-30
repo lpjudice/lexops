@@ -65,6 +65,21 @@ class JusBRSyncJobStatus(BaseModel):
     updated_at: datetime
 
 
+class JusBRBatchJobStatus(BaseModel):
+    job_id: str
+    status: str                  # rodando | concluido | erro
+    stage: str
+    message: str | None = None
+    total: int = 0               # total de processos no lote
+    processed: int = 0           # processos já finalizados
+    current_index: int = 0       # índice (1-based) do processo em andamento
+    current_cnj: str | None = None
+    results: list[SincronizacaoResult] = []
+    error: str | None = None
+    started_at: datetime
+    updated_at: datetime
+
+
 _sync_jobs: dict[str, dict] = {}
 _sync_jobs_lock = threading.Lock()
 
@@ -128,6 +143,91 @@ def _run_jusbr_sync_job(job_id: str, processo_id: uuid.UUID, token: str | None =
         _set_job(job_id, status="erro", stage="erro", error=str(exc), message="Falha ao sincronizar jus.br.")
     finally:
         db.close()
+
+
+def _run_jusbr_batch_job(job_id: str, processo_ids: list[str], token: str | None = None) -> None:
+    """Sincroniza vários processos via jus.br em background, com progresso e pausa
+    entre cada processo para não estourar o rate limit do PDPJ."""
+    from app.services.consulta_processual.jusbr_session import load_session
+    from app.services.consulta_processual.orchestrator import sincronizar_processo_jusbr as _sync
+    from app.services.consulta_processual.pdpj import PROCESS_DELAY_SECONDS
+
+    db = SessionLocal()
+    try:
+        session_data = load_session() if not token else None
+        if not token and not session_data:
+            _set_job(job_id, status="erro", stage="erro", error="Sessao do jus.br nao configurada.")
+            return
+
+        async def _run_all() -> None:
+            for indice, pid in enumerate(processo_ids):
+                # Pausa entre processos (exceto o primeiro).
+                if indice > 0 and PROCESS_DELAY_SECONDS > 0:
+                    await asyncio.sleep(PROCESS_DELAY_SECONDS)
+
+                try:
+                    pid_uuid = uuid.UUID(pid)
+                except ValueError:
+                    _append_batch_result(job_id, {
+                        "processo_id": pid, "tribunal": None, "status": "erro",
+                        "novos_andamentos": 0, "mensagem": "ID de processo inválido",
+                        "ultimo_andamento_data": None,
+                    }, indice + 1, None)
+                    continue
+
+                processo = db.query(Processo).filter(Processo.id == pid_uuid).first()
+                if not processo:
+                    _append_batch_result(job_id, {
+                        "processo_id": pid, "tribunal": None, "status": "erro",
+                        "novos_andamentos": 0, "mensagem": "Processo não encontrado",
+                        "ultimo_andamento_data": None,
+                    }, indice + 1, None)
+                    continue
+
+                cnj = processo.numero_cnj
+                _set_job(
+                    job_id,
+                    stage="processando",
+                    current_index=indice + 1,
+                    current_cnj=cnj,
+                    message=f"Sincronizando {indice + 1}/{len(processo_ids)}: {cnj or pid}",
+                )
+
+                try:
+                    log = await _sync(processo, db, token=token, session_data=session_data)
+                    db.refresh(processo)
+                    _append_batch_result(job_id, _job_result_from_log(log, processo), indice + 1, cnj)
+                except Exception as exc:  # noqa: BLE001
+                    _append_batch_result(job_id, {
+                        "processo_id": pid, "tribunal": getattr(processo, "tribunal", None),
+                        "status": "erro", "novos_andamentos": 0, "mensagem": str(exc),
+                        "ultimo_andamento_data": None,
+                    }, indice + 1, cnj)
+
+        asyncio.run(_run_all())
+        _set_job(
+            job_id,
+            status="concluido",
+            stage="finalizado",
+            current_cnj=None,
+            message="Sincronização do lote concluída.",
+        )
+    except Exception as exc:  # noqa: BLE001
+        _set_job(job_id, status="erro", stage="erro", error=str(exc), message="Falha ao sincronizar lote jus.br.")
+    finally:
+        db.close()
+
+
+def _append_batch_result(job_id: str, result: dict, current_index: int, current_cnj: str | None) -> None:
+    with _sync_jobs_lock:
+        job = _sync_jobs.get(job_id)
+        if not job:
+            return
+        job.setdefault("results", []).append(result)
+        job["processed"] = len(job["results"])
+        job["current_index"] = current_index
+        job["current_cnj"] = current_cnj
+        job["updated_at"] = datetime.now(timezone.utc)
 
 
 # ── List andamentos for a process ────────────────────────────────────────────
@@ -377,6 +477,51 @@ async def sincronizar_batch_jusbr(
             ultimo_andamento_data=p.ultimo_andamento_data,
         ))
     return results
+
+
+@router.post("/sincronizar-batch-jusbr-job", response_model=JusBRSyncJobStart)
+def iniciar_sincronizacao_batch_jusbr(
+    body: BatchJusBRSyncBody,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    from app.services.consulta_processual.jusbr_session import load_session
+
+    session_data = load_session() if not body.token else None
+    if not body.token and not session_data:
+        raise HTTPException(status_code=400, detail="Sessao do jus.br nao configurada.")
+
+    if not body.processo_ids:
+        raise HTTPException(status_code=400, detail="Nenhum processo informado.")
+
+    job_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    with _sync_jobs_lock:
+        _sync_jobs[job_id] = {
+            "job_id": job_id,
+            "status": "rodando",
+            "stage": "fila",
+            "message": "Sincronização do lote iniciada...",
+            "total": len(body.processo_ids),
+            "processed": 0,
+            "current_index": 0,
+            "current_cnj": None,
+            "results": [],
+            "error": None,
+            "started_at": now,
+            "updated_at": now,
+        }
+    background_tasks.add_task(_run_jusbr_batch_job, job_id, body.processo_ids, body.token)
+    return {"job_id": job_id}
+
+
+@router.get("/sincronizar-batch-jusbr-job/{job_id}", response_model=JusBRBatchJobStatus)
+def status_sincronizacao_batch_jusbr(job_id: str):
+    with _sync_jobs_lock:
+        job = _sync_jobs.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Sincronização não encontrada")
+        return dict(job)
 
 
 @router.get("/jusbr/session")

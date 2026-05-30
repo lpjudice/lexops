@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { andamentosApi } from '../api/andamentos'
 import type { JusbrSessionStatus, SincronizacaoResult } from '../api/andamentos'
@@ -80,18 +80,39 @@ export default function SincronizarModal({ processos, onClose }: Props) {
     },
   })
 
-  const syncJusBR = useMutation({
+  // jus.br batch agora roda em background (job + polling) para não prender a tela
+  // nem estourar timeout ao sincronizar muitos processos.
+  const [batchJobId, setBatchJobId] = useState<string | null>(null)
+
+  const startJusBRBatch = useMutation({
     mutationFn: () =>
-      andamentosApi.sincronizarBatchJusBR(Array.from(selecionados)),
-    onSuccess: (data) => {
-      setResultados(data)
-      qc.invalidateQueries({ queryKey: ['processos'] })
-      qc.invalidateQueries({ queryKey: ['andamentos'] })
-      qc.invalidateQueries({ queryKey: ['andamentos-count'] })
+      andamentosApi.iniciarSincronizacaoBatchJusBR(Array.from(selecionados)),
+    onSuccess: (data) => setBatchJobId(data.job_id),
+  })
+
+  const { data: batchJob } = useQuery({
+    queryKey: ['jusbr-batch-job', batchJobId],
+    queryFn: () => andamentosApi.statusSincronizacaoBatchJusBR(batchJobId as string),
+    enabled: !!batchJobId,
+    refetchInterval: (query) => {
+      const s = query.state.data?.status
+      return s === 'concluido' || s === 'erro' ? false : 1500
     },
   })
 
-  const isSyncing = syncDataJud.isPending || syncJusBR.isPending
+  useEffect(() => {
+    if (!batchJob) return
+    if (batchJob.status === 'concluido' || batchJob.status === 'erro') {
+      setResultados(batchJob.results)
+      setBatchJobId(null)
+      qc.invalidateQueries({ queryKey: ['processos'] })
+      qc.invalidateQueries({ queryKey: ['andamentos'] })
+      qc.invalidateQueries({ queryKey: ['andamentos-count'] })
+    }
+  }, [batchJob, qc])
+
+  const batchRunning = !!batchJobId && batchJob?.status !== 'concluido' && batchJob?.status !== 'erro'
+  const isSyncing = syncDataJud.isPending || startJusBRBatch.isPending || batchRunning
 
   const toggle = (id: string) => {
     setSelecionados((prev) => {
@@ -114,7 +135,7 @@ export default function SincronizarModal({ processos, onClose }: Props) {
       if (!jusbrAtivo) {
         setShowInstrucoes(true)
       } else {
-        syncJusBR.mutate()
+        startJusBRBatch.mutate()
       }
     }
   }
@@ -125,7 +146,7 @@ export default function SincronizarModal({ processos, onClose }: Props) {
       saveStoredJusbrToken(capture)
       await refetchJusbrSession()
       setShowInstrucoes(false)
-      syncJusBR.mutate()
+      startJusBRBatch.mutate()
     },
   })
 
@@ -251,6 +272,12 @@ export default function SincronizarModal({ processos, onClose }: Props) {
               </p>
             )}
 
+            {batchRunning && (
+              <p className={styles.semSupporte}>
+                {batchJob?.message ?? 'Sincronizando em segundo plano...'}
+              </p>
+            )}
+
             <div className={styles.modalFooter}>
               <button className={styles.btnCancel} onClick={onClose}>
                 Cancelar
@@ -260,7 +287,9 @@ export default function SincronizarModal({ processos, onClose }: Props) {
                 disabled={selecionados.size === 0 || isSyncing}
                 onClick={handleSync}
               >
-                {isSyncing
+                {batchRunning
+                  ? `Sincronizando ${batchJob?.processed ?? 0}/${batchJob?.total ?? selecionados.size}...`
+                  : isSyncing
                   ? `Sincronizando ${selecionados.size}...`
                   : fonte === 'jusbr' && !jusbrAtivo
                   ? `🔑 Conectar jus.br ${JUSBR_VERSION} e sincronizar ${selecionados.size}`
