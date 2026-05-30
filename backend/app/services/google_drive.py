@@ -252,6 +252,120 @@ def _is_unauthorized(exc: Exception) -> bool:
     )
 
 
+# ── Vínculo estável cliente → pasta do Drive ──────────────────────────────────
+# A pasta-raiz de cada cliente era endereçada pela STRING do nome. Quando o nome
+# do cliente mudava (ou variava por acento/espaço), a busca não achava a pasta
+# antiga e o app criava uma nova — origem das "duplicatas". Agora gravamos o id
+# da pasta em `clientes.drive_folder_id`: o upload usa o id (imune a renome) e só
+# cai na busca por nome na 1ª vez, gravando o id em seguida (backfill).
+def _cliente_folder_id_armazenado(nome_cliente: str) -> str | None:
+    try:
+        from sqlalchemy import select
+        from app.database import SessionLocal
+        from app.models.cliente import Cliente
+        with SessionLocal() as db:
+            row = db.execute(
+                select(Cliente.drive_folder_id)
+                .where(Cliente.nome == nome_cliente)
+                .order_by(Cliente.drive_folder_id.isnot(None).desc())
+                .limit(1)
+            ).first()
+            return row[0] if row and row[0] else None
+    except Exception as exc:
+        logger.warning("Falha ao ler drive_folder_id do cliente: %s", exc)
+        return None
+
+
+def _persistir_folder_id_cliente(nome_cliente: str, folder_id: str) -> None:
+    """Grava o id da pasta no cliente apenas se ainda estiver vazio (não sobrescreve)."""
+    if not folder_id:
+        return
+    try:
+        from sqlalchemy import update
+        from app.database import SessionLocal
+        from app.models.cliente import Cliente
+        with SessionLocal() as db:
+            db.execute(
+                update(Cliente)
+                .where(Cliente.nome == nome_cliente, Cliente.drive_folder_id.is_(None))
+                .values(drive_folder_id=folder_id)
+            )
+            db.commit()
+    except Exception as exc:
+        logger.warning("Falha ao gravar drive_folder_id do cliente: %s", exc)
+
+
+def _resolver_pasta_cliente(nome_cliente: str, headers: dict) -> str:
+    """Pasta-raiz do cliente (cria se faltar). Usa o id gravado quando houver;
+    senão resolve por nome e faz backfill do id. Imune a renome do cliente."""
+    nome = (nome_cliente or "").strip()
+    cached = _cache_get(DRIVE_FOLDER_ID, nome)
+    if cached:
+        return cached
+    stored = _cliente_folder_id_armazenado(nome)
+    if stored:
+        _cache_set(DRIVE_FOLDER_ID, nome, stored)
+        return stored
+    fid = _get_or_create_subfolder(nome, DRIVE_FOLDER_ID, headers)
+    _persistir_folder_id_cliente(nome, fid)
+    return fid
+
+
+def _resolver_pasta_cliente_existente(nome_cliente: str, headers: dict) -> str | None:
+    """Pasta-raiz do cliente SEM criar. Prefere o id gravado; senão busca por nome."""
+    nome = (nome_cliente or "").strip()
+    stored = _cliente_folder_id_armazenado(nome)
+    if stored:
+        return stored
+    fid = _find_subfolder(nome, DRIVE_FOLDER_ID, headers)
+    if fid:
+        _persistir_folder_id_cliente(nome, fid)
+    return fid
+
+
+def renomear_pasta_cliente(
+    novo_nome: str, folder_id: str | None = None, nome_antigo: str | None = None
+) -> str | None:
+    """Renomeia a pasta-raiz do cliente no Drive para `novo_nome`.
+    Usa `folder_id` quando fornecido; senão localiza pela string `nome_antigo`.
+    Retorna o id da pasta renomeada (para persistir no cliente) ou None."""
+    tokens = _load_tokens()
+    if not tokens:
+        return None
+    alvo = (novo_nome or "").strip()
+    antigo = (nome_antigo or "").strip()
+
+    def _do(tkns: dict) -> str | None:
+        h = _auth_headers(tkns)
+        fid = folder_id or (_find_subfolder(antigo, DRIVE_FOLDER_ID, h) if antigo else None)
+        if not fid:
+            return None
+        r = httpx.patch(
+            f"{DRIVE_META}/files/{fid}",
+            headers={**h, "Content-Type": "application/json"},
+            params={"supportsAllDrives": True},
+            content=json.dumps({"name": alvo}),
+            timeout=30,
+        )
+        r.raise_for_status()
+        if antigo:
+            _cache_evict(DRIVE_FOLDER_ID, antigo)
+        _cache_set(DRIVE_FOLDER_ID, alvo, fid)
+        return fid
+
+    try:
+        return _do(tokens)
+    except Exception as exc:
+        if not _is_unauthorized(exc):
+            logger.warning("Falha ao renomear pasta do cliente no Drive: %s", exc)
+            return None
+        try:
+            return _do(_refresh(tokens))
+        except Exception as exc2:
+            logger.warning("Falha ao renomear pasta do cliente apos refresh: %s", exc2)
+            return None
+
+
 def upload_arquivo(
     conteudo: bytes,
     nome_arquivo: str,
@@ -293,7 +407,7 @@ def upload_arquivo(
 
     def _do(tkns: dict) -> str | None:
         h = _auth_headers(tkns)
-        cliente_folder_id = _get_or_create_subfolder(nome_cliente, DRIVE_FOLDER_ID, h)
+        cliente_folder_id = _resolver_pasta_cliente(nome_cliente, h)
         tipo_folder_id = _get_or_create_subfolder(subfolder, cliente_folder_id, h)
         parent_id = tipo_folder_id
         if sub_subfolder:
@@ -356,7 +470,7 @@ def ensure_cliente_folder(nome_cliente: str) -> str | None:
 
     def _do(tkns: dict) -> str:
         h = _auth_headers(tkns)
-        folder_id = _get_or_create_subfolder(nome_cliente, DRIVE_FOLDER_ID, h)
+        folder_id = _resolver_pasta_cliente(nome_cliente, h)
         return f"https://drive.google.com/drive/folders/{folder_id}"
 
     try:
@@ -390,7 +504,7 @@ def listar_arquivos(nome_cliente: str, subfolder: str, sub_subfolder: str | None
 
     def _do(tkns: dict) -> list[dict]:
         h = _auth_headers(tkns)
-        cliente_folder_id = _get_or_create_subfolder(nome_cliente, DRIVE_FOLDER_ID, h)
+        cliente_folder_id = _resolver_pasta_cliente(nome_cliente, h)
         folder_id = _get_or_create_subfolder(subfolder, cliente_folder_id, h)
         if sub_subfolder:
             folder_id = _get_or_create_subfolder(sub_subfolder, folder_id, h)
@@ -443,7 +557,7 @@ def deletar_arquivo(nome_cliente: str, subfolder: str, nome_arquivo: str, sub_su
 
     def _do(tkns: dict) -> bool:
         h = _auth_headers(tkns)
-        cliente_folder_id = _get_or_create_subfolder(nome_cliente, DRIVE_FOLDER_ID, h)
+        cliente_folder_id = _resolver_pasta_cliente(nome_cliente, h)
         folder_id = _get_or_create_subfolder(subfolder, cliente_folder_id, h)
         if sub_subfolder:
             folder_id = _get_or_create_subfolder(sub_subfolder, folder_id, h)
@@ -504,7 +618,7 @@ def get_folder_link(nome_cliente: str, subfolder: str, sub_subfolder: str | None
 
     def _do(tkns: dict) -> str:
         h = _auth_headers(tkns)
-        cliente_folder_id = _get_or_create_subfolder(nome_cliente, DRIVE_FOLDER_ID, h)
+        cliente_folder_id = _resolver_pasta_cliente(nome_cliente, h)
         folder_id = _get_or_create_subfolder(subfolder, cliente_folder_id, h)
         if sub_subfolder:
             folder_id = _get_or_create_subfolder(sub_subfolder, folder_id, h)
@@ -525,7 +639,7 @@ def find_folder_link(nome_cliente: str, subfolder: str, sub_subfolder: str | Non
 
     def _do(tkns: dict) -> str | None:
         h = _auth_headers(tkns)
-        cliente_folder_id = _find_subfolder(nome_cliente, DRIVE_FOLDER_ID, h)
+        cliente_folder_id = _resolver_pasta_cliente_existente(nome_cliente, h)
         if not cliente_folder_id:
             return None
         folder_id = _find_subfolder(subfolder, cliente_folder_id, h)
@@ -555,7 +669,7 @@ def deletar_pasta(nome_cliente: str, subfolder: str, sub_subfolder: str) -> bool
 
     def _do(tkns: dict) -> bool:
         h = _auth_headers(tkns)
-        cliente_folder_id = _find_subfolder(nome_cliente, DRIVE_FOLDER_ID, h)
+        cliente_folder_id = _resolver_pasta_cliente_existente(nome_cliente, h)
         if not cliente_folder_id:
             return False
         folder_id = _find_subfolder(subfolder, cliente_folder_id, h)

@@ -83,6 +83,7 @@ def atualizar_cliente(
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
+    nome_antigo = cliente.nome
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(cliente, field, value)
     # Atualiza projeto se nome mudou
@@ -90,6 +91,20 @@ def atualizar_cliente(
         cliente.projeto_nome, cliente.worktree_nome = _gerar_projeto(data.nome)
     db.commit()
     db.refresh(cliente)
+    # Renomear a pasta-raiz no Drive quando o nome muda — mantém uma única pasta
+    # por cliente (sem duplicar) e o Drive legível. O vínculo é pelo id gravado.
+    if data.nome and (cliente.nome or "").strip() != (nome_antigo or "").strip():
+        try:
+            from app.services.google_drive import renomear_pasta_cliente
+            fid = renomear_pasta_cliente(
+                cliente.nome, folder_id=cliente.drive_folder_id, nome_antigo=nome_antigo
+            )
+            if fid and fid != cliente.drive_folder_id:
+                cliente.drive_folder_id = fid
+                db.commit()
+                db.refresh(cliente)
+        except Exception:
+            pass
     return cliente
 
 

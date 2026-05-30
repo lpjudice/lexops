@@ -145,6 +145,10 @@ def _run_migrations() -> None:
         conn.execute(text(
             "ALTER TABLE processos ADD COLUMN IF NOT EXISTS ultimo_sync_status VARCHAR(20)"
         ))
+        # Vínculo estável da pasta-raiz do cliente no Drive (imune a renome do cliente).
+        conn.execute(text(
+            "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS drive_folder_id VARCHAR(255)"
+        ))
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS sincronizacao_logs (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

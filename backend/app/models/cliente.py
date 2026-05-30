@@ -26,6 +26,9 @@ class Cliente(Base):
     incompleto: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     projeto_nome: Mapped[str | None] = mapped_column(String(500), nullable=True)
     worktree_nome: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # ID estável da pasta-raiz do cliente no Google Drive. Vínculo imune a renome:
+    # quando preenchido, os uploads usam este ID em vez de procurar pela string do nome.
+    drive_folder_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
