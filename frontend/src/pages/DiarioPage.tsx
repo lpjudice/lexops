@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { diarioApi } from '../api/diario'
-import type { AnaliseIA, DiarioSyncJobStatus, Publicacao, TipoAto } from '../api/diario'
+import type { AnaliseIA, DiarioSyncJobStatus, OabMonitorada, Publicacao, TipoAto } from '../api/diario'
 import { processosApi } from '../api/processos'
 import type { Processo } from '../api/processos'
 import { clientesApi } from '../api/clientes'
@@ -58,12 +58,17 @@ interface PublicacaoMatchInfo {
   exactClientNames: string[]
   exactTermMatches: string[]
   probableClientNames: string[]
+  // Nomes de clientes derivados de um processo cadastrado (match por CNJ) — vínculo confiável.
+  linkedClientNames: string[]
   relatedProcesses: ProcessoRelacionado[]
   relatedTerms: string[]
   primaryProcessId?: string
   primaryClientName?: string
   hasRegisteredProcess: boolean
   hasExactName: boolean
+  // Veio da busca por OAB monitorada (ex.: "14477/ES") — match forte.
+  hasOabMatch: boolean
+  oabMatch?: string
 }
 
 interface PublicacaoEnriquecida {
@@ -220,16 +225,23 @@ function classifyPublication(
 
   if (primary?.numero_cnj) relatedTerms.add(primary.numero_cnj)
 
+  const oabMatch = (pub.match_oab ?? '').trim()
+  // Cliente confiável só quando vem de um processo cadastrado (match por CNJ).
+  const linkedClientNames = uniqueStrings(relatedProcesses.flatMap((p) => p.clienteNomes))
+
   return {
     exactClientNames: [...exactClientNames],
     exactTermMatches: [...exactTermMatches],
     probableClientNames: [...probableClientNames],
+    linkedClientNames,
     relatedProcesses,
     relatedTerms: uniqueStrings([...relatedTerms]),
     primaryProcessId: primary?.id,
     primaryClientName: primary?.clienteNomes[0] ?? [...probableClientNames][0],
     hasRegisteredProcess,
     hasExactName: exactClientNames.size > 0 || exactTermMatches.size > 0,
+    hasOabMatch: oabMatch.length > 0,
+    oabMatch: oabMatch || undefined,
   }
 }
 
@@ -265,6 +277,9 @@ export default function DiarioPage() {
   const [daysBack, setDaysBack] = useState(3)
   const [termosCustom, setTermosCustom] = useState<string[]>([])
   const [novoTermo, setNovoTermo] = useState('')
+  const [oabs, setOabs] = useState<OabMonitorada[]>([])
+  const [novaOabNumero, setNovaOabNumero] = useState('')
+  const [novaOabUf, setNovaOabUf] = useState('')
   const [_termosAberto, _setTermosAberto] = useState(false)
   const [pjeModalAberto, setPjeModalAberto] = useState(false)
   const [pjeCpf, setPjeCpf] = useState('')
@@ -330,7 +345,9 @@ export default function DiarioPage() {
     queryFn: () => clientesApi.listar(),
   })
 
-  const nomesClientes = clientes.map((c) => c.nome)
+  // Só clientes marcados para monitoramento entram na busca por nome — evita ruído de homônimo.
+  const clientesMonitorados = clientes.filter((c) => c.monitorar_diario)
+  const nomesClientesMonitorados = clientesMonitorados.map((c) => c.nome)
 
   const { data: monitoramento } = useQuery({
     queryKey: ['diario-monitoramento'],
@@ -338,8 +355,9 @@ export default function DiarioPage() {
   })
 
   useEffect(() => {
-    if (monitoramento?.termos_extras) {
-      setTermosCustom(monitoramento.termos_extras)
+    if (monitoramento) {
+      setTermosCustom(monitoramento.termos_extras ?? [])
+      setOabs(monitoramento.oabs ?? [])
     }
   }, [monitoramento])
 
@@ -352,19 +370,27 @@ export default function DiarioPage() {
     },
   })
 
-  const termosNomesMonitorados = [...nomesClientes, ...termosCustom].filter(Boolean)
+  const termosNomesMonitorados = [...nomesClientesMonitorados, ...termosCustom].filter(Boolean)
 
   const salvarMonitoramento = useMutation({
-    mutationFn: (payload: { termos_extras: string[] }) =>
+    mutationFn: (payload: { termos_extras?: string[]; oabs?: OabMonitorada[] }) =>
       diarioApi.salvarMonitoramento({
         tribunais: monitoramento?.tribunais?.length ? monitoramento.tribunais : ['TJES', 'TJSP', 'TJAM'],
         auto_sync: monitoramento?.auto_sync ?? true,
-        termos_extras: payload.termos_extras,
+        termos_extras: payload.termos_extras ?? termosCustom,
+        oabs: payload.oabs ?? oabs,
       }),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['diario-monitoramento'] })
-      setTermosCustom(data.termos_extras)
+      setTermosCustom(data.termos_extras ?? [])
+      setOabs(data.oabs ?? [])
     },
+  })
+
+  const toggleMonitorarCliente = useMutation({
+    mutationFn: ({ id, monitorar_diario }: { id: string; monitorar_diario: boolean }) =>
+      clientesApi.atualizar(id, { monitorar_diario }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['clientes'] }),
   })
 
   const syncScraping = useMutation({
@@ -508,7 +534,7 @@ export default function DiarioPage() {
   const SEM_PUB = 'Sem publicações nesta edição.'
   const publicacoesEnriquecidas = [...publicacoes]
     .map((pub) => ({ pub, match: classifyPublication(pub, processos, clientes, termosNomesMonitorados) }))
-    .filter(({ match }) => match.hasRegisteredProcess || match.hasExactName)
+    .filter(({ match }) => match.hasRegisteredProcess || match.hasExactName || match.hasOabMatch)
     .sort((a, b) => {
       const dateA = new Date(`${a.pub.data_publicacao}T12:00:00`).getTime()
       const dateB = new Date(`${b.pub.data_publicacao}T12:00:00`).getTime()
@@ -692,15 +718,101 @@ export default function DiarioPage() {
         Cada botão consulta uma fonte separada. O `DJEN` e os botões por tribunal usam a busca pública nacional quando disponível. O `PJe Comunica` continua separado, autenticado, e não substitui o `DJEN`.
       </div>
 
-      {/* Termos de Monitoramento */}
+      {/* Monitoramento automático do Diário Oficial */}
       <div className={diarioStyles.termosBox}>
-        <div className={diarioStyles.termosInline}>
+        <div className={diarioStyles.termosInline} style={{ flexWrap: 'wrap', gap: '10px' }}>
           <span className={diarioStyles.termosLabel}>
-            Monitoramento:
-            <span className={diarioStyles.termosInfo} title="A busca padrão usa processos cadastrados e nomes adicionais. Clientes ficam para classificação visual quando houver match.">
-              processos + nomes adicionais
+            Monitoramento automático:
+            <span className={diarioStyles.termosInfo} title="Camadas por confiança: OAB e processos cadastrados são match forte; nomes (clientes selecionados e adicionais) são match médio.">
+              OAB · processos · clientes selecionados · nomes
             </span>
           </span>
+
+          {/* OABs monitoradas */}
+          <details className={diarioStyles.termosCollapse}>
+            <summary className={diarioStyles.termosSummary}>
+              OABs ({oabs.length})
+            </summary>
+            <div className={diarioStyles.termosChips}>
+              {oabs.map((o, i) => (
+                <span key={`${o.numero}/${o.uf}`} className={diarioStyles.termoChipCustom}>
+                  {o.numero}/{o.uf}
+                  <button
+                    className={diarioStyles.termoRemove}
+                    onClick={() => {
+                      const next = oabs.filter((_, j) => j !== i)
+                      setOabs(next)
+                      salvarMonitoramento.mutate({ oabs: next })
+                    }}
+                  >×</button>
+                </span>
+              ))}
+              <div className={diarioStyles.termoAddInline} style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                <input
+                  className={diarioStyles.termoInputInline}
+                  placeholder="Número"
+                  value={novaOabNumero}
+                  onChange={(e) => setNovaOabNumero(e.target.value.replace(/\D/g, ''))}
+                  style={{ width: '80px' }}
+                />
+                <input
+                  className={diarioStyles.termoInputInline}
+                  placeholder="UF"
+                  value={novaOabUf}
+                  maxLength={2}
+                  onChange={(e) => setNovaOabUf(e.target.value.toUpperCase().replace(/[^A-Z]/g, ''))}
+                  style={{ width: '46px' }}
+                />
+                <button
+                  className={diarioStyles.btnVincular}
+                  disabled={!novaOabNumero || novaOabUf.length !== 2}
+                  onClick={() => {
+                    const nova = { numero: novaOabNumero, uf: novaOabUf }
+                    if (!oabs.some((o) => o.numero === nova.numero && o.uf === nova.uf)) {
+                      const next = [...oabs, nova]
+                      setOabs(next)
+                      salvarMonitoramento.mutate({ oabs: next })
+                    }
+                    setNovaOabNumero('')
+                    setNovaOabUf('')
+                  }}
+                >
+                  + OAB
+                </button>
+              </div>
+            </div>
+          </details>
+
+          {/* Clientes monitorados por nome */}
+          <details className={diarioStyles.termosCollapse}>
+            <summary className={diarioStyles.termosSummary}>
+              Clientes monitorados ({clientesMonitorados.length})
+            </summary>
+            <div
+              className={diarioStyles.termosChips}
+              style={{ flexDirection: 'column', alignItems: 'stretch', maxHeight: '260px', overflowY: 'auto' }}
+            >
+              {[...clientes].sort((a, b) => a.nome.localeCompare(b.nome)).map((c) => (
+                <label
+                  key={c.id}
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#cbd5e1', padding: '2px 0', cursor: 'pointer' }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!c.monitorar_diario}
+                    disabled={toggleMonitorarCliente.isPending}
+                    onChange={(e) => toggleMonitorarCliente.mutate({ id: c.id, monitorar_diario: e.target.checked })}
+                  />
+                  {c.nome}
+                </label>
+              ))}
+              {clientes.length === 0 && (
+                <span style={{ fontSize: '12px', color: '#888' }}>Nenhum cliente cadastrado.</span>
+              )}
+            </div>
+          </details>
+
+          {/* Nomes adicionais (sem OAB vinculada) */}
           <details className={diarioStyles.termosCollapse}>
             <summary className={diarioStyles.termosSummary}>
               Nomes adicionais ({termosCustom.length})
@@ -896,30 +1008,40 @@ export default function DiarioPage() {
               )}
 
               <div className={diarioStyles.matchBox}>
+                {match.hasOabMatch && (
+                  <span className={`${diarioStyles.matchBadge} ${diarioStyles.matchProcesso}`} title="Encontrado pela OAB monitorada — match forte">
+                    OAB {match.oabMatch}
+                  </span>
+                )}
                 {match.hasRegisteredProcess && (
-                  <span className={`${diarioStyles.matchBadge} ${diarioStyles.matchProcesso}`}>Processo cadastrado</span>
+                  <span className={`${diarioStyles.matchBadge} ${diarioStyles.matchProcesso}`} title="Processo cadastrado no sistema (match por CNJ) — match forte">Processo cadastrado</span>
                 )}
                 {match.hasExactName && (
-                  <span className={`${diarioStyles.matchBadge} ${diarioStyles.matchExato}`}>Nome exato</span>
+                  <span className={`${diarioStyles.matchBadge} ${diarioStyles.matchExato}`} title="Nome encontrado no texto — confirme o cliente correto">Nome encontrado</span>
                 )}
               </div>
 
-              {(match.primaryClientName || match.relatedProcesses.length > 0 || nomesExatos.length > 0) && (
+              {(match.hasOabMatch || match.linkedClientNames.length > 0 || match.relatedProcesses.length > 0 || nomesExatos.length > 0) && (
                 <div className={diarioStyles.matchDetails}>
-                  {match.primaryClientName && (
+                  {match.hasOabMatch && (
                     <div>
-                      <span className={diarioStyles.iaLabel}>Cliente provável</span> {match.primaryClientName}
+                      <span className={diarioStyles.iaLabel}>OAB monitorada</span> {match.oabMatch}
+                    </div>
+                  )}
+                  {match.linkedClientNames.length > 0 && (
+                    <div>
+                      <span className={diarioStyles.iaLabel}>Cliente</span> {match.linkedClientNames.slice(0, 3).join(' · ')}
                     </div>
                   )}
                   {match.relatedProcesses.length > 0 && (
                     <div>
-                      <span className={diarioStyles.iaLabel}>Processo exato</span>{' '}
+                      <span className={diarioStyles.iaLabel}>Processo cadastrado</span>{' '}
                       {match.relatedProcesses.slice(0, 3).map((processo) => processo.numero_cnj).join(' · ')}
                     </div>
                   )}
                   {nomesExatos.length > 0 && (
                     <div>
-                      <span className={diarioStyles.iaLabel}>Nome exato encontrado</span> {nomesExatos.slice(0, 3).join(' · ')}
+                      <span className={diarioStyles.iaLabel}>Nome encontrado no texto</span> {nomesExatos.slice(0, 3).join(' · ')}
                     </div>
                   )}
                 </div>

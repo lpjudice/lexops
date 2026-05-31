@@ -48,6 +48,8 @@ class PublicacaoOut(PublicacaoBase):
     analise_ia: str | None = None
     cliente_nome_pub: str | None = None
     url_fonte: str | None = None
+    comunica_id: str | None = None
+    match_oab: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

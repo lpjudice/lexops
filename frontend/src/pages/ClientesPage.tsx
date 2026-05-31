@@ -87,6 +87,12 @@ export default function ClientesPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['clientes'] }),
   })
 
+  const toggleMonitorar = useMutation({
+    mutationFn: ({ id, monitorar_diario }: { id: string; monitorar_diario: boolean }) =>
+      clientesApi.atualizar(id, { monitorar_diario }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['clientes'] }),
+  })
+
   return (
     <div>
       <div className={styles.pageHeader}>
@@ -140,10 +146,24 @@ export default function ClientesPage() {
                   <span className={cs.nome}>{c.nome}</span>
                   <span className={styles.badge}>{c.tipo}</span>
                   {c.incompleto && <span className={cs.incompleto}>Incompleto</span>}
+                  {c.monitorar_diario && (
+                    <span className={styles.badge} style={{ background: '#064e3b', color: '#6ee7b7', borderColor: '#065f46' }} title="Nome incluído na busca automática do Diário Oficial">
+                      ◎ Diário
+                    </span>
+                  )}
                   {c.email && <span className={cs.meta}>✉ {c.email}</span>}
                   {c.telefone && <span className={cs.meta}>☏ {c.telefone}</span>}
                 </div>
                 <div className={cs.cardActions}>
+                  <button
+                    className={styles.btnTable}
+                    disabled={toggleMonitorar.isPending}
+                    title={c.monitorar_diario ? 'Parar de monitorar este cliente no Diário Oficial' : 'Monitorar o nome deste cliente no Diário Oficial'}
+                    style={c.monitorar_diario ? { color: '#6ee7b7', borderColor: '#065f46' } : undefined}
+                    onClick={() => toggleMonitorar.mutate({ id: c.id, monitorar_diario: !c.monitorar_diario })}
+                  >
+                    {c.monitorar_diario ? '◎ Monitorando' : '○ Monitorar Diário'}
+                  </button>
                   <Link to={`/clientes/${c.id}`} className={styles.btnTable}>Ver</Link>
                   <button className={styles.btnTable}
                     onClick={() => {

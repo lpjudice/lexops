@@ -301,6 +301,20 @@ def _run_migrations() -> None:
             ) sub
             WHERE a.id = sub.anotacao_id
         """))
+        # Diário Oficial: dedup por id estável da Comunica + match por OAB
+        conn.execute(text(
+            "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS comunica_id VARCHAR(64)"
+        ))
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_publicacoes_comunica_id ON publicacoes (comunica_id)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS match_oab VARCHAR(20)"
+        ))
+        # Cliente: opt-in de monitoramento por nome no Diário Oficial
+        conn.execute(text(
+            "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS monitorar_diario BOOLEAN NOT NULL DEFAULT false"
+        ))
 
         conn.commit()
 

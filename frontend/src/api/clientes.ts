@@ -10,6 +10,7 @@ export interface Cliente {
   endereco?: string
   observacoes?: string
   incompleto?: boolean
+  monitorar_diario?: boolean
   projeto_nome?: string
   worktree_nome?: string
   created_at: string
@@ -25,6 +26,7 @@ export interface ClienteCreate {
   endereco?: string
   observacoes?: string
   incompleto?: boolean
+  monitorar_diario?: boolean
 }
 
 export interface Documento {

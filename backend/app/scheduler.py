@@ -106,6 +106,7 @@ def _sync_diarios_monitorados() -> None:
         from app.routers.diario import (
             _filtrar_itens_monitorados_exatos,
             _inserir_publicacoes,
+            _oabs_monitoradas,
             _termos_monitorados_para_busca,
         )
         from app.services.scraping_tribunais import scrape_todos
@@ -113,8 +114,9 @@ def _sync_diarios_monitorados() -> None:
         db = SessionLocal()
         try:
             termos = _termos_monitorados_para_busca(db)
-            if not termos:
-                logger.info("Scheduler: nenhum termo monitorado para Diário Oficial")
+            oabs = _oabs_monitoradas()
+            if not termos and not oabs:
+                logger.info("Scheduler: nenhum termo/OAB monitorado para Diário Oficial")
                 return
 
             totais = {"inseridas": 0, "duplicatas": 0, "erros": 0}
@@ -130,6 +132,7 @@ def _sync_diarios_monitorados() -> None:
                         tribunais=[tribunal],
                         termos=termos,
                         days_back=DIARIO_DAYS_BACK,
+                        oabs=oabs or None,
                     )
                     itens = _filtrar_itens_monitorados_exatos(itens, db, termos)
                     ins, dup, err = _inserir_publicacoes(itens, db)

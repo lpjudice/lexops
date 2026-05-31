@@ -56,6 +56,11 @@ class Publicacao(Base):
     # Rastreabilidade
     email_message_id: Mapped[str | None] = mapped_column(String(255), unique=True)
     url_fonte: Mapped[str | None] = mapped_column(Text)  # link para o email ou página do diário
+    # ID estável da comunicação no DJEN/Comunica — chave de dedup à prova de duplicata
+    comunica_id: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
+    # Quando a publicação veio da busca por OAB, guarda qual OAB casou (ex.: "14477/ES").
+    # Marca de match forte: garante exibição mesmo sem nome/CNJ no texto.
+    match_oab: Mapped[str | None] = mapped_column(String(20))
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

@@ -21,6 +21,8 @@ class ClienteBase(BaseModel):
     endereco: str | None = None
     observacoes: str | None = None
     incompleto: bool = False
+    # Opt-in: quando True, o nome deste cliente entra na busca automática do Diário Oficial.
+    monitorar_diario: bool = False
 
     @field_validator("cpf_cnpj", "email", "telefone", "endereco", "observacoes", mode="before")
     @classmethod
@@ -40,6 +42,7 @@ class ClienteUpdate(BaseModel):
     telefone: str | None = None
     endereco: str | None = None
     observacoes: str | None = None
+    monitorar_diario: bool | None = None
 
 
 class ClienteOut(ClienteBase):

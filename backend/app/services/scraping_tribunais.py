@@ -273,25 +273,36 @@ def _extrair_por_cnj_global(
     return resultado
 
 
-def _consultas_comunica(termos: list[str] | None = None) -> list[tuple[str, int, str, str, int]]:
+def _consultas_comunica(
+    termos: list[str] | None = None,
+    oabs: list[dict] | None = None,
+) -> list[tuple[str, int, dict, int, bool]]:
     """
     Gera uma lista enxuta de consultas para a API pública.
-    Mantém variações úteis, mas evita dezenas de requests para um único nome.
-    """
-    consultas: list[tuple[str, int, str, str, int]] = []
-    vistos: set[tuple[str, str]] = set()
+    Cada item: (origem, prioridade, params_extra, max_paginas, is_oab).
 
-    def adicionar(origem: str, prioridade: int, campo: str, termo: str, max_paginas: int) -> None:
-        termo = _normalizar_espacos(termo)
-        if len(termo) < 3:
-            return
-        chave = (campo, termo.casefold())
-        if chave in vistos:
+    A consulta por OAB (numeroOab+ufOab) é a de maior confiança: captura tudo
+    dirigido ao advogado sem ambiguidade de homônimo, então vem primeiro.
+    """
+    consultas: list[tuple[str, int, dict, int, bool]] = []
+    vistos: set[tuple] = set()
+
+    def adicionar(origem: str, prioridade: int, params: dict, max_paginas: int, is_oab: bool) -> None:
+        chave = tuple(sorted((k, str(v).casefold()) for k, v in params.items()))
+        if not chave or chave in vistos:
             return
         vistos.add(chave)
-        consultas.append((origem, prioridade, campo, termo, max_paginas))
+        consultas.append((origem, prioridade, params, max_paginas, is_oab))
 
-    for termo_original in termos or [""]:
+    # OAB — alta confiança, sem ruído de nome
+    for oab in oabs or []:
+        numero = re.sub(r"\D", "", str(oab.get("numero") or ""))
+        uf = str(oab.get("uf") or "").strip().upper()
+        if not numero or len(uf) != 2:
+            continue
+        adicionar(f"oab:{numero}/{uf}", -2, {"numeroOab": numero, "ufOab": uf}, COMUNICA_MAX_PAGINAS, True)
+
+    for termo_original in termos or []:
         termo_original = _normalizar_espacos(termo_original)
         if not termo_original:
             continue
@@ -299,19 +310,20 @@ def _consultas_comunica(termos: list[str] | None = None) -> list[tuple[str, int,
             continue
 
         if _termo_parece_cnj(termo_original):
-            adicionar(termo_original, -1, "numeroProcesso", re.sub(r"\D", "", termo_original), COMUNICA_MAX_PAGINAS)
+            adicionar(termo_original, -1, {"numeroProcesso": re.sub(r"\D", "", termo_original)}, COMUNICA_MAX_PAGINAS, False)
         else:
-            adicionar(termo_original, 0, "nomeAdvogado", termo_original, COMUNICA_MAX_PAGINAS_NOME)
-            adicionar(termo_original, 1, "nomeParte", termo_original, COMUNICA_MAX_PAGINAS_NOME)
-            adicionar(termo_original, 2, "texto", termo_original, 1)
+            adicionar(termo_original, 0, {"nomeAdvogado": termo_original}, COMUNICA_MAX_PAGINAS_NOME, False)
+            adicionar(termo_original, 1, {"nomeParte": termo_original}, COMUNICA_MAX_PAGINAS_NOME, False)
+            adicionar(termo_original, 2, {"texto": termo_original}, 1, False)
             tokens = _tokenizar_relevantes(termo_original)
             sobrenome = tokens[-1] if len(tokens) >= 3 else ""
             if len(sobrenome) >= 5 and sobrenome not in SOBRENOMES_FALLBACK_BLOQUEADOS:
-                adicionar(termo_original, 3, "texto", sobrenome, 1)
+                adicionar(termo_original, 3, {"texto": sobrenome}, 1, False)
 
-    if termos:
+    if consultas:
         return consultas
-    return [("", 0, "texto", "", 1)]
+    # Nada monitorado: varredura genérica do tribunal/janela (fetch-all)
+    return [("", 0, {}, 1, False)]
 
 
 def _normalizar_data_comunica(valor: str | None) -> date | None:
@@ -358,6 +370,8 @@ def _comunica_para_publicacao(item: dict, tribunal_alvo: str) -> dict | None:
         numero_cnj=numero_cnj,
     )
     pub["url_fonte"] = url_fonte
+    # ID estável da comunicação — base de dedup à prova de duplicata
+    pub["comunica_id"] = str(item.get("hash") or item.get("id") or "").strip() or None
     return pub
 
 
@@ -366,22 +380,25 @@ def _buscar_comunica_api(
     data_inicio: date,
     data_fim: date,
     termos: list[str] | None = None,
+    oabs: list[dict] | None = None,
 ) -> list[dict]:
     """
     Consulta a API pública do DJEN/Comunica.
     Quando `tribunal` é DJEN, faz busca nacional; caso contrário, filtra a sigla.
+    Consultas por OAB são autoritativas: o resultado é aceito sem filtro de texto
+    e marcado com `match_oab` para garantir exibição mesmo sem nome/CNJ no corpo.
     """
     if data_fim < data_inicio:
         data_inicio, data_fim = data_fim, data_inicio
 
     vistos: set[str] = set()
     resultado: list[dict] = []
-    consultas = _consultas_comunica(termos)
+    consultas = _consultas_comunica(termos, oabs)
 
     sucesso_por_origem: dict[str, int] = {}
 
     with httpx.Client(headers=HEADERS, timeout=COMUNICA_TIMEOUT_SECONDS, follow_redirects=True) as client:
-        for origem, prioridade, campo, termo, max_paginas in consultas:
+        for origem, prioridade, params_extra, max_paginas, is_oab in consultas:
             if origem and sucesso_por_origem.get(origem, 99) < prioridade:
                 continue
 
@@ -396,8 +413,7 @@ def _buscar_comunica_api(
                     "dataDisponibilizacaoInicio": data_inicio.isoformat(),
                     "dataDisponibilizacaoFim": data_fim.isoformat(),
                 }
-                if termo:
-                    params[campo] = termo
+                params.update(params_extra)
                 if tribunal != "DJEN":
                     params["siglaTribunal"] = tribunal
 
@@ -430,10 +446,15 @@ def _buscar_comunica_api(
                     pub = _comunica_para_publicacao(item, tribunal)
                     if not pub:
                         continue
-                    if termos and not _texto_tem_match_monitorado(pub.get("texto_completo") or pub.get("texto_resumo") or "", termos):
+                    if is_oab:
+                        # Origem confiável: aceita direto e marca o match forte.
+                        pub["match_oab"] = origem.split(":", 1)[-1]
+                    elif termos and not _texto_tem_match_monitorado(
+                        pub.get("texto_completo") or pub.get("texto_resumo") or "", termos
+                    ):
                         continue
                     itens_encontrados_nesta_consulta += 1
-                    chave = str(item.get("id") or "") or "|".join(
+                    chave = pub.get("comunica_id") or str(item.get("id") or "") or "|".join(
                         [
                             pub.get("fonte", "") or "",
                             pub.get("tribunal", "") or "",
@@ -646,12 +667,16 @@ def scrape_tjrj(data: date | None = None, termos: list[str] | None = None) -> li
 
 # ── DJEN legado/experimental ──────────────────────────────────────────────────
 
-def scrape_djen(data: date | None = None, termos: list[str] | None = None) -> list[dict]:
+def scrape_djen(
+    data: date | None = None,
+    termos: list[str] | None = None,
+    oabs: list[dict] | None = None,
+) -> list[dict]:
     """
     Consulta pública do DJEN via API nacional do Comunica.
     """
     data = data or date.today() - timedelta(days=1)
-    return _buscar_comunica_api("DJEN", data, data, termos=termos)
+    return _buscar_comunica_api("DJEN", data, data, termos=termos, oabs=oabs)
 
 
 # ── Dispatcher ────────────────────────────────────────────────────────────────
@@ -661,10 +686,12 @@ def scrape_todos(
     data: date | None = None,
     termos: list[str] | None = None,
     days_back: int = 1,
+    oabs: list[dict] | None = None,
 ) -> list[dict]:
     """
     Roda todos os scrapers (ou só os solicitados) e retorna lista unificada.
     Cada termo é buscado INDIVIDUALMENTE para não combinar nomes diferentes.
+    OABs são monitoradas via API nacional do Comunica (busca de alta confiança).
     """
     mapa = {
         "TJES": scrape_tjes,
@@ -689,10 +716,10 @@ def scrape_todos(
 
         # DJEN e os estados mais recentes ficam mais confiáveis via API pública do CNJ.
         if tribunal in {"DJEN", "TJES", "TJSP", "TJAM", "TJRJ"}:
-            novos = _buscar_comunica_api(tribunal, data_inicio, data_fim, termos=termos)
+            novos = _buscar_comunica_api(tribunal, data_inicio, data_fim, termos=termos, oabs=oabs)
             if novos or tribunal == "DJEN":
                 for pub in novos:
-                    chave = "|".join(
+                    chave = pub.get("comunica_id") or "|".join(
                         [
                             str(pub.get("data_publicacao", "")),
                             pub.get("fonte", "") or "",

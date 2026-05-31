@@ -39,6 +39,8 @@ export interface Publicacao {
   analise_ia?: string      // JSON serializado
   cliente_nome_pub?: string
   url_fonte?: string
+  comunica_id?: string
+  match_oab?: string       // ex.: "14477/ES" — match forte por OAB
   created_at: string
 }
 
@@ -49,9 +51,15 @@ export interface SyncResult {
   fonte: string
 }
 
+export interface OabMonitorada {
+  numero: string
+  uf: string
+}
+
 export interface DiarioMonitoringConfig {
   tribunais: string[]
   termos_extras: string[]
+  oabs: OabMonitorada[]
   auto_sync: boolean
 }
 

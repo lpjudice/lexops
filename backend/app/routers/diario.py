@@ -25,9 +25,15 @@ router = APIRouter(prefix="/diario", tags=["diario"])
 DIARIO_SYNC_JOBS: dict[str, dict] = {}
 
 
+class OabMonitorada(BaseModel):
+    numero: str
+    uf: str
+
+
 class DiarioMonitoringConfig(BaseModel):
     tribunais: list[str]
     termos_extras: list[str]
+    oabs: list[OabMonitorada] = []
     auto_sync: bool = True
 
 
@@ -74,8 +80,23 @@ def _termo_exato_no_texto(texto: str, termo: str) -> bool:
     return re.search(padrao, _normalizar_texto_busca(texto)) is not None
 
 
+def _oabs_monitoradas() -> list[dict]:
+    from app.services.diario_monitoring import load_monitoring_config
+
+    return load_monitoring_config().get("oabs") or []
+
+
+def _clientes_monitorados(db: Session) -> list[Cliente]:
+    """Apenas clientes com opt-in de monitoramento no Diário (evita ruído de homônimo)."""
+    return [
+        c
+        for c in db.query(Cliente).filter(Cliente.monitorar_diario.is_(True)).all()
+        if getattr(c, "nome", None) and c.nome.strip()
+    ]
+
+
 def _nomes_monitorados(db: Session, termos_extras: list[str] | None = None) -> list[str]:
-    nomes = [c.nome.strip() for c in db.query(Cliente).all() if getattr(c, "nome", None) and c.nome.strip()]
+    nomes = [c.nome.strip() for c in _clientes_monitorados(db)]
     nomes.extend([t.strip() for t in (termos_extras or []) if t and t.strip()])
     vistos: set[str] = set()
     resultado: list[str] = []
@@ -100,7 +121,6 @@ def _processos_por_cnj(db: Session) -> dict[str, Processo]:
 def _termos_monitorados_para_busca(
     db: Session,
     termos_busca: list[str] | None = None,
-    incluir_clientes: bool = False,
 ) -> list[str]:
     from app.services.diario_monitoring import load_monitoring_config
 
@@ -108,12 +128,8 @@ def _termos_monitorados_para_busca(
     entradas: list[str] = []
     entradas.extend(termos_busca or [])
     entradas.extend(config.get("termos_extras") or [])
-    if incluir_clientes:
-        entradas.extend(
-            cliente.nome.strip()
-            for cliente in db.query(Cliente).all()
-            if getattr(cliente, "nome", None) and cliente.nome.strip()
-        )
+    # Clientes com opt-in de monitoramento entram na busca por nome (seletivo)
+    entradas.extend(cliente.nome.strip() for cliente in _clientes_monitorados(db))
     entradas.extend(
         processo.numero_cnj.strip()
         for processo in db.query(Processo).all()
@@ -174,6 +190,10 @@ def _filtrar_itens_monitorados_exatos(
 
     filtrados: list[dict] = []
     for item in itens:
+        # Origem por OAB é autoritativa: aceita sem exigir nome/CNJ no corpo.
+        if item.get("match_oab"):
+            filtrados.append(item)
+            continue
         ok, processo_id = _item_tem_match_monitorado_exato(item, processos_por_cnj, nomes_monitorados)
         if not ok:
             continue
@@ -205,6 +225,7 @@ def _run_scraping_job(
     db = SessionLocal()
     try:
         termos_monitorados = _termos_monitorados_para_busca(db, termos or [])
+        oabs_monitoradas = _oabs_monitoradas()
         dias = _periodo_dias(days_back)
         _set_job(
             job_id,
@@ -218,6 +239,7 @@ def _run_scraping_job(
             data=None,
             termos=termos_monitorados or None,
             days_back=days_back,
+            oabs=oabs_monitoradas or None,
         )
         itens_janela = _filtrar_itens_monitorados_exatos(itens_janela, db, termos_monitorados)
         for index, dia in enumerate(dias, start=1):
@@ -270,7 +292,17 @@ def _inserir_publicacoes(itens: list[dict], db: Session) -> tuple[int, int, int]
     inseridas = duplicatas = erros = 0
     for item in itens:
         try:
-            # Deduplicação por email_message_id (Gmail) ou por cnj+data+fonte
+            # Deduplicação por id estável da Comunica (mais confiável), depois
+            # por email_message_id (Gmail), depois por cnj+data+fonte.
+            comunica_id = item.get("comunica_id")
+            if comunica_id:
+                ja_existe = db.query(Publicacao).filter(
+                    Publicacao.comunica_id == comunica_id
+                ).first()
+                if ja_existe:
+                    duplicatas += 1
+                    continue
+
             email_id = item.get("email_message_id")
             if email_id:
                 existe = db.query(Publicacao).filter(
@@ -326,6 +358,8 @@ def _inserir_publicacoes(itens: list[dict], db: Session) -> tuple[int, int, int]
                 email_message_id=email_id,
                 processo_id=processo_id,
                 url_fonte=item.get("url_fonte"),
+                comunica_id=comunica_id,
+                match_oab=item.get("match_oab"),
             )
             db.add(pub)
             inseridas += 1
@@ -364,6 +398,7 @@ def sync_scraping(
         data=data,
         termos=termos_monitorados or None,
         days_back=days_back,
+        oabs=_oabs_monitoradas() or None,
     )
     itens = _filtrar_itens_monitorados_exatos(itens, db, termos_monitorados)
     ins, dup, err = _inserir_publicacoes(itens, db)
