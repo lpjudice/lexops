@@ -183,13 +183,13 @@
 
 /* ─── Topbar ─────────────────────────────────────────────────────────── */
 .topbar {
-  height: 56px;
+  height: calc(56px + env(safe-area-inset-top, 0px));
   background: var(--white);
   border-bottom: 1px solid var(--gray-border);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 28px;
+  padding: env(safe-area-inset-top, 0px) 28px 0;
   flex-shrink: 0;
   z-index: 5;
   gap: 12px;
@@ -332,11 +332,11 @@
   }
 
   .main {
-    padding: 20px 16px;
+    padding: 20px 16px calc(20px + env(safe-area-inset-bottom, 0px));
   }
 
   .topbar {
-    padding: 0 20px;
+    padding: env(safe-area-inset-top, 0px) 20px 0;
   }
 
   .userName {
@@ -362,7 +362,7 @@
   }
 
   .sidebarTop {
-    padding: 14px 16px 10px;
+    padding: calc(14px + env(safe-area-inset-top, 0px)) 16px 10px;
     justify-content: space-between;
   }
 
@@ -418,21 +418,21 @@
   }
 
   .main {
-    padding: 16px 14px;
+    padding: 16px 14px calc(16px + env(safe-area-inset-bottom, 0px));
   }
 
   .topbar {
-    padding: 0 14px;
+    padding: env(safe-area-inset-top, 0px) 14px 0;
   }
 }
 
 @media (max-width: 480px) {
   .main {
-    padding: 12px 10px;
+    padding: 12px 10px calc(12px + env(safe-area-inset-bottom, 0px));
   }
 
   .topbar {
-    padding: 0 12px;
-    height: 52px;
+    padding: env(safe-area-inset-top, 0px) 12px 0;
+    height: calc(52px + env(safe-area-inset-top, 0px));
   }
 }
