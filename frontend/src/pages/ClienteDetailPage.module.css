@@ -66,7 +66,11 @@
   gap: 2px;
   border-bottom: 2px solid #e5e7eb;
   margin-bottom: 24px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
 }
+.abas::-webkit-scrollbar { display: none; }
 
 .aba {
   padding: 8px 18px;
@@ -78,6 +82,8 @@
   border-bottom: 2px solid transparent;
   margin-bottom: -2px;
   transition: color 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .aba:hover { color: #1a1a2e; }
 .abaAtiva {

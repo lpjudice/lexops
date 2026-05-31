@@ -170,6 +170,7 @@
   display: flex;
   gap: 8px;
   margin-bottom: 20px;
+  flex-wrap: wrap;
 }
 
 .filtroBtn {
