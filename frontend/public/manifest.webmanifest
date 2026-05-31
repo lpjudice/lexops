@@ -1,0 +1,14 @@
+{
+  "name": "Sui — Pimenta Judice",
+  "short_name": "Sui",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1d1e20",
+  "theme_color": "#ffffff",
+  "icons": [
+    { "src": "/favicon.png", "sizes": "64x64", "type": "image/png" },
+    { "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png", "purpose": "any" }
+  ]
+}
