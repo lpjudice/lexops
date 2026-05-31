@@ -141,8 +141,8 @@ export default function DashboardPage() {
   return (
     <div className={styles.page}>
 
-      {/* ── Row 1: Prazos + Tarefas + Andamentos ───────────────────────── */}
-      <div className={styles.gridThree}>
+      {/* ── Masonry: painéis se encaixam, sem espaço branco irregular ──── */}
+      <div className={styles.masonry}>
 
         {/* Prazos Pendentes — card list */}
         <div className={styles.panel}>
@@ -229,10 +229,6 @@ export default function DashboardPage() {
             </div>
           )}
         </div>
-      </div>
-
-      {/* ── Row 2: Publicações + Contratos/Quick Actions ────────────────── */}
-      <div className={styles.gridTwo}>
 
         {/* Últimas Publicações */}
         <div className={styles.panel}>
@@ -273,11 +269,10 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Right: Contratos + Quick Actions */}
-        <div className={styles.rightCol}>
-          <div className={styles.panel}>
-            <div className={styles.panelHeader}>
-              <span className={styles.panelTitle}>Contratos</span>
+        {/* Contratos */}
+        <div className={styles.panel}>
+          <div className={styles.panelHeader}>
+            <span className={styles.panelTitle}>Contratos</span>
               <button className={styles.panelLink} onClick={() => navigate('/contratos')}>Ver todos</button>
             </div>
             {contratos.length === 0 ? (
@@ -307,7 +302,6 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
-      </div>
 
       {/* ── KPI Cards (bottom, with privacy toggles) ─────────────────────── */}
       <div className={styles.kpiRow}>
