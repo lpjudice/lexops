@@ -141,6 +141,15 @@ export default function DashboardPage() {
   return (
     <div className={styles.page}>
 
+      {/* ── Ações Rápidas — barra fina full-width ──────────────────────── */}
+      <div className={styles.acoesBar}>
+        <span className={styles.acoesBarLabel}>Ações Rápidas</span>
+        <button className={styles.quickBtn} onClick={() => navigate('/clientes')}><Plus size={14} />Novo Cliente</button>
+        <button className={styles.quickBtn} onClick={() => navigate('/prazos')}><Plus size={14} />Novo Prazo</button>
+        <button className={styles.quickBtn} onClick={() => navigate('/contratos')}><Plus size={14} />Novo Contrato</button>
+        <button className={styles.quickBtn} onClick={() => navigate('/processos')}><Plus size={14} />Novo Processo</button>
+      </div>
+
       {/* ── Masonry: painéis se encaixam, sem espaço branco irregular ──── */}
       <div className={styles.masonry}>
 
@@ -290,16 +299,6 @@ export default function DashboardPage() {
                 ))}
               </div>
             )}
-          </div>
-
-          <div className={styles.panel}>
-            <div className={styles.panelHeader}><span className={styles.panelTitle}>Ações Rápidas</span></div>
-            <div className={styles.quickActions}>
-              <button className={styles.quickBtn} onClick={() => navigate('/clientes')}><Plus size={14} />Novo Cliente</button>
-              <button className={styles.quickBtn} onClick={() => navigate('/prazos')}><Plus size={14} />Novo Prazo</button>
-              <button className={styles.quickBtn} onClick={() => navigate('/contratos')}><Plus size={14} />Novo Contrato</button>
-              <button className={styles.quickBtn} onClick={() => navigate('/processos')}><Plus size={14} />Novo Processo</button>
-            </div>
           </div>
         </div>
 
