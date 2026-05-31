@@ -568,9 +568,10 @@
   color: #6b7280;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  white-space: nowrap;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
   gap: 6px;
 }
 
@@ -581,6 +582,9 @@
   text-transform: none;
   letter-spacing: 0;
   cursor: default;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  min-width: 0;
 }
 
 .termosChips {
