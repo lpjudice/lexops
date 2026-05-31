@@ -117,7 +117,7 @@ export default function Diario2Page() {
     <div>
       <div className={styles.pageHeader}>
         <div>
-          <h1 className={styles.pageTitle}>Diário 2</h1>
+          <h1 className={styles.pageTitle}>Recorte Digital OAB</h1>
           <p className={diario2Styles.muted}>Publicações importadas do Gmail do Recorte Digital/OABES.</p>
         </div>
         <div className={diario2Styles.toolbar}>

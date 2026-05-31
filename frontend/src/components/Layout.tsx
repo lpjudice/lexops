@@ -68,7 +68,7 @@ const navGroups = [
     label: 'CONTEÚDO',
     items: [
       { to: '/diario', label: 'Diário Oficial', Icon: Newspaper },
-      { to: '/diario2', label: 'Diário 2', Icon: Newspaper },
+      { to: '/diario2', label: 'Recorte Digital OAB', Icon: Newspaper },
       { to: '/teses', label: 'Teses IA', Icon: Sparkles },
       { to: '/jurisprudencia', label: 'Jurisprudência', Icon: Scale },
     ],
@@ -101,7 +101,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/processos': 'Processos',
   '/prazos': 'Prazos',
   '/diario': 'Diário Oficial',
-  '/diario2': 'Diário 2',
+  '/diario2': 'Recorte Digital OAB',
   '/teses': 'Teses IA',
   '/jurisprudencia': 'Jurisprudência',
   '/contratos': 'Contratos',

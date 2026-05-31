@@ -29,6 +29,20 @@ TRIBUNAL_URLS: dict[str, str] = {
     "DJEN": "https://comunica.pje.jus.br/",
 }
 
+# Tribunais de Justiça estaduais por UF — todos consultáveis via API nacional do Comunica
+# (filtro siglaTribunal). Permite escolher qualquer estado do Brasil no Diário Oficial.
+TRIBUNAIS_ESTADUAIS: dict[str, str] = {
+    "AC": "TJAC", "AL": "TJAL", "AP": "TJAP", "AM": "TJAM", "BA": "TJBA",
+    "CE": "TJCE", "DF": "TJDFT", "ES": "TJES", "GO": "TJGO", "MA": "TJMA",
+    "MT": "TJMT", "MS": "TJMS", "MG": "TJMG", "PA": "TJPA", "PB": "TJPB",
+    "PR": "TJPR", "PE": "TJPE", "PI": "TJPI", "RJ": "TJRJ", "RN": "TJRN",
+    "RS": "TJRS", "RO": "TJRO", "RR": "TJRR", "SC": "TJSC", "SP": "TJSP",
+    "SE": "TJSE", "TO": "TJTO",
+}
+
+# Siglas aceitas nas rotas de sincronização do Diário Oficial.
+TRIBUNAIS_VALIDOS: set[str] = {"DJEN", *TRIBUNAIS_ESTADUAIS.values()}
+
 TIPO_ATO_KEYWORDS = {
     "sentenca": ["sentença", "sentenca", "procedente", "improcedente"],
     "acordao":  ["acórdão", "acordao", "provimento", "câmara", "turma"],
@@ -711,30 +725,30 @@ def scrape_todos(
     resultado: list[dict] = []
 
     for tribunal in alvos:
-        if tribunal not in mapa:
+        # A API nacional do Comunica cobre o DJEN e qualquer TJ estadual (filtro siglaTribunal).
+        # Assim, qualquer UF do Brasil é consultável sem precisar de scraper dedicado.
+        novos = _buscar_comunica_api(tribunal, data_inicio, data_fim, termos=termos, oabs=oabs)
+        if novos or tribunal == "DJEN":
+            for pub in novos:
+                chave = pub.get("comunica_id") or "|".join(
+                    [
+                        str(pub.get("data_publicacao", "")),
+                        pub.get("fonte", "") or "",
+                        pub.get("tribunal", "") or "",
+                        pub.get("numero_cnj", "") or "",
+                        (pub.get("texto_resumo", "") or "")[:180],
+                    ]
+                )
+                if chave not in visto:
+                    visto.add(chave)
+                    resultado.append(pub)
+            if novos:
+                continue
+
+        # Fallback HTML apenas para tribunais com scraper dedicado.
+        fn = mapa.get(tribunal)
+        if not fn:
             continue
-
-        # DJEN e os estados mais recentes ficam mais confiáveis via API pública do CNJ.
-        if tribunal in {"DJEN", "TJES", "TJSP", "TJAM", "TJRJ"}:
-            novos = _buscar_comunica_api(tribunal, data_inicio, data_fim, termos=termos, oabs=oabs)
-            if novos or tribunal == "DJEN":
-                for pub in novos:
-                    chave = pub.get("comunica_id") or "|".join(
-                        [
-                            str(pub.get("data_publicacao", "")),
-                            pub.get("fonte", "") or "",
-                            pub.get("tribunal", "") or "",
-                            pub.get("numero_cnj", "") or "",
-                            (pub.get("texto_resumo", "") or "")[:180],
-                        ]
-                    )
-                    if chave not in visto:
-                        visto.add(chave)
-                        resultado.append(pub)
-                if novos:
-                    continue
-
-        fn = mapa[tribunal]
         for data_busca in datas_busca:
             for termo in termos_lista:
                 termos_individual = [termo] if termo else None

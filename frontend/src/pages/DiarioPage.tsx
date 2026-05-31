@@ -9,13 +9,46 @@ import type { Cliente } from '../api/clientes'
 import styles from './Page.module.css'
 import diarioStyles from './DiarioPage.module.css'
 
-const FONTES_DIARIO = [
-  { key: 'DJEN', label: 'DJEN', tribunais: ['DJEN'] },
-  { key: 'TJSP', label: 'DJSP', tribunais: ['TJSP'] },
-  { key: 'TJES', label: 'DJES', tribunais: ['TJES'] },
-  { key: 'TJAM', label: 'DJAM', tribunais: ['TJAM'] },
-  { key: 'TJRJ', label: 'DJRJ', tribunais: ['TJRJ'] },
-] as const
+// Tribunais de Justiça estaduais por UF — todos lidos da base nacional do DJEN/Comunica.
+// Selecionar estados apenas filtra a consulta nacional; nenhum estado = DJEN nacional (todos).
+const ESTADOS_BR: { uf: string; nome: string; sigla: string }[] = [
+  { uf: 'AC', nome: 'Acre', sigla: 'TJAC' },
+  { uf: 'AL', nome: 'Alagoas', sigla: 'TJAL' },
+  { uf: 'AP', nome: 'Amapá', sigla: 'TJAP' },
+  { uf: 'AM', nome: 'Amazonas', sigla: 'TJAM' },
+  { uf: 'BA', nome: 'Bahia', sigla: 'TJBA' },
+  { uf: 'CE', nome: 'Ceará', sigla: 'TJCE' },
+  { uf: 'DF', nome: 'Distrito Federal', sigla: 'TJDFT' },
+  { uf: 'ES', nome: 'Espírito Santo', sigla: 'TJES' },
+  { uf: 'GO', nome: 'Goiás', sigla: 'TJGO' },
+  { uf: 'MA', nome: 'Maranhão', sigla: 'TJMA' },
+  { uf: 'MT', nome: 'Mato Grosso', sigla: 'TJMT' },
+  { uf: 'MS', nome: 'Mato Grosso do Sul', sigla: 'TJMS' },
+  { uf: 'MG', nome: 'Minas Gerais', sigla: 'TJMG' },
+  { uf: 'PA', nome: 'Pará', sigla: 'TJPA' },
+  { uf: 'PB', nome: 'Paraíba', sigla: 'TJPB' },
+  { uf: 'PR', nome: 'Paraná', sigla: 'TJPR' },
+  { uf: 'PE', nome: 'Pernambuco', sigla: 'TJPE' },
+  { uf: 'PI', nome: 'Piauí', sigla: 'TJPI' },
+  { uf: 'RJ', nome: 'Rio de Janeiro', sigla: 'TJRJ' },
+  { uf: 'RN', nome: 'Rio Grande do Norte', sigla: 'TJRN' },
+  { uf: 'RS', nome: 'Rio Grande do Sul', sigla: 'TJRS' },
+  { uf: 'RO', nome: 'Rondônia', sigla: 'TJRO' },
+  { uf: 'RR', nome: 'Roraima', sigla: 'TJRR' },
+  { uf: 'SC', nome: 'Santa Catarina', sigla: 'TJSC' },
+  { uf: 'SP', nome: 'São Paulo', sigla: 'TJSP' },
+  { uf: 'SE', nome: 'Sergipe', sigla: 'TJSE' },
+  { uf: 'TO', nome: 'Tocantins', sigla: 'TJTO' },
+]
+const SIGLA_PARA_UF: Record<string, string> = Object.fromEntries(ESTADOS_BR.map((e) => [e.sigla, e.uf]))
+
+const PERIODOS_FILTRO: { label: string; dias: number | null }[] = [
+  { label: 'Todo período', dias: null },
+  { label: 'Últimos 7 dias', dias: 7 },
+  { label: 'Últimos 15 dias', dias: 15 },
+  { label: 'Últimos 30 dias', dias: 30 },
+  { label: 'Últimos 90 dias', dias: 90 },
+]
 
 const FONTE_LABEL: Record<string, string> = {
   gmail: 'Gmail',
@@ -281,10 +314,14 @@ export default function DiarioPage() {
   const [novaOabNumero, setNovaOabNumero] = useState('')
   const [novaOabUf, setNovaOabUf] = useState('')
   const [_termosAberto, _setTermosAberto] = useState(false)
-  const [pjeModalAberto, setPjeModalAberto] = useState(false)
-  const [pjeCpf, setPjeCpf] = useState('')
-  const [pjeSenha, setPjeSenha] = useState('')
-  const [pjeSaving, setPjeSaving] = useState(false)
+  // Estados (siglas de tribunal) escolhidos para sincronizar. Vazio = DJEN nacional (todos).
+  const [estadosSync, setEstadosSync] = useState<string[]>([])
+  const [estadosAberto, setEstadosAberto] = useState(false)
+  // Filtros do feed
+  const [filtroPeriodoDias, setFiltroPeriodoDias] = useState<number | null>(null)
+  const [buscaCliente, setBuscaCliente] = useState('')
+  const [filtroTribunal, setFiltroTribunal] = useState('')
+  const [buscaMonitorCliente, setBuscaMonitorCliente] = useState('')
 
 
   const parseAnalise = (pub: { analise_ia?: string }): AnaliseIA | null => {
@@ -403,42 +440,15 @@ export default function DiarioPage() {
     },
   })
 
-  const { data: pjeConfig } = useQuery({
-    queryKey: ['pje-config'],
-    queryFn: () => diarioApi.pjeConfig(),
-  })
-
-  const syncPje = useMutation({
-    mutationFn: () => diarioApi.syncPje(),
-    onSuccess: (r) => {
-      qc.invalidateQueries({ queryKey: ['diario'] })
-      setSyncMsg(`PJe: ${r.inseridas} novas, ${r.duplicatas} duplicatas (${r.total_pje} total)`)
-      setTimeout(() => setSyncMsg(null), 6000)
-    },
-    onError: () => {
-      setPjeModalAberto(true)
-    },
-  })
-
-  const handlePjeClick = () => {
-    if (pjeConfig?.configurado) {
-      syncPje.mutate()
-    } else {
-      setPjeModalAberto(true)
-    }
-  }
-
-  const handlePjeSaveConfig = async () => {
-    if (!pjeCpf || !pjeSenha) return
-    setPjeSaving(true)
-    try {
-      await diarioApi.savePjeConfig(pjeCpf, pjeSenha)
-      qc.invalidateQueries({ queryKey: ['pje-config'] })
-      setPjeModalAberto(false)
-      syncPje.mutate()
-    } finally {
-      setPjeSaving(false)
-    }
+  const sincronizarEstados = () => {
+    const tribunais = estadosSync.length ? estadosSync : ['DJEN']
+    const label = estadosSync.length === 0
+      ? 'DJEN nacional'
+      : estadosSync.length === 1
+        ? (SIGLA_PARA_UF[estadosSync[0]] ?? estadosSync[0])
+        : `${estadosSync.length} estados`
+    setEstadosAberto(false)
+    syncScraping.mutate({ tribunais, label })
   }
 
   const marcarLida = useMutation({
@@ -541,10 +551,33 @@ export default function DiarioPage() {
       return dateB - dateA
     })
 
+  // Tribunais (siglas) presentes nos resultados, para o filtro por estado.
+  const tribunaisPresentes = uniqueStrings(
+    publicacoesEnriquecidas.map(({ pub }) => (pub.tribunal ?? '').trim()).filter(Boolean),
+  ).sort()
+
+  const periodoCutoff = filtroPeriodoDias
+    ? new Date(Date.now() - filtroPeriodoDias * 24 * 60 * 60 * 1000)
+    : null
+  const buscaClienteNorm = normalizeText(buscaCliente)
+
   const publicacoesFiltradas = publicacoesEnriquecidas.filter(({ pub, match }) => {
     if (filtroComConteudo && (pub.texto_resumo === SEM_PUB || !pub.texto_resumo)) return false
     if (filtroMatch === 'cadastrados' && !match.hasRegisteredProcess) return false
     if (filtroMatch === 'exatos' && !match.hasExactName) return false
+    if (filtroTribunal && (pub.tribunal ?? '') !== filtroTribunal) return false
+    if (periodoCutoff && new Date(`${pub.data_publicacao}T12:00:00`) < periodoCutoff) return false
+    if (buscaClienteNorm) {
+      const alvo = normalizeText(
+        [
+          ...match.linkedClientNames,
+          ...match.exactClientNames,
+          match.primaryClientName ?? '',
+          pub.cliente_nome_pub ?? '',
+        ].join(' '),
+      )
+      if (!alvo.includes(buscaClienteNorm)) return false
+    }
     return true
   })
 
@@ -598,103 +631,68 @@ export default function DiarioPage() {
           >
             {syncGmail.isPending ? 'Buscando...' : '↓ Gmail'}
           </button>
+        </div>
+      </div>
+
+      {/* Sincronizar — leitura nacional do DJEN, com filtro opcional por estado */}
+      <div className={diarioStyles.syncBar}>
+        <div className={diarioStyles.estadosDropdown}>
           <button
-            className={diarioStyles.btnGmail}
-            onClick={handlePjeClick}
-            disabled={syncPje.isPending}
-            style={{ background: '#2a1a40', borderColor: '#7c3aed', color: '#a78bfa' }}
+            type="button"
+            className={diarioStyles.estadosToggle}
+            onClick={() => setEstadosAberto((v) => !v)}
+            disabled={syncEmAndamento}
           >
-            {syncPje.isPending ? 'Buscando...' : '↓ PJe Comunica'}
+            {estadosSync.length === 0
+              ? 'Todos os estados (DJEN nacional)'
+              : `${estadosSync.length} estado(s): ${estadosSync.map((s) => SIGLA_PARA_UF[s] ?? s).join(', ')}`}
+            <span className={diarioStyles.estadosCaret}>▾</span>
           </button>
+          {estadosAberto && (
+            <div className={diarioStyles.estadosPanel}>
+              <div className={diarioStyles.estadosPanelHead}>
+                <button type="button" className={diarioStyles.estadosMini} onClick={() => setEstadosSync([])}>
+                  Limpar (nacional)
+                </button>
+                <button
+                  type="button"
+                  className={diarioStyles.estadosMini}
+                  onClick={() => setEstadosSync(ESTADOS_BR.map((e) => e.sigla))}
+                >
+                  Selecionar todos
+                </button>
+              </div>
+              <div className={diarioStyles.estadosGrid}>
+                {ESTADOS_BR.map((e) => {
+                  const marcado = estadosSync.includes(e.sigla)
+                  return (
+                    <label key={e.sigla} className={diarioStyles.estadoItem} title={e.nome}>
+                      <input
+                        type="checkbox"
+                        checked={marcado}
+                        onChange={() =>
+                          setEstadosSync((prev) =>
+                            marcado ? prev.filter((s) => s !== e.sigla) : [...prev, e.sigla],
+                          )
+                        }
+                      />
+                      <span className={diarioStyles.estadoUf}>{e.uf}</span>
+                      <span className={diarioStyles.estadoNome}>{e.nome}</span>
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+          )}
         </div>
+        <button
+          className={diarioStyles.btnSincronizar}
+          onClick={sincronizarEstados}
+          disabled={syncEmAndamento}
+        >
+          {syncEmAndamento ? `Lendo ${syncJob?.current_label ?? syncJobLabel ?? ''}...` : '↓ Sincronizar DJEN'}
+        </button>
       </div>
-
-      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
-        {FONTES_DIARIO.map((fonte) => {
-          const carregando = syncEmAndamento && syncJobLabel === fonte.label
-          return (
-            <button
-              key={fonte.key}
-              className={diarioStyles.btnTribunais}
-              onClick={() => syncScraping.mutate({ tribunais: [...fonte.tribunais], label: fonte.label })}
-              disabled={syncEmAndamento}
-              style={{
-                opacity: syncEmAndamento && !carregando ? 0.7 : 1,
-                minWidth: '110px',
-              }}
-            >
-              {carregando ? `Lendo ${syncJob?.current_label ?? fonte.label}...` : `↓ ${fonte.label}`}
-            </button>
-          )
-        })}
-      </div>
-
-      {/* Modal PJe */}
-      {pjeModalAberto && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
-        }}>
-          <div style={{
-            background: '#1a1b1e', border: '1px solid #333', borderRadius: '10px',
-            padding: '24px', width: '360px', display: 'flex', flexDirection: 'column', gap: '14px',
-          }}>
-            <h3 style={{ margin: 0, color: '#a78bfa' }}>PJe Comunica — Credenciais</h3>
-            <p style={{ margin: 0, fontSize: '13px', color: '#888' }}>
-              Configure seu CPF e senha do PJe para importar comunicações processuais.
-            </p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <label style={{ fontSize: '12px', color: '#aaa' }}>CPF (login)</label>
-              <input
-                type="text"
-                placeholder="000.000.000-00"
-                value={pjeCpf}
-                onChange={(e) => setPjeCpf(e.target.value)}
-                style={{
-                  background: '#111', border: '1px solid #333', borderRadius: '6px',
-                  color: '#fff', padding: '8px 10px', fontSize: '14px',
-                }}
-              />
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <label style={{ fontSize: '12px', color: '#aaa' }}>Senha</label>
-              <input
-                type="password"
-                placeholder="Senha PJe"
-                value={pjeSenha}
-                onChange={(e) => setPjeSenha(e.target.value)}
-                style={{
-                  background: '#111', border: '1px solid #333', borderRadius: '6px',
-                  color: '#fff', padding: '8px 10px', fontSize: '14px',
-                }}
-                onKeyDown={(e) => { if (e.key === 'Enter') handlePjeSaveConfig() }}
-              />
-            </div>
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-              <button
-                onClick={() => setPjeModalAberto(false)}
-                style={{
-                  background: 'transparent', border: '1px solid #444', color: '#aaa',
-                  borderRadius: '6px', padding: '8px 16px', cursor: 'pointer',
-                }}
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handlePjeSaveConfig}
-                disabled={!pjeCpf || !pjeSenha || pjeSaving}
-                style={{
-                  background: '#7c3aed', border: 'none', color: '#fff',
-                  borderRadius: '6px', padding: '8px 16px', cursor: 'pointer',
-                  opacity: (!pjeCpf || !pjeSenha || pjeSaving) ? 0.5 : 1,
-                }}
-              >
-                {pjeSaving ? 'Salvando...' : 'Salvar e Sincronizar'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {syncMsg && <div className={diarioStyles.syncMsg}>{syncMsg}</div>}
 
@@ -715,7 +713,7 @@ export default function DiarioPage() {
       )}
 
       <div className={diarioStyles.syncMsg} style={{ background: '#1f2937', borderColor: '#374151', color: '#cbd5e1' }}>
-        Cada botão consulta uma fonte separada. O `DJEN` e os botões por tribunal usam a busca pública nacional quando disponível. O `PJe Comunica` continua separado, autenticado, e não substitui o `DJEN`.
+        A leitura usa a base nacional do DJEN/Comunica, filtrada pelas OABs e clientes monitorados. Sem estado selecionado, busca em todo o Brasil; escolha estados para restringir a consulta.
       </div>
 
       {/* Monitoramento automático do Diário Oficial */}
@@ -788,27 +786,39 @@ export default function DiarioPage() {
             <summary className={diarioStyles.termosSummary}>
               Clientes monitorados ({clientesMonitorados.length})
             </summary>
-            <div
-              className={diarioStyles.termosChips}
-              style={{ flexDirection: 'column', alignItems: 'stretch', maxHeight: '260px', overflowY: 'auto' }}
-            >
-              {[...clientes].sort((a, b) => a.nome.localeCompare(b.nome)).map((c) => (
-                <label
-                  key={c.id}
-                  style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#cbd5e1', padding: '2px 0', cursor: 'pointer' }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={!!c.monitorar_diario}
-                    disabled={toggleMonitorarCliente.isPending}
-                    onChange={(e) => toggleMonitorarCliente.mutate({ id: c.id, monitorar_diario: e.target.checked })}
-                  />
-                  {c.nome}
-                </label>
-              ))}
-              {clientes.length === 0 && (
-                <span style={{ fontSize: '12px', color: '#888' }}>Nenhum cliente cadastrado.</span>
-              )}
+            <div className={diarioStyles.clienteMonitorBox}>
+              <input
+                className={diarioStyles.clienteMonitorBusca}
+                placeholder="Filtrar clientes..."
+                value={buscaMonitorCliente}
+                onChange={(e) => setBuscaMonitorCliente(e.target.value)}
+              />
+              <div className={diarioStyles.clienteMonitorLista}>
+                {[...clientes]
+                  .sort((a, b) => a.nome.localeCompare(b.nome))
+                  .filter((c) => normalizeText(c.nome).includes(normalizeText(buscaMonitorCliente)))
+                  .map((c) => {
+                    const ativo = !!c.monitorar_diario
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        className={`${diarioStyles.clienteMonitorItem} ${ativo ? diarioStyles.clienteMonitorAtivo : ''}`}
+                        disabled={toggleMonitorarCliente.isPending}
+                        onClick={() => toggleMonitorarCliente.mutate({ id: c.id, monitorar_diario: !ativo })}
+                        title={c.nome}
+                      >
+                        <span className={`${diarioStyles.clienteMonitorCheck} ${ativo ? diarioStyles.clienteMonitorCheckOn : ''}`}>
+                          {ativo ? '✓' : ''}
+                        </span>
+                        <span className={diarioStyles.clienteMonitorNome}>{c.nome}</span>
+                      </button>
+                    )
+                  })}
+                {clientes.length === 0 && (
+                  <span className={diarioStyles.clienteMonitorVazio}>Nenhum cliente cadastrado.</span>
+                )}
+              </div>
             </div>
           </details>
 
@@ -897,6 +907,58 @@ export default function DiarioPage() {
         >
           Nomes exatos
         </button>
+      </div>
+
+      <div className={diarioStyles.filtrosAvancados}>
+        <label className={diarioStyles.filtroCampo}>
+          <span className={diarioStyles.filtroCampoLabel}>Período</span>
+          <select
+            className={diarioStyles.filtroSelect}
+            value={filtroPeriodoDias ?? ''}
+            onChange={(e) => setFiltroPeriodoDias(e.target.value ? Number(e.target.value) : null)}
+          >
+            {PERIODOS_FILTRO.map((p) => (
+              <option key={p.label} value={p.dias ?? ''}>{p.label}</option>
+            ))}
+          </select>
+        </label>
+
+        <label className={diarioStyles.filtroCampo}>
+          <span className={diarioStyles.filtroCampoLabel}>Tribunal/UF</span>
+          <select
+            className={diarioStyles.filtroSelect}
+            value={filtroTribunal}
+            onChange={(e) => setFiltroTribunal(e.target.value)}
+          >
+            <option value="">Todos</option>
+            {tribunaisPresentes.map((t) => (
+              <option key={t} value={t}>{SIGLA_PARA_UF[t] ? `${SIGLA_PARA_UF[t]} · ${t}` : t}</option>
+            ))}
+          </select>
+        </label>
+
+        <label className={`${diarioStyles.filtroCampo} ${diarioStyles.filtroCampoBusca}`}>
+          <span className={diarioStyles.filtroCampoLabel}>Cliente</span>
+          <input
+            className={diarioStyles.filtroInput}
+            placeholder="Buscar por nome de cliente..."
+            value={buscaCliente}
+            onChange={(e) => setBuscaCliente(e.target.value)}
+          />
+          {buscaCliente && (
+            <button type="button" className={diarioStyles.filtroLimpar} onClick={() => setBuscaCliente('')}>×</button>
+          )}
+        </label>
+
+        {(filtroPeriodoDias || filtroTribunal || buscaCliente) && (
+          <button
+            type="button"
+            className={diarioStyles.filtroBtn}
+            onClick={() => { setFiltroPeriodoDias(null); setFiltroTribunal(''); setBuscaCliente('') }}
+          >
+            Limpar filtros
+          </button>
+        )}
       </div>
 
       {isLoading ? (

@@ -17,7 +17,7 @@ from app.models.tese import Tese
 from app.schemas.publicacao import PublicacaoOut, PublicacaoUpdate, SyncResult
 from app.services.gmail_diario import sincronizar_gmail
 from app.services.ia_diario import analisar_publicacao
-from app.services.scraping_tribunais import scrape_todos
+from app.services.scraping_tribunais import TRIBUNAIS_VALIDOS, scrape_todos
 
 router = APIRouter(prefix="/diario", tags=["diario"])
 
@@ -389,9 +389,9 @@ def sync_scraping(
     db: Session = Depends(get_db),
 ):
     """Roda scrapers nos tribunais selecionados para a data informada."""
-    tribunais_validos = [t for t in tribunais if t in {"TJES", "TJSP", "TJAM", "TJRJ", "DJEN"}]
+    tribunais_validos = [t for t in tribunais if t in TRIBUNAIS_VALIDOS]
     if not tribunais_validos:
-        raise HTTPException(status_code=400, detail="Selecione ao menos um tribunal local válido.")
+        raise HTTPException(status_code=400, detail="Selecione ao menos um tribunal/estado válido.")
     termos_monitorados = _termos_monitorados_para_busca(db, termos)
     itens = scrape_todos(
         tribunais=tribunais_validos,
@@ -412,9 +412,9 @@ def iniciar_sync_scraping_job(
     days_back: int = Query(1, ge=1, le=30),
     termos: list[str] = Query(default=[]),
 ):
-    tribunais_validos = [t for t in tribunais if t in {"TJES", "TJSP", "TJAM", "TJRJ", "DJEN"}]
+    tribunais_validos = [t for t in tribunais if t in TRIBUNAIS_VALIDOS]
     if not tribunais_validos:
-        raise HTTPException(status_code=400, detail="Selecione ao menos um tribunal local válido.")
+        raise HTTPException(status_code=400, detail="Selecione ao menos um tribunal/estado válido.")
 
     job_id = str(uuid.uuid4())
     DIARIO_SYNC_JOBS[job_id] = {
