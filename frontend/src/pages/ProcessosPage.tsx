@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { processosApi } from '../api/processos'
 import { clientesApi } from '../api/clientes'
@@ -10,6 +10,7 @@ import AndamentosSection from '../components/AndamentosSection'
 import SincronizarModal from '../components/SincronizarModal'
 import InstrucoesJusBRModal from '../components/InstrucoesJusBRModal'
 import { saveStoredJusbrToken } from '../utils/jusbrToken'
+import { getBatchNew, clearBatchNew, type BatchNewState } from '../utils/batchNew'
 import styles from './Page.module.css'
 import ps from './ProcessosPage.module.css'
 
@@ -151,6 +152,22 @@ export default function ProcessosPage() {
     staleTime: 30_000,
     refetchInterval: 60_000,
   })
+
+  // Estado efêmero da última leitura em lote (bolinhas verdes + botão do PDF).
+  const [batchNew, setBatchNew] = useState<BatchNewState | null>(() => getBatchNew())
+  useEffect(() => {
+    const update = () => setBatchNew(getBatchNew())
+    window.addEventListener('batchnew-updated', update)
+    window.addEventListener('storage', update)
+    return () => {
+      window.removeEventListener('batchnew-updated', update)
+      window.removeEventListener('storage', update)
+    }
+  }, [])
+  // Token desconectado → some o destaque verde e o botão do relatório.
+  useEffect(() => {
+    if (jusbrSession && !jusbrSession.active) clearBatchNew()
+  }, [jusbrSession?.active])
 
   const configurarSessao = useMutation({
     mutationFn: (capture: string) => andamentosApi.configurarSessaoJusBR(capture),
@@ -317,6 +334,17 @@ export default function ProcessosPage() {
           >
             {jusbrStatusLabel}
           </span>
+          {batchNew?.drive_link && (
+            <a
+              className={ps.btnRelatorio}
+              href={batchNew.drive_link}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Abrir o último relatório de andamentos em lote (salvo no Drive)"
+            >
+              ⬇ Último relatório
+            </a>
+          )}
           <button className={styles.btnTable} onClick={() => setShowSyncModal(true)}>
             ⟳ Sincronizar andamentos
           </button>
@@ -626,7 +654,14 @@ export default function ProcessosPage() {
                     }}>
                     {andamentosAberto === p.id ? '▲ Fechar Andamentos' : '▼ Andamentos'}
                     {andamentosAberto !== p.id && (p.andamentos_nao_lidos ?? 0) > 0 && (
-                      <span className={ps.naoLidosBadge}>{p.andamentos_nao_lidos}</span>
+                      <span
+                        className={`${ps.naoLidosBadge} ${batchNew?.counts?.[p.id] ? ps.naoLidosBadgeNovo : ''}`}
+                        title={batchNew?.counts?.[p.id]
+                          ? `${batchNew.counts[p.id]} andamento(s) novo(s) neste lote`
+                          : `${p.andamentos_nao_lidos} não lido(s)`}
+                      >
+                        {p.andamentos_nao_lidos}
+                      </span>
                     )}
                   </button>
                   <button className={styles.btnTable}
@@ -858,6 +893,7 @@ export default function ProcessosPage() {
                     tribunal={p.tribunal}
                     ultimoAndamentoData={p.ultimo_andamento_data}
                     ultimoCheck={p.ultimo_check}
+                    novosLoteCount={batchNew?.counts?.[p.id] ?? 0}
                   />
                 </div>
               )}

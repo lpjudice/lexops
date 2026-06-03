@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from datetime import datetime, timezone
+import logging
 import os
 import threading
 import uuid
@@ -20,10 +22,20 @@ from app.models.processo import Processo
 from app.schemas.andamento import AndamentoOut, SincronizacaoResult
 
 router = APIRouter(prefix="/andamentos", tags=["andamentos"])
+logger = logging.getLogger(__name__)
 
 
 class BatchSyncBody(BaseModel):
     processo_ids: list[str]
+
+
+class RelatorioLoteItem(BaseModel):
+    processo_id: str
+    novos: int = 0
+
+
+class RelatorioLoteBody(BaseModel):
+    items: list[RelatorioLoteItem]
 
 
 class DiagnosticoBody(BaseModel):
@@ -420,6 +432,82 @@ async def sincronizar_batch(body: BatchSyncBody, db: Session = Depends(get_db)):
         )
         for r in raw
     ]
+
+
+# ── Relatório PDF do lote ─────────────────────────────────────────────────────
+
+@router.post("/relatorio-lote")
+def gerar_relatorio_lote_endpoint(body: RelatorioLoteBody, db: Session = Depends(get_db)):
+    """
+    Gera um PDF com os processos que tiveram andamento novo no lote (os 10
+    últimos andamentos de cada, destacando os novos e com hyperlink ao arquivo),
+    salva em Drive raiz/"Andamentos em Batch" e retorna o link + o PDF (base64).
+    """
+    from app.services.andamentos_pdf import gerar_relatorio_lote
+    from app.services import google_drive
+
+    epoch = datetime.min.replace(tzinfo=timezone.utc)
+    processos_data: list[dict] = []
+    for item in body.items:
+        try:
+            pid = uuid.UUID(item.processo_id)
+        except (ValueError, AttributeError, TypeError):
+            continue
+        proc = db.query(Processo).filter(Processo.id == pid).first()
+        if not proc:
+            continue
+        andamentos = (
+            db.query(AndamentoProcesso)
+            .filter(AndamentoProcesso.processo_id == pid)
+            .order_by(
+                AndamentoProcesso.data_andamento.desc().nullslast(),
+                AndamentoProcesso.created_at.desc(),
+            )
+            .limit(10)
+            .all()
+        )
+        # "Novo" = os `item.novos` andamentos mais recentes por created_at entre
+        # os exibidos (os recém-inseridos pelo lote).
+        novos_n = max(0, min(item.novos or 0, len(andamentos)))
+        novos_ids: set = set()
+        if novos_n:
+            por_created = sorted(andamentos, key=lambda a: a.created_at or epoch, reverse=True)
+            novos_ids = {a.id for a in por_created[:novos_n]}
+        processos_data.append({
+            "cnj": proc.numero_cnj,
+            "cliente": proc.cliente.nome if proc.cliente else None,
+            "tribunal": proc.tribunal,
+            "andamentos": [
+                {
+                    "data": a.data_andamento,
+                    "tipo": a.tipo,
+                    "descricao": a.descricao,
+                    "arquivo_nome": a.arquivo_nome,
+                    "arquivo_drive_link": a.arquivo_drive_link,
+                    "novo": a.id in novos_ids,
+                }
+                for a in andamentos
+            ],
+        })
+
+    if not processos_data:
+        raise HTTPException(status_code=400, detail="Nenhum processo válido para o relatório.")
+
+    gerado = datetime.now()
+    pdf_bytes = gerar_relatorio_lote(processos_data, gerado)
+    filename = f"Andamentos_lote_{gerado.strftime('%Y-%m-%d_%H%M')}.pdf"
+
+    drive_link = None
+    try:
+        drive_link = google_drive.upload_pdf_raiz(pdf_bytes, filename)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Falha ao salvar relatorio de lote no Drive: %s", exc)
+
+    return {
+        "drive_link": drive_link,
+        "filename": filename,
+        "pdf_base64": base64.b64encode(pdf_bytes).decode("ascii"),
+    }
 
 
 # ── JusBR sync (single) ───────────────────────────────────────────────────────

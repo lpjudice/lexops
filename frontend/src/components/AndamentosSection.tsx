@@ -16,6 +16,8 @@ interface Props {
   tribunal?: string | null
   ultimoAndamentoData?: string | null
   ultimoCheck?: string | null
+  /** Nº de andamentos novos deste lote (sessão) — destaca os N mais recentes. */
+  novosLoteCount?: number
 }
 
 type Fonte = 'datajud' | 'jusbr'
@@ -95,7 +97,7 @@ function SyncBanner({ result, ultimoAndamentoPre }: {
   )
 }
 
-export default function AndamentosSection({ processoId, ultimoAndamentoData, ultimoCheck }: Props) {
+export default function AndamentosSection({ processoId, ultimoAndamentoData, ultimoCheck, novosLoteCount = 0 }: Props) {
   const qc = useQueryClient()
   const [fonte, setFonte] = useState<Fonte>('jusbr')
   const [offset, setOffset] = useState(0)
@@ -199,6 +201,15 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
     }
   }, [fonte, processoId, syncDataJud.data, syncDataJud.error, jusbrJobResult, jusbrJobError, startJusBR.error, ultimoAndamentoPre])
   const temMais = (count?.total ?? 0) > offset + PAGE
+  // Os N andamentos mais recentes (por created_at) na 1ª página são os "novos
+  // deste lote". Só vale na 1ª página, onde os recém-inseridos aparecem.
+  const novoLoteIds = useMemo(() => {
+    if (!novosLoteCount || offset !== 0) return new Set<string>()
+    const ordenados = [...andamentos].sort((a, b) =>
+      (b.created_at || '').localeCompare(a.created_at || ''),
+    )
+    return new Set(ordenados.slice(0, novosLoteCount).map((a) => a.id))
+  }, [andamentos, novosLoteCount, offset])
   const jusbrAtivo = !!jusbrSession?.active
   const jusbrProgressPct = jusbrJob?.total
     ? Math.min(100, Math.round((jusbrJob.processed / jusbrJob.total) * 100))
@@ -399,7 +410,9 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
       ) : (
         <>
           <div className={styles.lista}>
-            {andamentos.map((a) => <AndamentoCard key={a.id} andamento={a} />)}
+            {andamentos.map((a) => (
+              <AndamentoCard key={a.id} andamento={a} novoLote={novoLoteIds.has(a.id)} />
+            ))}
           </div>
           <div className={styles.paginacao}>
             {offset > 0 && (
@@ -429,15 +442,17 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
   )
 }
 
-function AndamentoCard({ andamento: a }: { andamento: Andamento }) {
+function AndamentoCard({ andamento: a, novoLote = false }: { andamento: Andamento; novoLote?: boolean }) {
   const arquivoUrl = andamentosApi.arquivoUrl(a.id)
   return (
-    <div className={`${styles.card} ${!a.lido ? styles.cardNaoLido : ''}`}>
+    <div className={`${styles.card} ${novoLote ? styles.cardNovoLote : !a.lido ? styles.cardNaoLido : ''}`}>
       <div className={styles.cardMeta}>
         <span className={styles.data}>{formatDate(a.data_andamento)}</span>
         {a.grau && <span className={styles.grauBadge}>{a.grau}</span>}
         {a.tipo && <span className={styles.tipo}>{a.tipo}</span>}
-        {!a.lido && <span className={styles.novoBadge}>Novo</span>}
+        {novoLote
+          ? <span className={styles.novoLoteBadge}>Novo neste lote</span>
+          : !a.lido && <span className={styles.novoBadge}>Novo</span>}
         {a.arquivo_nome && (
           <a
             className={styles.btnArquivo}

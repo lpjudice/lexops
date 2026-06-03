@@ -95,3 +95,25 @@ Se for continuar depois:
 - a sessao compartilhada tenta renovar automaticamente o `access_token` usando `refresh_token` quando possivel.
 - `cURL`, headers e token puro continuam aceitos como fallback.
 - a interface passou a sinalizar `jus.br v3` no toggle para refletir a sessao compartilhada ativa.
+
+## Relatorio de lote + destaque de novos (apresentacao apenas)
+NAO toca em conexao/consulta jus.br — so apresentacao por cima do que ja existe.
+
+- **PDF do lote**: no popup de sincronizacao (`SincronizarModal`), botao "Exportar
+  PDF" gera relatorio com os processos que tiveram andamento novo, 10 ultimos
+  andamentos de cada, destaque verde nos novos e hyperlink ao arquivo (Drive).
+  Salvo em Drive `raiz / Andamentos em Batch` com nome datado (historico).
+  - backend: `app/services/andamentos_pdf.py` (reportlab/Platypus),
+    `google_drive.upload_pdf_raiz(...)`, endpoint `POST /andamentos/relatorio-lote`
+    (body `{ items: [{processo_id, novos}] }` → `{ drive_link, filename, pdf_base64 }`).
+- **Sinal verde de sessao**: estado efemero em `sessionStorage`
+  (`frontend/src/utils/batchNew.ts`, chave `lexops:andamentos-batch`) guarda
+  `counts` (processo_id→novos) deste lote. A bolinha do botao "Andamentos" fica
+  verde para esses processos; ao abrir, os N mais recentes por `created_at` na 1a
+  pagina recebem badge "Novo neste lote" (verde, distinto do "Novo"/nao-lido azul).
+  Some sozinho na proxima sessao (aba fechada), em novo lote, ou ao desconectar o
+  token (`clearBatchNew()` em `ProcessosPage` quando `jusbrSession.active` vira false).
+- **Definicao de "novo"**: os `novos_andamentos` retornados pelo batch = os N
+  andamentos com maior `created_at`. Sem cutoff por relogio (sem risco de skew).
+- botao "Ultimo relatorio" no header de Processos abre o PDF do Drive ate o
+  proximo lote (link trocado a cada lote).

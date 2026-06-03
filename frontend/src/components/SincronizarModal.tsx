@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { andamentosApi } from '../api/andamentos'
 import type { JusbrSessionStatus, SincronizacaoResult } from '../api/andamentos'
@@ -11,7 +11,22 @@ import {
   saveStoredJusbrToken,
 } from '../utils/jusbrToken'
 import { inferTribunalFromCnj } from '../utils/cnj'
+import { setBatchNew, patchBatchNew } from '../utils/batchNew'
 import axios from 'axios'
+
+function downloadBase64Pdf(b64: string, filename: string) {
+  const bin = atob(b64)
+  const arr = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i)
+  const url = URL.createObjectURL(new Blob([arr], { type: 'application/pdf' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 5000)
+}
 
 interface Props {
   processos: Processo[]
@@ -53,6 +68,7 @@ export default function SincronizarModal({ processos, onClose }: Props) {
   const [fonte, setFonte] = useState<Fonte>('jusbr')
   const [showInstrucoes, setShowInstrucoes] = useState(false)
   const [resultados, setResultados] = useState<SincronizacaoResult[] | null>(null)
+  const [pdfLink, setPdfLink] = useState<string | null>(null)
   const { data: jusbrSession, refetch: refetchJusbrSession } = useQuery<JusbrSessionStatus>({
     queryKey: ['jusbr-session'],
     queryFn: () => andamentosApi.obterSessaoJusBR(),
@@ -117,6 +133,35 @@ export default function SincronizarModal({ processos, onClose }: Props) {
 
   const batchRunning = !!batchJobId && batchJob?.status !== 'concluido' && batchJob?.status !== 'erro'
   const isSyncing = syncDataJud.isPending || startJusBRBatch.isPending || batchRunning
+
+  // Processos que tiveram andamento novo neste lote.
+  const comNovos = useMemo(
+    () => (resultados ?? []).filter((r) => r.novos_andamentos > 0),
+    [resultados],
+  )
+
+  // Assim que o lote conclui, registra os processos com novidade (sessão) para
+  // as bolinhas verdes aparecerem nos cards ao fechar o modal.
+  useEffect(() => {
+    if (!resultados) return
+    const counts: Record<string, number> = {}
+    for (const r of resultados) {
+      if (r.novos_andamentos > 0) counts[r.processo_id] = r.novos_andamentos
+    }
+    setBatchNew({ counts, at: new Date().toISOString() })
+  }, [resultados])
+
+  const exportarPdf = useMutation({
+    mutationFn: () =>
+      andamentosApi.gerarRelatorioLote(
+        comNovos.map((r) => ({ processo_id: r.processo_id, novos: r.novos_andamentos })),
+      ),
+    onSuccess: (data) => {
+      downloadBase64Pdf(data.pdf_base64, data.filename)
+      patchBatchNew({ drive_link: data.drive_link, filename: data.filename })
+      setPdfLink(data.drive_link)
+    },
+  })
 
   const toggle = (id: string) => {
     setSelecionados((prev) => {
@@ -385,11 +430,36 @@ export default function SincronizarModal({ processos, onClose }: Props) {
                 </div>
               ))}
             </div>
+            {pdfLink && (
+              <a
+                className={styles.driveLink}
+                href={pdfLink}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                ↗ Relatório salvo no Drive (Andamentos em Batch)
+              </a>
+            )}
             <div className={styles.modalFooter}>
+              <button
+                className={styles.btnExportar}
+                onClick={() => exportarPdf.mutate()}
+                disabled={comNovos.length === 0 || exportarPdf.isPending}
+                title={comNovos.length === 0
+                  ? 'Nenhum processo com andamento novo neste lote'
+                  : 'Gera um PDF com os processos que tiveram novidade e salva no Drive'}
+              >
+                {exportarPdf.isPending
+                  ? 'Gerando PDF…'
+                  : `⬇ Exportar PDF (${comNovos.length})`}
+              </button>
               <button className={styles.btnPrimary} onClick={onClose}>
                 Fechar
               </button>
             </div>
+            {exportarPdf.isError && (
+              <p className={styles.semSupporte}>Não foi possível gerar o PDF do lote.</p>
+            )}
           </>
         )}
       </div>

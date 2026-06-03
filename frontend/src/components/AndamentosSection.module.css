@@ -218,6 +218,12 @@
   background: #eff6ff;
   border-color: #bfdbfe;
 }
+/* Novo deste lote (sessão) — destaque verde, distinto do "não lido" azul. */
+.cardNovoLote {
+  background: #e6f7f1;
+  border-color: #00b090;
+  border-left: 3px solid #00875a;
+}
 
 .cardMeta {
   display: flex;
@@ -254,6 +260,15 @@
   font-size: 10px;
   font-weight: 700;
   background: #1d4ed8;
+  color: #fff;
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.novoLoteBadge {
+  font-size: 10px;
+  font-weight: 700;
+  background: #00875a;
   color: #fff;
   border-radius: 999px;
   padding: 1px 7px;

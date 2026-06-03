@@ -67,6 +67,17 @@ export interface AndamentoCount {
   nao_lidos: number
 }
 
+export interface RelatorioLoteItem {
+  processo_id: string
+  novos: number
+}
+
+export interface RelatorioLoteResult {
+  drive_link: string | null
+  filename: string
+  pdf_base64: string
+}
+
 export interface JusbrSessionStatus {
   active: boolean
   expires_at: string | null
@@ -96,6 +107,11 @@ export const andamentosApi = {
   sincronizarBatch: (processoIds: string[]) =>
     api
       .post<SincronizacaoResult[]>('/andamentos/sincronizar-batch', { processo_ids: processoIds })
+      .then((r) => r.data),
+
+  gerarRelatorioLote: (items: RelatorioLoteItem[]) =>
+    api
+      .post<RelatorioLoteResult>('/andamentos/relatorio-lote', { items })
       .then((r) => r.data),
 
   sincronizarJusBR: (processoId: string, token?: string) =>

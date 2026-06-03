@@ -184,6 +184,32 @@
 }
 .btnPrimary:hover { background: #374151; }
 
+.btnExportar {
+  margin-right: auto;
+  padding: 8px 16px;
+  border-radius: 7px;
+  border: 1px solid #00b090;
+  background: #e6f7f1;
+  color: #00875a;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.12s;
+}
+.btnExportar:hover:not(:disabled) { background: #d4f0e6; }
+.btnExportar:disabled { opacity: 0.5; cursor: default; }
+
+.driveLink {
+  display: inline-block;
+  margin: 6px 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #00875a;
+  text-decoration: none;
+}
+.driveLink:hover { text-decoration: underline; }
+
 /* Results */
 .resultados {
   display: flex;

@@ -263,6 +263,30 @@
   line-height: 1;
 }
 
+/* Verde = teve andamento novo neste lote (sessão). */
+.naoLidosBadgeNovo {
+  background: #00875a;
+}
+
+/* Botão "Último relatório" no header */
+.btnRelatorio {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border-radius: 7px;
+  border: 1px solid #00b090;
+  background: #e6f7f1;
+  color: #00875a;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  font-family: inherit;
+  transition: background 0.12s;
+}
+.btnRelatorio:hover { background: #d4f0e6; }
+
 /* ── Litisconsorte tag on card ── */
 .litisTag {
   font-size: 10.5px;
