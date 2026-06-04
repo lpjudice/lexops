@@ -78,6 +78,7 @@ class BrowserManager:
         self.auth_event = asyncio.Event()
         self.captured_token: Optional[str] = None
         self._code_verifier: Optional[str] = None
+        self._last_screenshot: Optional[bytes] = None
 
     async def start(self) -> None:
         async with self._lock:
@@ -117,6 +118,12 @@ class BrowserManager:
 
     async def _ensure_page(self) -> Page:
         await self.start()
+        # Always prefer the most recent live page in the context. gov.br login
+        # (captcha / 2FA) can open popups or replace the page; a stale ref breaks.
+        if self._context:
+            live = [p for p in self._context.pages if not p.is_closed()]
+            if live:
+                self._page = live[-1]
         assert self._page is not None
         return self._page
 
@@ -209,8 +216,19 @@ class BrowserManager:
         await self.navigate_to_sso()
 
     async def screenshot_png(self) -> bytes:
-        page = await self._ensure_page()
-        return await page.screenshot(type="png", full_page=False)
+        # Resilient: a transient navigation (captcha/2FA) can make a single shot
+        # fail. Return the last good frame instead of erroring the viewer, so the
+        # connection never appears to drop.
+        try:
+            page = await self._ensure_page()
+            png = await page.screenshot(type="png", full_page=False, timeout=8000)
+            self._last_screenshot = png
+            return png
+        except Exception as exc:
+            logger.warning("screenshot falhou (%s); servindo último frame", str(exc)[:120])
+            if self._last_screenshot:
+                return self._last_screenshot
+            raise
 
     async def click(self, x: int, y: int) -> None:
         page = await self._ensure_page()
