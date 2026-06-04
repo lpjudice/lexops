@@ -1,11 +1,14 @@
-"""Playwright BrowserManager for jus.br/gov.br authentication on Fly.io.
+"""BrowserManager for jus.br/gov.br authentication on Fly.io.
 
-Fly.io's IP is accepted by the PDPJ portal (unlike residential IPs).
-Runs headless — the user interacts via the screenshot viewer at
-/api/andamentos/viewer/{token}.
+PKCE OAuth2 flow — bypasses the portal homepage (blocked by AWS WAF):
+  1. Build authorization URL directly against the SSO server (not blocked)
+  2. Navigate Playwright to the SSO login page
+  3. User completes gov.br login in the screenshot viewer
+  4. Intercept the OAuth redirect via context.route() before it hits the portal
+  5. Exchange code → access_token via httpx (works fine from Fly.io)
+  6. Save to JusbrSession Postgres table via existing jusbr_session.py logic
 
-Token capture: intercepts the SSO openid-connect/token response and saves
-it to the existing JusbrSession Postgres table via jusbr_session.py.
+The portal homepage is never loaded by Playwright.
 """
 from __future__ import annotations
 
@@ -15,22 +18,28 @@ import hashlib
 import hmac
 import json
 import logging
+import secrets
 import time
+import urllib.parse
 from pathlib import Path
 from typing import Optional
 
+import httpx
 from patchright.async_api import (
-    Browser,
     BrowserContext,
     Page,
     Playwright,
-    Response,
+    Route,
+    Request,
     async_playwright,
 )
 
 logger = logging.getLogger(__name__)
 
-_SSO_TOKEN_PATTERN = "openid-connect/token"
+_SSO_AUTH = "https://sso.cloud.pje.jus.br/auth/realms/pje/protocol/openid-connect/auth"
+_SSO_TOKEN = "https://sso.cloud.pje.jus.br/auth/realms/pje/protocol/openid-connect/token"
+_CLIENT_ID = "portalexterno-frontend"
+_REDIRECT_URI = "https://portaldeservicos.pdpj.jus.br/home"
 _PROFILE_DIR = Path("/app/backend/uploads/.playwright-profile")
 
 
@@ -68,6 +77,7 @@ class BrowserManager:
 
         self.auth_event = asyncio.Event()
         self.captured_token: Optional[str] = None
+        self._code_verifier: Optional[str] = None
 
     async def start(self) -> None:
         async with self._lock:
@@ -88,10 +98,9 @@ class BrowserManager:
                 locale="pt-BR",
                 timezone_id="America/Sao_Paulo",
             )
-            self._context.on("response", self._on_response)
             pages = self._context.pages
             self._page = pages[0] if pages else await self._context.new_page()
-            logger.info("Playwright context started (profile: %s)", _PROFILE_DIR)
+            logger.info("Patchright context started (profile: %s)", _PROFILE_DIR)
 
     async def stop(self) -> None:
         async with self._lock:
@@ -111,11 +120,93 @@ class BrowserManager:
         assert self._page is not None
         return self._page
 
-    async def navigate_to_portal(self) -> None:
+    async def navigate_to_sso(self) -> None:
+        """Navigate Playwright to the gov.br SSO login page via PKCE."""
         page = await self._ensure_page()
-        url = "https://portaldeservicos.pdpj.jus.br/home"
-        await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-        logger.info("Navigated to %s → %s", url, page.url)
+
+        # Generate PKCE pair
+        raw = secrets.token_bytes(32)
+        code_verifier = base64.urlsafe_b64encode(raw).decode().rstrip("=")
+        digest = hashlib.sha256(code_verifier.encode()).digest()
+        code_challenge = base64.urlsafe_b64encode(digest).decode().rstrip("=")
+        self._code_verifier = code_verifier
+
+        params = {
+            "client_id": _CLIENT_ID,
+            "redirect_uri": _REDIRECT_URI,
+            "response_type": "code",
+            "scope": "openid profile",
+            "code_challenge": code_challenge,
+            "code_challenge_method": "S256",
+            "state": secrets.token_hex(16),
+        }
+        auth_url = f"{_SSO_AUTH}?{urllib.parse.urlencode(params)}"
+
+        # Intercept the OAuth redirect back to the portal before it loads
+        await self._context.route(
+            f"{_REDIRECT_URI}*",
+            self._intercept_redirect,
+        )
+
+        await page.goto(auth_url, wait_until="domcontentloaded", timeout=30_000)
+        logger.info("Navigated to SSO: %s", _SSO_AUTH)
+
+    async def _intercept_redirect(self, route: Route, request: Request) -> None:
+        """Catch the OAuth redirect, exchange code for token via httpx."""
+        url = request.url
+        params = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(url).query))
+        code = params.get("code")
+
+        if not code:
+            await route.continue_()
+            return
+
+        logger.info("OAuth code interceptado — trocando por token...")
+
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    _SSO_TOKEN,
+                    data={
+                        "grant_type": "authorization_code",
+                        "code": code,
+                        "redirect_uri": _REDIRECT_URI,
+                        "client_id": _CLIENT_ID,
+                        "code_verifier": self._code_verifier or "",
+                    },
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    timeout=20,
+                )
+
+            if resp.status_code == 200 and resp.json().get("access_token"):
+                from app.services.consulta_processual.jusbr_session import save_session_from_capture
+                save_session_from_capture(resp.text)
+                self.captured_token = resp.json()["access_token"]
+                self.auth_event.set()
+                logger.info("Token obtido via PKCE ✓")
+
+                await route.fulfill(
+                    status=200,
+                    content_type="text/html; charset=utf-8",
+                    body=(
+                        "<html><body style='font-family:sans-serif;text-align:center;"
+                        "padding:60px;background:#0d0d0d;color:#e0e0e0'>"
+                        "<h2>✅ Login concluído!</h2>"
+                        "<p>Pode fechar esta janela. O bot está buscando os andamentos...</p>"
+                        "</body></html>"
+                    ),
+                )
+                return
+            else:
+                logger.warning("Token exchange falhou: %d %s", resp.status_code, resp.text[:200])
+        except Exception:
+            logger.exception("Erro na troca de código OAuth")
+
+        await route.continue_()
+
+    # ── Keep navigate_to_portal as alias for backwards compat ────────────────
+    async def navigate_to_portal(self) -> None:
+        await self.navigate_to_sso()
 
     async def screenshot_png(self) -> bytes:
         page = await self._ensure_page()
@@ -137,6 +228,10 @@ class BrowserManager:
         page = await self._ensure_page()
         if self._context:
             await self._context.clear_cookies()
+            try:
+                await self._context.unroute(f"{_REDIRECT_URI}*")
+            except Exception:
+                pass
         try:
             await page.evaluate("() => { localStorage.clear(); sessionStorage.clear(); }")
         except Exception:
@@ -144,6 +239,7 @@ class BrowserManager:
         await page.goto("about:blank")
         self.captured_token = None
         self.auth_event.clear()
+        self._code_verifier = None
 
     def create_viewer_token(self) -> tuple[str, int]:
         return _sign(self._secret, "viewer", self._link_ttl)
@@ -154,6 +250,7 @@ class BrowserManager:
     def reset_auth_event(self) -> None:
         self.captured_token = None
         self.auth_event.clear()
+        self._code_verifier = None
 
     async def wait_for_auth(self, timeout_seconds: int = 600) -> str:
         try:
@@ -162,24 +259,3 @@ class BrowserManager:
             raise TimeoutError("Timeout aguardando autenticação gov.br.") from exc
         assert self.captured_token is not None
         return self.captured_token
-
-    async def _on_response(self, response: Response) -> None:
-        if _SSO_TOKEN_PATTERN not in response.url:
-            return
-        try:
-            body = await response.text()
-            data = json.loads(body)
-        except Exception:
-            return
-        if not isinstance(data, dict) or not data.get("access_token"):
-            return
-
-        # Reuse existing session save logic (saves to Postgres JusbrSession table)
-        try:
-            from app.services.consulta_processual.jusbr_session import save_session_from_capture
-            save_session_from_capture(body)
-            self.captured_token = str(data["access_token"])
-            self.auth_event.set()
-            logger.info("access_token interceptado e salvo na sessão jus.br.")
-        except Exception:
-            logger.exception("Erro ao salvar token interceptado.")
