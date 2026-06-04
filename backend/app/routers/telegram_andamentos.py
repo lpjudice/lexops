@@ -30,10 +30,10 @@ from app.services.browser_manager import BrowserManager
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/andamentos", tags=["andamentos-bot"])
+router = APIRouter(prefix="/andamentos", tags=["andamentos-bot"])
 
 _VIEWER_HTML = (Path(__file__).parent.parent / "static" / "viewer.html").read_text()
-_API_BASE = "/api/andamentos"
+_API_BASE = "/api/andamentos"  # full public path (nginx adds /api/ prefix)
 _PAGE_SIZE = 5
 _CNJ_RE = re.compile(r"\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}")
 
