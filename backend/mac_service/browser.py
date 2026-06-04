@@ -23,7 +23,7 @@ from playwright.async_api import (
     async_playwright,
 )
 
-from . import session as session_store
+import session as session_store
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +166,7 @@ class BrowserManager:
         refresh_token = data.get("refresh_token")
         now_iso = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
 
-        from .session import _jwt_exp  # local import avoids circular dep issues
+        from session import _jwt_exp
 
         exp_dt = _jwt_exp(token)
         ref_dt = _jwt_exp(refresh_token) if refresh_token else None

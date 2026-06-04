@@ -13,6 +13,14 @@ Also starts:
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# Ensure mac_service/ is on sys.path for absolute sibling imports (bot, browser, etc.)
+_HERE = Path(__file__).resolve().parent
+if str(_HERE) not in sys.path:
+    sys.path.insert(0, str(_HERE))
+
 import asyncio
 import logging
 import re
@@ -25,10 +33,10 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 
-from .bot import create_dispatcher, run_polling, set_viewer_base_url
-from .browser import BrowserManager
-from .config import get_settings
-from . import session as session_store
+from bot import create_dispatcher, run_polling, set_viewer_base_url
+from browser import BrowserManager
+from config import get_settings
+import session as session_store
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s — %(message)s")
 logger = logging.getLogger(__name__)

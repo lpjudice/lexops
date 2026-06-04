@@ -61,7 +61,7 @@ echo ""
 echo "--- Instalando launchd agent ---"
 sed \
   -e "s|__PYTHON_PATH__|$PYTHON|g" \
-  -e "s|__REPO_ROOT__|$REPO_ROOT|g" \
+  -e "s|__MAC_SERVICE_DIR__|$MAC_SERVICE|g" \
   -e "s|__TELEGRAM_BOT_TOKEN__|$BOT_TOKEN|g" \
   -e "s|__AUTH_SECRET__|$AUTH_SECRET|g" \
   "$PLIST_SRC" > "$PLIST_DST"

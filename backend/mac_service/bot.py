@@ -20,8 +20,8 @@ from aiogram.types import (
     Message,
 )
 
-from . import session as session_store
-from .collector import fetch_andamentos, fetch_document
+import session as session_store
+from collector import fetch_andamentos, fetch_document
 
 logger = logging.getLogger(__name__)
 
@@ -104,8 +104,7 @@ async def _run_lookup(bot: Bot, chat_id: int, cnj: str, browser_mgr) -> None:
     sess = session_store.load_session()
 
     if not sess:
-        # Need authentication
-        await bot.send_message(chat_id, "🔐 Sessão jus.br expirada. Iniciando autenticação...")
+        await bot.send_message(chat_id, "🔐 Sessão jus.br inativa. Iniciando autenticação no portal...")
         browser_mgr.reset_auth_event()
         await browser_mgr.navigate_to_portal()
 
@@ -139,7 +138,7 @@ async def _run_lookup(bot: Bot, chat_id: int, cnj: str, browser_mgr) -> None:
         await bot.send_message(chat_id, f"🔍 Buscando andamentos para `{cnj}`...", parse_mode="Markdown")
 
     try:
-        andamentos = await fetch_andamentos(cnj, sess)
+        andamentos = await fetch_andamentos(cnj, sess)  # type: ignore[arg-type]
     except ValueError as exc:
         await bot.send_message(chat_id, f"❌ {exc}")
         return

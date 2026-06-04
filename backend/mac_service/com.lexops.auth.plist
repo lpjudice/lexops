@@ -17,7 +17,7 @@
     <string>__PYTHON_PATH__</string>
     <string>-m</string>
     <string>uvicorn</string>
-    <string>backend.mac_service.main:app</string>
+    <string>main:app</string>
     <string>--host</string>
     <string>127.0.0.1</string>
     <string>--port</string>
@@ -26,9 +26,9 @@
     <string>info</string>
   </array>
 
-  <!-- Root of the GestorJuridico repo — so "backend.mac_service" resolves -->
+  <!-- mac_service/ dir — uvicorn finds "main:app" and collector adds ../  to sys.path for lexops imports -->
   <key>WorkingDirectory</key>
-  <string>__REPO_ROOT__</string>
+  <string>__MAC_SERVICE_DIR__</string>
 
   <key>RunAtLoad</key>
   <true/>
