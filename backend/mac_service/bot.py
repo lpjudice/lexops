@@ -21,6 +21,7 @@ from aiogram.types import (
 )
 
 import session as session_store
+import tunnel
 from collector import fetch_andamentos, fetch_document
 
 logger = logging.getLogger(__name__)
@@ -108,16 +109,18 @@ async def _run_lookup(bot: Bot, chat_id: int, cnj: str, browser_mgr) -> None:
         browser_mgr.reset_auth_event()
         await browser_mgr.navigate_to_portal()
 
-        token, _exp = browser_mgr.create_viewer_token()
-        base_url = _get_viewer_base_url()
+        await bot.send_message(chat_id, "🌐 Aguardando Cloudflare Tunnel...")
+        base_url = await tunnel.get_url(timeout=45)
         if not base_url:
             await bot.send_message(
                 chat_id,
-                "⚠️ Cloudflare Tunnel não está ativo.\n"
-                "Inicie o serviço e tente novamente, ou renove a sessão manualmente no lexops."
+                "⚠️ Cloudflare Tunnel não iniciou.\n"
+                "Verifique se `cloudflared` está instalado (`brew install cloudflared`) "
+                "e tente novamente."
             )
             return
 
+        token, _exp = browser_mgr.create_viewer_token()
         link = f"{base_url}/viewer/{token}"
         await bot.send_message(
             chat_id,
@@ -154,20 +157,6 @@ async def _run_lookup(bot: Bot, chat_id: int, cnj: str, browser_mgr) -> None:
     state = QueryState(cnj=cnj, andamentos=andamentos)
     _state[chat_id] = state
     await _send_page(bot, chat_id, state, 0)
-
-
-# ── Viewer base URL (set by main.py after cloudflared starts) ─────────────────
-
-_viewer_base_url: str = ""
-
-
-def set_viewer_base_url(url: str) -> None:
-    global _viewer_base_url
-    _viewer_base_url = url.rstrip("/")
-
-
-def _get_viewer_base_url() -> str:
-    return _viewer_base_url
 
 
 # ── Handler factory ──────────────────────────────────────────────────────────
