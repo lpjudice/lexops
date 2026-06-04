@@ -25,8 +25,8 @@ WORKDIR /app/backend
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Playwright Chromium binary (system deps already installed above)
-RUN playwright install chromium
+# Patchright Chromium — patched binary with real Chrome JA3 fingerprint
+RUN patchright install chromium
 
 # Backend source
 COPY backend/ .

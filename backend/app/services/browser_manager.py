@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from playwright.async_api import (
+from patchright.async_api import (
     Browser,
     BrowserContext,
     Page,
