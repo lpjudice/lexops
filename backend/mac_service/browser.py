@@ -76,9 +76,15 @@ class BrowserManager:
             self._playwright = await async_playwright().start()
             self._context = await self._playwright.chromium.launch_persistent_context(
                 user_data_dir=str(self._profile_dir),
-                headless=True,
-                args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage"],
+                headless=False,  # headed = indetectável para o Cloudflare do portal PDPJ
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-infobars",
+                    "--disable-notifications",
+                ],
                 viewport={"width": 1440, "height": 900},
+                locale="pt-BR",
+                timezone_id="America/Sao_Paulo",
             )
             self._context.on("response", self._on_response)
             pages = self._context.pages
