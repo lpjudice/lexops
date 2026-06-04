@@ -130,7 +130,7 @@ async def _run_lookup(bot: Bot, chat_id: int, cnj: str) -> None:
     mgr = get_browser_manager()
 
     if not sess:
-        await bot.send_message(chat_id, "🔐 Sessão jus.br inativa. Abrindo portal para login...")
+        await bot.send_message(chat_id, "🔐 Sessão jus.br inativa. Gerando QR code de login gov.br...")
         mgr.reset_auth_event()
         await mgr.navigate_to_portal()
 
@@ -138,9 +138,11 @@ async def _run_lookup(bot: Bot, chat_id: int, cnj: str) -> None:
         link = f"https://lexops.fly.dev/api/andamentos/viewer/{viewer_token}"
         await bot.send_message(
             chat_id,
-            f"📱 *Login gov.br necessário*\n\n"
-            f"Abra este link no celular:\n{link}\n\n"
-            f"_Após concluir o login, o bot continua automaticamente. Link expira em 10 min._",
+            f"📱 *Login gov.br via QR code*\n\n"
+            f"1. Abra este link no celular:\n{link}\n\n"
+            f"2. Abra o *app gov.br* e use o leitor de QR code\n"
+            f"3. Aprove o login com sua biometria\n\n"
+            f"_Sem senha, sem captcha. O bot continua sozinho após a aprovação. Expira em 10 min._",
             parse_mode="Markdown",
         )
         try:
@@ -312,14 +314,89 @@ async def run_polling(token: str, dispatcher: Dispatcher) -> None:
         await bot.session.close()
 
 
-# ── FastAPI viewer endpoints ──────────────────────────────────────────────────
+# ── FastAPI viewer endpoints (QR-code login) ──────────────────────────────────
+
+_QR_VIEWER_HTML = """<!DOCTYPE html>
+<html lang="pt-BR"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Login gov.br — LexOps</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0d0d0d;color:#e0e0e0;font-family:-apple-system,sans-serif;
+       min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center}
+  h2{font-size:20px;margin-bottom:8px}
+  p{font-size:14px;color:#aaa;margin-bottom:20px;max-width:340px;line-height:1.5}
+  #qrbox{background:#fff;border-radius:16px;padding:20px;display:inline-block;min-width:264px;min-height:264px;
+         display:flex;align-items:center;justify-content:center}
+  #qrbox img{width:224px;height:224px;display:block}
+  .spinner{width:40px;height:40px;border:4px solid #333;border-top-color:#2563eb;border-radius:50%;animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  #status{margin-top:20px;font-size:14px;color:#888}
+  .ok{color:#22c55e!important;font-weight:600}
+  .steps{margin-top:24px;font-size:13px;color:#777;text-align:left;max-width:320px}
+  .steps li{margin:6px 0}
+</style></head><body>
+  <h2>🏛️ Login gov.br</h2>
+  <p>Abra o <strong>app gov.br</strong> no celular, toque no leitor de QR code e aponte para a imagem abaixo.</p>
+  <div id="qrbox"><div class="spinner"></div></div>
+  <div id="status">Gerando QR code…</div>
+  <ol class="steps">
+    <li>1. Abra o app <strong>gov.br</strong></li>
+    <li>2. Toque no ícone de <strong>QR code</strong></li>
+    <li>3. Aponte para o código e aprove com biometria</li>
+  </ol>
+<script>
+  const TOKEN='__VIEWER_TOKEN__', API='__API_BASE__';
+  const qrbox=document.getElementById('qrbox'), status=document.getElementById('status');
+  let done=false;
+  async function poll(){
+    if(done) return;
+    try{
+      const s=await (await fetch(`${API}/auth-status?token=${TOKEN}`)).json();
+      if(s.authenticated){
+        done=true;
+        qrbox.innerHTML='<div style="font-size:64px">✅</div>';
+        status.innerHTML='<span class="ok">Login concluído! Voltando ao Telegram…</span>';
+        return;
+      }
+      // refresh QR image
+      const r=await fetch(`${API}/qr.png?token=${TOKEN}&t=${Date.now()}`);
+      if(r.ok){
+        const blob=await r.blob();
+        qrbox.innerHTML=`<img src="${URL.createObjectURL(blob)}" alt="QR code"/>`;
+        status.textContent='Aguardando aprovação no app gov.br…';
+      }
+    }catch(e){}
+    setTimeout(poll, 2000);
+  }
+  poll();
+</script>
+</body></html>"""
+
 
 @router.get("/viewer/{token}", response_class=HTMLResponse)
 async def viewer(token: str):
     if not get_browser_manager().verify_token(token):
         raise HTTPException(status_code=403, detail="Link expirado ou inválido.")
-    html = _VIEWER_HTML.replace("__VIEWER_TOKEN__", token).replace("__API_BASE__", _API_BASE)
+    html = _QR_VIEWER_HTML.replace("__VIEWER_TOKEN__", token).replace("__API_BASE__", _API_BASE)
     return HTMLResponse(html)
+
+
+@router.get("/qr.png")
+async def qr_png(token: str = Query(...)):
+    if not get_browser_manager().verify_token(token):
+        raise HTTPException(status_code=403, detail="Token inválido.")
+    png = get_browser_manager().get_qr_png()
+    if not png:
+        raise HTTPException(status_code=404, detail="QR ainda não disponível.")
+    return Response(content=png, media_type="image/png")
+
+
+@router.get("/auth-status")
+async def auth_status(token: str = Query(...)):
+    if not get_browser_manager().verify_token(token):
+        raise HTTPException(status_code=403, detail="Token inválido.")
+    return {"authenticated": get_browser_manager().auth_event.is_set()}
 
 
 @router.get("/screenshot.png")

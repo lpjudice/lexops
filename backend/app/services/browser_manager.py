@@ -79,6 +79,7 @@ class BrowserManager:
         self.captured_token: Optional[str] = None
         self._code_verifier: Optional[str] = None
         self._last_screenshot: Optional[bytes] = None
+        self._qr_png: Optional[bytes] = None
 
     async def start(self) -> None:
         async with self._lock:
@@ -156,7 +157,61 @@ class BrowserManager:
         )
 
         await page.goto(auth_url, wait_until="domcontentloaded", timeout=30_000)
-        logger.info("Navigated to SSO: %s", _SSO_AUTH)
+        logger.info("Navigated to SSO (JUS.BR): %s", page.url)
+
+        # Auto-advance to the gov.br QR-code login (no captcha path).
+        self._qr_png = None
+        asyncio.create_task(self._drive_to_qr(page))
+
+    async def _drive_to_qr(self, page: Page) -> None:
+        """Click through JUS.BR → gov.br → 'Login com QR code' and render the QR.
+
+        Runs as a background task so navigate_to_sso returns immediately. The QR
+        is extracted from the canvas (CPU-cheap) and cached in self._qr_png.
+        """
+        try:
+            # 1) JUS.BR page → click "Entrar com gov.br" (br-sign-in broker link)
+            await page.locator("a.br-sign-in").first.click(timeout=15_000)
+            await page.wait_for_timeout(5_000)
+            logger.info("gov.br login page: %s", page.url)
+
+            # 2) Click "Login com QR code". The gov.br SPA reports the click as a
+            #    timeout (post-click actionability wait) but the handler fires and
+            #    the QR canvas renders — so we ignore the timeout.
+            try:
+                await page.locator("a:has-text('QR code')").first.click(
+                    timeout=6_000, force=True, no_wait_after=True
+                )
+            except Exception:
+                pass
+
+            # 3) Poll the #qrcode canvas until it actually contains a QR.
+            for _ in range(40):
+                data_url = await page.evaluate(
+                    """() => {
+                      const c = document.querySelector('#qrcode canvas');
+                      if (!c) return null;
+                      try {
+                        const ctx = c.getContext('2d');
+                        const d = ctx.getImageData(0,0,c.width,c.height).data;
+                        let black = 0;
+                        for (let i = 0; i < d.length; i += 4) if (d[i] < 128) black++;
+                        if (black < 50) return null;
+                        return c.toDataURL('image/png');
+                      } catch (e) { return null; }
+                    }"""
+                )
+                if data_url:
+                    self._qr_png = base64.b64decode(data_url.split(",", 1)[1])
+                    logger.info("QR code renderizado e extraído (%d bytes).", len(self._qr_png))
+                    return
+                await asyncio.sleep(0.5)
+            logger.warning("QR não renderizou no tempo esperado.")
+        except Exception:
+            logger.exception("Erro ao dirigir até o QR do gov.br")
+
+    def get_qr_png(self) -> Optional[bytes]:
+        return self._qr_png
 
     async def _intercept_redirect(self, route: Route, request: Request) -> None:
         """Catch the OAuth redirect, exchange code for token via httpx."""
@@ -269,6 +324,7 @@ class BrowserManager:
         self.captured_token = None
         self.auth_event.clear()
         self._code_verifier = None
+        self._qr_png = None
 
     async def wait_for_auth(self, timeout_seconds: int = 600) -> str:
         try:
