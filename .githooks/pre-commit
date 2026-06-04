@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# ──────────────────────────────────────────────────────────────────────────────
+# SEMI-TRAVA jus.br / PDPJ / DataJud
+#
+# Bloqueia commits que alterem a LÓGICA congelada da consulta de processos
+# (andamentos + documentos) e do fluxo de captura de token (colar o JSON/response
+# do token em vez de cURL).
+#
+# Propósito: evitar que outro dev/chat (Claude, Codex, etc.) altere essa lógica
+# de forma despercebida, ou reverta para um commit antigo, enquanto outras
+# mudanças (visuais/layout) são feitas na mesma tela.
+#
+# IMPORTANTE: só a LÓGICA está travada. Mudanças visuais/posicionamento ficam
+# em componentes de UI (ProcessosPage, AndamentosSection, SincronizarModal,
+# ImportarJusBRModal, InstrucoesJusBRModal) e NÃO são bloqueadas.
+#
+# Override intencional (mudança revisada e proposital):
+#     ALLOW_JUSBR_CHANGES=1 git commit ...
+# ──────────────────────────────────────────────────────────────────────────────
+set -euo pipefail
+
+PROTECTED=(
+  "backend/app/services/consulta_processual/orchestrator.py"
+  "backend/app/services/consulta_processual/pdpj.py"
+  "backend/app/services/consulta_processual/jusbr_session.py"
+  "backend/app/services/consulta_processual/datajud.py"
+  "backend/app/services/consulta_processual/cnj.py"
+  "backend/app/services/consulta_processual/base.py"
+  "frontend/src/utils/jusbrToken.ts"
+)
+
+# Override explícito e proposital.
+if [[ "${ALLOW_JUSBR_CHANGES:-0}" == "1" ]]; then
+  echo "🔓 SEMI-TRAVA jus.br: override ativo (ALLOW_JUSBR_CHANGES=1) — permitindo."
+  exit 0
+fi
+
+staged="$(git diff --cached --name-only)"
+blocked=()
+for f in "${PROTECTED[@]}"; do
+  if grep -qxF "$f" <<<"$staged"; then
+    blocked+=("$f")
+  fi
+done
+
+if (( ${#blocked[@]} > 0 )); then
+  echo "──────────────────────────────────────────────────────────────"
+  echo "🔒 SEMI-TRAVA jus.br: commit BLOQUEADO."
+  echo ""
+  echo "Estes arquivos contêm a LÓGICA congelada da consulta jus.br/DataJud"
+  echo "(andamentos + documentos) e do fluxo de colar o token:"
+  echo ""
+  for f in "${blocked[@]}"; do echo "   • $f"; done
+  echo ""
+  echo "Mudanças visuais/de layout NÃO ficam aqui — edite os componentes de UI."
+  echo "Se a alteração na LÓGICA for intencional e revisada, refaça o commit com:"
+  echo ""
+  echo "   ALLOW_JUSBR_CHANGES=1 git commit ..."
+  echo "──────────────────────────────────────────────────────────────"
+  exit 1
+fi
+
+exit 0
