@@ -30,6 +30,45 @@ class Settings(BaseSettings):
     # Frontend base URL (for magic links)
     frontend_url: str = "http://localhost:5174"
 
+    # Telegram — bot de Reembolsos
+    telegram_bot_token: str = ""
+
+    # Andamentos bot (@jusbr_andamentos_bot) — separate token, long polling
+    andamentos_bot_token: str = ""
+    andamentos_allowed_user_ids: str = "5152275140"
+    andamentos_viewer_secret: str = ""
+    # IDs de usuários autorizados a operar o bot em DM (separados por vírgula).
+    telegram_allowed_user_ids: str = ""
+    # IDs de grupos cujos membros são automaticamente autorizados (separados por vírgula).
+    # Qualquer pessoa adicionada ao grupo pode usar o bot — sem precisar cadastrar ID individual.
+    telegram_allowed_group_ids: str = ""
+    # Segredo do webhook: o Telegram envia no header X-Telegram-Bot-Api-Secret-Token.
+    telegram_webhook_secret: str = ""
+
+    @property
+    def telegram_allowed_ids(self) -> set[int]:
+        out: set[int] = set()
+        for part in self.telegram_allowed_user_ids.split(","):
+            part = part.strip()
+            if part:
+                try:
+                    out.add(int(part))
+                except ValueError:
+                    pass
+        return out
+
+    @property
+    def telegram_allowed_group_ids_set(self) -> set[int]:
+        out: set[int] = set()
+        for part in self.telegram_allowed_group_ids.split(","):
+            part = part.strip()
+            if part:
+                try:
+                    out.add(int(part))
+                except ValueError:
+                    pass
+        return out
+
     @property
     def database_url(self) -> str:
         import os

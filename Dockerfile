@@ -20,6 +20,9 @@ WORKDIR /app/backend
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Playwright Chromium — must run after pip install (playwright binary comes from pip)
+RUN playwright install chromium --with-deps
+
 # Backend source
 COPY backend/ .
 

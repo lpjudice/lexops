@@ -6,7 +6,8 @@ from app.database import Base, engine
 from app.models import email_cliente  # noqa: F401 — ensures EmailCliente table is registered
 from app.models import reuniao  # noqa: F401 — ensures Reuniao table is registered
 from app.models import jusbr_session as _jusbr_session_model  # noqa: F401 — ensures JusbrSession table is registered
-from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, jurisprudencia, organizador, pje, prazos, processos, reembolsos, reunioes, system, tarefas, teses, usuarios, webhooks
+from app.models import telegram_conversa as _telegram_conversa_model  # noqa: F401 — ensures TelegramConversa table is registered
+from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, jurisprudencia, organizador, pje, prazos, processos, reembolsos, reunioes, system, tarefas, telegram, telegram_andamentos, teses, usuarios, webhooks
 
 # Cria as tabelas (Alembic gerencia em produção; aqui facilita o dev)
 Base.metadata.create_all(bind=engine)
@@ -315,6 +316,42 @@ def _run_migrations() -> None:
         conn.execute(text(
             "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS monitorar_diario BOOLEAN NOT NULL DEFAULT false"
         ))
+        # Reembolsos: múltiplos comprovantes por despesa (bot do Telegram)
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS comprovantes_item (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                item_id UUID NOT NULL REFERENCES itens_reembolso(id) ON DELETE CASCADE,
+                filename VARCHAR(500),
+                file_path VARCHAR(1000),
+                drive_link VARCHAR(1000),
+                mime VARCHAR(100),
+                created_at TIMESTAMPTZ DEFAULT now()
+            )
+        """))
+        # Estado da conversa do bot do Telegram
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS telegram_conversas (
+                chat_id BIGINT PRIMARY KEY,
+                state VARCHAR(50) NOT NULL DEFAULT 'idle',
+                data JSONB NOT NULL DEFAULT '{}'::jsonb,
+                updated_at TIMESTAMPTZ DEFAULT now()
+            )
+        """))
+        # Comprovantes recebidos pelo bot (reconciliação /pendentes)
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS telegram_docs (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                chat_id BIGINT NOT NULL,
+                file_id VARCHAR(400) NOT NULL,
+                file_unique_id VARCHAR(200),
+                filename VARCHAR(500),
+                mime VARCHAR(100),
+                valor_detectado NUMERIC(12,2),
+                status VARCHAR(20) NOT NULL DEFAULT 'pendente',
+                item_id UUID,
+                created_at TIMESTAMPTZ DEFAULT now()
+            )
+        """))
 
         conn.commit()
 
@@ -386,6 +423,33 @@ app.include_router(andamentos.router)
 app.include_router(usuarios.router)
 app.include_router(reunioes.router)
 app.include_router(webhooks.router)
+app.include_router(telegram.router)
+app.include_router(telegram_andamentos.router)
+
+
+@app.on_event("startup")
+async def _startup_andamentos_bot():
+    """Start Playwright browser + aiogram polling for @jusbr_andamentos_bot."""
+    import asyncio
+    import logging
+    log = logging.getLogger(__name__)
+
+    token = settings.andamentos_bot_token
+    secret = settings.andamentos_viewer_secret
+    if not token or not secret:
+        log.warning("andamentos_bot_token ou andamentos_viewer_secret não configurados — bot desativado.")
+        return
+
+    from app.services.browser_manager import BrowserManager
+    from app.routers.telegram_andamentos import set_browser_manager, create_dispatcher, run_polling
+
+    mgr = BrowserManager(viewer_secret=secret, link_ttl=600)
+    await mgr.start()
+    set_browser_manager(mgr)
+
+    dispatcher = create_dispatcher()
+    asyncio.create_task(run_polling(token, dispatcher))
+    log.info("@jusbr_andamentos_bot polling iniciado.")
 
 
 @app.on_event("startup")
