@@ -151,6 +151,22 @@ export const andamentosApi = {
   limparSessaoJusBR: () =>
     api.delete('/andamentos/jusbr/session').then((r) => r.data),
 
+  iniciarPkceJusBR: () =>
+    api
+      .post<{ url: string; state_id: string; expires_in: number }>('/andamentos/jusbr/pkce/start')
+      .then((r) => r.data),
+
+  finalizarPkceJusBR: (state_id: string, pasted_url: string) =>
+    api
+      .post<{
+        ok: boolean
+        expires_at: string | null
+        refresh_type: string | null
+        refresh_scope: string | null
+        refresh_expires_at: string | null
+      }>('/andamentos/jusbr/pkce/finish', { state_id, pasted_url })
+      .then((r) => r.data),
+
   arquivoUrl: (andamentoId: string) => `/api/andamentos/arquivo/${andamentoId}`,
 
   importarJusBR: (processoId: string, payload: string) =>

@@ -4,6 +4,7 @@ import axios from 'axios'
 import { andamentosApi } from '../api/andamentos'
 import type { Andamento, JusbrSessionStatus, JusbrSyncJobStatus, SincronizacaoResult } from '../api/andamentos'
 import InstrucoesJusBRModal from './InstrucoesJusBRModal'
+import ConectarGovBrModal from './ConectarGovBrModal'
 import { JUSBR_VERSION } from '../jusbrVersion'
 import styles from './AndamentosSection.module.css'
 import {
@@ -102,6 +103,7 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
   const [fonte, setFonte] = useState<Fonte>('jusbr')
   const [offset, setOffset] = useState(0)
   const [showTokenModal, setShowTokenModal] = useState(false)
+  const [showPkceModal, setShowPkceModal] = useState(false)
   const [ultimoAndamentoPre, setUltimoAndamentoPre] = useState<string | null | undefined>(ultimoAndamentoData)
   const [jusbrJobId, setJusbrJobId] = useState<string | null>(null)
   const [jusbrJobResult, setJusbrJobResult] = useState<SincronizacaoResult | null>(null)
@@ -297,9 +299,18 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
             <button
               className={styles.btnTokenReset}
               onClick={() => setShowTokenModal(true)}
-              title="Sessão ativa — clique para renovar"
+              title="Sessão ativa — clique para renovar (colar JSON)"
             >
               🔑
+            </button>
+          )}
+          {fonte === 'jusbr' && (
+            <button
+              className={styles.btnTokenReset}
+              onClick={() => setShowPkceModal(true)}
+              title="Conectar via gov.br (login PKCE, sessão não expira)"
+            >
+              🔐
             </button>
           )}
           <button
@@ -436,6 +447,16 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
           initialToken=""
           isSubmitting={configurarSessao.isPending}
           error={configurarSessao.isError ? extractApiErrorMessage(configurarSessao.error, 'Não foi possível configurar a sessão do jus.br.') : null}
+        />
+      )}
+
+      {/* PKCE modal (sessão perene via gov.br) */}
+      {showPkceModal && (
+        <ConectarGovBrModal
+          onClose={() => setShowPkceModal(false)}
+          onSuccess={() => {
+            qc.invalidateQueries({ queryKey: ['jusbr-session'] })
+          }}
         />
       )}
     </div>

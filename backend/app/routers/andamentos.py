@@ -711,6 +711,31 @@ def limpar_sessao_jusbr():
     return {"ok": True}
 
 
+# ── PKCE com offline_access (sessão perene, sem colar token manualmente) ─────
+
+@router.post("/jusbr/pkce/start")
+def iniciar_pkce():
+    """Gera URL de autorização gov.br (PKCE + offline_access) e state_id."""
+    from app.services.lexops_pkce import build_login_url
+
+    return build_login_url()
+
+
+@router.post("/jusbr/pkce/finish")
+def finalizar_pkce(body: dict):
+    """Recebe {state_id, pasted_url} e troca por tokens; salva sessão id=1."""
+    from app.services.lexops_pkce import exchange_code
+
+    state_id = (body or {}).get("state_id") or ""
+    pasted = (body or {}).get("pasted_url") or (body or {}).get("code") or ""
+    if not state_id or not pasted:
+        raise HTTPException(status_code=422, detail="state_id e pasted_url são obrigatórios.")
+    try:
+        return exchange_code(state_id, pasted)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
 # ── JusBR import from pasted Response JSON ───────────────────────────────────
 
 @router.post("/processo/{processo_id}/importar-jusbr", response_model=SincronizacaoResult)
