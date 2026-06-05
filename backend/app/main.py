@@ -7,6 +7,8 @@ from app.models import email_cliente  # noqa: F401 — ensures EmailCliente tabl
 from app.models import reuniao  # noqa: F401 — ensures Reuniao table is registered
 from app.models import jusbr_session as _jusbr_session_model  # noqa: F401 — ensures JusbrSession table is registered
 from app.models import telegram_conversa as _telegram_conversa_model  # noqa: F401 — ensures TelegramConversa table is registered
+from app.models import processo_telegram_extra as _processo_telegram_extra_model  # noqa: F401
+from app.models import processo_parte as _processo_parte_model  # noqa: F401
 from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, jurisprudencia, organizador, pje, prazos, processos, reembolsos, reunioes, system, tarefas, telegram, telegram_andamentos, teses, usuarios, webhooks
 
 # Cria as tabelas (Alembic gerencia em produção; aqui facilita o dev)
@@ -352,6 +354,52 @@ def _run_migrations() -> None:
                 created_at TIMESTAMPTZ DEFAULT now()
             )
         """))
+
+        # ── Bot @jusbr_andamentos_bot — push diário e CNJs avulsos ──────────
+        # Flag por processo para ligar/desligar o push diário do Telegram.
+        conn.execute(text(
+            "ALTER TABLE processos ADD COLUMN IF NOT EXISTS notificar_telegram BOOLEAN NOT NULL DEFAULT TRUE"
+        ))
+        # CNJs adicionados via /add no bot que não estão na carteira do escritório.
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS processos_telegram_extras (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                cnj VARCHAR(25) UNIQUE NOT NULL,
+                nome_cliente VARCHAR(255),
+                apelido VARCHAR(255),
+                descricao TEXT,
+                info_adicional VARCHAR(120),
+                tribunal VARCHAR(20),
+                vara VARCHAR(255),
+                comarca VARCHAR(255),
+                notificar BOOLEAN NOT NULL DEFAULT TRUE,
+                criado_por_chat_id BIGINT,
+                created_at TIMESTAMPTZ DEFAULT now()
+            )
+        """))
+        # Partes coletadas via PDPJ (polo ativo / passivo / etc).
+        # Vincula a processos (escritório) OU a processos_telegram_extras (avulsos),
+        # exatamente UM dos dois. Polo: ATIVO / PASSIVO / OUTROS.
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS processo_partes (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                processo_id UUID REFERENCES processos(id) ON DELETE CASCADE,
+                extra_id UUID REFERENCES processos_telegram_extras(id) ON DELETE CASCADE,
+                polo VARCHAR(20) NOT NULL,
+                nome VARCHAR(500) NOT NULL,
+                tipo_pessoa VARCHAR(20),
+                documento VARCHAR(50),
+                ordem INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ DEFAULT now(),
+                CHECK ((processo_id IS NOT NULL) <> (extra_id IS NOT NULL))
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_processo_partes_processo ON processo_partes(processo_id)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_processo_partes_extra ON processo_partes(extra_id)"
+        ))
 
         conn.commit()
 

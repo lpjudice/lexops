@@ -74,6 +74,9 @@ class Processo(Base):
     tentativas_falha: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     andamentos_nao_lidos: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
+    # Push diário do @jusbr_andamentos_bot — pode silenciar processo a processo.
+    notificar_telegram: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
