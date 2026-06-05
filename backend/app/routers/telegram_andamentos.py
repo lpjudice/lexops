@@ -12,6 +12,7 @@ import re
 from dataclasses import dataclass, field
 
 from aiogram import Bot, Dispatcher, F
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject
 from aiogram.types import (
     BufferedInputFile,
@@ -63,6 +64,15 @@ class QueryState:
 
 _state: dict[int, QueryState] = {}
 
+
+async def _safe_send(bot: Bot, chat_id: int, text: str, reply_markup=None):
+    """Envia em Markdown; se o conteúdo dinâmico quebrar o parser (descrição de
+    andamento com * _ ` soltos), reenvia em texto puro para nunca falhar."""
+    try:
+        return await bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=reply_markup)
+    except TelegramBadRequest:
+        return await bot.send_message(chat_id, text, reply_markup=reply_markup)
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _allowed(user_id: int) -> bool:
@@ -109,10 +119,8 @@ async def _send_page(bot: Bot, chat_id: int, state: QueryState, page: int) -> No
         lines.append(_fmt_andamento(a, start + i))
         lines.append("")
     lines.append(f"_Mostrando {start}–{start + len(items) - 1} de {len(state.andamentos)} andamentos_")
-    await bot.send_message(
-        chat_id,
-        "\n".join(lines),
-        parse_mode="Markdown",
+    await _safe_send(
+        bot, chat_id, "\n".join(lines),
         reply_markup=_build_keyboard(state.cnj, page, len(state.andamentos), items),
     )
 
@@ -229,10 +237,9 @@ async def _busca_clientes(bot: Bot, chat_id: int, termo: str) -> None:
         [InlineKeyboardButton(text=f"{nome} ({qtd} proc.)", callback_data=f"acli:{cid}")]
         for cid, nome, qtd in clientes
     ]
-    await bot.send_message(
-        chat_id,
+    await _safe_send(
+        bot, chat_id,
         f"👤 *{len(clientes)} cliente(s)* para “{termo}”:",
-        parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
 
@@ -257,10 +264,9 @@ async def _busca_clientes_pagina(bot: Bot, chat_id: int, offset: int) -> None:
     rows.append([InlineKeyboardButton(text="✏️ Digitar nome", callback_data="aclhint")])
 
     ini, fim = offset + 1, min(offset + _CLI_PAGE, total)
-    await bot.send_message(
-        chat_id,
+    await _safe_send(
+        bot, chat_id,
         f"👤 *Clientes {ini}–{fim} de {total}* (ordem alfabética):",
-        parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
 
@@ -287,12 +293,12 @@ async def _listar_processos(bot: Bot, chat_id: int, cliente_id: str) -> None:
     if not procs:
         await bot.send_message(chat_id, f"{nome or 'Cliente'} não tem processos cadastrados.")
         return
-    await bot.send_message(chat_id, f"⚖️ *Processos de {nome}* ({len(procs)}):", parse_mode="Markdown")
+    await _safe_send(bot, chat_id, f"⚖️ *Processos de {nome}* ({len(procs)}):")
     for i, p in enumerate(procs, 1):
         kb = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="🔍 Buscar andamentos", callback_data=f"aproc:{p['numero_cnj']}")
         ]])
-        await bot.send_message(chat_id, _fmt_processo(p, i), parse_mode="Markdown", reply_markup=kb)
+        await _safe_send(bot, chat_id, _fmt_processo(p, i), reply_markup=kb)
 
 
 async def _run_lookup(bot: Bot, chat_id: int, cnj: str) -> None:
@@ -528,12 +534,12 @@ def create_dispatcher() -> Dispatcher:
 
             content, _ = result
             filename = a.arquivo_nome or f"documento_{abs_i}.pdf"
-            await query.bot.send_document(
-                chat_id,
-                document=BufferedInputFile(content, filename=filename),
-                caption=caption,
-                parse_mode="Markdown",
-            )
+            doc = BufferedInputFile(content, filename=filename)
+            try:
+                await query.bot.send_document(chat_id, document=doc, caption=caption, parse_mode="Markdown")
+            except TelegramBadRequest:
+                doc = BufferedInputFile(content, filename=filename)
+                await query.bot.send_document(chat_id, document=doc, caption=caption)
 
     return dp
 
