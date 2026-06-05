@@ -147,13 +147,10 @@ def _query_clientes(termo: str) -> list[tuple[str, str, int]]:
 
     db = SessionLocal()
     try:
-        rows = (
-            db.query(Cliente)
-            .filter(Cliente.nome.ilike(f"%{termo}%"))
-            .order_by(Cliente.nome.asc())
-            .limit(15)
-            .all()
-        )
+        q = db.query(Cliente).order_by(Cliente.nome.asc())
+        if termo:
+            q = q.filter(Cliente.nome.ilike(f"%{termo}%")).limit(15)
+        rows = q.all()
         return [(str(c.id), c.nome, len(c.processos)) for c in rows]
     finally:
         db.close()
@@ -198,15 +195,17 @@ def _query_processos(cliente_id: str) -> tuple[str, list[dict]]:
 async def _busca_clientes(bot: Bot, chat_id: int, termo: str) -> None:
     clientes = _query_clientes(termo)
     if not clientes:
-        await bot.send_message(chat_id, f"Nenhum cliente encontrado para “{termo}”.")
+        alvo = f"para “{termo}”" if termo else "cadastrado"
+        await bot.send_message(chat_id, f"Nenhum cliente {alvo}.")
         return
     rows = [
         [InlineKeyboardButton(text=f"{nome} ({qtd} proc.)", callback_data=f"acli:{cid}")]
         for cid, nome, qtd in clientes
     ]
+    titulo = f"para “{termo}”" if termo else "(todos, em ordem alfabética)"
     await bot.send_message(
         chat_id,
-        f"👤 *{len(clientes)} cliente(s)* para “{termo}”:",
+        f"👤 *{len(clientes)} cliente(s)* {titulo}:",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
@@ -289,7 +288,7 @@ def create_dispatcher() -> Dispatcher:
         await msg.answer(
             "🏛️ *Bot de Andamentos Processuais*\n\n"
             "• Envie o *número CNJ* (com pontos/traços ou os 20 dígitos corridos) para buscar andamentos.\n"
-            "• `/busca <nome>` — encontra clientes cadastrados no lexops e lista os processos.\n\n"
+            "• `/busca <nome>` — encontra clientes do lexops (ou só `/busca` p/ listar todos).\n\n"
             "/sessao — status da sessão jus.br",
             parse_mode="Markdown",
         )
@@ -319,8 +318,9 @@ def create_dispatcher() -> Dispatcher:
         if not _allowed(msg.from_user.id):
             return
         termo = (command.args or "").strip()
-        if not termo or len(termo) < 2:
-            await msg.answer("Use `/busca <nome do cliente>`. Ex: `/busca silva`", parse_mode="Markdown")
+        # /busca sem termo → lista todos os clientes; com termo → busca parcial
+        if termo and len(termo) < 2:
+            await msg.answer("Digite ao menos 2 letras, ou só `/busca` para listar todos.", parse_mode="Markdown")
             return
         await _busca_clientes(msg.bot, msg.chat.id, termo)
 
