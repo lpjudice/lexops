@@ -82,7 +82,8 @@ _HELP_TEXT = (
     "• `/cancelar` — aborta um cadastro em andamento.\n\n"
     "*Sessão jus.br (login gov.br):*\n"
     "• `/login` — revalida o acesso (gera o link de login gov.br).\n"
-    "• `/sessao` — status da sessão.\n\n"
+    "• `/sessao` — status da sessão.\n"
+    "• `/chatid` — descobre o id do chat atual (útil pra setup do grupo de push).\n\n"
     "*Ajuda:* `/help` ou `/ajuda`\n\n"
     "_📎 = tem documento · 📊 = processo do escritório · 📌 = CNJ avulso · "
     "🔔 = notificando · 🔕 = silenciado_"
@@ -820,6 +821,53 @@ async def _send_partes(bot: Bot, chat_id: int, kind: str, ref_id: str) -> None:
     await _safe_send(bot, chat_id, "\n".join(linhas))
 
 
+async def _send_push_andamentos(bot: Bot, chat_id: int, kind: str, ref_id: str) -> None:
+    """Mostra os andamentos das últimas 24h de um processo (do push diário)."""
+    from datetime import datetime, timedelta, timezone
+    from app.database import SessionLocal
+    from app.models.andamento import AndamentoProcesso
+    from app.models.andamento_telegram_extra import AndamentoTelegramExtra
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=36)  # margem além das 24h
+    db = SessionLocal()
+    try:
+        if kind == "proc":
+            rows = (
+                db.query(AndamentoProcesso)
+                .filter(AndamentoProcesso.processo_id == ref_id)
+                .filter(AndamentoProcesso.created_at >= cutoff)
+                .order_by(AndamentoProcesso.data_andamento.desc().nullslast())
+                .all()
+            )
+            tem_doc = lambda a: bool(a.arquivo_drive_link or a.arquivo_path or a.arquivo_nome)
+        else:
+            rows = (
+                db.query(AndamentoTelegramExtra)
+                .filter(AndamentoTelegramExtra.extra_id == ref_id)
+                .filter(AndamentoTelegramExtra.created_at >= cutoff)
+                .order_by(AndamentoTelegramExtra.data_andamento.desc().nullslast())
+                .all()
+            )
+            tem_doc = lambda a: bool(a.arquivo_url or a.arquivo_nome)
+    finally:
+        db.close()
+
+    if not rows:
+        await bot.send_message(chat_id, "Sem andamentos recentes para esse processo.")
+        return
+
+    linhas = [f"📋 *Últimos {len(rows)} andamento(s):*\n"]
+    for i, a in enumerate(rows, 1):
+        data = a.data_andamento.strftime("%d/%m/%Y") if a.data_andamento else "—"
+        tipo = f"  __{a.tipo}__\n" if getattr(a, "tipo", None) else ""
+        desc = (a.descricao or "").strip()
+        if len(desc) > 350:
+            desc = desc[:347] + "…"
+        marca = " 📎" if tem_doc(a) else ""
+        linhas.append(f"*{i}.* 📅 {data}{marca}\n{tipo}{desc}\n")
+    await _safe_send(bot, chat_id, "\n".join(linhas))
+
+
 async def _run_lookup(bot: Bot, chat_id: int, cnj: str) -> None:
     from app.services.consulta_processual.pdpj import buscar_via_pdpj
     from app.services.consulta_processual.cnj import inferir_tribunal_pelo_cnj
@@ -906,6 +954,11 @@ def create_dispatcher() -> Dispatcher:
             await msg.answer("Digite ao menos 2 letras, ou só `/busca` para listar todos.", parse_mode="Markdown")
             return
         await _busca_clientes(msg.bot, msg.chat.id, termo)
+
+    @dp.message(Command("chatid"))
+    async def cmd_chatid(msg: Message) -> None:
+        # Sem _allowed: precisa funcionar em grupo recém-criado pra capturar o ID.
+        await msg.answer(f"chat_id: `{msg.chat.id}`\nType: {msg.chat.type}", parse_mode="Markdown")
 
     @dp.message(Command("login"))
     async def cmd_login(msg: Message) -> None:
@@ -1102,6 +1155,16 @@ def create_dispatcher() -> Dispatcher:
         _, kind, ref_id = query.data.split(":", 2)
         await query.answer()
         await _send_partes(query.bot, query.message.chat.id, kind, ref_id)
+
+    @dp.callback_query(F.data.startswith("apv:"))
+    async def cb_push_view(query: CallbackQuery) -> None:
+        """Push diário: 'Ver andamentos' → lista andamentos das últimas 24h."""
+        if not _allowed(query.from_user.id):
+            await query.answer()
+            return
+        _, kind, ref_id = query.data.split(":", 2)
+        await query.answer()
+        await _send_push_andamentos(query.bot, query.message.chat.id, kind, ref_id)
 
     @dp.callback_query(F.data.startswith("amore:"))
     async def cb_more(query: CallbackQuery) -> None:

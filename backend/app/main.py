@@ -9,6 +9,7 @@ from app.models import jusbr_session as _jusbr_session_model  # noqa: F401 — e
 from app.models import telegram_conversa as _telegram_conversa_model  # noqa: F401 — ensures TelegramConversa table is registered
 from app.models import processo_telegram_extra as _processo_telegram_extra_model  # noqa: F401
 from app.models import processo_parte as _processo_parte_model  # noqa: F401
+from app.models import andamento_telegram_extra as _andamento_telegram_extra_model  # noqa: F401
 from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, jurisprudencia, organizador, pje, prazos, processos, reembolsos, reunioes, system, tarefas, telegram, telegram_andamentos, teses, usuarios, webhooks
 
 # Cria as tabelas (Alembic gerencia em produção; aqui facilita o dev)
@@ -399,6 +400,28 @@ def _run_migrations() -> None:
         ))
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_processo_partes_extra ON processo_partes(extra_id)"
+        ))
+        # Andamentos dos CNJs avulsos (não estão em processos do escritório).
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS andamentos_telegram_extras (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                extra_id UUID NOT NULL REFERENCES processos_telegram_extras(id) ON DELETE CASCADE,
+                data_andamento DATE,
+                descricao TEXT NOT NULL,
+                tipo VARCHAR(255),
+                arquivo_nome VARCHAR(500),
+                arquivo_url TEXT,
+                hash_unico VARCHAR(64) UNIQUE NOT NULL,
+                notificado BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TIMESTAMPTZ DEFAULT now()
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_andamentos_telegram_extra ON andamentos_telegram_extras(extra_id)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_andamentos_telegram_extra_notif "
+            "ON andamentos_telegram_extras(notificado) WHERE notificado = FALSE"
         ))
 
         conn.commit()

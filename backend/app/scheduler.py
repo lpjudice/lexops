@@ -75,6 +75,24 @@ def _refresh_jusbr_session() -> None:
         logger.warning("Scheduler: falha ao renovar sessão jus.br: %s", exc)
 
 
+def _sync_jusbr_notificaveis() -> None:
+    """18h45 BRT — sincroniza jus.br dos processos com push ativo."""
+    try:
+        from app.services.andamentos_push import sync_jusbr_notificaveis
+        sync_jusbr_notificaveis()
+    except Exception as exc:
+        logger.warning("Scheduler: sync_jusbr_notificaveis falhou: %s", exc)
+
+
+def _push_andamentos_telegram() -> None:
+    """19h BRT — envia o resumo do dia no grupo do Telegram."""
+    try:
+        from app.services.andamentos_push import push_andamentos_telegram
+        push_andamentos_telegram()
+    except Exception as exc:
+        logger.warning("Scheduler: push_andamentos_telegram falhou: %s", exc)
+
+
 def _refresh_andamentos_session() -> None:
     """Mantém vivo o offline token do bot @jusbr_andamentos_bot (sessão id=2).
 
@@ -291,6 +309,19 @@ def start_scheduler() -> None:
         _refresh_andamentos_session,
         trigger=CronTrigger(hour='*/12', minute=40),
         id="refresh_andamentos_session",
+        replace_existing=True,
+    )
+    # Push diário do @jusbr_andamentos_bot — coleta jus.br 18h45 e envia 19h
+    scheduler.add_job(
+        _sync_jusbr_notificaveis,
+        trigger=CronTrigger(hour=18, minute=45, timezone="America/Sao_Paulo"),
+        id="sync_jusbr_notificaveis",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _push_andamentos_telegram,
+        trigger=CronTrigger(hour=19, minute=0, timezone="America/Sao_Paulo"),
+        id="push_andamentos_telegram",
         replace_existing=True,
     )
     scheduler.add_job(
