@@ -36,7 +36,6 @@ class Settings(BaseSettings):
     # Andamentos bot (@jusbr_andamentos_bot) — separate token, long polling
     andamentos_bot_token: str = ""
     andamentos_allowed_user_ids: str = "5152275140"
-    andamentos_viewer_secret: str = ""
     # IDs de usuários autorizados a operar o bot em DM (separados por vírgula).
     telegram_allowed_user_ids: str = ""
     # IDs de grupos cujos membros são automaticamente autorizados (separados por vírgula).
