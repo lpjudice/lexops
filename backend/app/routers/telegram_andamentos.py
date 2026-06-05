@@ -31,6 +31,25 @@ router = APIRouter(prefix="/andamentos", tags=["andamentos-bot"])
 
 _PAGE_SIZE = 5
 _CNJ_RE = re.compile(r"\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}")
+# Bare 20-digit CNJ (sem . ou -), opcionalmente com espaços
+_CNJ_DIGITS_RE = re.compile(r"(?<!\d)(\d[\d\s]{18,}\d)(?!\d)")
+
+
+def _format_cnj(digits: str) -> str:
+    """20 dígitos → NNNNNNN-DD.AAAA.J.TT.OOOO."""
+    return f"{digits[:7]}-{digits[7:9]}.{digits[9:13]}.{digits[13]}.{digits[14:16]}.{digits[16:20]}"
+
+
+def _extract_cnj(text: str) -> str | None:
+    """Aceita CNJ formatado OU 20 dígitos corridos (com/sem espaços)."""
+    m = _CNJ_RE.search(text)
+    if m:
+        return m.group(0)
+    for raw in _CNJ_DIGITS_RE.findall(text):
+        digits = re.sub(r"\D", "", raw)
+        if len(digits) == 20:
+            return _format_cnj(digits)
+    return None
 
 
 # ── Per-chat state ────────────────────────────────────────────────────────────
@@ -119,6 +138,110 @@ async def _send_login_link(bot: Bot, chat_id: int) -> None:
     await bot.send_message(chat_id, url, disable_web_page_preview=True)
 
 
+# ── Busca por cliente / processo (dados do lexops) ─────────────────────────────
+
+def _query_clientes(termo: str) -> list[tuple[str, str, int]]:
+    """Retorna (id, nome, qtd_processos) dos clientes que casam com o termo."""
+    from app.database import SessionLocal
+    from app.models.cliente import Cliente
+
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(Cliente)
+            .filter(Cliente.nome.ilike(f"%{termo}%"))
+            .order_by(Cliente.nome.asc())
+            .limit(15)
+            .all()
+        )
+        return [(str(c.id), c.nome, len(c.processos)) for c in rows]
+    finally:
+        db.close()
+
+
+def _query_processos(cliente_id: str) -> tuple[str, list[dict]]:
+    """Retorna (nome_cliente, lista de dicts de processo) de um cliente."""
+    from app.database import SessionLocal
+    from app.models.cliente import Cliente
+    from app.models.processo import Processo
+
+    db = SessionLocal()
+    try:
+        cli = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+        if not cli:
+            return "", []
+        procs = (
+            db.query(Processo)
+            .filter(Processo.cliente_id == cliente_id)
+            .order_by(Processo.created_at.desc())
+            .all()
+        )
+        out = []
+        for p in procs:
+            litis = ", ".join(c.nome for c in p.clientes_litisconsorcio) if p.clientes_litisconsorcio else ""
+            out.append({
+                "numero_cnj": p.numero_cnj,
+                "tribunal": p.tribunal or "",
+                "polo": p.polo or "",
+                "objeto": p.objeto or "",
+                "materia": p.materia or "",
+                "vara": p.vara or "",
+                "comarca": p.comarca or "",
+                "status": p.status or "",
+                "litisconsorcio": litis,
+            })
+        return cli.nome, out
+    finally:
+        db.close()
+
+
+async def _busca_clientes(bot: Bot, chat_id: int, termo: str) -> None:
+    clientes = _query_clientes(termo)
+    if not clientes:
+        await bot.send_message(chat_id, f"Nenhum cliente encontrado para “{termo}”.")
+        return
+    rows = [
+        [InlineKeyboardButton(text=f"{nome} ({qtd} proc.)", callback_data=f"acli:{cid}")]
+        for cid, nome, qtd in clientes
+    ]
+    await bot.send_message(
+        chat_id,
+        f"👤 *{len(clientes)} cliente(s)* para “{termo}”:",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+
+
+def _fmt_processo(p: dict, idx: int) -> str:
+    linhas = [f"*{idx}.* `{p['numero_cnj']}`"]
+    meta = " · ".join(x for x in [p["tribunal"], p["polo"], p["status"]] if x)
+    if meta:
+        linhas.append(f"   {meta}")
+    local = " · ".join(x for x in [p["vara"], p["comarca"]] if x)
+    if local:
+        linhas.append(f"   {local}")
+    if p["materia"]:
+        linhas.append(f"   📂 {p['materia']}")
+    if p["litisconsorcio"]:
+        linhas.append(f"   👥 {p['litisconsorcio']}")
+    if p["objeto"]:
+        linhas.append(f"   📝 {p['objeto'].strip()[:300]}")
+    return "\n".join(linhas)
+
+
+async def _listar_processos(bot: Bot, chat_id: int, cliente_id: str) -> None:
+    nome, procs = _query_processos(cliente_id)
+    if not procs:
+        await bot.send_message(chat_id, f"{nome or 'Cliente'} não tem processos cadastrados.")
+        return
+    await bot.send_message(chat_id, f"⚖️ *Processos de {nome}* ({len(procs)}):", parse_mode="Markdown")
+    for i, p in enumerate(procs, 1):
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="🔍 Buscar andamentos", callback_data=f"aproc:{p['numero_cnj']}")
+        ]])
+        await bot.send_message(chat_id, _fmt_processo(p, i), parse_mode="Markdown", reply_markup=kb)
+
+
 async def _run_lookup(bot: Bot, chat_id: int, cnj: str) -> None:
     from app.services.consulta_processual.pdpj import buscar_via_pdpj
     from app.services.consulta_processual.cnj import inferir_tribunal_pelo_cnj
@@ -165,10 +288,9 @@ def create_dispatcher() -> Dispatcher:
             return
         await msg.answer(
             "🏛️ *Bot de Andamentos Processuais*\n\n"
-            "Envie o número CNJ para buscar andamentos.\n"
-            "Formato: `NNNNNNN-DD.AAAA.J.TT.OOOO`\n\n"
-            "/sessao — status da sessão jus.br\n"
-            "/resetar — limpar sessão",
+            "• Envie o *número CNJ* (com pontos/traços ou os 20 dígitos corridos) para buscar andamentos.\n"
+            "• `/busca <nome>` — encontra clientes cadastrados no lexops e lista os processos.\n\n"
+            "/sessao — status da sessão jus.br",
             parse_mode="Markdown",
         )
 
@@ -186,11 +308,21 @@ def create_dispatcher() -> Dispatcher:
     async def cmd_buscar(msg: Message, command: CommandObject) -> None:
         if not _allowed(msg.from_user.id):
             return
-        m = _CNJ_RE.search(command.args or "")
-        if not m:
-            await msg.answer("Formato inválido. Ex: `0001234-56.2023.8.26.0100`", parse_mode="Markdown")
+        cnj = _extract_cnj(command.args or "")
+        if not cnj:
+            await msg.answer("Formato inválido. Ex: `0001234-56.2023.8.26.0100` ou os 20 dígitos corridos.", parse_mode="Markdown")
             return
-        await _run_lookup(msg.bot, msg.chat.id, m.group(0))
+        await _run_lookup(msg.bot, msg.chat.id, cnj)
+
+    @dp.message(Command("busca"))
+    async def cmd_busca(msg: Message, command: CommandObject) -> None:
+        if not _allowed(msg.from_user.id):
+            return
+        termo = (command.args or "").strip()
+        if not termo or len(termo) < 2:
+            await msg.answer("Use `/busca <nome do cliente>`. Ex: `/busca silva`", parse_mode="Markdown")
+            return
+        await _busca_clientes(msg.bot, msg.chat.id, termo)
 
     @dp.message(F.text)
     async def text_handler(msg: Message) -> None:
@@ -199,10 +331,10 @@ def create_dispatcher() -> Dispatcher:
         text = msg.text or ""
         chat_id = msg.chat.id
 
-        # CNJ → start a lookup
-        m = _CNJ_RE.search(text)
-        if m:
-            await _run_lookup(msg.bot, chat_id, m.group(0))
+        # CNJ (formatado ou 20 dígitos) → start a lookup
+        cnj = _extract_cnj(text)
+        if cnj:
+            await _run_lookup(msg.bot, chat_id, cnj)
             return
 
         # Pasted redirect URL / code while a login is pending → exchange it
@@ -226,6 +358,24 @@ def create_dispatcher() -> Dispatcher:
             cnj = _pending_cnj.pop(chat_id, None)
             if cnj:
                 await _run_lookup(msg.bot, chat_id, cnj)
+
+    @dp.callback_query(F.data.startswith("acli:"))
+    async def cb_cliente(query: CallbackQuery) -> None:
+        if not _allowed(query.from_user.id):
+            await query.answer()
+            return
+        cliente_id = query.data.split(":", 1)[1]
+        await query.answer()
+        await _listar_processos(query.bot, query.message.chat.id, cliente_id)
+
+    @dp.callback_query(F.data.startswith("aproc:"))
+    async def cb_processo(query: CallbackQuery) -> None:
+        if not _allowed(query.from_user.id):
+            await query.answer()
+            return
+        cnj = query.data.split(":", 1)[1]
+        await query.answer()
+        await _run_lookup(query.bot, query.message.chat.id, cnj)
 
     @dp.callback_query(F.data.startswith("amore:"))
     async def cb_more(query: CallbackQuery) -> None:

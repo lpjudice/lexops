@@ -75,6 +75,23 @@ def _refresh_jusbr_session() -> None:
         logger.warning("Scheduler: falha ao renovar sessão jus.br: %s", exc)
 
 
+def _refresh_andamentos_session() -> None:
+    """Mantém vivo o offline token do bot @jusbr_andamentos_bot (sessão id=2).
+
+    O refresh token é offline (não expira), mas o Keycloak encerra a sessão
+    offline por inatividade. Renovar periodicamente mantém viva indefinidamente.
+    """
+    try:
+        from app.services.andamentos_auth import refresh_proactively
+
+        if refresh_proactively():
+            logger.info("Scheduler: sessão andamentos (offline) renovada")
+        else:
+            logger.info("Scheduler: nenhuma sessão andamentos para renovar")
+    except Exception as exc:
+        logger.warning("Scheduler: falha ao renovar sessão andamentos: %s", exc)
+
+
 def _refresh_google_master_session() -> None:
     try:
         from app.services.google_calendar import _load_tokens, _refresh_token
@@ -268,6 +285,12 @@ def start_scheduler() -> None:
         _refresh_google_master_session,
         trigger=CronTrigger(hour='*/6', minute=25),
         id="refresh_google_master_session",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _refresh_andamentos_session,
+        trigger=CronTrigger(hour='*/12', minute=40),
+        id="refresh_andamentos_session",
         replace_existing=True,
     )
     scheduler.add_job(
