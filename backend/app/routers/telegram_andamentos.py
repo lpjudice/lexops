@@ -86,6 +86,35 @@ _HELP_TEXT = (
 )
 
 
+def _diagnostico_doc(content: bytes, mimetype: str | None, nome: str | None) -> dict:
+    """Coleta sinais úteis pra diagnosticar PDF/HTML que abre em branco."""
+    size = len(content)
+    head = content[:16]
+    tail = content[-64:] if size > 64 else content
+    is_pdf = content[:5] == b"%PDF-"
+    pdf_version = content[5:8].decode("ascii", errors="replace") if is_pdf else None
+    has_eof = b"%%EOF" in tail  # PDFs válidos terminam com %%EOF
+    has_encrypt = b"/Encrypt" in content[:4096] or b"/Encrypt" in content[-4096:]
+    has_xref = b"xref" in content or b"/XRef" in content
+    # JPEG/PNG embeddeds (sentença escaneada)?
+    has_jpeg = b"/DCTDecode" in content[:8192]
+    has_image_only = has_jpeg and b"/Font" not in content[:16384]
+    return {
+        "size": size,
+        "head_hex": head.hex(),
+        "head_ascii": head.decode("latin1", errors="replace"),
+        "tail_ascii": tail.decode("latin1", errors="replace").replace("\n", "\\n")[-80:],
+        "is_pdf": is_pdf,
+        "pdf_version": pdf_version,
+        "has_eof": has_eof,
+        "encrypted": has_encrypt,
+        "has_xref": has_xref,
+        "image_only_likely": has_image_only,
+        "mimetype": mimetype,
+        "nome": nome,
+    }
+
+
 def _nome_documento(content: bytes, mimetype: str | None, nome: str | None, idx: int) -> tuple[str, str]:
     """Corrige a extensão pelo conteúdo REAL (magic bytes), não pelo nome.
 
@@ -581,6 +610,8 @@ def create_dispatcher() -> Dispatcher:
                 continue
 
             content, mimetype = result
+            diag = _diagnostico_doc(content, mimetype, a.arquivo_nome)
+            logger.warning("DOC_DIAG #%d cnj=%s | %s", abs_i, cnj, diag)
             filename, tipo = _nome_documento(content, mimetype, a.arquivo_nome, abs_i)
             # Avisa quando o documento não é PDF (ex.: sentença em HTML) — assim
             # você sabe que deve abrir no navegador, não num leitor de PDF.
