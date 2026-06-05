@@ -86,6 +86,30 @@ _HELP_TEXT = (
 )
 
 
+def _nome_documento(content: bytes, mimetype: str | None, nome: str | None, idx: int) -> tuple[str, str]:
+    """Corrige a extensão pelo conteúdo REAL (magic bytes), não pelo nome.
+
+    Documentos do jus.br às vezes vêm em HTML mas nomeados .pdf → abrem em branco
+    num leitor de PDF. Detectamos o tipo de verdade e renomeamos.
+    Retorna (filename, tipo_legivel).
+    """
+    base = (nome or f"documento_{idx}").strip() or f"documento_{idx}"
+    stem = base.rsplit(".", 1)[0] if "." in base else base
+    mime = (mimetype or "").lower()
+    head = content[:1024].lstrip().lower()
+
+    if content[:5] == b"%PDF-" or "pdf" in mime:
+        return f"{stem}.pdf", "PDF"
+    if head.startswith(b"<") and (b"<html" in head or b"<!doctype" in head or "html" in mime):
+        return f"{stem}.html", "HTML"
+    if content[:4] == b"PK\x03\x04":  # zip/docx/xlsx
+        ext = base.rsplit(".", 1)[1] if "." in base else "zip"
+        return f"{stem}.{ext}", ext.upper()
+    # fallback: mantém o que tinha, ou .bin
+    ext = base.rsplit(".", 1)[1] if "." in base else "bin"
+    return f"{stem}.{ext}", ext.upper()
+
+
 async def _safe_send(bot: Bot, chat_id: int, text: str, reply_markup=None):
     """Envia em Markdown; se o conteúdo dinâmico quebrar o parser (descrição de
     andamento com * _ ` soltos), reenvia em texto puro para nunca falhar."""
@@ -556,14 +580,17 @@ def create_dispatcher() -> Dispatcher:
                 await query.bot.send_message(chat_id, f"⚠️ Documento {abs_i} indisponível.")
                 continue
 
-            content, _ = result
-            filename = a.arquivo_nome or f"documento_{abs_i}.pdf"
+            content, mimetype = result
+            filename, tipo = _nome_documento(content, mimetype, a.arquivo_nome, abs_i)
+            # Avisa quando o documento não é PDF (ex.: sentença em HTML) — assim
+            # você sabe que deve abrir no navegador, não num leitor de PDF.
+            cap = caption if tipo == "PDF" else f"{caption}\n_({tipo} — abra no navegador)_"
             doc = BufferedInputFile(content, filename=filename)
             try:
-                await query.bot.send_document(chat_id, document=doc, caption=caption, parse_mode="Markdown")
+                await query.bot.send_document(chat_id, document=doc, caption=cap, parse_mode="Markdown")
             except TelegramBadRequest:
                 doc = BufferedInputFile(content, filename=filename)
-                await query.bot.send_document(chat_id, document=doc, caption=caption)
+                await query.bot.send_document(chat_id, document=doc, caption=cap)
 
     return dp
 
