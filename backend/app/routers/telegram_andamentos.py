@@ -955,6 +955,35 @@ def create_dispatcher() -> Dispatcher:
             return
         await _busca_clientes(msg.bot, msg.chat.id, termo)
 
+    @dp.message(Command("testpush"))
+    async def cmd_testpush(msg: Message) -> None:
+        """Dispara o push diário AGORA, em vez de esperar as 19h. Apenas allowlist."""
+        if not _allowed(msg.from_user.id):
+            return
+        await msg.answer("⏳ Disparando push...")
+        import asyncio
+        from app.services.andamentos_push import _async_push
+        try:
+            await _async_push()
+            await msg.answer("✅ Push disparado. Veja o resultado no grupo.")
+        except Exception as exc:
+            logger.exception("testpush falhou")
+            await msg.answer(f"❌ {str(exc)[:200]}")
+
+    @dp.message(Command("testsync"))
+    async def cmd_testsync(msg: Message) -> None:
+        """Dispara o sync das 18h45 AGORA. Apenas allowlist."""
+        if not _allowed(msg.from_user.id):
+            return
+        await msg.answer("⏳ Sincronizando jus.br dos monitorados (pode demorar)...")
+        from app.services.andamentos_push import _async_sync
+        try:
+            await _async_sync()
+            await msg.answer("✅ Sync concluído. Use /testpush pra ver o resumo.")
+        except Exception as exc:
+            logger.exception("testsync falhou")
+            await msg.answer(f"❌ {str(exc)[:200]}")
+
     @dp.message(Command("chatid"))
     async def cmd_chatid(msg: Message) -> None:
         # Sem _allowed: precisa funcionar em grupo recém-criado pra capturar o ID.
