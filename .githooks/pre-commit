@@ -27,6 +27,10 @@ PROTECTED=(
   "backend/app/services/consulta_processual/cnj.py"
   "backend/app/services/consulta_processual/base.py"
   "frontend/src/utils/jusbrToken.ts"
+  # Lógica de auth gov.br/PKCE/offline-token do bot @jusbr_andamentos_bot.
+  # Congelada e funcionando (login no navegador real + offline_access que renova
+  # pra sempre). A UI/comandos do bot ficam em telegram_andamentos.py (NÃO travado).
+  "backend/app/services/andamentos_auth.py"
 )
 
 # Override explícito e proposital.
