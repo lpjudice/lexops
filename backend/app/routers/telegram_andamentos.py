@@ -129,6 +129,8 @@ def _nome_documento(content: bytes, mimetype: str | None, nome: str | None, idx:
 
     if content[:5] == b"%PDF-" or "pdf" in mime:
         return f"{stem}.pdf", "PDF"
+    if content[:5] == b"{\\rtf" or "rtf" in mime:
+        return f"{stem}.rtf", "RTF"
     if head.startswith(b"<") and (b"<html" in head or b"<!doctype" in head or "html" in mime):
         return f"{stem}.html", "HTML"
     if content[:4] == b"PK\x03\x04":  # zip/docx/xlsx
@@ -610,12 +612,18 @@ def create_dispatcher() -> Dispatcher:
                 continue
 
             content, mimetype = result
-            diag = _diagnostico_doc(content, mimetype, a.arquivo_nome)
-            logger.warning("DOC_DIAG #%d cnj=%s | %s", abs_i, cnj, diag)
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug("DOC_DIAG #%d cnj=%s | %s", abs_i, cnj, _diagnostico_doc(content, mimetype, a.arquivo_nome))
             filename, tipo = _nome_documento(content, mimetype, a.arquivo_nome, abs_i)
-            # Avisa quando o documento não é PDF (ex.: sentença em HTML) — assim
-            # você sabe que deve abrir no navegador, não num leitor de PDF.
-            cap = caption if tipo == "PDF" else f"{caption}\n_({tipo} — abra no navegador)_"
+            # Avisa quando o documento não é PDF — assim você sabe que precisa de
+            # outro app pra abrir (RTF/HTML não abrem em leitor de PDF).
+            _ABERTURA = {
+                "PDF": None,
+                "RTF": "abra no Word / Pages / qualquer editor de texto",
+                "HTML": "abra no navegador",
+            }
+            dica = _ABERTURA.get(tipo)
+            cap = caption if not dica else f"{caption}\n_({tipo} — {dica})_"
             doc = BufferedInputFile(content, filename=filename)
             try:
                 await query.bot.send_document(chat_id, document=doc, caption=cap, parse_mode="Markdown")
