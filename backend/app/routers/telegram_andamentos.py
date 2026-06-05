@@ -69,20 +69,23 @@ _HELP_TEXT = (
     "🏛️ *Bot de Andamentos Processuais*\n"
     "Consulta andamentos e documentos direto do jus.br/PDPJ.\n\n"
     "*Buscar andamentos:*\n"
-    "• Envie o *número CNJ* — com pontos/traços (`0001234-56.2023.8.26.0100`) "
-    "ou os 20 dígitos corridos. O bot reorganiza sozinho.\n"
-    "• `/buscar <cnj>` — mesma coisa, via comando.\n\n"
+    "• Envie o *número CNJ* (formatado ou 20 dígitos corridos) — busca direto.\n"
+    "• `/buscar <cnj>` — mesma coisa via comando.\n\n"
     "*Buscar pelo cliente (cadastro do lexops):*\n"
-    "• `/busca <nome>` — filtra clientes pelo nome e lista os processos "
-    "(partes, vara/comarca, matéria, status e a descrição). Toque no processo p/ ver andamentos.\n"
-    "• `/busca` (sem nome) — lista *todos* os clientes em ordem alfabética, de 10 em 10.\n\n"
+    "• `/busca <nome>` — filtra clientes pelo nome e lista os processos.\n"
+    "• `/busca` — lista *todos* os clientes em ordem alfabética, paginado.\n\n"
+    "*Monitorar processos (push diário 19h):*\n"
+    "• `/add <cnj>` — adiciona um CNJ avulso (mesmo fora da carteira do escritório).\n"
+    "• `/lista` — todos os processos monitorados (escritório + avulsos).\n"
+    "• `/silenciar <cnj>` · `/ativar <cnj>` — controla o push individualmente.\n"
+    "• `/silenciados` — lista só os que estão silenciados.\n"
+    "• `/cancelar` — aborta um cadastro em andamento.\n\n"
     "*Sessão jus.br (login gov.br):*\n"
-    "• `/login` — revalida o acesso manualmente (gera o link de login gov.br).\n"
-    "• `/sessao` — mostra se a sessão está ativa e quando expira.\n\n"
-    "*Ajuda:*\n"
-    "• `/help` ou `/ajuda` — mostra esta mensagem.\n\n"
-    "_Nos resultados: 📎 = tem documento · botão “Quero os documentos” envia os PDFs aqui · "
-    "“Ver mais” pagina os andamentos._"
+    "• `/login` — revalida o acesso (gera o link de login gov.br).\n"
+    "• `/sessao` — status da sessão.\n\n"
+    "*Ajuda:* `/help` ou `/ajuda`\n\n"
+    "_📎 = tem documento · 📊 = processo do escritório · 📌 = CNJ avulso · "
+    "🔔 = notificando · 🔕 = silenciado_"
 )
 
 
@@ -204,6 +207,11 @@ async def _send_page(bot: Bot, chat_id: int, state: QueryState, page: int) -> No
 # Remember the CNJ the user wanted, so we can resume after login
 _pending_cnj: dict[int, str] = {}
 
+# State machine do /add — em memória, curto fluxo.
+# chat_id → {step, cnj, resumo, apelido, descricao, info_adicional}
+_add_state: dict[int, dict] = {}
+_LISTA_PAGE = 10
+
 
 async def _send_login_link(bot: Bot, chat_id: int) -> None:
     url = andamentos_auth.build_login_url(chat_id)
@@ -264,10 +272,14 @@ def _query_clientes_pagina(offset: int) -> tuple[list[tuple[str, str, int]], int
 
 
 def _query_processos(cliente_id: str) -> tuple[str, list[dict]]:
-    """Retorna (nome_cliente, lista de dicts de processo) de um cliente."""
+    """Retorna (nome_cliente, lista de dicts de processo) de um cliente.
+
+    Cada dict inclui as partes coletadas (se houver) e a flag notificar_telegram.
+    """
     from app.database import SessionLocal
     from app.models.cliente import Cliente
     from app.models.processo import Processo
+    from app.models.processo_parte import ProcessoParte
 
     db = SessionLocal()
     try:
@@ -280,10 +292,18 @@ def _query_processos(cliente_id: str) -> tuple[str, list[dict]]:
             .order_by(Processo.created_at.desc())
             .all()
         )
+        ids = [p.id for p in procs]
+        partes_por_proc: dict = {}
+        if ids:
+            for parte in db.query(ProcessoParte).filter(ProcessoParte.processo_id.in_(ids)).order_by(
+                ProcessoParte.ordem
+            ).all():
+                partes_por_proc.setdefault(parte.processo_id, {}).setdefault(parte.polo, []).append(parte.nome)
         out = []
         for p in procs:
             litis = ", ".join(c.nome for c in p.clientes_litisconsorcio) if p.clientes_litisconsorcio else ""
             out.append({
+                "processo_id": str(p.id),
                 "numero_cnj": p.numero_cnj,
                 "tribunal": p.tribunal or "",
                 "polo": p.polo or "",
@@ -293,6 +313,8 @@ def _query_processos(cliente_id: str) -> tuple[str, list[dict]]:
                 "comarca": p.comarca or "",
                 "status": p.status or "",
                 "litisconsorcio": litis,
+                "notificar_telegram": bool(getattr(p, "notificar_telegram", True)),
+                "partes_por_polo": partes_por_proc.get(p.id, {}),
             })
         return cli.nome, out
     finally:
@@ -347,6 +369,26 @@ async def _busca_clientes_pagina(bot: Bot, chat_id: int, offset: int) -> None:
     )
 
 
+_POLO_LABEL = {"ATIVO": "Polo ativo", "PASSIVO": "Polo passivo", "OUTROS": "Outras partes"}
+
+
+def _fmt_polo(nomes: list[str], max_visible: int = 2) -> str:
+    """1 → 'X' · 2 → 'X e Y' · 3+ → 'X, Y e Outros (N)'."""
+    if not nomes:
+        return ""
+    n = len(nomes)
+    if n == 1:
+        return nomes[0]
+    if n == 2:
+        return f"{nomes[0]} e {nomes[1]}"
+    visiveis = ", ".join(nomes[:max_visible])
+    return f"{visiveis} e Outros ({n - max_visible})"
+
+
+def _tem_overflow(partes_por_polo: dict[str, list[str]], threshold: int = 3) -> bool:
+    return any(len(v) >= threshold for v in (partes_por_polo or {}).values())
+
+
 def _fmt_processo(p: dict, idx: int) -> str:
     linhas = [f"*{idx}.* `{p['numero_cnj']}`"]
     meta = " · ".join(x for x in [p["tribunal"], p["polo"], p["status"]] if x)
@@ -355,11 +397,20 @@ def _fmt_processo(p: dict, idx: int) -> str:
     local = " · ".join(x for x in [p["vara"], p["comarca"]] if x)
     if local:
         linhas.append(f"   {local}")
-    if p["materia"]:
+    if p.get("materia"):
         linhas.append(f"   📂 {p['materia']}")
-    if p["litisconsorcio"]:
+
+    # Partes coletadas via PDPJ — prevalecem sobre o fallback (litisconsórcio).
+    partes_por_polo = p.get("partes_por_polo") or {}
+    if partes_por_polo:
+        for polo in ("ATIVO", "PASSIVO", "OUTROS"):
+            nomes = partes_por_polo.get(polo) or []
+            if nomes:
+                linhas.append(f"   👥 {_POLO_LABEL[polo]}: {_fmt_polo(nomes)}")
+    elif p.get("litisconsorcio"):
         linhas.append(f"   👥 {p['litisconsorcio']}")
-    if p["objeto"]:
+
+    if p.get("objeto"):
         linhas.append(f"   📝 {p['objeto'].strip()[:300]}")
     return "\n".join(linhas)
 
@@ -371,10 +422,402 @@ async def _listar_processos(bot: Bot, chat_id: int, cliente_id: str) -> None:
         return
     await _safe_send(bot, chat_id, f"⚖️ *Processos de {nome}* ({len(procs)}):")
     for i, p in enumerate(procs, 1):
-        kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="🔍 Buscar andamentos", callback_data=f"aproc:{p['numero_cnj']}")
-        ]])
+        botoes = []
+        if _tem_overflow(p.get("partes_por_polo") or {}):
+            botoes.append(InlineKeyboardButton(
+                text="👥 Ver todas as partes",
+                callback_data=f"apart:p:{p['processo_id']}",
+            ))
+        botoes.append(InlineKeyboardButton(
+            text="🔍 Buscar andamentos",
+            callback_data=f"aproc:{p['numero_cnj']}",
+        ))
+        kb = InlineKeyboardMarkup(inline_keyboard=[botoes])
         await _safe_send(bot, chat_id, _fmt_processo(p, i), reply_markup=kb)
+
+
+# ── Monitorados (processos do escritório + CNJs avulsos do /add) ──────────────
+
+def _listar_monitorados(offset: int, soh_silenciados: bool = False) -> tuple[list[dict], int]:
+    """Une processos do escritório + extras do bot, ordena por nome.
+
+    Cada item: {tipo: 'proc'|'extra', id, label, cnj, descricao, tribunal,
+                notificar, vara, comarca, partes_por_polo, ref_id_str}.
+    """
+    from app.database import SessionLocal
+    from app.models.cliente import Cliente
+    from app.models.processo import Processo
+    from app.models.processo_parte import ProcessoParte
+    from app.models.processo_telegram_extra import ProcessoTelegramExtra
+
+    db = SessionLocal()
+    try:
+        qp = db.query(Processo, Cliente.nome).join(Cliente, Cliente.id == Processo.cliente_id)
+        if soh_silenciados:
+            qp = qp.filter(Processo.notificar_telegram.is_(False))
+        procs = qp.all()
+
+        qe = db.query(ProcessoTelegramExtra)
+        if soh_silenciados:
+            qe = qe.filter(ProcessoTelegramExtra.notificar.is_(False))
+        extras = qe.all()
+
+        # partes em batch
+        proc_ids = [p.id for p, _ in procs]
+        extra_ids = [e.id for e in extras]
+        partes_p, partes_e = {}, {}
+        if proc_ids:
+            for x in db.query(ProcessoParte).filter(ProcessoParte.processo_id.in_(proc_ids)).order_by(ProcessoParte.ordem).all():
+                partes_p.setdefault(x.processo_id, {}).setdefault(x.polo, []).append(x.nome)
+        if extra_ids:
+            for x in db.query(ProcessoParte).filter(ProcessoParte.extra_id.in_(extra_ids)).order_by(ProcessoParte.ordem).all():
+                partes_e.setdefault(x.extra_id, {}).setdefault(x.polo, []).append(x.nome)
+
+        items: list[dict] = []
+        for p, nome_cliente in procs:
+            items.append({
+                "tipo": "proc",
+                "ref_id_str": str(p.id),
+                "label": nome_cliente,
+                "cnj": p.numero_cnj,
+                "tribunal": p.tribunal or "",
+                "vara": p.vara or "",
+                "comarca": p.comarca or "",
+                "descricao": (p.objeto or "").strip(),
+                "notificar": bool(getattr(p, "notificar_telegram", True)),
+                "partes_por_polo": partes_p.get(p.id, {}),
+            })
+        for e in extras:
+            items.append({
+                "tipo": "extra",
+                "ref_id_str": str(e.id),
+                "label": e.apelido or e.nome_cliente or e.cnj,
+                "cnj": e.cnj,
+                "tribunal": e.tribunal or "",
+                "vara": e.vara or "",
+                "comarca": e.comarca or "",
+                "descricao": (e.descricao or "").strip(),
+                "notificar": bool(e.notificar),
+                "partes_por_polo": partes_e.get(e.id, {}),
+            })
+
+        items.sort(key=lambda x: (x["label"] or "").lower())
+        total = len(items)
+        return items[offset: offset + _LISTA_PAGE], total
+    finally:
+        db.close()
+
+
+def _fmt_monitorado(item: dict, idx: int) -> str:
+    ico = "📊" if item["tipo"] == "proc" else "📌"
+    estado = "🔔" if item["notificar"] else "🔕"
+    linhas = [f"*{idx}.* {ico} *{item['label']}* {estado}"]
+    linhas.append(f"   `{item['cnj']}`")
+    meta = " · ".join(x for x in [item["tribunal"], item["vara"], item["comarca"]] if x)
+    if meta:
+        linhas.append(f"   {meta}")
+    partes = item.get("partes_por_polo") or {}
+    for polo in ("ATIVO", "PASSIVO"):
+        nomes = partes.get(polo) or []
+        if nomes:
+            linhas.append(f"   👥 {_POLO_LABEL[polo]}: {_fmt_polo(nomes)}")
+    if item["descricao"]:
+        linhas.append(f"   📝 {item['descricao'][:240]}")
+    return "\n".join(linhas)
+
+
+async def _send_lista_pagina(bot: Bot, chat_id: int, offset: int, soh_silenciados: bool = False) -> None:
+    items, total = _listar_monitorados(offset, soh_silenciados)
+    if not items and offset == 0:
+        msg = "Nenhum processo silenciado." if soh_silenciados else "Nenhum processo monitorado ainda. Use `/add <cnj>` para começar."
+        await bot.send_message(chat_id, msg, parse_mode="Markdown")
+        return
+    titulo = "🔕 *Silenciados*" if soh_silenciados else "🔔 *Monitorados*"
+    ini, fim = offset + 1, min(offset + _LISTA_PAGE, total)
+    await _safe_send(bot, chat_id, f"{titulo} — {ini}–{fim} de {total}")
+    for i, item in enumerate(items, ini):
+        ref = item["ref_id_str"]
+        kind = item["tipo"]  # 'proc' ou 'extra'
+        toggle_label = "🔔 Reativar" if not item["notificar"] else "🔕 Silenciar"
+        botoes = [InlineKeyboardButton(
+            text=toggle_label, callback_data=f"atoggle:{kind}:{ref}"
+        )]
+        if _tem_overflow(item.get("partes_por_polo") or {}):
+            botoes.insert(0, InlineKeyboardButton(
+                text="👥 Ver partes",
+                callback_data=f"apart:{kind[0]}:{ref}",  # apart:p:UUID ou apart:e:UUID
+            ))
+        botoes.append(InlineKeyboardButton(
+            text="🔍 Andamentos", callback_data=f"aproc:{item['cnj']}",
+        ))
+        rows = [botoes]
+        await _safe_send(bot, chat_id, _fmt_monitorado(item, i), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+
+    # Navegação no final
+    nav: list[InlineKeyboardButton] = []
+    cb_root = "alistsil" if soh_silenciados else "alistg"
+    if offset > 0:
+        nav.append(InlineKeyboardButton(text="◀ Anteriores", callback_data=f"{cb_root}:{max(0, offset - _LISTA_PAGE)}"))
+    if offset + _LISTA_PAGE < total:
+        nav.append(InlineKeyboardButton(text="Próximos 10 ▶", callback_data=f"{cb_root}:{offset + _LISTA_PAGE}"))
+    if nav:
+        await bot.send_message(
+            chat_id, "Navegação:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[nav]),
+        )
+
+
+def _set_notificar(cnj: str, valor: bool) -> tuple[bool, str]:
+    """Atualiza flag em processos OU extras. Retorna (achou, label)."""
+    from app.database import SessionLocal
+    from app.models.cliente import Cliente
+    from app.models.processo import Processo
+    from app.models.processo_telegram_extra import ProcessoTelegramExtra
+
+    db = SessionLocal()
+    try:
+        p = db.query(Processo).filter(Processo.numero_cnj == cnj).first()
+        if p:
+            p.notificar_telegram = valor
+            cli = db.query(Cliente).filter(Cliente.id == p.cliente_id).first()
+            label = cli.nome if cli else cnj
+            db.commit()
+            return True, label
+        e = db.query(ProcessoTelegramExtra).filter(ProcessoTelegramExtra.cnj == cnj).first()
+        if e:
+            e.notificar = valor
+            label = e.apelido or e.nome_cliente or cnj
+            db.commit()
+            return True, label
+        return False, ""
+    finally:
+        db.close()
+
+
+def _toggle_notificar(kind: str, ref_id: str) -> tuple[bool, str, bool]:
+    """Alterna a flag pelo id (uuid). Retorna (ok, label, novo_estado)."""
+    from app.database import SessionLocal
+    from app.models.cliente import Cliente
+    from app.models.processo import Processo
+    from app.models.processo_telegram_extra import ProcessoTelegramExtra
+
+    db = SessionLocal()
+    try:
+        if kind == "proc":
+            p = db.query(Processo).filter(Processo.id == ref_id).first()
+            if not p:
+                return False, "", False
+            p.notificar_telegram = not bool(getattr(p, "notificar_telegram", True))
+            cli = db.query(Cliente).filter(Cliente.id == p.cliente_id).first()
+            db.commit()
+            return True, (cli.nome if cli else p.numero_cnj), bool(p.notificar_telegram)
+        if kind == "extra":
+            e = db.query(ProcessoTelegramExtra).filter(ProcessoTelegramExtra.id == ref_id).first()
+            if not e:
+                return False, "", False
+            e.notificar = not bool(e.notificar)
+            db.commit()
+            return True, (e.apelido or e.nome_cliente or e.cnj), bool(e.notificar)
+        return False, "", False
+    finally:
+        db.close()
+
+
+# ── /add — cadastro de CNJ avulso (state machine em memória) ──────────────────
+
+async def _iniciar_add(bot: Bot, chat_id: int, cnj: str) -> None:
+    """Verifica se o CNJ já existe, busca no PDPJ e abre o fluxo de cadastro."""
+    from app.database import SessionLocal
+    from app.models.processo import Processo
+    from app.models.processo_telegram_extra import ProcessoTelegramExtra
+    from app.services.processo_partes_collector import fetch_resumo
+
+    # Já está em algum dos cadastros?
+    db = SessionLocal()
+    try:
+        if db.query(Processo).filter(Processo.numero_cnj == cnj).first():
+            await bot.send_message(chat_id, f"ℹ️ `{cnj}` já está cadastrado no lexops. Use /ativar pra ligar o push.", parse_mode="Markdown")
+            return
+        if db.query(ProcessoTelegramExtra).filter(ProcessoTelegramExtra.cnj == cnj).first():
+            await bot.send_message(chat_id, f"ℹ️ `{cnj}` já está no /lista. Use /ativar caso esteja silenciado.", parse_mode="Markdown")
+            return
+    finally:
+        db.close()
+
+    sess = andamentos_auth.load_session()
+    if not sess:
+        _pending_cnj[chat_id] = f"__addcnj__{cnj}"  # marker pra retomar após login
+        await bot.send_message(chat_id, "🔐 Preciso da sessão jus.br ativa pra buscar este processo. Faça login primeiro:")
+        await _send_login_link(bot, chat_id)
+        return
+
+    await bot.send_message(chat_id, f"🔍 Buscando `{cnj}` no jus.br...", parse_mode="Markdown")
+    try:
+        resumo = await fetch_resumo(cnj, sess["token"])
+    except Exception as exc:
+        logger.exception("erro fetch_resumo /add")
+        await bot.send_message(chat_id, f"❌ Erro consultando jus.br: {str(exc)[:160]}")
+        return
+    if not resumo:
+        await bot.send_message(
+            chat_id,
+            f"❌ Não consegui localizar `{cnj}` no jus.br. Verifique o número, ou sua sessão pode não ter acesso a esse tribunal.",
+            parse_mode="Markdown",
+        )
+        return
+
+    # Pre-formata pra mostrar ao usuário
+    linhas = [f"🔎 Encontrei `{cnj}`. Confere:\n"]
+    if resumo.get("tribunal"):
+        linhas.append(f"🏛️ {resumo['tribunal']}")
+    if resumo.get("vara") or resumo.get("comarca"):
+        linhas.append(f"   {' · '.join(x for x in [resumo.get('vara'), resumo.get('comarca')] if x)}")
+    if resumo.get("classe"):
+        linhas.append(f"📂 {resumo['classe']}")
+    if resumo.get("assunto"):
+        linhas.append(f"   {resumo['assunto']}")
+    partes_dict: dict[str, list[str]] = {}
+    for p in resumo.get("partes") or []:
+        partes_dict.setdefault(p["polo"], []).append(p["nome"])
+    for polo in ("ATIVO", "PASSIVO", "OUTROS"):
+        nomes = partes_dict.get(polo) or []
+        if nomes:
+            linhas.append(f"👥 {_POLO_LABEL[polo]}: {_fmt_polo(nomes)}")
+
+    await _safe_send(bot, chat_id, "\n".join(linhas))
+
+    # Guarda em memória e abre a primeira pergunta
+    _add_state[chat_id] = {
+        "step": "apelido",
+        "cnj": cnj,
+        "resumo": resumo,
+    }
+    await bot.send_message(
+        chat_id,
+        "Como você quer chamar esse caso internamente?\n"
+        "_(Apelido livre — aparece na lista e no push. Ou /cancelar para sair.)_",
+        parse_mode="Markdown",
+    )
+
+
+async def _continuar_add(bot: Bot, chat_id: int, texto: str) -> bool:
+    """Processa o texto conforme o step ativo. Retorna True se consumiu."""
+    st = _add_state.get(chat_id)
+    if not st:
+        return False
+    txt = (texto or "").strip()
+    if txt.lower() in ("/cancelar", "/cancel"):
+        _add_state.pop(chat_id, None)
+        await bot.send_message(chat_id, "❌ Cadastro cancelado.")
+        return True
+
+    if st["step"] == "apelido":
+        if not txt:
+            await bot.send_message(chat_id, "Mande um apelido (texto), ou /cancelar.")
+            return True
+        st["apelido"] = txt[:200]
+        st["step"] = "descricao"
+        await bot.send_message(
+            chat_id,
+            "Quer adicionar uma *descrição/objeto*? (texto livre, ou /pular)",
+            parse_mode="Markdown",
+        )
+        return True
+
+    if st["step"] == "descricao":
+        if txt.lower() in ("/pular", "/skip"):
+            st["descricao"] = None
+        else:
+            st["descricao"] = txt[:1000]
+        st["step"] = "info"
+        await bot.send_message(
+            chat_id,
+            "Info adicional (até 5 palavras), ou /pular.",
+        )
+        return True
+
+    if st["step"] == "info":
+        if txt.lower() in ("/pular", "/skip"):
+            st["info_adicional"] = None
+        else:
+            palavras = txt.split()
+            if len(palavras) > 5:
+                await bot.send_message(chat_id, "Máximo 5 palavras. Tente de novo, ou /pular.")
+                return True
+            st["info_adicional"] = " ".join(palavras)[:120]
+        await _finalizar_add(bot, chat_id, st)
+        _add_state.pop(chat_id, None)
+        return True
+    return False
+
+
+async def _finalizar_add(bot: Bot, chat_id: int, st: dict) -> None:
+    """Persiste o ProcessoTelegramExtra + partes."""
+    from app.database import SessionLocal
+    from app.models.processo_telegram_extra import ProcessoTelegramExtra
+    from app.services.processo_partes_store import salvar_partes
+
+    resumo = st["resumo"]
+    db = SessionLocal()
+    try:
+        extra = ProcessoTelegramExtra(
+            cnj=st["cnj"],
+            nome_cliente=st.get("apelido"),  # se um dia separar, ajuste aqui
+            apelido=st.get("apelido"),
+            descricao=st.get("descricao"),
+            info_adicional=st.get("info_adicional"),
+            tribunal=resumo.get("tribunal"),
+            vara=resumo.get("vara"),
+            comarca=resumo.get("comarca"),
+            criado_por_chat_id=chat_id,
+            notificar=True,
+        )
+        db.add(extra)
+        db.flush()
+        if resumo.get("partes"):
+            salvar_partes(db, extra_id=extra.id, partes=resumo["partes"])
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("erro persistindo extra")
+        await bot.send_message(chat_id, "❌ Falha ao salvar. Tente novamente.")
+        return
+    finally:
+        db.close()
+
+    await bot.send_message(
+        chat_id,
+        f"✅ Cadastrado! *{st.get('apelido')}* entra no push diário a partir do próximo ciclo.\n"
+        "Use /lista para ver todos os monitorados.",
+        parse_mode="Markdown",
+    )
+
+
+async def _send_partes(bot: Bot, chat_id: int, kind: str, ref_id: str) -> None:
+    """Envia lista completa de partes (ATIVO/PASSIVO/OUTROS)."""
+    from app.database import SessionLocal
+    from app.services.processo_partes_store import listar_partes
+
+    db = SessionLocal()
+    try:
+        if kind == "p":
+            partes = listar_partes(db, processo_id=ref_id)
+        else:
+            partes = listar_partes(db, extra_id=ref_id)
+    finally:
+        db.close()
+
+    if not partes:
+        await bot.send_message(chat_id, "Sem partes cadastradas (faça /buscar para sincronizar do jus.br).")
+        return
+    linhas = ["*Todas as partes do processo:*"]
+    for polo in ("ATIVO", "PASSIVO", "OUTROS"):
+        nomes = [r.nome for r in partes.get(polo, [])]
+        if nomes:
+            linhas.append(f"\n👥 *{_POLO_LABEL[polo]}* ({len(nomes)})")
+            for n in nomes:
+                linhas.append(f"  • {n}")
+    await _safe_send(bot, chat_id, "\n".join(linhas))
 
 
 async def _run_lookup(bot: Bot, chat_id: int, cnj: str) -> None:
@@ -476,12 +919,79 @@ def create_dispatcher() -> Dispatcher:
             )
         await _send_login_link(msg.bot, msg.chat.id)
 
+    @dp.message(Command("add"))
+    async def cmd_add(msg: Message, command: CommandObject) -> None:
+        if not _allowed(msg.from_user.id):
+            return
+        cnj = _extract_cnj(command.args or "")
+        if not cnj:
+            await msg.answer(
+                "Use `/add <cnj>` (formatado ou 20 dígitos). Ex: `/add 0001234-56.2024.8.26.0100`.",
+                parse_mode="Markdown",
+            )
+            return
+        await _iniciar_add(msg.bot, msg.chat.id, cnj)
+
+    @dp.message(Command("cancelar"))
+    async def cmd_cancelar(msg: Message) -> None:
+        if not _allowed(msg.from_user.id):
+            return
+        if _add_state.pop(msg.chat.id, None):
+            await msg.answer("❌ Cadastro cancelado.")
+        else:
+            await msg.answer("Nada em andamento pra cancelar.")
+
+    @dp.message(Command("lista"))
+    async def cmd_lista(msg: Message) -> None:
+        if not _allowed(msg.from_user.id):
+            return
+        await _send_lista_pagina(msg.bot, msg.chat.id, 0, soh_silenciados=False)
+
+    @dp.message(Command("silenciados"))
+    async def cmd_silenciados(msg: Message) -> None:
+        if not _allowed(msg.from_user.id):
+            return
+        await _send_lista_pagina(msg.bot, msg.chat.id, 0, soh_silenciados=True)
+
+    @dp.message(Command("silenciar"))
+    async def cmd_silenciar(msg: Message, command: CommandObject) -> None:
+        if not _allowed(msg.from_user.id):
+            return
+        cnj = _extract_cnj(command.args or "")
+        if not cnj:
+            await msg.answer("Use `/silenciar <cnj>`.", parse_mode="Markdown")
+            return
+        ok, label = _set_notificar(cnj, False)
+        if not ok:
+            await msg.answer(f"❌ `{cnj}` não encontrado no lexops nem nos seus monitorados.", parse_mode="Markdown")
+            return
+        await msg.answer(f"🔕 Silenciado: *{label}* (`{cnj}`).", parse_mode="Markdown")
+
+    @dp.message(Command("ativar"))
+    async def cmd_ativar(msg: Message, command: CommandObject) -> None:
+        if not _allowed(msg.from_user.id):
+            return
+        cnj = _extract_cnj(command.args or "")
+        if not cnj:
+            await msg.answer("Use `/ativar <cnj>`.", parse_mode="Markdown")
+            return
+        ok, label = _set_notificar(cnj, True)
+        if not ok:
+            await msg.answer(f"❌ `{cnj}` não encontrado. Use `/add` se for um CNJ novo.", parse_mode="Markdown")
+            return
+        await msg.answer(f"🔔 Reativado: *{label}* (`{cnj}`).", parse_mode="Markdown")
+
     @dp.message(F.text)
     async def text_handler(msg: Message) -> None:
         if not _allowed(msg.from_user.id):
             return
         text = msg.text or ""
         chat_id = msg.chat.id
+
+        # State machine do /add — prioridade total enquanto ativo
+        if chat_id in _add_state:
+            if await _continuar_add(msg.bot, chat_id, text):
+                return
 
         # CNJ (formatado ou 20 dígitos) → start a lookup
         cnj = _extract_cnj(text)
@@ -507,9 +1017,12 @@ def create_dispatcher() -> Dispatcher:
                 f"Escopo: `{info.get('scope')}`",
                 parse_mode="Markdown",
             )
-            cnj = _pending_cnj.pop(chat_id, None)
-            if cnj:
-                await _run_lookup(msg.bot, chat_id, cnj)
+            pendente = _pending_cnj.pop(chat_id, None)
+            if pendente:
+                if pendente.startswith("__addcnj__"):
+                    await _iniciar_add(msg.bot, chat_id, pendente.removeprefix("__addcnj__"))
+                else:
+                    await _run_lookup(msg.bot, chat_id, pendente)
 
     @dp.callback_query(F.data.startswith("acli:"))
     async def cb_cliente(query: CallbackQuery) -> None:
@@ -549,6 +1062,46 @@ def create_dispatcher() -> Dispatcher:
         cnj = query.data.split(":", 1)[1]
         await query.answer()
         await _run_lookup(query.bot, query.message.chat.id, cnj)
+
+    @dp.callback_query(F.data.startswith("alistg:"))
+    async def cb_lista_pagina(query: CallbackQuery) -> None:
+        if not _allowed(query.from_user.id):
+            await query.answer()
+            return
+        offset = int(query.data.split(":", 1)[1])
+        await query.answer()
+        await _send_lista_pagina(query.bot, query.message.chat.id, offset, soh_silenciados=False)
+
+    @dp.callback_query(F.data.startswith("alistsil:"))
+    async def cb_silenciados_pagina(query: CallbackQuery) -> None:
+        if not _allowed(query.from_user.id):
+            await query.answer()
+            return
+        offset = int(query.data.split(":", 1)[1])
+        await query.answer()
+        await _send_lista_pagina(query.bot, query.message.chat.id, offset, soh_silenciados=True)
+
+    @dp.callback_query(F.data.startswith("atoggle:"))
+    async def cb_toggle(query: CallbackQuery) -> None:
+        if not _allowed(query.from_user.id):
+            await query.answer()
+            return
+        _, kind, ref_id = query.data.split(":", 2)
+        ok, label, novo = _toggle_notificar(kind, ref_id)
+        if not ok:
+            await query.answer("Não encontrei.")
+            return
+        msg = f"🔔 {label}: agora notifica" if novo else f"🔕 {label}: silenciado"
+        await query.answer(msg, show_alert=False)
+
+    @dp.callback_query(F.data.startswith("apart:"))
+    async def cb_partes(query: CallbackQuery) -> None:
+        if not _allowed(query.from_user.id):
+            await query.answer()
+            return
+        _, kind, ref_id = query.data.split(":", 2)
+        await query.answer()
+        await _send_partes(query.bot, query.message.chat.id, kind, ref_id)
 
     @dp.callback_query(F.data.startswith("amore:"))
     async def cb_more(query: CallbackQuery) -> None:
