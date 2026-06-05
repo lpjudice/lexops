@@ -429,27 +429,21 @@ app.include_router(telegram_andamentos.router)
 
 @app.on_event("startup")
 async def _startup_andamentos_bot():
-    """Start Playwright browser + aiogram polling for @jusbr_andamentos_bot."""
+    """Start aiogram polling for @jusbr_andamentos_bot (login via user's browser)."""
     import asyncio
     import logging
     log = logging.getLogger(__name__)
 
     token = settings.andamentos_bot_token
-    secret = settings.andamentos_viewer_secret
-    if not token or not secret:
-        log.warning("andamentos_bot_token ou andamentos_viewer_secret não configurados — bot desativado.")
+    if not token:
+        log.warning("andamentos_bot_token não configurado — bot desativado.")
         return
 
-    from app.services.browser_manager import BrowserManager
-    from app.routers.telegram_andamentos import set_browser_manager, create_dispatcher, run_polling
-
-    mgr = BrowserManager(viewer_secret=secret, link_ttl=600)
-    await mgr.start()
-    set_browser_manager(mgr)
+    from app.routers.telegram_andamentos import create_dispatcher, run_polling
 
     dispatcher = create_dispatcher()
     asyncio.create_task(run_polling(token, dispatcher))
-    log.info("@jusbr_andamentos_bot polling iniciado.")
+    log.info("@jusbr_andamentos_bot polling iniciado (login PKCE no navegador do usuário).")
 
 
 @app.on_event("startup")

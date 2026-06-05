@@ -1,16 +1,15 @@
-"""Telegram bot for process lookup + Playwright viewer endpoints.
+"""Telegram bot for process lookup (@jusbr_andamentos_bot).
 
-Bot: @jusbr_andamentos_bot — long polling, independent of the reembolsos webhook bot.
-Viewer: /api/andamentos/viewer/{token} — mobile screenshot UI for gov.br login.
+Login: PKCE in the USER's real browser (gov.br anti-automation makes a headless
+server browser unviable). The bot hands a login link; the user logs in normally
+and pastes back the redirect URL; we exchange the code for a token.
+See app.services.andamentos_auth.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Optional
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandObject
@@ -21,34 +20,17 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     Message,
 )
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import HTMLResponse, Response
-from pydantic import BaseModel
+from fastapi import APIRouter
 
 from app.config import settings
-from app.services.browser_manager import BrowserManager
+from app.services import andamentos_auth
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/andamentos", tags=["andamentos-bot"])
 
-_VIEWER_HTML = (Path(__file__).parent.parent / "static" / "viewer.html").read_text()
-_API_BASE = "/api/andamentos"  # full public path (nginx adds /api/ prefix)
 _PAGE_SIZE = 5
 _CNJ_RE = re.compile(r"\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}")
-
-# Singleton — injected at startup from main.py
-_browser: Optional[BrowserManager] = None
-
-
-def set_browser_manager(mgr: BrowserManager) -> None:
-    global _browser
-    _browser = mgr
-
-
-def get_browser_manager() -> BrowserManager:
-    assert _browser is not None, "BrowserManager not initialised"
-    return _browser
 
 
 # ── Per-chat state ────────────────────────────────────────────────────────────
@@ -116,8 +98,26 @@ async def _send_page(bot: Bot, chat_id: int, state: QueryState, page: int) -> No
     )
 
 
+# Remember the CNJ the user wanted, so we can resume after login
+_pending_cnj: dict[int, str] = {}
+
+
+async def _send_login_link(bot: Bot, chat_id: int) -> None:
+    url = andamentos_auth.build_login_url(chat_id)
+    await bot.send_message(
+        chat_id,
+        "🔐 *Login jus.br necessário*\n\n"
+        "1. Abra este link no seu navegador e faça login no gov.br normalmente:\n\n"
+        f"{url}\n\n"
+        "2. Após o login, o navegador vai para uma página do *portaldeservicos.pdpj.jus.br*. "
+        "Copie a *URL inteira* da barra de endereço (ela contém `code=`) e *cole aqui no chat*.\n\n"
+        "_Login feito no seu navegador real (sem captcha pra humano). Faço isso uma vez só._",
+        parse_mode="Markdown",
+        disable_web_page_preview=True,
+    )
+
+
 async def _run_lookup(bot: Bot, chat_id: int, cnj: str) -> None:
-    from app.services.consulta_processual.jusbr_session import load_session
     from app.services.consulta_processual.pdpj import buscar_via_pdpj
     from app.services.consulta_processual.cnj import inferir_tribunal_pelo_cnj
 
@@ -126,37 +126,13 @@ async def _run_lookup(bot: Bot, chat_id: int, cnj: str) -> None:
         await bot.send_message(chat_id, f"❌ Tribunal não identificado para o CNJ `{cnj}`.", parse_mode="Markdown")
         return
 
-    sess = load_session()
-    mgr = get_browser_manager()
-
+    sess = andamentos_auth.load_session()
     if not sess:
-        await bot.send_message(chat_id, "🔐 Sessão jus.br inativa. Gerando QR code de login gov.br...")
-        mgr.reset_auth_event()
-        await mgr.navigate_to_portal()
+        _pending_cnj[chat_id] = cnj
+        await _send_login_link(bot, chat_id)
+        return
 
-        viewer_token, _ = mgr.create_viewer_token()
-        link = f"https://lexops.fly.dev/api/andamentos/viewer/{viewer_token}"
-        await bot.send_message(
-            chat_id,
-            f"📱 *Login gov.br via QR code*\n\n"
-            f"1. Abra este link no celular:\n{link}\n\n"
-            f"2. Abra o *app gov.br* e use o leitor de QR code\n"
-            f"3. Aprove o login com sua biometria\n\n"
-            f"_Sem senha, sem captcha. O bot continua sozinho após a aprovação. Expira em 10 min._",
-            parse_mode="Markdown",
-        )
-        try:
-            await mgr.wait_for_auth(timeout_seconds=600)
-        except TimeoutError:
-            await bot.send_message(chat_id, "⏰ Timeout. Envie o CNJ novamente para tentar.")
-            return
-        await bot.send_message(chat_id, "✅ Autenticado! Buscando andamentos...")
-        sess = load_session()
-        if not sess:
-            await bot.send_message(chat_id, "❌ Sessão não encontrada após login. Tente novamente.")
-            return
-    else:
-        await bot.send_message(chat_id, f"🔍 Buscando `{cnj}`...", parse_mode="Markdown")
+    await bot.send_message(chat_id, f"🔍 Buscando `{cnj}`...", parse_mode="Markdown")
 
     try:
         token = sess.get("token")
@@ -198,21 +174,11 @@ def create_dispatcher() -> Dispatcher:
     async def cmd_sessao(msg: Message) -> None:
         if not _allowed(msg.from_user.id):
             return
-        from app.services.consulta_processual.jusbr_session import session_status
-        st = session_status()
-        if st["active"]:
-            await msg.answer(f"✅ Sessão ativa\nExpira: {st['expires_at']}\nRefresh: {'sim' if st['has_refresh_token'] else 'não'}")
+        sess = andamentos_auth.load_session()
+        if sess:
+            await msg.answer(f"✅ Sessão ativa (andamentos)\nExpira: {sess.get('expires_at')}")
         else:
-            await msg.answer("❌ Sem sessão ativa. Envie um CNJ para iniciar autenticação.")
-
-    @dp.message(Command("resetar"))
-    async def cmd_resetar(msg: Message) -> None:
-        if not _allowed(msg.from_user.id):
-            return
-        from app.services.consulta_processual.jusbr_session import clear_session
-        clear_session()
-        await get_browser_manager().reset_session()
-        await msg.answer("🗑️ Sessão jus.br limpa.")
+            await msg.answer("❌ Sem sessão ativa. Envie um CNJ para iniciar o login.")
 
     @dp.message(Command("buscar"))
     async def cmd_buscar(msg: Message, command: CommandObject) -> None:
@@ -228,9 +194,36 @@ def create_dispatcher() -> Dispatcher:
     async def text_handler(msg: Message) -> None:
         if not _allowed(msg.from_user.id):
             return
-        m = _CNJ_RE.search(msg.text or "")
+        text = msg.text or ""
+        chat_id = msg.chat.id
+
+        # CNJ → start a lookup
+        m = _CNJ_RE.search(text)
         if m:
-            await _run_lookup(msg.bot, msg.chat.id, m.group(0))
+            await _run_lookup(msg.bot, chat_id, m.group(0))
+            return
+
+        # Pasted redirect URL / code while a login is pending → exchange it
+        if andamentos_auth.has_pending(chat_id) and ("code=" in text or "pdpj.jus.br" in text or len(text.strip()) > 30):
+            await msg.answer("🔄 Trocando o código por token...")
+            try:
+                payload = andamentos_auth.exchange_code(chat_id, text)
+            except ValueError as exc:
+                await msg.answer(f"❌ {exc}")
+                return
+            # Report token type — THIS tests the offline_access premise
+            info = andamentos_auth.describe_refresh(payload)
+            tipo = info.get("typ") or "?"
+            offline = "♾️ OFFLINE (renovável indefinidamente!)" if tipo == "Offline" else f"⏳ {tipo} (expira em {info.get('exp')})"
+            await msg.answer(
+                f"✅ *Login concluído!*\n\n"
+                f"Tipo do refresh token: {offline}\n"
+                f"Escopo: `{info.get('scope')}`",
+                parse_mode="Markdown",
+            )
+            cnj = _pending_cnj.pop(chat_id, None)
+            if cnj:
+                await _run_lookup(msg.bot, chat_id, cnj)
 
     @dp.callback_query(F.data.startswith("amore:"))
     async def cb_more(query: CallbackQuery) -> None:
@@ -266,9 +259,8 @@ def create_dispatcher() -> Dispatcher:
         await query.answer(f"Baixando {len(docs)} documento(s)...")
         chat_id = query.message.chat.id
 
-        from app.services.consulta_processual.jusbr_session import load_session
         from app.services.consulta_processual.pdpj import baixar_documento_jusbr
-        sess = load_session()
+        sess = andamentos_auth.load_session()
 
         for rel_i, a in docs:
             abs_i = page * _PAGE_SIZE + rel_i + 1
@@ -312,139 +304,3 @@ async def run_polling(token: str, dispatcher: Dispatcher) -> None:
         await dispatcher.start_polling(bot)
     finally:
         await bot.session.close()
-
-
-# ── FastAPI viewer endpoints (QR-code login) ──────────────────────────────────
-
-_QR_VIEWER_HTML = """<!DOCTYPE html>
-<html lang="pt-BR"><head>
-<meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Login gov.br — LexOps</title>
-<style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{background:#0d0d0d;color:#e0e0e0;font-family:-apple-system,sans-serif;
-       min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center}
-  h2{font-size:20px;margin-bottom:8px}
-  p{font-size:14px;color:#aaa;margin-bottom:20px;max-width:340px;line-height:1.5}
-  #qrbox{background:#fff;border-radius:16px;padding:20px;display:inline-block;min-width:264px;min-height:264px;
-         display:flex;align-items:center;justify-content:center}
-  #qrbox img{width:224px;height:224px;display:block}
-  .spinner{width:40px;height:40px;border:4px solid #333;border-top-color:#2563eb;border-radius:50%;animation:spin 1s linear infinite}
-  @keyframes spin{to{transform:rotate(360deg)}}
-  #status{margin-top:20px;font-size:14px;color:#888}
-  .ok{color:#22c55e!important;font-weight:600}
-  .steps{margin-top:24px;font-size:13px;color:#777;text-align:left;max-width:320px}
-  .steps li{margin:6px 0}
-</style></head><body>
-  <h2>🏛️ Login gov.br</h2>
-  <p>Abra o <strong>app gov.br</strong> no celular, toque no leitor de QR code e aponte para a imagem abaixo.</p>
-  <div id="qrbox"><div class="spinner"></div></div>
-  <div id="status">Gerando QR code…</div>
-  <ol class="steps">
-    <li>1. Abra o app <strong>gov.br</strong></li>
-    <li>2. Toque no ícone de <strong>QR code</strong></li>
-    <li>3. Aponte para o código e aprove com biometria</li>
-  </ol>
-<script>
-  const TOKEN='__VIEWER_TOKEN__', API='__API_BASE__';
-  const qrbox=document.getElementById('qrbox'), status=document.getElementById('status');
-  let done=false;
-  async function poll(){
-    if(done) return;
-    try{
-      const s=await (await fetch(`${API}/auth-status?token=${TOKEN}`)).json();
-      if(s.authenticated){
-        done=true;
-        qrbox.innerHTML='<div style="font-size:64px">✅</div>';
-        status.innerHTML='<span class="ok">Login concluído! Voltando ao Telegram…</span>';
-        return;
-      }
-      // refresh QR image
-      const r=await fetch(`${API}/qr.png?token=${TOKEN}&t=${Date.now()}`);
-      if(r.ok){
-        const blob=await r.blob();
-        qrbox.innerHTML=`<img src="${URL.createObjectURL(blob)}" alt="QR code"/>`;
-        status.textContent='Aguardando aprovação no app gov.br…';
-      }
-    }catch(e){}
-    setTimeout(poll, 2000);
-  }
-  poll();
-</script>
-</body></html>"""
-
-
-@router.get("/viewer/{token}", response_class=HTMLResponse)
-async def viewer(token: str):
-    if not get_browser_manager().verify_token(token):
-        raise HTTPException(status_code=403, detail="Link expirado ou inválido.")
-    html = _QR_VIEWER_HTML.replace("__VIEWER_TOKEN__", token).replace("__API_BASE__", _API_BASE)
-    return HTMLResponse(html)
-
-
-@router.get("/qr.png")
-async def qr_png(token: str = Query(...)):
-    if not get_browser_manager().verify_token(token):
-        raise HTTPException(status_code=403, detail="Token inválido.")
-    png = get_browser_manager().get_qr_png()
-    if not png:
-        raise HTTPException(status_code=404, detail="QR ainda não disponível.")
-    return Response(content=png, media_type="image/png")
-
-
-@router.get("/auth-status")
-async def auth_status(token: str = Query(...)):
-    if not get_browser_manager().verify_token(token):
-        raise HTTPException(status_code=403, detail="Token inválido.")
-    return {"authenticated": get_browser_manager().auth_event.is_set()}
-
-
-@router.get("/screenshot.png")
-async def screenshot(token: str = Query(...)):
-    if not get_browser_manager().verify_token(token):
-        raise HTTPException(status_code=403, detail="Token inválido.")
-    try:
-        png = await get_browser_manager().screenshot_png()
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-    return Response(content=png, media_type="image/png")
-
-
-class _XY(BaseModel):
-    x: int
-    y: int
-    token: str
-
-
-class _Text(BaseModel):
-    text: str
-    token: str
-
-
-class _Key(BaseModel):
-    key: str
-    token: str
-
-
-@router.post("/click")
-async def click(p: _XY):
-    if not get_browser_manager().verify_token(p.token):
-        raise HTTPException(status_code=403, detail="Token inválido.")
-    await get_browser_manager().click(p.x, p.y)
-    return {"ok": True}
-
-
-@router.post("/type")
-async def type_text(p: _Text):
-    if not get_browser_manager().verify_token(p.token):
-        raise HTTPException(status_code=403, detail="Token inválido.")
-    await get_browser_manager().type_text(p.text)
-    return {"ok": True}
-
-
-@router.post("/key")
-async def press_key(p: _Key):
-    if not get_browser_manager().verify_token(p.token):
-        raise HTTPException(status_code=403, detail="Token inválido.")
-    await get_browser_manager().press_key(p.key)
-    return {"ok": True}
