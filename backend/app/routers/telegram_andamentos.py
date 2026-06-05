@@ -65,6 +65,27 @@ class QueryState:
 _state: dict[int, QueryState] = {}
 
 
+_HELP_TEXT = (
+    "🏛️ *Bot de Andamentos Processuais*\n"
+    "Consulta andamentos e documentos direto do jus.br/PDPJ.\n\n"
+    "*Buscar andamentos:*\n"
+    "• Envie o *número CNJ* — com pontos/traços (`0001234-56.2023.8.26.0100`) "
+    "ou os 20 dígitos corridos. O bot reorganiza sozinho.\n"
+    "• `/buscar <cnj>` — mesma coisa, via comando.\n\n"
+    "*Buscar pelo cliente (cadastro do lexops):*\n"
+    "• `/busca <nome>` — filtra clientes pelo nome e lista os processos "
+    "(partes, vara/comarca, matéria, status e a descrição). Toque no processo p/ ver andamentos.\n"
+    "• `/busca` (sem nome) — lista *todos* os clientes em ordem alfabética, de 10 em 10.\n\n"
+    "*Sessão jus.br (login gov.br):*\n"
+    "• `/login` — revalida o acesso manualmente (gera o link de login gov.br).\n"
+    "• `/sessao` — mostra se a sessão está ativa e quando expira.\n\n"
+    "*Ajuda:*\n"
+    "• `/help` ou `/ajuda` — mostra esta mensagem.\n\n"
+    "_Nos resultados: 📎 = tem documento · botão “Quero os documentos” envia os PDFs aqui · "
+    "“Ver mais” pagina os andamentos._"
+)
+
+
 async def _safe_send(bot: Bot, chat_id: int, text: str, reply_markup=None):
     """Envia em Markdown; se o conteúdo dinâmico quebrar o parser (descrição de
     andamento com * _ ` soltos), reenvia em texto puro para nunca falhar."""
@@ -341,18 +362,21 @@ async def _run_lookup(bot: Bot, chat_id: int, cnj: str) -> None:
 def create_dispatcher() -> Dispatcher:
     dp = Dispatcher()
 
+    async def _enviar_ajuda(msg: Message) -> None:
+        await msg.answer(_HELP_TEXT, parse_mode="Markdown", disable_web_page_preview=True)
+
     @dp.message(Command("start"))
     async def cmd_start(msg: Message) -> None:
         if not _allowed(msg.from_user.id):
             return
-        await msg.answer(
-            "🏛️ *Bot de Andamentos Processuais*\n\n"
-            "• Envie o *número CNJ* (com pontos/traços ou os 20 dígitos corridos) para buscar andamentos.\n"
-            "• `/busca <nome>` — encontra clientes do lexops (ou só `/busca` p/ listar todos).\n\n"
-            "/login — revalidar o acesso jus.br manualmente\n"
-            "/sessao — status da sessão jus.br",
-            parse_mode="Markdown",
-        )
+        await _enviar_ajuda(msg)
+
+    @dp.message(Command("help"))
+    @dp.message(Command("ajuda"))
+    async def cmd_help(msg: Message) -> None:
+        if not _allowed(msg.from_user.id):
+            return
+        await _enviar_ajuda(msg)
 
     @dp.message(Command("sessao"))
     async def cmd_sessao(msg: Message) -> None:
