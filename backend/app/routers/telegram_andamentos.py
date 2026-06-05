@@ -156,6 +156,29 @@ def _query_clientes(termo: str) -> list[tuple[str, str, int]]:
         db.close()
 
 
+_CLI_PAGE = 10
+
+
+def _query_clientes_pagina(offset: int) -> tuple[list[tuple[str, str, int]], int]:
+    """Página de TODOS os clientes (ordem alfabética). Retorna (linhas, total)."""
+    from app.database import SessionLocal
+    from app.models.cliente import Cliente
+
+    db = SessionLocal()
+    try:
+        total = db.query(Cliente).count()
+        rows = (
+            db.query(Cliente)
+            .order_by(Cliente.nome.asc())
+            .offset(offset)
+            .limit(_CLI_PAGE)
+            .all()
+        )
+        return [(str(c.id), c.nome, len(c.processos)) for c in rows], total
+    finally:
+        db.close()
+
+
 def _query_processos(cliente_id: str) -> tuple[str, list[dict]]:
     """Retorna (nome_cliente, lista de dicts de processo) de um cliente."""
     from app.database import SessionLocal
@@ -193,19 +216,50 @@ def _query_processos(cliente_id: str) -> tuple[str, list[dict]]:
 
 
 async def _busca_clientes(bot: Bot, chat_id: int, termo: str) -> None:
+    # Sem termo → lista paginada de todos. Com termo → busca parcial direta.
+    if not termo:
+        await _busca_clientes_pagina(bot, chat_id, 0)
+        return
+
     clientes = _query_clientes(termo)
     if not clientes:
-        alvo = f"para “{termo}”" if termo else "cadastrado"
-        await bot.send_message(chat_id, f"Nenhum cliente {alvo}.")
+        await bot.send_message(chat_id, f"Nenhum cliente para “{termo}”.")
         return
     rows = [
         [InlineKeyboardButton(text=f"{nome} ({qtd} proc.)", callback_data=f"acli:{cid}")]
         for cid, nome, qtd in clientes
     ]
-    titulo = f"para “{termo}”" if termo else "(todos, em ordem alfabética)"
     await bot.send_message(
         chat_id,
-        f"👤 *{len(clientes)} cliente(s)* {titulo}:",
+        f"👤 *{len(clientes)} cliente(s)* para “{termo}”:",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+
+
+async def _busca_clientes_pagina(bot: Bot, chat_id: int, offset: int) -> None:
+    clientes, total = _query_clientes_pagina(offset)
+    if not clientes:
+        await bot.send_message(chat_id, "Nenhum cliente cadastrado.")
+        return
+    rows = [
+        [InlineKeyboardButton(text=f"{nome} ({qtd} proc.)", callback_data=f"acli:{cid}")]
+        for cid, nome, qtd in clientes
+    ]
+    # Navegação + chip "digitar nome"
+    nav: list[InlineKeyboardButton] = []
+    if offset > 0:
+        nav.append(InlineKeyboardButton(text="◀ Anteriores", callback_data=f"aclg:{max(0, offset - _CLI_PAGE)}"))
+    if offset + _CLI_PAGE < total:
+        nav.append(InlineKeyboardButton(text="Próximos 10 ▶", callback_data=f"aclg:{offset + _CLI_PAGE}"))
+    if nav:
+        rows.append(nav)
+    rows.append([InlineKeyboardButton(text="✏️ Digitar nome", callback_data="aclhint")])
+
+    ini, fim = offset + 1, min(offset + _CLI_PAGE, total)
+    await bot.send_message(
+        chat_id,
+        f"👤 *Clientes {ini}–{fim} de {total}* (ordem alfabética):",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
@@ -289,6 +343,7 @@ def create_dispatcher() -> Dispatcher:
             "🏛️ *Bot de Andamentos Processuais*\n\n"
             "• Envie o *número CNJ* (com pontos/traços ou os 20 dígitos corridos) para buscar andamentos.\n"
             "• `/busca <nome>` — encontra clientes do lexops (ou só `/busca` p/ listar todos).\n\n"
+            "/login — revalidar o acesso jus.br manualmente\n"
             "/sessao — status da sessão jus.br",
             parse_mode="Markdown",
         )
@@ -323,6 +378,18 @@ def create_dispatcher() -> Dispatcher:
             await msg.answer("Digite ao menos 2 letras, ou só `/busca` para listar todos.", parse_mode="Markdown")
             return
         await _busca_clientes(msg.bot, msg.chat.id, termo)
+
+    @dp.message(Command("login"))
+    async def cmd_login(msg: Message) -> None:
+        if not _allowed(msg.from_user.id):
+            return
+        sess = andamentos_auth.load_session()
+        if sess:
+            await msg.answer(
+                f"✅ A sessão jus.br já está ativa (expira o access em {sess.get('expires_at')}).\n"
+                "Para forçar um login novo mesmo assim, é só seguir o link abaixo."
+            )
+        await _send_login_link(msg.bot, msg.chat.id)
 
     @dp.message(F.text)
     async def text_handler(msg: Message) -> None:
@@ -367,6 +434,27 @@ def create_dispatcher() -> Dispatcher:
         cliente_id = query.data.split(":", 1)[1]
         await query.answer()
         await _listar_processos(query.bot, query.message.chat.id, cliente_id)
+
+    @dp.callback_query(F.data.startswith("aclg:"))
+    async def cb_clientes_pagina(query: CallbackQuery) -> None:
+        if not _allowed(query.from_user.id):
+            await query.answer()
+            return
+        offset = int(query.data.split(":", 1)[1])
+        await query.answer()
+        await _busca_clientes_pagina(query.bot, query.message.chat.id, offset)
+
+    @dp.callback_query(F.data == "aclhint")
+    async def cb_clientes_hint(query: CallbackQuery) -> None:
+        if not _allowed(query.from_user.id):
+            await query.answer()
+            return
+        await query.answer()
+        await query.bot.send_message(
+            query.message.chat.id,
+            "✏️ Digite `/busca <parte do nome>` — ex: `/busca silva` — que eu filtro os clientes.",
+            parse_mode="Markdown",
+        )
 
     @dp.callback_query(F.data.startswith("aproc:"))
     async def cb_processo(query: CallbackQuery) -> None:
