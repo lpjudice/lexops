@@ -104,17 +104,19 @@ _pending_cnj: dict[int, str] = {}
 
 async def _send_login_link(bot: Bot, chat_id: int) -> None:
     url = andamentos_auth.build_login_url(chat_id)
+    # URL goes in a SEPARATE plain-text message — Markdown eats the underscores
+    # in the OAuth params (client_id, offline_access, code_challenge…).
     await bot.send_message(
         chat_id,
         "🔐 *Login jus.br necessário*\n\n"
-        "1. Abra este link no seu navegador e faça login no gov.br normalmente:\n\n"
-        f"{url}\n\n"
-        "2. Após o login, o navegador vai para uma página do *portaldeservicos.pdpj.jus.br*. "
-        "Copie a *URL inteira* da barra de endereço (ela contém `code=`) e *cole aqui no chat*.\n\n"
-        "_Login feito no seu navegador real (sem captcha pra humano). Faço isso uma vez só._",
+        "1. Abra o link abaixo no navegador e faça login no gov.br normalmente.\n"
+        "2. Depois do login o navegador vai para uma página do portaldeservicos.pdpj.jus.br "
+        "(pode mostrar erro / Solicitação inválida — tudo bem). "
+        "Copie a URL INTEIRA da barra de endereço (contém `code=`) e cole aqui no chat.\n\n"
+        "_Login no seu navegador real, sem captcha. Só uma vez._",
         parse_mode="Markdown",
-        disable_web_page_preview=True,
     )
+    await bot.send_message(chat_id, url, disable_web_page_preview=True)
 
 
 async def _run_lookup(bot: Bot, chat_id: int, cnj: str) -> None:
