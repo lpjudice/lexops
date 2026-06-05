@@ -958,7 +958,8 @@ def create_dispatcher() -> Dispatcher:
     @dp.message(Command("chatid"))
     async def cmd_chatid(msg: Message) -> None:
         # Sem _allowed: precisa funcionar em grupo recém-criado pra capturar o ID.
-        await msg.answer(f"chat_id: `{msg.chat.id}`\nType: {msg.chat.type}", parse_mode="Markdown")
+        chat_type = getattr(msg.chat.type, "value", msg.chat.type)
+        await msg.answer(f"chat_id: {msg.chat.id}\ntype: {chat_type}")
 
     @dp.message(Command("login"))
     async def cmd_login(msg: Message) -> None:
