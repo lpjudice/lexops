@@ -129,6 +129,26 @@ def criar_tarefa(
     db.add(tarefa)
     db.commit()
     db.refresh(tarefa)
+
+    # Notifica responsável se já foi definido na criação e tem email
+    if tarefa.responsavel and tarefa.responsavel_email:
+        import threading
+        from app.services.tarefa_email import notificar_responsavel
+        from app.database import SessionLocal
+
+        tarefa_id_snap = tarefa.id
+
+        def _enviar():
+            _db = SessionLocal()
+            try:
+                _t = _db.query(Tarefa).filter(Tarefa.id == tarefa_id_snap).first()
+                if _t:
+                    notificar_responsavel(_db, _t, dry_run=False)
+            finally:
+                _db.close()
+
+        threading.Thread(target=_enviar, daemon=True).start()
+
     return _enrich(tarefa, db, usuario)
 
 

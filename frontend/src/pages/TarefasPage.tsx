@@ -9,6 +9,7 @@ import { usuariosApi } from '../api/usuarios'
 import { useAuth } from '../contexts/AuthContext'
 import ComboBox from '../components/ComboBox'
 import ClienteCombobox from '../components/ClienteCombobox'
+import ResponsavelComboBox from '../components/ResponsavelComboBox'
 import styles from './Page.module.css'
 import t from './TarefasPage.module.css'
 
@@ -43,6 +44,7 @@ interface EditForm {
   titulo: string
   descricao: string
   responsavel: string
+  responsavel_email: string
   data_limite: string
   tags: string
   cliente_id: string
@@ -79,9 +81,9 @@ export default function TarefasPage() {
   // ── Card UI state ─────────────────────────────────────────────────────
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [batchResponsavel, setBatchResponsavel] = useState('')
+  const [batchResponsavel, setBatchResponsavel] = useState({ nome: '', email: '' })
   const [editForm, setEditForm] = useState<EditForm>({
-    titulo: '', descricao: '', responsavel: '', data_limite: '', tags: '',
+    titulo: '', descricao: '', responsavel: '', responsavel_email: '', data_limite: '', tags: '',
     cliente_id: '', processo_id: '', status: 'pendente',
   })
 
@@ -121,7 +123,7 @@ export default function TarefasPage() {
       setRows([{ ...EMPTY_ROW }])
       setBatchCliente('')
       setBatchProcesso('')
-      setBatchResponsavel('')
+      setBatchResponsavel({ nome: '', email: '' })
     },
   })
 
@@ -238,6 +240,7 @@ export default function TarefasPage() {
       titulo: tarefa.titulo,
       descricao: tarefa.descricao ?? '',
       responsavel: tarefa.responsavel ?? '',
+      responsavel_email: tarefa.responsavel_email ?? '',
       data_limite: tarefa.data_limite ?? '',
       tags: tarefa.tags ?? '',
       cliente_id: tarefa.cliente_id ?? '',
@@ -255,6 +258,7 @@ export default function TarefasPage() {
         titulo: editForm.titulo,
         descricao: editForm.descricao || null,
         responsavel: editForm.responsavel || null,
+        responsavel_email: editForm.responsavel_email || null,
         data_limite: editForm.data_limite || null,
         tags: editForm.tags || null,
         cliente_id: editForm.cliente_id || null,
@@ -273,7 +277,8 @@ export default function TarefasPage() {
       valid.map((r) => ({
         titulo: r.titulo.trim(),
         descricao: r.descricao || null,
-        responsavel: batchResponsavel || null,
+        responsavel: batchResponsavel.nome || null,
+        responsavel_email: batchResponsavel.email || null,
         data_limite: r.data_limite || null,
         tags: r.tag || null,
         cliente_id: batchCliente || null,
@@ -400,13 +405,11 @@ export default function TarefasPage() {
 
           <div className={styles.formRow}>
             <label className={styles.formLabel}>Responsável (opcional)</label>
-            <select className={styles.input} value={batchResponsavel} onChange={(e) => setBatchResponsavel(e.target.value)}>
-              <option value="">— Nenhum —</option>
-              {usuarios.filter(u => u.ativo).map(u => (
-                <option key={u.id} value={u.nome}>{u.nome}</option>
-              ))}
-              <option value="Terceiros">Terceiros</option>
-            </select>
+            <ResponsavelComboBox
+              value={batchResponsavel}
+              onChange={setBatchResponsavel}
+              usuarios={usuarios}
+            />
           </div>
 
           <div className={t.tasksBlock}>
@@ -653,13 +656,11 @@ export default function TarefasPage() {
                     </div>
                     <div className={styles.formRow}>
                       <label className={styles.formLabel}>Responsável</label>
-                      <select className={styles.input} value={editForm.responsavel} onChange={(e) => setEditForm({ ...editForm, responsavel: e.target.value })}>
-                        <option value="">— Nenhum —</option>
-                        {usuarios.filter(u => u.ativo).map(u => (
-                          <option key={u.id} value={u.nome}>{u.nome}</option>
-                        ))}
-                        <option value="Terceiros">Terceiros</option>
-                      </select>
+                      <ResponsavelComboBox
+                        value={{ nome: editForm.responsavel, email: editForm.responsavel_email }}
+                        onChange={(v) => setEditForm({ ...editForm, responsavel: v.nome, responsavel_email: v.email })}
+                        usuarios={usuarios}
+                      />
                     </div>
                     <div className={styles.formRow}>
                       <label className={styles.formLabel}>Detalhes / notas</label>
