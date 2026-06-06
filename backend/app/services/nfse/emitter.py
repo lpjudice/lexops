@@ -63,7 +63,7 @@ def emitir_nfse(dados: DadosDPS) -> ResultadoEmissao:
 
     try:
         with get_nfse_client() as client:
-            resp = client.post("/nfse", content=xml_dps)
+            resp = client.post("nfse", content=xml_dps)
     except httpx.RequestError as exc:
         log.error("Erro de conexão com ADN: %s", exc)
         return ResultadoEmissao(sucesso=False, erro_mensagem=f"Erro de conexão: {exc}")
@@ -106,7 +106,7 @@ def consultar_nfse(chave_acesso: str) -> Optional[str]:
     """Consulta NFS-e pela chave de acesso. Retorna XML ou None."""
     try:
         with get_nfse_client() as client:
-            resp = client.get(f"/nfse/{chave_acesso}")
+            resp = client.get(f"nfse/{chave_acesso}")
     except httpx.RequestError as exc:
         log.error("Erro ao consultar NFS-e: %s", exc)
         return None
@@ -127,7 +127,7 @@ def cancelar_nfse(chave_acesso: str, motivo: str) -> ResultadoCancelamento:
 
     try:
         with get_nfse_client() as client:
-            resp = client.post(f"/nfse/{chave_acesso}/eventos", content=xml_evento)
+            resp = client.post(f"nfse/{chave_acesso}/eventos", content=xml_evento)
     except httpx.RequestError as exc:
         return ResultadoCancelamento(sucesso=False, erro_mensagem=str(exc))
 
@@ -169,7 +169,7 @@ def consultar_parametros_municipio(cod_municipio: str = "3205309") -> Optional[d
     try:
         with get_nfse_client() as client:
             resp = client.get(
-                f"/parametros_municipais/{cod_municipio}/convenio",
+                f"parametros_municipais/{cod_municipio}/convenio",
                 headers={"Accept": "application/json"},
             )
     except httpx.RequestError as exc:
