@@ -21,7 +21,10 @@ WORKDIR /app/backend
 COPY backend/requirements.txt .
 # lxml e xmlsec precisam ser compilados do fonte contra o MESMO libxml2 do sistema,
 # senão dá "lxml & xmlsec libxml2 library version mismatch" no import.
-RUN pip install --no-cache-dir --no-binary lxml --no-binary xmlsec lxml==5.2.1 xmlsec==1.3.14 \
+# CFLAGS: GCC 14 trata incompatible-pointer-types como erro; xmlsec vs headers do
+# lxml 5.x dispara isso. Rebaixamos para warning para o build do xmlsec passar.
+RUN CFLAGS="-Wno-incompatible-pointer-types" \
+    pip install --no-cache-dir --no-binary lxml --no-binary xmlsec lxml==5.2.1 xmlsec==1.3.14 \
     && pip install --no-cache-dir -r requirements.txt
 
 # Backend source
