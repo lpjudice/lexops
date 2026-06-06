@@ -1395,13 +1395,28 @@ _BOT_COMMANDS = [
 
 
 async def _setup_bot_commands(bot: Bot) -> None:
-    """Registra a lista de comandos no menu sanduíche do Telegram."""
-    from aiogram.types import BotCommand
+    """Registra a lista de comandos + força o Menu button (botão azul flutuante).
+
+    Em DMs o menu aparece sozinho; em grupos o Telegram só mostra o botão
+    flutuante se a gente explicitar via set_chat_menu_button(MenuButtonCommands).
+    Registramos commands em 3 escopos pra garantir visibilidade em qualquer chat.
+    """
+    from aiogram.types import (
+        BotCommand,
+        BotCommandScopeAllGroupChats,
+        BotCommandScopeAllPrivateChats,
+        BotCommandScopeDefault,
+        MenuButtonCommands,
+    )
+
+    cmds = [BotCommand(command=c, description=d) for c, d in _BOT_COMMANDS]
     try:
-        await bot.set_my_commands([BotCommand(command=c, description=d) for c, d in _BOT_COMMANDS])
-        logger.info("Bot commands registrados (%d).", len(_BOT_COMMANDS))
+        for scope in (BotCommandScopeDefault(), BotCommandScopeAllPrivateChats(), BotCommandScopeAllGroupChats()):
+            await bot.set_my_commands(cmds, scope=scope)
+        await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+        logger.info("Bot commands + Menu button registrados em todos os escopos (%d cmds).", len(cmds))
     except Exception:
-        logger.exception("Falha ao registrar bot commands")
+        logger.exception("Falha ao registrar bot commands / menu button")
 
 
 async def run_polling(token: str, dispatcher: Dispatcher) -> None:
