@@ -821,14 +821,21 @@ async def _send_partes(bot: Bot, chat_id: int, kind: str, ref_id: str) -> None:
     await _safe_send(bot, chat_id, "\n".join(linhas))
 
 
-async def _send_push_andamentos(bot: Bot, chat_id: int, kind: str, ref_id: str) -> None:
-    """Mostra os andamentos das últimas 24h de um processo (do push diário)."""
+_PUSH_PAGE = 10
+# Cache em memória dos andamentos carregados por chat/ref — evita re-query nas
+# trocas de página e dá pé pros documentos (que precisam da URL coletada).
+# (chat_id, kind, ref_id) → [andamento_objects], created_at_cache
+_push_cache: dict[tuple[int, str, str], list] = {}
+
+
+def _carregar_push_andamentos(kind: str, ref_id: str) -> list:
+    """Busca do banco os andamentos recentes (≤ 36h) p/ exibir no push view."""
     from datetime import datetime, timedelta, timezone
     from app.database import SessionLocal
     from app.models.andamento import AndamentoProcesso
     from app.models.andamento_telegram_extra import AndamentoTelegramExtra
 
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=36)  # margem além das 24h
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=36)
     db = SessionLocal()
     try:
         if kind == "proc":
@@ -839,7 +846,6 @@ async def _send_push_andamentos(bot: Bot, chat_id: int, kind: str, ref_id: str) 
                 .order_by(AndamentoProcesso.data_andamento.desc().nullslast())
                 .all()
             )
-            tem_doc = lambda a: bool(a.arquivo_drive_link or a.arquivo_path or a.arquivo_nome)
         else:
             rows = (
                 db.query(AndamentoTelegramExtra)
@@ -848,24 +854,131 @@ async def _send_push_andamentos(bot: Bot, chat_id: int, kind: str, ref_id: str) 
                 .order_by(AndamentoTelegramExtra.data_andamento.desc().nullslast())
                 .all()
             )
-            tem_doc = lambda a: bool(a.arquivo_url or a.arquivo_nome)
+        # Destacha do session pra usar fora do db.close
+        for r in rows:
+            db.expunge(r)
+        return rows
     finally:
         db.close()
+
+
+def _push_doc_url(a) -> str | None:
+    """Retorna a URL pra baixar o documento do andamento (PDPJ hrefBinario)."""
+    return getattr(a, "arquivo_url", None)
+
+
+def _push_tem_doc(a) -> bool:
+    if hasattr(a, "arquivo_drive_link"):
+        return bool(a.arquivo_drive_link or a.arquivo_path or a.arquivo_nome or a.arquivo_url)
+    return bool(getattr(a, "arquivo_url", None) or getattr(a, "arquivo_nome", None))
+
+
+async def _send_push_andamentos(bot: Bot, chat_id: int, kind: str, ref_id: str, page: int = 0) -> None:
+    """Mostra andamentos paginados (10/página) com botões 'Ver próximos' e
+    'Quero os documentos desta página'."""
+    key = (chat_id, kind, ref_id)
+    rows = _push_cache.get(key)
+    if rows is None or page == 0:
+        rows = _carregar_push_andamentos(kind, ref_id)
+        _push_cache[key] = rows
 
     if not rows:
         await bot.send_message(chat_id, "Sem andamentos recentes para esse processo.")
         return
 
-    linhas = [f"📋 *Últimos {len(rows)} andamento(s):*\n"]
-    for i, a in enumerate(rows, 1):
+    total = len(rows)
+    start = page * _PUSH_PAGE
+    items = rows[start: start + _PUSH_PAGE]
+    if not items:
+        await bot.send_message(chat_id, "Não há mais andamentos.")
+        return
+
+    linhas = [f"📋 *Andamentos {start + 1}–{start + len(items)} de {total}:*\n"]
+    for i, a in enumerate(items, start + 1):
         data = a.data_andamento.strftime("%d/%m/%Y") if a.data_andamento else "—"
         tipo = f"  __{a.tipo}__\n" if getattr(a, "tipo", None) else ""
         desc = (a.descricao or "").strip()
         if len(desc) > 350:
             desc = desc[:347] + "…"
-        marca = " 📎" if tem_doc(a) else ""
+        marca = " 📎" if _push_tem_doc(a) else ""
         linhas.append(f"*{i}.* 📅 {data}{marca}\n{tipo}{desc}\n")
-    await _safe_send(bot, chat_id, "\n".join(linhas))
+
+    botoes: list[list[InlineKeyboardButton]] = []
+    # Doc da página (só se algum item da página tem)
+    if any(_push_tem_doc(a) for a in items):
+        botoes.append([InlineKeyboardButton(
+            text="📄 Quero os documentos desta página",
+            callback_data=f"apvd:{kind[0]}:{ref_id}:{page}",
+        )])
+    # Paginação
+    remaining = total - (start + len(items))
+    if remaining > 0:
+        botoes.append([InlineKeyboardButton(
+            text=f"↓ Ver próximos {min(remaining, _PUSH_PAGE)} ({remaining} restantes)",
+            callback_data=f"apv:{kind}:{ref_id}:{page + 1}",
+        )])
+
+    kb = InlineKeyboardMarkup(inline_keyboard=botoes) if botoes else None
+    await _safe_send(bot, chat_id, "\n".join(linhas), reply_markup=kb)
+
+
+async def _send_push_documentos(bot: Bot, chat_id: int, kind: str, ref_id: str, page: int) -> None:
+    """Envia os documentos dos andamentos da página informada."""
+    from app.services.consulta_processual.pdpj import baixar_documento_jusbr
+
+    key = (chat_id, kind, ref_id)
+    rows = _push_cache.get(key)
+    if rows is None:
+        rows = _carregar_push_andamentos(kind, ref_id)
+        _push_cache[key] = rows
+
+    start = page * _PUSH_PAGE
+    items = rows[start: start + _PUSH_PAGE]
+    docs = [(i, a) for i, a in enumerate(items) if _push_tem_doc(a)]
+    if not docs:
+        await bot.send_message(chat_id, "Nenhum documento nesta página.")
+        return
+
+    # Sessão jus.br — pra extras pode ser id=1 (lexops) também, ambos têm acesso.
+    sess = andamentos_auth.load_session()
+    if not sess:
+        # tenta a sessão do lexops (id=1) como fallback
+        from app.services.consulta_processual.jusbr_session import load_session as load_lexops
+        sess = load_lexops()
+    if not sess:
+        await bot.send_message(chat_id, "❌ Sessão jus.br inativa. Use /login.")
+        return
+
+    await bot.send_message(chat_id, f"⏳ Baixando {len(docs)} documento(s)...")
+    for rel_i, a in docs:
+        abs_i = start + rel_i + 1
+        data_str = a.data_andamento.strftime("%d/%m/%Y") if a.data_andamento else "—"
+        caption = f"*{abs_i}.* 📅 {data_str}\n{(a.descricao or '')[:200]}"
+
+        url = _push_doc_url(a)
+        if not url:
+            await bot.send_message(chat_id, f"⚠️ Andamento {abs_i}: sem URL de documento.")
+            continue
+
+        try:
+            result = await baixar_documento_jusbr(url, token=sess.get("token"), session_data=sess)
+        except Exception as exc:
+            await bot.send_message(chat_id, f"❌ Erro doc {abs_i}: {str(exc)[:120]}")
+            continue
+        if not result:
+            await bot.send_message(chat_id, f"⚠️ Documento {abs_i} indisponível.")
+            continue
+
+        content, mimetype = result
+        filename, tipo = _nome_documento(content, mimetype, a.arquivo_nome, abs_i)
+        dica = {"PDF": None, "RTF": "abra no Word / Pages / qualquer editor de texto", "HTML": "abra no navegador"}.get(tipo)
+        cap = caption if not dica else f"{caption}\n_({tipo} — {dica})_"
+        doc = BufferedInputFile(content, filename=filename)
+        try:
+            await bot.send_document(chat_id, document=doc, caption=cap, parse_mode="Markdown")
+        except TelegramBadRequest:
+            doc = BufferedInputFile(content, filename=filename)
+            await bot.send_document(chat_id, document=doc, caption=cap)
 
 
 async def _run_lookup(bot: Bot, chat_id: int, cnj: str) -> None:
@@ -1188,13 +1301,27 @@ def create_dispatcher() -> Dispatcher:
 
     @dp.callback_query(F.data.startswith("apv:"))
     async def cb_push_view(query: CallbackQuery) -> None:
-        """Push diário: 'Ver andamentos' → lista andamentos das últimas 24h."""
+        """Push diário: 'Ver andamentos' (paginado 10/pág)."""
         if not _allowed(query.from_user.id):
             await query.answer()
             return
-        _, kind, ref_id = query.data.split(":", 2)
+        parts = query.data.split(":")
+        kind = parts[1]
+        ref_id = parts[2]
+        page = int(parts[3]) if len(parts) > 3 else 0
         await query.answer()
-        await _send_push_andamentos(query.bot, query.message.chat.id, kind, ref_id)
+        await _send_push_andamentos(query.bot, query.message.chat.id, kind, ref_id, page)
+
+    @dp.callback_query(F.data.startswith("apvd:"))
+    async def cb_push_docs(query: CallbackQuery) -> None:
+        """Push diário: documentos da página atual."""
+        if not _allowed(query.from_user.id):
+            await query.answer()
+            return
+        _, kind_short, ref_id, page_str = query.data.split(":", 3)
+        kind = "proc" if kind_short == "p" else "extra"
+        await query.answer("⏳ Buscando…")
+        await _send_push_documentos(query.bot, query.message.chat.id, kind, ref_id, int(page_str))
 
     @dp.callback_query(F.data.startswith("amore:"))
     async def cb_more(query: CallbackQuery) -> None:
