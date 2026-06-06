@@ -13,12 +13,16 @@ FROM python:3.11-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nginx curl \
+    gcc pkg-config libxml2-dev libxmlsec1-dev libxmlsec1-openssl \
     && rm -rf /var/lib/apt/lists/*
 
 # Python deps
 WORKDIR /app/backend
 COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# lxml e xmlsec precisam ser compilados do fonte contra o MESMO libxml2 do sistema,
+# senão dá "lxml & xmlsec libxml2 library version mismatch" no import.
+RUN pip install --no-cache-dir --no-binary lxml --no-binary xmlsec lxml==5.2.1 xmlsec==1.3.14 \
+    && pip install --no-cache-dir -r requirements.txt
 
 # Backend source
 COPY backend/ .
