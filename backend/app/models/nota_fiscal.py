@@ -59,6 +59,12 @@ class NotaFiscal(Base):
     ibs_valor: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
     cbs_valor: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
 
+    # ── Tributação extra ─────────────────────────────────────────────────
+    natureza_operacao: Mapped[str] = mapped_column(String(2), nullable=False, server_default="1")
+    regime_tributario: Mapped[str] = mapped_column(String(2), nullable=False, server_default="1")
+    iss_retido: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
+    contrato_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+
     # ── Status ────────────────────────────────────────────────────────────
     # rascunho | emitida | cancelada | erro
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="rascunho")

@@ -1,253 +1,225 @@
 /* ─── Filtros ────────────────────────────────────────────────────────── */
 .filtros {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 20px;
-  flex-wrap: wrap;
-  align-items: center;
+  display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap;
 }
-
 .filtroBtn {
-  background: var(--white);
-  border: 1px solid var(--gray-border);
-  border-radius: var(--radius-btn);
-  padding: 6px 14px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--gray-mid);
-  cursor: pointer;
-  font-family: 'Archivo', sans-serif;
-  transition: all 0.13s ease;
+  background: var(--white); border: 1px solid var(--gray-border);
+  border-radius: var(--radius-btn); padding: 6px 14px; font-size: 12px;
+  font-weight: 600; color: var(--gray-mid); cursor: pointer;
+  font-family: 'Archivo', sans-serif; transition: all 0.13s ease;
 }
-
-.filtroBtn:hover,
-.filtroBtnActive {
-  background: var(--teal-light);
-  border-color: var(--teal);
-  color: var(--teal);
+.filtroBtn:hover, .filtroBtnActive {
+  background: var(--teal-light); border-color: var(--teal); color: var(--teal);
 }
 
 /* ─── Status badges ──────────────────────────────────────────────────── */
-.badgeEmitida  { background: #dcfce7; color: #15803d; }
-.badgeRascunho { background: #f3f4f6; color: #6b7280; }
-.badgeCancelada{ background: #fee2e2; color: #b91c1c; }
-.badgeErro     { background: #fff7ed; color: #c2410c; }
+.badgeEmitida   { background: #dcfce7; color: #15803d; }
+.badgeRascunho  { background: #f3f4f6; color: #6b7280; }
+.badgeCancelada { background: #fee2e2; color: #b91c1c; }
+.badgeErro      { background: #fff7ed; color: #c2410c; }
 
-/* ─── Modal overlay ──────────────────────────────────────────────────── */
+/* ─── Overlay / Modal ────────────────────────────────────────────────── */
 .overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  z-index: 200;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding: 40px 16px;
-  overflow-y: auto;
+  position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 200;
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 32px 16px; overflow-y: auto;
 }
-
 .modal {
-  background: var(--white);
-  border-radius: var(--radius-card);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
-  width: 100%;
-  max-width: 620px;
-  padding: 28px 32px;
-  position: relative;
+  background: var(--white); border-radius: var(--radius-card);
+  box-shadow: 0 20px 60px rgba(0,0,0,.2); width: 100%; max-width: 660px;
+  padding: 28px 32px; position: relative;
 }
-
 .modalTitle {
-  font-size: 17px;
-  font-weight: 700;
-  color: var(--dark);
-  margin-bottom: 24px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  font-size: 17px; font-weight: 700; color: var(--dark);
+  margin-bottom: 20px; display: flex; align-items: center; gap: 8px;
 }
-
 .closeBtn {
-  position: absolute;
-  top: 20px;
-  right: 20px;
-  background: none;
-  border: none;
-  font-size: 20px;
-  color: var(--gray-mid);
-  cursor: pointer;
-  line-height: 1;
-  padding: 4px;
-  border-radius: 4px;
-  transition: color 0.13s ease;
+  position: absolute; top: 20px; right: 20px; background: none; border: none;
+  font-size: 20px; color: var(--gray-mid); cursor: pointer; padding: 4px;
+  border-radius: 4px; transition: color .13s;
 }
-
 .closeBtn:hover { color: var(--dark); }
 
-/* ─── Formulário de emissão ──────────────────────────────────────────── */
+/* ─── Form grid ──────────────────────────────────────────────────────── */
 .formGrid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px 16px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px;
 }
-
-.formGridFull {
-  grid-column: 1 / -1;
-}
+.formGridFull { grid-column: 1 / -1; }
 
 .formLabel {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--teal);
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  display: block;
-  margin-bottom: 5px;
+  font-size: 11px; font-weight: 600; color: var(--teal);
+  text-transform: uppercase; letter-spacing: .07em; display: block; margin-bottom: 5px;
 }
-
 .input {
-  padding: 9px 12px;
-  border: 1px solid var(--gray-border);
-  border-radius: var(--radius-input);
-  font-size: 13px;
-  font-family: 'Archivo', sans-serif;
-  color: var(--dark);
-  background: var(--white);
-  width: 100%;
-  box-sizing: border-box;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  padding: 9px 12px; border: 1px solid var(--gray-border);
+  border-radius: var(--radius-input); font-size: 13px;
+  font-family: 'Archivo', sans-serif; color: var(--dark);
+  background: var(--white); width: 100%; box-sizing: border-box;
+  transition: border-color .15s, box-shadow .15s;
+}
+.input:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px rgba(0,176,144,.1); }
+.textarea { composes: input; resize: vertical; min-height: 64px; }
+
+.fieldHint {
+  font-size: 11px; color: var(--gray-mid); margin: 4px 0 0; line-height: 1.4;
 }
 
-.input:focus {
-  outline: none;
-  border-color: var(--teal);
-  box-shadow: 0 0 0 3px rgba(0, 176, 144, 0.1);
+/* ─── Seção título ───────────────────────────────────────────────────── */
+.secaoTitulo {
+  font-size: 12px; font-weight: 700; color: var(--dark);
+  text-transform: uppercase; letter-spacing: .05em;
+  border-bottom: 1px solid var(--gray-border); padding-bottom: 6px;
+  margin-bottom: 2px;
 }
 
-.textarea {
-  composes: input;
-  resize: vertical;
-  min-height: 72px;
+/* ─── Seção colapsável ───────────────────────────────────────────────── */
+.secaoColapsavel { margin-bottom: 16px; }
+.colapsarBtn {
+  background: none; border: none; font-size: 12px; font-weight: 600;
+  color: var(--teal); cursor: pointer; padding: 6px 0;
+  font-family: 'Archivo', sans-serif; display: flex; align-items: center; gap: 6px;
+}
+.colapsarBtn:hover { color: var(--dark); }
+.colapsarLabel { font-weight: 400; color: var(--gray-mid); }
+
+/* ─── Caixa emitente ─────────────────────────────────────────────────── */
+.emitenteCaixa {
+  background: var(--light); border-radius: 8px; padding: 12px 14px;
+  margin-top: 8px; display: flex; flex-direction: column; gap: 4px;
+}
+.emitenteRow { font-size: 12px; color: var(--dark); }
+
+/* ─── Currency field ─────────────────────────────────────────────────── */
+.currencyWrap {
+  display: flex; align-items: center;
+  border: 1px solid var(--gray-border); border-radius: var(--radius-input);
+  overflow: hidden; background: var(--white);
+  transition: border-color .15s, box-shadow .15s;
+}
+.currencyWrap:focus-within {
+  border-color: var(--teal); box-shadow: 0 0 0 3px rgba(0,176,144,.1);
+}
+.currencyPrefix {
+  padding: 9px 10px 9px 12px; font-size: 13px; color: var(--gray-mid);
+  font-family: 'Archivo', sans-serif; font-weight: 600; white-space: nowrap;
+  border-right: 1px solid var(--gray-border); background: var(--light);
+}
+.inputCurrency {
+  padding: 9px 12px; font-size: 13px; font-family: 'Archivo', sans-serif;
+  color: var(--dark); border: none; background: transparent; width: 100%;
+  outline: none; text-align: right;
 }
 
-/* ─── Seção de retenções (colapsável) ───────────────────────────────── */
-.retencaoToggle {
-  background: none;
-  border: none;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--teal);
-  cursor: pointer;
-  padding: 4px 0;
-  margin-top: 4px;
-  font-family: 'Archivo', sans-serif;
-  display: flex;
-  align-items: center;
-  gap: 5px;
+/* ─── Busca de cliente ───────────────────────────────────────────────── */
+.searchWrap { position: relative; }
+.dropdown {
+  position: absolute; top: calc(100% + 2px); left: 0; right: 0; z-index: 300;
+  background: var(--white); border: 1px solid var(--gray-border);
+  border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.12);
+  list-style: none; margin: 0; padding: 4px 0; max-height: 220px; overflow-y: auto;
 }
+.dropdownItem {
+  padding: 8px 14px; cursor: pointer; display: flex; flex-direction: column; gap: 2px;
+  transition: background .1s;
+}
+.dropdownItem:hover { background: var(--teal-light); }
+.dropdownNome { font-size: 13px; font-weight: 600; color: var(--dark); }
+.dropdownDoc  { font-size: 11px; color: var(--gray-mid); }
+.dropdownEmail{ font-size: 11px; color: var(--teal); }
 
+/* ─── Templates de descrição ─────────────────────────────────────────── */
+.templatesBtns {
+  display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px;
+}
+.templateBtn {
+  background: var(--light); border: 1px solid var(--gray-border);
+  border-radius: 20px; padding: 4px 12px; font-size: 11px; font-weight: 600;
+  color: var(--gray-mid); cursor: pointer; font-family: 'Archivo', sans-serif;
+  transition: all .13s;
+}
+.templateBtn:hover { background: var(--teal-light); border-color: var(--teal); color: var(--teal); }
+
+/* ─── Contratos sugeridos ────────────────────────────────────────────── */
+.contratosList { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.contratoChip {
+  background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px;
+  padding: 8px 12px; cursor: pointer; font-family: 'Archivo', sans-serif;
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 12px; color: #065f46; text-align: left;
+  transition: background .13s;
+}
+.contratoChip:hover { background: #d1fae5; }
+.contratoValor { font-weight: 700; white-space: nowrap; margin-left: 12px; }
+
+/* ─── Retenções ──────────────────────────────────────────────────────── */
 .retencaoGrid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px 14px;
-  margin-top: 12px;
-  padding: 14px;
-  background: var(--light);
-  border-radius: 8px;
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 14px;
+  margin-top: 10px; padding: 14px; background: var(--light); border-radius: 8px;
 }
 
-/* ─── Alerta de pré-fill ─────────────────────────────────────────────── */
+/* ─── Intermediário ──────────────────────────────────────────────────── */
+.intermediarioGrid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+  margin-top: 10px; padding: 14px; background: var(--light); border-radius: 8px;
+}
+
+/* ─── Checkbox label ─────────────────────────────────────────────────── */
+.checkboxLabel {
+  font-size: 13px; color: var(--dark); display: flex; align-items: center;
+  gap: 6px; cursor: pointer;
+}
+
+/* ─── Resumo de valores ──────────────────────────────────────────────── */
+.resumoValores {
+  display: flex; gap: 20px; flex-wrap: wrap;
+  background: var(--light); border-radius: 8px;
+  padding: 10px 14px; font-size: 13px; color: var(--dark);
+  margin-top: 16px; border: 1px solid var(--gray-border);
+}
+
+/* ─── Pré-fill banner ────────────────────────────────────────────────── */
 .prefillBanner {
-  background: #ecfdf5;
-  border: 1px solid #a7f3d0;
-  border-radius: 8px;
-  padding: 10px 14px;
-  font-size: 12px;
-  color: #065f46;
-  margin-bottom: 16px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px;
+  padding: 10px 14px; font-size: 12px; color: #065f46; margin-bottom: 16px;
 }
 
-/* ─── Detalhe da NF emitida ──────────────────────────────────────────── */
+/* ─── Erro ───────────────────────────────────────────────────────────── */
+.erroBox {
+  background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px;
+  padding: 10px 14px; font-size: 12px; color: #9a3412; margin-top: 14px;
+}
+
+/* ─── Detalhe da NF ──────────────────────────────────────────────────── */
 .detailGrid {
-  display: grid;
-  grid-template-columns: 140px 1fr;
-  gap: 10px 16px;
-  font-size: 13px;
+  display: grid; grid-template-columns: 130px 1fr; gap: 10px 16px; font-size: 13px;
 }
-
-.detailLabel {
-  font-weight: 600;
-  color: var(--gray-mid);
-  font-size: 12px;
-}
-
-.detailValue {
-  color: var(--dark);
-}
-
+.detailLabel { font-weight: 600; color: var(--gray-mid); font-size: 12px; }
 .xmlBlock {
-  grid-column: 1 / -1;
-  background: var(--light);
-  border-radius: 6px;
-  padding: 12px;
-  font-size: 11px;
-  font-family: monospace;
-  overflow-x: auto;
-  max-height: 200px;
-  overflow-y: auto;
-  color: #374151;
-  white-space: pre;
+  grid-column: 1/-1; background: var(--light); border-radius: 6px;
+  padding: 12px; font-size: 11px; font-family: monospace; overflow-x: auto;
+  max-height: 200px; overflow-y: auto; color: #374151; white-space: pre;
 }
+.nfNumero { font-size: 15px; font-weight: 700; color: var(--teal); }
 
 /* ─── Botões do modal ────────────────────────────────────────────────── */
 .modalFooter {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 24px;
-  padding-top: 18px;
-  border-top: 1px solid var(--gray-border);
+  display: flex; justify-content: flex-end; gap: 10px;
+  margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--gray-border);
 }
-
 .btnSecondary {
-  background: var(--white);
-  color: var(--dark);
-  border: 1px solid var(--gray-border);
-  padding: 9px 20px;
-  border-radius: var(--radius-btn);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: 'Archivo', sans-serif;
-  transition: background 0.13s ease;
+  background: var(--white); color: var(--dark); border: 1px solid var(--gray-border);
+  padding: 9px 20px; border-radius: var(--radius-btn); font-size: 13px; font-weight: 600;
+  cursor: pointer; font-family: 'Archivo', sans-serif; transition: background .13s;
 }
-
 .btnSecondary:hover { background: var(--light); }
 
-/* ─── Erro inline ────────────────────────────────────────────────────── */
-.erroBox {
-  background: #fff7ed;
-  border: 1px solid #fed7aa;
-  border-radius: 8px;
-  padding: 10px 14px;
-  font-size: 12px;
-  color: #9a3412;
-  margin-top: 14px;
-}
-
-/* ─── NF number destaque ─────────────────────────────────────────────── */
-.nfNumero {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--teal);
-}
-
+/* ─── Mobile ─────────────────────────────────────────────────────────── */
 @media (max-width: 640px) {
   .formGrid { grid-template-columns: 1fr; }
   .retencaoGrid { grid-template-columns: 1fr 1fr; }
+  .intermediarioGrid { grid-template-columns: 1fr; }
   .modal { padding: 20px 16px; }
   .overlay { padding: 0; align-items: flex-end; }
-  .modal { border-radius: 16px 16px 0 0; }
+  .modal { border-radius: 16px 16px 0 0; max-height: 92vh; overflow-y: auto; }
+  .resumoValores { flex-direction: column; gap: 6px; }
 }

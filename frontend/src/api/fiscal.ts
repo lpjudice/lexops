@@ -14,6 +14,13 @@ export interface EnderecoIn {
 }
 
 export interface EmitirNFSeIn {
+  intermediario?: IntermediarioIn
+  tomador_no_exterior?: boolean
+  natureza_operacao?: string
+  regime_tributario?: string
+  reg_apuracao_sn?: string
+  iss_retido?: boolean
+  contrato_id?: string
   competencia: string            // YYYY-MM
   tomador_cpf_cnpj: string
   tomador_nome: string
@@ -83,11 +90,17 @@ export interface PreFillNFSeOut {
   tomador_cpf_cnpj?: string
   tomador_nome?: string
   tomador_email?: string
+  tomador_telefone?: string
   valor_servicos: number
   descricao_servico: string
   honorario_id: string
   recebimento_id?: string
+  contrato_id?: string
 }
+
+export interface CodigoTributacao { codigo: string; label: string; descricao: string }
+export interface OpcaoFiscal { valor: string; label: string; descricao: string }
+export interface IntermediarioIn { nome: string; cpf_cnpj: string; inscricao_municipal?: string }
 
 // ─── API calls ────────────────────────────────────────────────────────────────
 
@@ -113,4 +126,13 @@ export const fiscalApi = {
 
   parametrosMunicipais: () =>
     api.get('/fiscal/parametros-municipais').then((r) => r.data),
+
+  listarCodigosTributacao: () =>
+    api.get<CodigoTributacao[]>('/fiscal/opcoes/codigos-tributacao').then((r) => r.data),
+
+  listarNaturezaOperacao: () =>
+    api.get<OpcaoFiscal[]>('/fiscal/opcoes/natureza-operacao').then((r) => r.data),
+
+  listarRegApuracaoSN: () =>
+    api.get<OpcaoFiscal[]>('/fiscal/opcoes/reg-apuracao-sn').then((r) => r.data),
 }

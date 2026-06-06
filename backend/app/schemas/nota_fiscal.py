@@ -8,63 +8,74 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
-# ─── Endereço tomador ────────────────────────────────────────────────────────
-
 class EnderecoIn(BaseModel):
     logradouro: str
     numero: str
     bairro: str
-    cod_municipio: str          # IBGE 7 dígitos
+    cod_municipio: str
     cep: str
     complemento: str = ""
+    cod_pais: str = "1058"
 
 
-# ─── Input para emissão ──────────────────────────────────────────────────────
+class IntermediarioIn(BaseModel):
+    nome: str
+    cpf_cnpj: str
+    inscricao_municipal: str = ""
+
 
 class EmitirNFSeIn(BaseModel):
     # Competência
-    competencia: str = Field(..., pattern=r"^\d{4}-\d{2}$", example="2026-06")
+    competencia: str = Field(..., pattern=r"^\d{4}-\d{2}$", examples=["2026-06"])
 
     # Tomador
-    tomador_cpf_cnpj: str       # apenas dígitos
+    tomador_cpf_cnpj: str
     tomador_nome: str
     tomador_email: Optional[str] = None
     tomador_telefone: Optional[str] = None
     tomador_endereco: Optional[EnderecoIn] = None
+    tomador_no_exterior: bool = False
 
     # Serviço
     descricao_servico: str
     cod_tributacao_nacional: str = "010900"
 
+    # Tributação
+    natureza_operacao: str = "1"   # 1=Tributado município (padrão)
+    regime_tributario: str = "1"   # 1=Simples Nacional
+    reg_apuracao_sn: str = "3"     # 3=Fed+Mun pelo Simples Nacional
+
     # Valores
     valor_servicos: Decimal = Field(..., gt=0)
-
-    # Retenções (0 = não reter)
     retencao_ir: Decimal = Decimal("0")
     retencao_inss: Decimal = Decimal("0")
     retencao_csll: Decimal = Decimal("0")
     retencao_cofins: Decimal = Decimal("0")
     retencao_pis: Decimal = Decimal("0")
+    iss_retido: bool = False
 
-    # IBS/CBS (reforma tributária — agosto 2026)
+    # IBS/CBS (reforma tributária agosto 2026)
     ibs_valor: Optional[Decimal] = None
     cbs_valor: Optional[Decimal] = None
 
-    # Vínculo financeiro (opcional)
+    # Intermediário
+    intermediario: Optional[IntermediarioIn] = None
+
+    # Vínculo financeiro
     honorario_id: Optional[uuid.UUID] = None
     recebimento_id: Optional[uuid.UUID] = None
+    contrato_id: Optional[uuid.UUID] = None
 
-    # Série da DPS (padrão "1")
+    # Série (padrão "1")
     serie: str = "1"
 
-
-# ─── Output ──────────────────────────────────────────────────────────────────
 
 class NotaFiscalOut(BaseModel):
     id: uuid.UUID
     numero_nfse: Optional[str]
     chave_acesso: Optional[str]
     serie: str
+    numero_dps: Optional[int]
     competencia: str
     data_emissao: Optional[date]
 
@@ -75,6 +86,8 @@ class NotaFiscalOut(BaseModel):
 
     cod_tributacao_nacional: str
     descricao_servico: str
+    natureza_operacao: str
+    regime_tributario: str
 
     valor_servicos: float
     retencao_ir: Optional[float]
@@ -82,15 +95,18 @@ class NotaFiscalOut(BaseModel):
     retencao_csll: Optional[float]
     retencao_cofins: Optional[float]
     retencao_pis: Optional[float]
+    iss_retido: Optional[bool]
     ibs_valor: Optional[float]
     cbs_valor: Optional[float]
     valor_liquido: float
 
     status: str
     erro_mensagem: Optional[str]
+    xml_nfse: Optional[str]
 
     honorario_id: Optional[uuid.UUID]
     recebimento_id: Optional[uuid.UUID]
+    contrato_id: Optional[uuid.UUID]
 
     created_at: datetime
     updated_at: datetime
@@ -108,25 +124,35 @@ class NotaFiscalResumo(BaseModel):
     valor_liquido: float
     status: str
     honorario_id: Optional[uuid.UUID]
+    contrato_id: Optional[uuid.UUID]
 
     model_config = {"from_attributes": True}
 
 
-# ─── Pré-preenchimento a partir de honorário ─────────────────────────────────
-
 class PreFillNFSeOut(BaseModel):
-    """Dados sugeridos para emissão de NFS-e a partir de um honorário/recebimento."""
     competencia: str
     tomador_cpf_cnpj: Optional[str]
     tomador_nome: Optional[str]
     tomador_email: Optional[str]
+    tomador_telefone: Optional[str]
     valor_servicos: float
     descricao_servico: str
     honorario_id: uuid.UUID
     recebimento_id: Optional[uuid.UUID]
+    contrato_id: Optional[uuid.UUID]
 
-
-# ─── Cancelamento ────────────────────────────────────────────────────────────
 
 class CancelarNFSeIn(BaseModel):
     motivo: str = Field(..., min_length=10, max_length=255)
+
+
+class CodigoTributacaoOut(BaseModel):
+    codigo: str
+    label: str
+    descricao: str
+
+
+class OpcaoOut(BaseModel):
+    valor: str
+    label: str
+    descricao: str

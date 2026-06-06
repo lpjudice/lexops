@@ -475,13 +475,24 @@ def _run_migrations() -> None:
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_notas_fiscais_honorario ON notas_fiscais(honorario_id)"
         ))
+        # Colunas adicionadas na v2 do módulo fiscal
+        for _col in [
+            "ALTER TABLE notas_fiscais ADD COLUMN IF NOT EXISTS natureza_operacao VARCHAR(2) NOT NULL DEFAULT '1'",
+            "ALTER TABLE notas_fiscais ADD COLUMN IF NOT EXISTS regime_tributario VARCHAR(2) NOT NULL DEFAULT '1'",
+            "ALTER TABLE notas_fiscais ADD COLUMN IF NOT EXISTS iss_retido BOOLEAN NOT NULL DEFAULT false",
+            "ALTER TABLE notas_fiscais ADD COLUMN IF NOT EXISTS contrato_id UUID",
+        ]:
+            conn.execute(text(_col))
 
-        # Tarefas: campos de período (bot de Tarefas via Telegram)
+        # Tarefas: campos de período e email do responsável
         conn.execute(text(
             "ALTER TABLE tarefas ADD COLUMN IF NOT EXISTS data_inicio DATE"
         ))
         conn.execute(text(
             "ALTER TABLE tarefas ADD COLUMN IF NOT EXISTS data_fim DATE"
+        ))
+        conn.execute(text(
+            "ALTER TABLE tarefas ADD COLUMN IF NOT EXISTS responsavel_email VARCHAR(255)"
         ))
 
         # Bot de Tarefas — lotes e sessões

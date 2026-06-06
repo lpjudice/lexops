@@ -16,29 +16,46 @@ from app.models.nota_fiscal import NotaFiscal
 from app.models.financeiro import Honorario, Recebimento
 from app.models.cliente import Cliente
 from app.schemas.nota_fiscal import (
-    CancelarNFSeIn,
-    EmitirNFSeIn,
-    NotaFiscalOut,
-    NotaFiscalResumo,
-    PreFillNFSeOut,
+    CancelarNFSeIn, CodigoTributacaoOut, EmitirNFSeIn,
+    NotaFiscalOut, NotaFiscalResumo, OpcaoOut, PreFillNFSeOut,
 )
 from app.services.nfse.dps_builder import (
-    DadosDPS,
-    EnderecoTomador,
-    Retencoes,
-    Tomador,
-    CTN_ADVOCACIA,
+    CODIGOS_TRIBUTACAO, NATUREZA_OPERACAO_OPCOES, REG_APURACAO_SN_OPCOES,
+    REGIME_TRIBUTARIO_OPCOES, CTN_ADVOCACIA,
+    DadosDPS, EnderecoTomador, Intermediario, Retencoes, Tomador,
 )
 from app.services.nfse.emitter import (
-    cancelar_nfse,
-    consultar_parametros_municipio,
-    emitir_nfse,
+    cancelar_nfse, consultar_parametros_municipio, emitir_nfse,
 )
 
 router = APIRouter(prefix="/fiscal", tags=["fiscal"])
 log = logging.getLogger(__name__)
-
 BRT = timezone(timedelta(hours=-3))
+
+# Exporta constante para o dps_builder sem circular import
+CTN_ADVOCACIA = CTN_ADVOCACIA  # noqa
+
+
+# ─── Endpoints de referência ──────────────────────────────────────────────────
+
+@router.get("/opcoes/codigos-tributacao", response_model=list[CodigoTributacaoOut])
+def listar_codigos_tributacao(_=Depends(get_current_user)):
+    return [{"codigo": c, "label": l, "descricao": d} for c, l, d in CODIGOS_TRIBUTACAO]
+
+
+@router.get("/opcoes/natureza-operacao", response_model=list[OpcaoOut])
+def listar_natureza_operacao(_=Depends(get_current_user)):
+    return [{"valor": v, "label": l, "descricao": d} for v, l, d in NATUREZA_OPERACAO_OPCOES]
+
+
+@router.get("/opcoes/regime-tributario", response_model=list[OpcaoOut])
+def listar_regime_tributario(_=Depends(get_current_user)):
+    return [{"valor": v, "label": l, "descricao": d} for v, l, d in REGIME_TRIBUTARIO_OPCOES]
+
+
+@router.get("/opcoes/reg-apuracao-sn", response_model=list[OpcaoOut])
+def listar_reg_apuracao_sn(_=Depends(get_current_user)):
+    return [{"valor": v, "label": l, "descricao": d} for v, l, d in REG_APURACAO_SN_OPCOES]
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -53,9 +70,15 @@ def _proximo_numero_dps(db: Session) -> int:
     return (ultimo[0] or 0) + 1
 
 
-def _descricao_auto(honorario: Honorario) -> str:
-    """Gera descrição da NFS-e a partir do honorário."""
-    partes = ["Honorários advocatícios"]
+def _descricao_auto(honorario: Honorario, tipo_servico: str = "processo") -> str:
+    templates = {
+        "processo": "Honorários advocatícios",
+        "consultoria": "Serviços de consultoria jurídica",
+        "planejamento": "Serviços de planejamento jurídico-societário",
+        "exito": "Honorários advocatícios de êxito",
+    }
+    base = templates.get(tipo_servico, "Honorários advocatícios")
+    partes = [base]
     if honorario.processo:
         proc = honorario.processo
         if proc.numero_cnj:
@@ -71,7 +94,7 @@ def _nf_to_out(nf: NotaFiscal) -> NotaFiscalOut:
     return NotaFiscalOut.model_validate(nf)
 
 
-# ─── Endpoints ───────────────────────────────────────────────────────────────
+# ─── CRUD de notas ────────────────────────────────────────────────────────────
 
 @router.get("/notas", response_model=list[NotaFiscalResumo])
 def listar_notas(
@@ -86,6 +109,42 @@ def listar_notas(
     if competencia:
         q = q.filter(NotaFiscal.competencia == competencia)
     return [NotaFiscalResumo.model_validate(nf) for nf in q.all()]
+
+
+@router.get("/notas/prefill/honorario/{honorario_id}", response_model=PreFillNFSeOut)
+def prefill_de_honorario(
+    honorario_id: uuid.UUID,
+    recebimento_id: Optional[uuid.UUID] = Query(None),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    honorario = db.query(Honorario).filter(Honorario.id == honorario_id).first()
+    if not honorario:
+        raise HTTPException(404, "Honorário não encontrado")
+
+    recebimento = None
+    valor = float(honorario.valor_total)
+    competencia = datetime.now(tz=BRT).strftime("%Y-%m")
+
+    if recebimento_id:
+        recebimento = db.query(Recebimento).filter(Recebimento.id == recebimento_id).first()
+        if recebimento:
+            valor = float(recebimento.valor)
+            competencia = recebimento.data_recebimento.strftime("%Y-%m")
+
+    cliente = honorario.cliente
+    return PreFillNFSeOut(
+        competencia=competencia,
+        tomador_cpf_cnpj=_apenas_digitos(getattr(cliente, "cpf_cnpj", "") or ""),
+        tomador_nome=cliente.nome if cliente else honorario.descricao,
+        tomador_email=getattr(cliente, "email", None),
+        tomador_telefone=_apenas_digitos(getattr(cliente, "telefone", "") or ""),
+        valor_servicos=valor,
+        descricao_servico=_descricao_auto(honorario),
+        honorario_id=honorario_id,
+        recebimento_id=recebimento_id,
+        contrato_id=getattr(honorario, "contrato_id", None),
+    )
 
 
 @router.get("/notas/{nf_id}", response_model=NotaFiscalOut)
@@ -106,19 +165,17 @@ def emitir_nota(
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
+    from app.config import settings
+
     numero_dps = _proximo_numero_dps(db)
 
-    # Monta objetos do builder
     endereco = None
     if body.tomador_endereco:
         e = body.tomador_endereco
         endereco = EnderecoTomador(
-            logradouro=e.logradouro,
-            numero=e.numero,
-            bairro=e.bairro,
-            cod_municipio=e.cod_municipio,
-            cep=e.cep,
-            complemento=e.complemento,
+            logradouro=e.logradouro, numero=e.numero, bairro=e.bairro,
+            cod_municipio=e.cod_municipio, cep=e.cep, complemento=e.complemento,
+            cod_pais=e.cod_pais,
         )
 
     tomador = Tomador(
@@ -127,17 +184,22 @@ def emitir_nota(
         email=body.tomador_email or "",
         telefone=body.tomador_telefone or "",
         endereco=endereco,
+        no_exterior=body.tomador_no_exterior,
     )
+
+    intermediario = None
+    if body.intermediario:
+        intermediario = Intermediario(
+            nome=body.intermediario.nome,
+            cpf_cnpj=body.intermediario.cpf_cnpj,
+            inscricao_municipal=body.intermediario.inscricao_municipal,
+        )
 
     retencoes = Retencoes(
-        ir=body.retencao_ir,
-        inss=body.retencao_inss,
-        csll=body.retencao_csll,
-        cofins=body.retencao_cofins,
-        pis=body.retencao_pis,
+        ir=body.retencao_ir, inss=body.retencao_inss, csll=body.retencao_csll,
+        cofins=body.retencao_cofins, pis=body.retencao_pis, iss_retido=body.iss_retido,
     )
 
-    from app.config import settings
     dados = DadosDPS(
         serie=body.serie,
         numero=numero_dps,
@@ -145,8 +207,12 @@ def emitir_nota(
         tomador=tomador,
         descricao_servico=body.descricao_servico,
         cod_tributacao_nacional=body.cod_tributacao_nacional,
+        natureza_operacao=body.natureza_operacao,
+        regime_tributario=body.regime_tributario,
+        reg_apuracao_sn=body.reg_apuracao_sn,
         valor_servicos=body.valor_servicos,
         retencoes=retencoes,
+        intermediario=intermediario,
         ibs_valor=body.ibs_valor,
         cbs_valor=body.cbs_valor,
         ambiente=settings.nfse_ambiente,
@@ -155,7 +221,6 @@ def emitir_nota(
 
     resultado = emitir_nfse(dados)
 
-    # Persiste a NF independentemente do resultado (para auditoria)
     nf = NotaFiscal(
         numero_nfse=resultado.numero_nfse,
         chave_acesso=resultado.chave_acesso,
@@ -175,6 +240,9 @@ def emitir_nota(
         tomador_cep=body.tomador_endereco.cep if body.tomador_endereco else None,
         cod_tributacao_nacional=body.cod_tributacao_nacional,
         descricao_servico=body.descricao_servico,
+        natureza_operacao=body.natureza_operacao,
+        regime_tributario=body.regime_tributario,
+        iss_retido=body.iss_retido,
         valor_servicos=float(body.valor_servicos),
         retencao_ir=float(body.retencao_ir) if body.retencao_ir else None,
         retencao_inss=float(body.retencao_inss) if body.retencao_inss else None,
@@ -188,22 +256,20 @@ def emitir_nota(
         xml_nfse=resultado.xml_nfse,
         honorario_id=body.honorario_id,
         recebimento_id=body.recebimento_id,
+        contrato_id=body.contrato_id,
     )
     db.add(nf)
     db.commit()
     db.refresh(nf)
 
     if not resultado.sucesso:
-        log.error("Falha na emissão NFS-e: %s — %s", resultado.erro_codigo, resultado.erro_mensagem)
-        raise HTTPException(
-            422,
-            detail={
-                "message": "Falha na emissão junto ao ADN",
-                "codigo": resultado.erro_codigo,
-                "detalhe": resultado.erro_mensagem,
-                "nf_id": str(nf.id),
-            },
-        )
+        log.error("Falha na emissão NFS-e: [%s] %s", resultado.erro_codigo, resultado.erro_mensagem)
+        raise HTTPException(422, detail={
+            "message": "Falha na emissão junto ao ADN",
+            "codigo": resultado.erro_codigo,
+            "detalhe": resultado.erro_mensagem,
+            "nf_id": str(nf.id),
+        })
 
     return _nf_to_out(nf)
 
@@ -221,7 +287,7 @@ def cancelar_nota(
     if nf.status != "emitida":
         raise HTTPException(400, f"Não é possível cancelar NFS-e com status '{nf.status}'")
     if not nf.chave_acesso:
-        raise HTTPException(400, "NFS-e sem chave de acesso — não pode ser cancelada via API")
+        raise HTTPException(400, "NFS-e sem chave de acesso")
 
     resultado = cancelar_nfse(nf.chave_acesso, body.motivo)
     if not resultado.sucesso:
@@ -233,45 +299,16 @@ def cancelar_nota(
     return _nf_to_out(nf)
 
 
-@router.get("/notas/prefill/honorario/{honorario_id}", response_model=PreFillNFSeOut)
-def prefill_de_honorario(
-    honorario_id: uuid.UUID,
-    recebimento_id: Optional[uuid.UUID] = Query(None),
-    db: Session = Depends(get_db),
-    _=Depends(get_current_user),
-):
-    """Retorna dados pré-preenchidos para emissão de NFS-e a partir de um honorário."""
-    honorario = db.query(Honorario).filter(Honorario.id == honorario_id).first()
-    if not honorario:
-        raise HTTPException(404, "Honorário não encontrado")
-
-    recebimento = None
-    valor = float(honorario.valor_total)
-    competencia = datetime.now(tz=BRT).strftime("%Y-%m")
-
-    if recebimento_id:
-        recebimento = db.query(Recebimento).filter(Recebimento.id == recebimento_id).first()
-        if recebimento:
-            valor = float(recebimento.valor)
-            competencia = recebimento.data_recebimento.strftime("%Y-%m")
-
-    cliente = honorario.cliente
-    return PreFillNFSeOut(
-        competencia=competencia,
-        tomador_cpf_cnpj=getattr(cliente, "cpf_cnpj", None),
-        tomador_nome=cliente.nome if cliente else honorario.descricao,
-        tomador_email=getattr(cliente, "email", None),
-        valor_servicos=valor,
-        descricao_servico=_descricao_auto(honorario),
-        honorario_id=honorario_id,
-        recebimento_id=recebimento_id,
-    )
-
-
 @router.get("/parametros-municipais")
 def parametros_municipais(_=Depends(get_current_user)):
-    """Consulta parametrizações de Vitória/ES na API nacional (alíquotas, etc.)."""
     dados = consultar_parametros_municipio("3205309")
     if dados is None:
         raise HTTPException(503, "Não foi possível consultar os parâmetros municipais")
     return dados
+
+
+# ─── Helpers internos ────────────────────────────────────────────────────────
+
+def _apenas_digitos(v: str) -> str:
+    import re
+    return re.sub(r"\D", "", v or "")

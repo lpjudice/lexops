@@ -156,10 +156,33 @@ def atualizar_tarefa(
         raise HTTPException(status_code=404, detail="Tarefa não encontrada")
     if not _pode_ver_tarefa(t, usuario):
         raise HTTPException(status_code=403, detail="Acesso restrito a esta tarefa")
-    for field, value in data.model_dump(exclude_unset=True).items():
+
+    # Detecta se o responsável está mudando para notificar por email
+    resp_anterior = t.responsavel
+    updates = data.model_dump(exclude_unset=True)
+    for field, value in updates.items():
         setattr(t, field, value)
     db.commit()
     db.refresh(t)
+
+    # Dispara email se o responsável foi definido ou alterado (em background)
+    novo_resp = updates.get("responsavel")
+    if novo_resp and novo_resp != resp_anterior and t.responsavel_email:
+        import threading
+        from app.services.tarefa_email import notificar_responsavel
+        from app.database import SessionLocal
+
+        def _enviar():
+            _db = SessionLocal()
+            try:
+                _t = _db.query(Tarefa).filter(Tarefa.id == t.id).first()
+                if _t:
+                    notificar_responsavel(_db, _t, dry_run=False)
+            finally:
+                _db.close()
+
+        threading.Thread(target=_enviar, daemon=True).start()
+
     return _enrich(t, db, usuario)
 
 

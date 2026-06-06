@@ -14,6 +14,7 @@ class TarefaCreate(BaseModel):
     titulo: str
     descricao: str | None = None
     responsavel: str | None = None
+    responsavel_email: str | None = None
     tags: str | None = None
     data_inicio: date | None = None
     data_fim: date | None = None
@@ -29,6 +30,7 @@ class TarefaUpdate(BaseModel):
     titulo: str | None = None
     descricao: str | None = None
     responsavel: str | None = None
+    responsavel_email: str | None = None
     tags: str | None = None
     data_inicio: date | None = None
     data_fim: date | None = None
@@ -52,6 +54,7 @@ class TarefaOut(BaseModel):
     titulo: str
     descricao: str | None
     responsavel: str | None
+    responsavel_email: str | None = None
     tags: str | None
     data_inicio: date | None = None
     data_fim: date | None = None
