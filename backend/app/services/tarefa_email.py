@@ -47,18 +47,22 @@ def build_tarefa_email_html(
     prazo_str = _fmt_data(tarefa.data_limite)
     prazo_color = "#dc2626" if tarefa.data_limite and tarefa.data_limite < datetime.today().date() else "#374151"
 
+    _td_label = 'style="padding:7px 0 7px 20px;font-size:13px;color:#6b7280;width:130px;"'
+    _td_value = 'style="padding:7px 20px 7px 0;font-size:13px;color:#1d1e20;"'
+    _td_value_bold = 'style="padding:7px 20px 7px 0;font-size:13px;color:#1d1e20;font-weight:500;"'
+
     cliente_row = (
-        f'<tr><td style="padding:7px 0;font-size:13px;color:#6b7280;width:130px;">Cliente</td>'
-        f'<td style="padding:7px 0;font-size:13px;color:#1d1e20;font-weight:500;">{cliente_nome}</td></tr>'
+        f'<tr><td {_td_label}>Cliente</td>'
+        f'<td {_td_value_bold}>{cliente_nome}</td></tr>'
         if cliente_nome else ""
     )
     processo_row = (
-        f'<tr><td style="padding:7px 0;font-size:13px;color:#6b7280;">Processo</td>'
-        f'<td style="padding:7px 0;font-size:13px;color:#1d1e20;">{processo_numero}</td></tr>'
+        f'<tr><td {_td_label}>Processo</td>'
+        f'<td {_td_value}>{processo_numero}</td></tr>'
         if processo_numero else ""
     )
     descricao_row = (
-        f'<tr><td colspan="2" style="padding:7px 0;font-size:13px;color:#6b7280;border-top:1px solid #f3f4f6;">'
+        f'<tr><td colspan="2" style="padding:7px 20px 12px;font-size:13px;border-top:1px solid #f3f4f6;">'
         f'<div style="margin-bottom:4px;font-weight:600;color:#374151;">Notas</div>'
         f'<div style="color:#374151;line-height:1.6;">{tarefa.descricao}</div></td></tr>'
         if tarefa.descricao else ""
