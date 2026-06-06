@@ -173,12 +173,20 @@ function ClienteSearch({
   })
 
   const filtrados = useMemo(() => {
-    if (!q || q.length < 2) return []
+    if (!q || q.length < 1) return []
     const lower = q.toLowerCase()
-    return clientes.filter((c) =>
+    const digits = q.replace(/\D/g, '')
+    const matched = clientes.filter((c) =>
       c.nome.toLowerCase().includes(lower) ||
-      (c.cpf_cnpj || '').replace(/\D/g, '').includes(q.replace(/\D/g, ''))
-    ).slice(0, 8)
+      (digits && (c.cpf_cnpj || '').replace(/\D/g, '').includes(digits))
+    )
+    // Prioriza: começa com o termo > contém o termo
+    matched.sort((a, b) => {
+      const aStarts = a.nome.toLowerCase().startsWith(lower) ? 0 : 1
+      const bStarts = b.nome.toLowerCase().startsWith(lower) ? 0 : 1
+      return aStarts - bStarts || a.nome.localeCompare(b.nome)
+    })
+    return matched.slice(0, 15)
   }, [q, clientes])
 
   return (
