@@ -77,3 +77,39 @@ class ItemReembolso(Base):
     valor: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
 
     reembolso: Mapped["Reembolso"] = relationship("Reembolso", back_populates="itens")
+
+    @property
+    def comprovante_drive_link(self) -> str | None:
+        """Primeiro drive_link dos ComprovantesItem (ou None). Exposto no schema Out."""
+        for c in self.comprovantes:
+            if c.drive_link:
+                return c.drive_link
+        return None
+
+    # Docs adicionais da despesa (ex.: um pagamento que cobre vários comprovantes).
+    # O campo comprovante_path acima continua apontando para o doc principal (compat
+    # com a geração de PDF e a UI atuais); aqui ficam todos os anexos.
+    comprovantes: Mapped[list["ComprovanteItem"]] = relationship(
+        "ComprovanteItem", back_populates="item", cascade="all, delete-orphan",
+        order_by="ComprovanteItem.created_at"
+    )
+
+
+class ComprovanteItem(Base):
+    __tablename__ = "comprovantes_item"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("itens_reembolso.id"), nullable=False
+    )
+    filename: Mapped[str | None] = mapped_column(String(500))
+    file_path: Mapped[str | None] = mapped_column(String(1000))
+    drive_link: Mapped[str | None] = mapped_column(String(1000))
+    mime: Mapped[str | None] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    item: Mapped["ItemReembolso"] = relationship("ItemReembolso", back_populates="comprovantes")

@@ -10,6 +10,7 @@ export interface ItemReembolso {
   natureza: string
   documento_comprobatorio?: string
   comprovante_path?: string | null
+  comprovante_drive_link?: string | null
   valor: number
 }
 

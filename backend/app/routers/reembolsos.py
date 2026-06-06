@@ -619,15 +619,23 @@ def upload_comprovante(
     # Upload to Drive under specific reembolso subfolder (best-effort)
     try:
         from app.models.cliente import Cliente
-        from app.services.google_drive import upload_arquivo
+        from app.services.google_drive import get_folder_link, upload_arquivo
         if reembolso:
             cliente = db.query(Cliente).filter(Cliente.id == reembolso.cliente_id).first()
             if cliente:
                 ext_lower = ext.lower()
                 mime = "image/jpeg" if ext_lower in (".jpg", ".jpeg") else \
                        "image/png" if ext_lower == ".png" else "application/pdf"
+                folder_name = _reembolso_folder_name(reembolso)
                 upload_arquivo(conteudo, nome_arquivo, cliente.nome, "Reembolsos", mime,
-                               sub_subfolder=_reembolso_folder_name(reembolso))
+                               sub_subfolder=folder_name)
+                # Guarda o link da pasta no reembolso assim que o primeiro arquivo sobe —
+                # não espera pelo PDF para ter o link disponível na UI.
+                if not reembolso.drive_link:
+                    link = get_folder_link(cliente.nome, "Reembolsos", sub_subfolder=folder_name)
+                    if link:
+                        reembolso.drive_link = link
+                        db.commit()
     except Exception:
         pass
 

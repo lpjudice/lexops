@@ -526,6 +526,19 @@ def _startup():
         import logging
         logging.getLogger(__name__).warning("apscheduler não instalado — scheduler desativado")
 
+    # Registra comandos do bot de Reembolsos no menu sanduíche do Telegram
+    try:
+        from app.services.telegram_api import set_my_commands
+        set_my_commands([
+            ("manual",    "Catalogar despesa só por texto (sem foto)"),
+            ("resumo",    "Ver pastas em aberto e comprovantes pendentes"),
+            ("pendentes", "Listar comprovantes recebidos não catalogados"),
+            ("cancelar",  "Cancelar o lote em andamento"),
+            ("ajuda",     "Mostrar todos os comandos disponíveis"),
+        ])
+    except Exception:
+        pass
+
     # Auto-registra Drive webhook se ainda não estiver ativo
     try:
         import os

@@ -23,6 +23,7 @@ class ItemReembolsoOut(BaseModel):
     natureza: str
     documento_comprobatorio: str | None
     comprovante_path: str | None = None
+    comprovante_drive_link: str | None = None  # link do primeiro ComprovanteItem
     valor: float
 
     model_config = {"from_attributes": True}

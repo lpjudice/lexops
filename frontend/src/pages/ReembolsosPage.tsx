@@ -394,6 +394,19 @@ export default function ReembolsosPage() {
 
               {expandido === r.id && (
                 <div className={cs.cardBody}>
+                  {/* Link Drive no topo — ajuste 2 */}
+                  {r.drive_link && (
+                    <div style={{ marginBottom: 12 }}>
+                      <a
+                        href={r.drive_link}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ fontSize: 13, color: '#2563eb', textDecoration: 'underline' }}
+                      >
+                        ☁ Abrir pasta no Drive
+                      </a>
+                    </div>
+                  )}
                   {/* Tabela de itens */}
                   <div>
                     <div className={cs.sectionTitle}>Despesas</div>
@@ -435,9 +448,21 @@ export default function ReembolsosPage() {
                               <td>
                                 {it.comprovante_path ? (
                                   <span className={cs.comprovanteLine}>
-                                    <span style={{ color: '#15803d', fontSize: 12 }} title={it.documento_comprobatorio || it.comprovante_path}>
-                                      ✓ Anexado{it.documento_comprobatorio ? ` (${it.documento_comprobatorio})` : ''}
-                                    </span>
+                                    {it.comprovante_drive_link ? (
+                                      <a
+                                        href={it.comprovante_drive_link}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        style={{ color: '#15803d', fontSize: 12, textDecoration: 'underline' }}
+                                        title="Abrir no Drive"
+                                      >
+                                        ✓ {it.documento_comprobatorio || 'Comprovante'}
+                                      </a>
+                                    ) : (
+                                      <span style={{ color: '#15803d', fontSize: 12 }} title={it.documento_comprobatorio || it.comprovante_path}>
+                                        ✓ {it.documento_comprobatorio || 'Comprovante'}
+                                      </span>
+                                    )}
                                     {podeEditarDespesas(r.status) && (
                                       <button
                                         className={cs.btnRemoveComprovante}
@@ -681,37 +706,42 @@ export default function ReembolsosPage() {
                       )}
                     </div>
 
-                    {/* Enviar por e-mail */}
+                    {/* Enviar por e-mail — ajuste 3: layout vertical, sem ambiguidade */}
                     {r.itens.length > 0 && r.status !== 'cancelado' && (
-                      <div className={cs.emailRow}>
-                        <input
-                          className={styles.input}
-                          type="email"
-                          placeholder="E-mail do destinatário"
-                          value={emailMap[r.id] ?? (clientes.find((c) => c.id === r.cliente_id)?.email ?? '')}
-                          onChange={(e) => setEmailMap({ ...emailMap, [r.id]: e.target.value })}
-                        />
-                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#475569' }}>
+                      <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Enviar por e-mail</div>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <input
+                            className={styles.input}
+                            type="email"
+                            placeholder="E-mail do cliente (destinatário)"
+                            style={{ flex: '1 1 220px', minWidth: 0 }}
+                            value={emailMap[r.id] ?? (clientes.find((c) => c.id === r.cliente_id)?.email ?? '')}
+                            onChange={(e) => setEmailMap({ ...emailMap, [r.id]: e.target.value })}
+                          />
+                          <button
+                            className={`${styles.btnPrimary} ${cs.btnEmail}`}
+                            disabled={enviarEmail.isPending || (!emailMap[r.id] && !clientes.find((c) => c.id === r.cliente_id)?.email)}
+                            onClick={() => {
+                              const dest = emailMap[r.id] || clientes.find((c) => c.id === r.cliente_id)?.email || ''
+                              const copiarUsuario = Boolean(copiarUsuarioMap[r.id] && emailUsuario)
+                              if (dest && confirm(`Enviar nota por e-mail para ${dest}?${copiarUsuario ? ' Você também receberá uma cópia oculta.' : ''}`))
+                                enviarEmail.mutate({ id: r.id, dest, copiarUsuario })
+                            }}
+                          >
+                            ✉ Enviar
+                          </button>
+                        </div>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#6b7280', userSelect: 'none' }}>
                           <input
                             type="checkbox"
                             checked={Boolean(copiarUsuarioMap[r.id])}
                             disabled={!emailUsuario}
                             onChange={(e) => setCopiarUsuarioMap({ ...copiarUsuarioMap, [r.id]: e.target.checked })}
                           />
-                          Me enviar cópia oculta{emailUsuario ? ` (${emailUsuario})` : ''}
+                          Enviar cópia oculta (BCC) para mim
+                          {emailUsuario && <span style={{ color: '#9ca3af' }}> — {emailUsuario}</span>}
                         </label>
-                        <button
-                          className={`${styles.btnPrimary} ${cs.btnEmail}`}
-                          disabled={enviarEmail.isPending || (!emailMap[r.id] && !clientes.find((c) => c.id === r.cliente_id)?.email)}
-                          onClick={() => {
-                            const dest = emailMap[r.id] || clientes.find((c) => c.id === r.cliente_id)?.email || ''
-                            const copiarUsuario = Boolean(copiarUsuarioMap[r.id] && emailUsuario)
-                            if (dest && confirm(`Enviar nota por e-mail para ${dest}?${copiarUsuario ? ' Você também receberá uma cópia oculta.' : ''}`))
-                              enviarEmail.mutate({ id: r.id, dest, copiarUsuario })
-                          }}
-                        >
-                          ✉ Enviar por E-mail
-                        </button>
                       </div>
                     )}
                   </div>
