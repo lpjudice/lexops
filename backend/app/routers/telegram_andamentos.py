@@ -1068,35 +1068,6 @@ def create_dispatcher() -> Dispatcher:
             return
         await _busca_clientes(msg.bot, msg.chat.id, termo)
 
-    @dp.message(Command("testpush"))
-    async def cmd_testpush(msg: Message) -> None:
-        """Dispara o push diário AGORA, em vez de esperar as 19h. Apenas allowlist."""
-        if not _allowed(msg.from_user.id):
-            return
-        await msg.answer("⏳ Disparando push...")
-        import asyncio
-        from app.services.andamentos_push import _async_push
-        try:
-            await _async_push()
-            await msg.answer("✅ Push disparado. Veja o resultado no grupo.")
-        except Exception as exc:
-            logger.exception("testpush falhou")
-            await msg.answer(f"❌ {str(exc)[:200]}")
-
-    @dp.message(Command("testsync"))
-    async def cmd_testsync(msg: Message) -> None:
-        """Dispara o sync das 18h45 AGORA. Apenas allowlist."""
-        if not _allowed(msg.from_user.id):
-            return
-        await msg.answer("⏳ Sincronizando jus.br dos monitorados (pode demorar)...")
-        from app.services.andamentos_push import _async_sync
-        try:
-            await _async_sync()
-            await msg.answer("✅ Sync concluído. Use /testpush pra ver o resumo.")
-        except Exception as exc:
-            logger.exception("testsync falhou")
-            await msg.answer(f"❌ {str(exc)[:200]}")
-
     @dp.message(Command("chatid"))
     async def cmd_chatid(msg: Message) -> None:
         # Sem _allowed: precisa funcionar em grupo recém-criado pra capturar o ID.
@@ -1407,9 +1378,36 @@ def create_dispatcher() -> Dispatcher:
     return dp
 
 
+_BOT_COMMANDS = [
+    ("buscar", "Buscar andamentos por CNJ (formatado ou 20 dígitos)"),
+    ("busca", "Buscar clientes do lexops (sem termo lista todos)"),
+    ("add", "Adicionar um CNJ avulso ao monitoramento"),
+    ("lista", "Listar todos os processos monitorados"),
+    ("silenciados", "Ver só os processos com push desligado"),
+    ("silenciar", "Silenciar push diário de um CNJ"),
+    ("ativar", "Reativar push diário de um CNJ"),
+    ("login", "Revalidar o acesso jus.br (gov.br)"),
+    ("sessao", "Status da sessão jus.br"),
+    ("chatid", "Mostra o id do chat atual (setup do grupo)"),
+    ("help", "Ajuda completa"),
+    ("cancelar", "Aborta um cadastro em andamento"),
+]
+
+
+async def _setup_bot_commands(bot: Bot) -> None:
+    """Registra a lista de comandos no menu sanduíche do Telegram."""
+    from aiogram.types import BotCommand
+    try:
+        await bot.set_my_commands([BotCommand(command=c, description=d) for c, d in _BOT_COMMANDS])
+        logger.info("Bot commands registrados (%d).", len(_BOT_COMMANDS))
+    except Exception:
+        logger.exception("Falha ao registrar bot commands")
+
+
 async def run_polling(token: str, dispatcher: Dispatcher) -> None:
     bot = Bot(token=token)
     try:
+        await _setup_bot_commands(bot)
         await dispatcher.start_polling(bot)
     finally:
         await bot.session.close()
