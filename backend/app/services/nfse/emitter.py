@@ -68,10 +68,16 @@ def emitir_nfse(dados: DadosDPS) -> ResultadoEmissao:
         log.error("Erro de conexão com ADN: %s", exc)
         return ResultadoEmissao(sucesso=False, erro_mensagem=f"Erro de conexão: {exc}")
 
-    log.debug("ADN status=%s body=%s", resp.status_code, resp.text[:500])
+    log.warning("ADN status=%s headers=%s body=%s",
+                resp.status_code,
+                dict(resp.headers),
+                resp.text[:1000] or "(vazio)")
 
     if resp.status_code not in (200, 201):
         codigo, msg = _parse_erro(resp.content)
+        # Garante que msg nunca seja vazia para diagnóstico
+        if not msg:
+            msg = f"HTTP {resp.status_code} — resposta vazia do ADN"
         return ResultadoEmissao(sucesso=False, erro_codigo=codigo, erro_mensagem=msg)
 
     # Parse da NFS-e retornada

@@ -218,6 +218,9 @@ def emitir_nota(
 
     resultado = emitir_nfse(dados)
 
+    # ── Auto-atualiza o cadastro do cliente com dados da NF ───────────────
+    _atualizar_cliente_com_dados_nf(db, body)
+
     nf = NotaFiscal(
         numero_nfse=resultado.numero_nfse,
         chave_acesso=resultado.chave_acesso,
@@ -271,6 +274,28 @@ def emitir_nota(
     return _nf_to_out(nf)
 
 
+@router.get("/clientes/{cliente_id}/historico", response_model=list[NotaFiscalResumo])
+def historico_nfs_cliente(
+    cliente_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Todas as NFS-e emitidas para um cliente (pelo CPF/CNPJ)."""
+    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    if not cliente:
+        raise HTTPException(404, "Cliente não encontrado")
+    cpf_cnpj = _apenas_digitos(cliente.cpf_cnpj or "")
+    if not cpf_cnpj:
+        return []
+    notas = (
+        db.query(NotaFiscal)
+        .filter(NotaFiscal.tomador_cpf_cnpj == cpf_cnpj)
+        .order_by(NotaFiscal.created_at.desc())
+        .all()
+    )
+    return [NotaFiscalResumo.model_validate(n) for n in notas]
+
+
 @router.post("/notas/{nf_id}/cancelar", response_model=NotaFiscalOut)
 def cancelar_nota(
     nf_id: uuid.UUID,
@@ -309,3 +334,27 @@ def parametros_municipais(_=Depends(get_current_user)):
 def _apenas_digitos(v: str) -> str:
     import re
     return re.sub(r"\D", "", v or "")
+
+
+def _atualizar_cliente_com_dados_nf(db: Session, body: EmitirNFSeIn) -> None:
+    """Se o tomador já existe como cliente, preenche campos em branco com os dados da NF."""
+    cpf_cnpj = _apenas_digitos(body.tomador_cpf_cnpj)
+    if not cpf_cnpj:
+        return
+    cliente = db.query(Cliente).filter(
+        Cliente.cpf_cnpj.ilike(f"%{cpf_cnpj}%")
+    ).first()
+    if not cliente:
+        return
+    atualizado = False
+    if not cliente.email and body.tomador_email:
+        cliente.email = body.tomador_email
+        atualizado = True
+    if not cliente.telefone and body.tomador_telefone:
+        cliente.telefone = body.tomador_telefone
+        atualizado = True
+    if not cliente.cpf_cnpj and cpf_cnpj:
+        cliente.cpf_cnpj = cpf_cnpj
+        atualizado = True
+    if atualizado:
+        db.commit()

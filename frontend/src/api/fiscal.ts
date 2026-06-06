@@ -127,6 +127,9 @@ export const fiscalApi = {
   parametrosMunicipais: () =>
     api.get('/fiscal/parametros-municipais').then((r) => r.data),
 
+  historicoCliente: (clienteId: string) =>
+    api.get<NotaFiscalResumo[]>(`/fiscal/clientes/${clienteId}/historico`).then((r) => r.data),
+
   listarCodigosTributacao: () =>
     api.get<CodigoTributacao[]>('/fiscal/opcoes/codigos-tributacao').then((r) => r.data),
 

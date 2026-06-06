@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { processosApi } from '../api/processos'
 import { anotacoesApi } from '../api/anotacoes'
 import { financeiroApi } from '../api/financeiro'
+import { fiscalApi } from '../api/fiscal'
 import type { HonorarioCreate, RecebimentoCreate } from '../api/financeiro'
 import { contratosApi } from '../api/contratos'
 import api from '../api/client'
@@ -44,7 +45,7 @@ function formatDate(d: string) {
   return new Date(d).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-type Aba = 'timeline' | 'anotacoes' | 'emails' | 'processos' | 'financeiro' | 'contratos' | 'reunioes' | 'ia'
+type Aba = 'timeline' | 'anotacoes' | 'emails' | 'processos' | 'financeiro' | 'contratos' | 'reunioes' | 'ia' | 'fiscal'
 
 export default function ClienteDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -105,6 +106,12 @@ export default function ClienteDetailPage() {
     queryKey: ['contratos-cliente', id],
     queryFn: () => contratosApi.listar({ cliente_id: id }),
     enabled: aba === 'contratos',
+  })
+
+  const { data: notasFiscais = [] } = useQuery({
+    queryKey: ['nfs-cliente', id],
+    queryFn: () => fiscalApi.historicoCliente(id!),
+    enabled: aba === 'fiscal',
   })
 
   const { usuario: me, isSuperAdmin } = useAuth()
@@ -268,10 +275,10 @@ export default function ClienteDetailPage() {
 
       {/* Abas */}
       <div className={detailStyles.abas}>
-        {(['timeline', 'anotacoes', 'emails', 'processos', 'financeiro', 'contratos', 'reunioes', 'ia'] as Aba[]).map((a) => (
+        {(['timeline', 'anotacoes', 'emails', 'processos', 'financeiro', 'contratos', 'reunioes', 'ia', 'fiscal'] as Aba[]).map((a) => (
           <button
             key={a}
-            className={`${detailStyles.aba} ${aba === a ? detailStyles.abaAtiva : ''}`}
+            className={`${detailStyles.aba} ${aba === (a as Aba) ? detailStyles.abaAtiva : ''}`}
             onClick={() => setAba(a)}
           >
             {a === 'timeline' ? 'Timeline' :
@@ -290,7 +297,8 @@ export default function ClienteDetailPage() {
                  )}
                </>
              ) :
-             'IA & Docs'}
+             a === 'ia' ? 'IA & Docs' :
+             `🧾 NFS-e${notasFiscais.length ? ` (${notasFiscais.length})` : ''}`}
           </button>
         ))}
       </div>
@@ -944,6 +952,70 @@ export default function ClienteDetailPage() {
       {/* ── IA & Docs ── */}
       {aba === 'ia' && (
         <ClienteIA clienteId={id!} />
+      )}
+
+      {/* ── NFS-e Histórico ── */}
+      {aba === 'fiscal' && (
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--dark)', margin: 0 }}>
+              Notas Fiscais emitidas para {cliente.nome}
+            </h3>
+            <a href={`/fiscal?nome=${encodeURIComponent(cliente.nome)}`}
+              style={{ fontSize: 12, color: 'var(--teal)', fontWeight: 600, textDecoration: 'none' }}>
+              + Emitir nova NFS-e →
+            </a>
+          </div>
+          {notasFiscais.length === 0 ? (
+            <p style={{ color: 'var(--gray-mid)', fontSize: 13 }}>Nenhuma NFS-e emitida para este cliente.</p>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: 'var(--light)', color: 'var(--gray-mid)', fontSize: 11, textTransform: 'uppercase' }}>
+                  <th style={{ padding: '8px 12px', textAlign: 'left' }}>Nº NFS-e</th>
+                  <th style={{ padding: '8px 12px', textAlign: 'left' }}>Competência</th>
+                  <th style={{ padding: '8px 12px', textAlign: 'left' }}>Emissão</th>
+                  <th style={{ padding: '8px 12px', textAlign: 'right' }}>Valor</th>
+                  <th style={{ padding: '8px 12px', textAlign: 'left' }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {notasFiscais.map((nf) => (
+                  <tr key={nf.id} style={{ borderBottom: '1px solid #f5f5f5' }}>
+                    <td style={{ padding: '10px 12px', fontWeight: 600 }}>{nf.numero_nfse ?? '—'}</td>
+                    <td style={{ padding: '10px 12px' }}>{nf.competencia}</td>
+                    <td style={{ padding: '10px 12px' }}>{nf.data_emissao ? new Date(nf.data_emissao + 'T12:00:00').toLocaleDateString('pt-BR') : '—'}</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                      {nf.valor_servicos.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    </td>
+                    <td style={{ padding: '10px 12px' }}>
+                      <span style={{
+                        background: nf.status === 'emitida' ? '#dcfce7' : nf.status === 'cancelada' ? '#fee2e2' : '#f3f4f6',
+                        color: nf.status === 'emitida' ? '#15803d' : nf.status === 'cancelada' ? '#b91c1c' : '#6b7280',
+                        padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 600,
+                      }}>
+                        {nf.status === 'emitida' ? 'Emitida' : nf.status === 'cancelada' ? 'Cancelada' : nf.status === 'erro' ? 'Erro' : 'Rascunho'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td colSpan={3} style={{ padding: '10px 12px', fontWeight: 700, fontSize: 12, color: 'var(--gray-mid)' }}>
+                    Total emitido
+                  </td>
+                  <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700, color: 'var(--teal)' }}>
+                    {notasFiscais.filter(n => n.status === 'emitida')
+                      .reduce((s, n) => s + n.valor_servicos, 0)
+                      .toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                  </td>
+                  <td />
+                </tr>
+              </tfoot>
+            </table>
+          )}
+        </div>
       )}
 
       {reuniaoRevisando && (
