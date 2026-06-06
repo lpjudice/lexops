@@ -363,13 +363,52 @@ def build_batch_summary(db: Session, batch: TelegramTaskBatch) -> str:
 def batch_actions_markup(batch: TelegramTaskBatch, has_duplicates: bool) -> dict:
     keyboard: list[list[dict]] = [
         [
+            {"text": "👤 Responsável", "callback_data": f"tg:batch:{batch.id.hex}:resp"},
             {"text": "📅 Datas", "callback_data": f"tg:batch:{batch.id.hex}:dates"},
+        ],
+        [
             {"text": "✅ Deixar como está", "callback_data": f"tg:batch:{batch.id.hex}:done"},
         ]
     ]
     if has_duplicates:
         keyboard.append([{"text": "🔁 Revisar duplicadas", "callback_data": f"tg:batch:{batch.id.hex}:dupes"}])
     return {"inline_keyboard": keyboard}
+
+
+# ---------------------------------------------------------------------------
+# Menu de responsável
+# ---------------------------------------------------------------------------
+
+def build_responsavel_menu(db: Session, batch_id: uuid.UUID) -> tuple[str, dict]:
+    """Retorna lista de usuários ativos como botões inline."""
+    from app.models.usuario import Usuario as UsuarioModel
+    usuarios = db.query(UsuarioModel).filter(UsuarioModel.ativo == True).order_by(UsuarioModel.nome).limit(12).all()  # noqa: E712
+    keyboard: list[list[dict]] = []
+    row: list[dict] = []
+    for u in usuarios:
+        btn = {"text": u.nome, "callback_data": f"tg:batch:{batch_id.hex}:resp_set:{u.nome[:30]}"}
+        row.append(btn)
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+    keyboard.append([{"text": "✏️ Digitar nome", "callback_data": f"tg:batch:{batch_id.hex}:resp_custom"}])
+    keyboard.append([{"text": "✅ Deixar como está", "callback_data": f"tg:batch:{batch_id.hex}:done"}])
+    return "Quem vai executar essas tarefas?", {"inline_keyboard": keyboard}
+
+
+def apply_responsavel(db: Session, batch_id: uuid.UUID, responsavel: str) -> int:
+    items = load_batch_items(db, batch_id)
+    count = 0
+    for item in items:
+        tarefa = db.query(Tarefa).filter(Tarefa.id == item.tarefa_id).first()
+        if not tarefa:
+            continue
+        tarefa.responsavel = responsavel
+        count += 1
+    db.commit()
+    return count
 
 
 # ---------------------------------------------------------------------------

@@ -93,6 +93,17 @@ def _handle_pending_input(db: Session, chat_id: str, text: str) -> bool:
         tg.send_message(chat_id, f"✅ Período aplicado em {count} tarefa(s).")
         return True
 
+    if session.pending_action == "awaiting_responsavel":
+        responsavel = text.strip()
+        if not responsavel:
+            tg.send_message(chat_id, "Digite o nome do responsável.", tg.default_reply_markup())
+            return True
+        count = tg.apply_responsavel(db, batch.id, responsavel)
+        tg.reset_session(session)
+        db.commit()
+        tg.send_message(chat_id, f"✅ Responsável definido: {responsavel} ({count} tarefa(s)).")
+        return True
+
     return False
 
 
@@ -186,6 +197,26 @@ def _handle_callback(db: Session, callback_query: dict) -> None:
         tg.edit_message(chat_id, message_id, "✅ Tarefas salvas! Veja no menu Tarefas do LexOps.")
         batch.status = "concluido"
         db.commit()
+        return
+
+    if action == "resp":
+        text_out, markup = tg.build_responsavel_menu(db, batch.id)
+        tg.edit_message(chat_id, message_id, text_out, markup)
+        return
+
+    # resp_set:<nome> — clicou num usuário da lista
+    if action.startswith("resp_set:"):
+        responsavel = action[len("resp_set:"):]
+        count = tg.apply_responsavel(db, batch.id, responsavel)
+        tg.edit_message(chat_id, message_id, f"✅ Responsável: {responsavel} ({count} tarefa(s)).")
+        return
+
+    if action == "resp_custom":
+        session = tg.get_or_create_session(db, chat_id)
+        session.pending_action = "awaiting_responsavel"
+        session.current_batch_id = batch.id
+        db.commit()
+        tg.send_message(chat_id, "Digite o nome do responsável:", tg.default_reply_markup())
         return
 
     if action == "dates":
