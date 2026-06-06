@@ -1076,24 +1076,34 @@ def create_dispatcher() -> Dispatcher:
 
     @dp.message(Command("menu"))
     async def cmd_menu(msg: Message) -> None:
-        """Força commands + Menu button no CHAT ATUAL (sobrescreve cache local)."""
-        from aiogram.types import (
-            BotCommand,
-            BotCommandScopeChat,
-            MenuButtonCommands,
-        )
+        """Força commands no CHAT ATUAL. Em grupos, o botão flutuante azul é
+        decisão do cliente do Telegram (não há API pra forçar)."""
+        from aiogram.types import BotCommand, BotCommandScopeChat, MenuButtonCommands
         cmds = [BotCommand(command=c, description=d) for c, d in _BOT_COMMANDS]
+        chat_type = getattr(msg.chat.type, "value", msg.chat.type)
         try:
             await msg.bot.set_my_commands(cmds, scope=BotCommandScopeChat(chat_id=msg.chat.id))
-            await msg.bot.set_chat_menu_button(
-                chat_id=msg.chat.id,
-                menu_button=MenuButtonCommands(),
-            )
-            await msg.answer(
-                "✅ Menu configurado neste chat.\n"
-                "Se o botão azul ainda não aparecer no canto esquerdo, force-quit "
-                "o Telegram e abra de novo."
-            )
+            if chat_type == "private":
+                # set_chat_menu_button só funciona em private chats — em grupos
+                # o Telegram retorna "invalid chat_id specified".
+                await msg.bot.set_chat_menu_button(
+                    chat_id=msg.chat.id,
+                    menu_button=MenuButtonCommands(),
+                )
+                await msg.answer("✅ Menu + botão azul configurados.")
+            else:
+                await msg.answer(
+                    "✅ Comandos registrados neste grupo.\n\n"
+                    "*Limitação do Telegram:* o botão azul flutuante (Menu) só pode "
+                    "ser forçado em DMs. Em grupos, o cliente do Telegram decide "
+                    "quando mostrá-lo. Se ainda não aparecer:\n"
+                    "• Force-quit o Telegram e reabra\n"
+                    "• Ou abra DM com @jusbr\\_andamentos\\_bot uma vez (`/start`) — "
+                    "isso pode \"acordar\" o botão no grupo também\n"
+                    "• Os comandos `/...` continuam funcionando normalmente "
+                    "(autocomplete ao digitar `/`)",
+                    parse_mode="Markdown",
+                )
         except Exception as exc:
             logger.exception("cmd_menu falhou")
             await msg.answer(f"❌ Falhou: {str(exc)[:160]}")
