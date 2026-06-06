@@ -94,14 +94,22 @@ def _handle_pending_input(db: Session, chat_id: str, text: str) -> bool:
         return True
 
     if session.pending_action == "awaiting_responsavel":
-        responsavel = text.strip()
-        if not responsavel:
+        import re as _re
+        raw = text.strip()
+        if not raw:
             tg.send_message(chat_id, "Digite o nome do responsável.", tg.default_reply_markup())
             return True
-        count = tg.apply_responsavel(db, batch.id, responsavel)
+        # Aceita "Nome Sobrenome <email@exemplo.com>" ou só "Nome"
+        email_match = _re.search(r"<([^>]+@[^>]+)>", raw)
+        email = email_match.group(1).strip() if email_match else None
+        nome = _re.sub(r"\s*<[^>]+>", "", raw).strip()
+        count = tg.apply_responsavel(db, batch.id, nome, email)
         tg.reset_session(session)
         db.commit()
-        tg.send_message(chat_id, f"✅ Responsável definido: {responsavel} ({count} tarefa(s)).")
+        msg = f"✅ Responsável: {nome} ({count} tarefa(s))."
+        if email:
+            msg += f"\nNotificação será enviada para {email}."
+        tg.send_message(chat_id, msg)
         return True
 
     return False
@@ -206,11 +214,37 @@ def _handle_callback(db: Session, callback_query: dict) -> None:
         tg.edit_message(chat_id, message_id, text_out, markup)
         return
 
-    # resp_set:<nome> — clicou num usuário da lista
+    # resp_set:<idx> — clicou num usuário da lista (índice numérico para caber nos 64 bytes)
     if action.startswith("resp_set:"):
-        responsavel = action[len("resp_set:"):]
-        count = tg.apply_responsavel(db, batch.id, responsavel)
-        tg.edit_message(chat_id, message_id, f"✅ Responsável: {responsavel} ({count} tarefa(s)).")
+        try:
+            idx = int(action[len("resp_set:"):])
+        except ValueError:
+            tg.edit_message(chat_id, message_id, "Erro ao identificar usuário. Tente novamente.")
+            return
+        usuarios = tg._active_usuarios(db)
+        if idx >= len(usuarios):
+            tg.edit_message(chat_id, message_id, "Usuário não encontrado.")
+            return
+        u = usuarios[idx]
+        count = tg.apply_responsavel(db, batch.id, u.nome, u.email)
+        tg.edit_message(chat_id, message_id, f"✅ Responsável: {u.nome} ({count} tarefa(s)).\nEmail de notificação será enviado para {u.email}.")
+        # Dispara emails em background para cada tarefa do lote
+        import threading
+        from app.services.tarefa_email import notificar_responsavel
+        from app.database import SessionLocal
+        items = tg.load_batch_items(db, batch.id)
+        tarefa_ids = [item.tarefa_id for item in items]
+        def _enviar_lote():
+            _db = SessionLocal()
+            try:
+                from app.models.tarefa import Tarefa
+                for tid in tarefa_ids:
+                    _t = _db.query(Tarefa).filter(Tarefa.id == tid).first()
+                    if _t and _t.responsavel_email:
+                        notificar_responsavel(_db, _t, dry_run=False)
+            finally:
+                _db.close()
+        threading.Thread(target=_enviar_lote, daemon=True).start()
         return
 
     if action == "resp_custom":
@@ -218,7 +252,7 @@ def _handle_callback(db: Session, callback_query: dict) -> None:
         session.pending_action = "awaiting_responsavel"
         session.current_batch_id = batch.id
         db.commit()
-        tg.send_message(chat_id, "Digite o nome do responsável:", tg.default_reply_markup())
+        tg.send_message(chat_id, "Digite o nome do responsável (e email se quiser notificação, ex: João Silva <joao@email.com>):", tg.default_reply_markup())
         return
 
     if action == "dates":

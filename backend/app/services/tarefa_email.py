@@ -221,13 +221,13 @@ def notificar_responsavel(
 
     # Enviar via Gmail master token (mesma lógica do bot de Reembolsos)
     try:
-        from app.services.google_master_tokens import load_tokens, refresh_token
-        tokens = load_tokens()
+        from app.services.google_calendar import _load_tokens, _refresh_token
+        tokens = _load_tokens()
         if not tokens:
             log.warning("tarefa_email: sem tokens Gmail para enviar")
             return False
         try:
-            tokens = refresh_token(tokens)
+            tokens = _refresh_token(tokens)
         except Exception:
             pass
         access_token = tokens.get("access_token")

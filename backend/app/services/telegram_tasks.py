@@ -379,26 +379,36 @@ def batch_actions_markup(batch: TelegramTaskBatch, has_duplicates: bool) -> dict
 # Menu de responsável
 # ---------------------------------------------------------------------------
 
-def build_responsavel_menu(db: Session, batch_id: uuid.UUID) -> tuple[str, dict]:
-    """Retorna lista de usuários ativos como botões inline."""
+def _active_usuarios(db: Session):
+    """Retorna lista de usuários ativos ordenada por nome (usada para índice no callback)."""
     from app.models.usuario import Usuario as UsuarioModel
-    usuarios = db.query(UsuarioModel).filter(UsuarioModel.ativo == True).order_by(UsuarioModel.nome).limit(12).all()  # noqa: E712
+    return db.query(UsuarioModel).filter(UsuarioModel.ativo == True).order_by(UsuarioModel.nome).limit(12).all()  # noqa: E712
+
+
+def build_responsavel_menu(db: Session, batch_id: uuid.UUID) -> tuple[str, dict]:
+    """Retorna lista de usuários ativos como botões inline.
+
+    Usa índice numérico no callback_data para não exceder o limite de 64 bytes
+    do Telegram (f'tg:batch:{hex32}:resp_set:{idx}' = máx. 55 bytes).
+    """
+    usuarios = _active_usuarios(db)
     keyboard: list[list[dict]] = []
     row: list[dict] = []
-    for u in usuarios:
-        btn = {"text": u.nome, "callback_data": f"tg:batch:{batch_id.hex}:resp_set:{u.nome[:30]}"}
+    for idx, u in enumerate(usuarios):
+        cb = f"tg:batch:{batch_id.hex}:resp_set:{idx}"  # ≤55 bytes — dentro do limite
+        btn = {"text": u.nome, "callback_data": cb}
         row.append(btn)
         if len(row) == 2:
             keyboard.append(row)
             row = []
     if row:
         keyboard.append(row)
-    keyboard.append([{"text": "✏️ Digitar nome", "callback_data": f"tg:batch:{batch_id.hex}:resp_custom"}])
+    keyboard.append([{"text": "✏️ Digitar nome / Terceiros", "callback_data": f"tg:batch:{batch_id.hex}:resp_custom"}])
     keyboard.append([{"text": "✅ Deixar como está", "callback_data": f"tg:batch:{batch_id.hex}:done"}])
     return "Quem vai executar essas tarefas?", {"inline_keyboard": keyboard}
 
 
-def apply_responsavel(db: Session, batch_id: uuid.UUID, responsavel: str) -> int:
+def apply_responsavel(db: Session, batch_id: uuid.UUID, responsavel: str, responsavel_email: str | None = None) -> int:
     items = load_batch_items(db, batch_id)
     count = 0
     for item in items:
@@ -406,6 +416,8 @@ def apply_responsavel(db: Session, batch_id: uuid.UUID, responsavel: str) -> int
         if not tarefa:
             continue
         tarefa.responsavel = responsavel
+        if responsavel_email is not None:
+            tarefa.responsavel_email = responsavel_email  # type: ignore[assignment]
         count += 1
     db.commit()
     return count

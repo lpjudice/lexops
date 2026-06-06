@@ -186,16 +186,19 @@ def atualizar_tarefa(
     db.refresh(t)
 
     # Dispara email se o responsável foi definido ou alterado (em background)
+    # Notifica mesmo sem responsavel_email explícito — o serviço faz lookup por nome
     novo_resp = updates.get("responsavel")
-    if novo_resp and novo_resp != resp_anterior and t.responsavel_email:
+    if novo_resp and novo_resp != resp_anterior:
         import threading
         from app.services.tarefa_email import notificar_responsavel
         from app.database import SessionLocal
 
+        tarefa_id_snap = t.id
+
         def _enviar():
             _db = SessionLocal()
             try:
-                _t = _db.query(Tarefa).filter(Tarefa.id == t.id).first()
+                _t = _db.query(Tarefa).filter(Tarefa.id == tarefa_id_snap).first()
                 if _t:
                     notificar_responsavel(_db, _t, dry_run=False)
             finally:
