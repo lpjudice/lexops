@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { financeiroApi } from '../api/financeiro'
 import type { HonorarioCreate, RecebimentoCreate, StatusHonorario, TipoHonorario, FormaPagamento } from '../api/financeiro'
@@ -34,6 +35,7 @@ function fmtData(d: string) {
 }
 
 export default function FinanceiroPage() {
+  const navigate = useNavigate()
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<HonorarioCreate>(EMPTY_H)
@@ -733,7 +735,16 @@ export default function FinanceiroPage() {
                               <td style={{ textTransform: 'uppercase', fontSize: 11 }}>{rec.forma_pagamento}</td>
                               <td>{rec.observacao || '—'}</td>
                               <td className={cs.tdValor}>{fmtVal(rec.valor)}</td>
-                              <td>
+                              <td style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                <button
+                                  className={styles.btnTable}
+                                  title="Emitir NFS-e para este recebimento"
+                                  onClick={() =>
+                                    navigate(`/fiscal?honorario=${h.id}&recebimento=${rec.id}`)
+                                  }
+                                >
+                                  🧾 NFS-e
+                                </button>
                                 <button
                                   className={styles.btnDanger}
                                   onClick={() => removerRec.mutate({ hid: h.id, rid: rec.id })}

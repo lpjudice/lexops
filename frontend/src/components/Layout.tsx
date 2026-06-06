@@ -20,6 +20,7 @@ import {
   Menu,
   X,
   LogOut,
+  ScrollText,
 } from 'lucide-react'
 import api from '../api/client'
 import { useAuth } from '../contexts/AuthContext'
@@ -88,6 +89,12 @@ const navGroups = [
     ],
   },
   {
+    label: 'FISCAL',
+    items: [
+      { to: '/fiscal', label: 'Notas Fiscais', Icon: ScrollText },
+    ],
+  },
+  {
     label: 'SISTEMA',
     items: [
       { to: '/configuracoes', label: 'Configurações', Icon: Settings },
@@ -108,6 +115,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/organizador': 'Folder Organizer',
   '/reembolsos': 'Reembolsos',
   '/financeiro': 'Financeiro',
+  '/fiscal': 'Notas Fiscais',
   '/atendimentos': 'Atendimentos',
   '/tarefas': 'Tarefas',
   '/reunioes': 'Reuniões',

@@ -1,0 +1,253 @@
+/* ─── Filtros ────────────────────────────────────────────────────────── */
+.filtros {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.filtroBtn {
+  background: var(--white);
+  border: 1px solid var(--gray-border);
+  border-radius: var(--radius-btn);
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gray-mid);
+  cursor: pointer;
+  font-family: 'Archivo', sans-serif;
+  transition: all 0.13s ease;
+}
+
+.filtroBtn:hover,
+.filtroBtnActive {
+  background: var(--teal-light);
+  border-color: var(--teal);
+  color: var(--teal);
+}
+
+/* ─── Status badges ──────────────────────────────────────────────────── */
+.badgeEmitida  { background: #dcfce7; color: #15803d; }
+.badgeRascunho { background: #f3f4f6; color: #6b7280; }
+.badgeCancelada{ background: #fee2e2; color: #b91c1c; }
+.badgeErro     { background: #fff7ed; color: #c2410c; }
+
+/* ─── Modal overlay ──────────────────────────────────────────────────── */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 200;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 40px 16px;
+  overflow-y: auto;
+}
+
+.modal {
+  background: var(--white);
+  border-radius: var(--radius-card);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+  width: 100%;
+  max-width: 620px;
+  padding: 28px 32px;
+  position: relative;
+}
+
+.modalTitle {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--dark);
+  margin-bottom: 24px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.closeBtn {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  background: none;
+  border: none;
+  font-size: 20px;
+  color: var(--gray-mid);
+  cursor: pointer;
+  line-height: 1;
+  padding: 4px;
+  border-radius: 4px;
+  transition: color 0.13s ease;
+}
+
+.closeBtn:hover { color: var(--dark); }
+
+/* ─── Formulário de emissão ──────────────────────────────────────────── */
+.formGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 16px;
+}
+
+.formGridFull {
+  grid-column: 1 / -1;
+}
+
+.formLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--teal);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  display: block;
+  margin-bottom: 5px;
+}
+
+.input {
+  padding: 9px 12px;
+  border: 1px solid var(--gray-border);
+  border-radius: var(--radius-input);
+  font-size: 13px;
+  font-family: 'Archivo', sans-serif;
+  color: var(--dark);
+  background: var(--white);
+  width: 100%;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--teal);
+  box-shadow: 0 0 0 3px rgba(0, 176, 144, 0.1);
+}
+
+.textarea {
+  composes: input;
+  resize: vertical;
+  min-height: 72px;
+}
+
+/* ─── Seção de retenções (colapsável) ───────────────────────────────── */
+.retencaoToggle {
+  background: none;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--teal);
+  cursor: pointer;
+  padding: 4px 0;
+  margin-top: 4px;
+  font-family: 'Archivo', sans-serif;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.retencaoGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px 14px;
+  margin-top: 12px;
+  padding: 14px;
+  background: var(--light);
+  border-radius: 8px;
+}
+
+/* ─── Alerta de pré-fill ─────────────────────────────────────────────── */
+.prefillBanner {
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: #065f46;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ─── Detalhe da NF emitida ──────────────────────────────────────────── */
+.detailGrid {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 10px 16px;
+  font-size: 13px;
+}
+
+.detailLabel {
+  font-weight: 600;
+  color: var(--gray-mid);
+  font-size: 12px;
+}
+
+.detailValue {
+  color: var(--dark);
+}
+
+.xmlBlock {
+  grid-column: 1 / -1;
+  background: var(--light);
+  border-radius: 6px;
+  padding: 12px;
+  font-size: 11px;
+  font-family: monospace;
+  overflow-x: auto;
+  max-height: 200px;
+  overflow-y: auto;
+  color: #374151;
+  white-space: pre;
+}
+
+/* ─── Botões do modal ────────────────────────────────────────────────── */
+.modalFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--gray-border);
+}
+
+.btnSecondary {
+  background: var(--white);
+  color: var(--dark);
+  border: 1px solid var(--gray-border);
+  padding: 9px 20px;
+  border-radius: var(--radius-btn);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'Archivo', sans-serif;
+  transition: background 0.13s ease;
+}
+
+.btnSecondary:hover { background: var(--light); }
+
+/* ─── Erro inline ────────────────────────────────────────────────────── */
+.erroBox {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: #9a3412;
+  margin-top: 14px;
+}
+
+/* ─── NF number destaque ─────────────────────────────────────────────── */
+.nfNumero {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--teal);
+}
+
+@media (max-width: 640px) {
+  .formGrid { grid-template-columns: 1fr; }
+  .retencaoGrid { grid-template-columns: 1fr 1fr; }
+  .modal { padding: 20px 16px; }
+  .overlay { padding: 0; align-items: flex-end; }
+  .modal { border-radius: 16px 16px 0 0; }
+}

@@ -21,6 +21,7 @@ import JurisprudenciaPage from './pages/JurisprudenciaPage'
 import TarefasPage from './pages/TarefasPage'
 import AceitarConvitePage from './pages/AceitarConvitePage'
 import ReunioesPage from './pages/ReunioesPage'
+import FiscalPage from './pages/FiscalPage'
 
 const queryClient = new QueryClient()
 
@@ -62,6 +63,7 @@ function AppRoutes() {
         <Route path="jurisprudencia" element={<JurisprudenciaPage />} />
         <Route path="tarefas" element={<TarefasPage />} />
         <Route path="reunioes" element={<ReunioesPage />} />
+        <Route path="fiscal" element={<FiscalPage />} />
       </Route>
     </Routes>
   )
