@@ -158,11 +158,13 @@ def _handle_callback(db: Session, callback_query: dict) -> None:
         tg.edit_message(chat_id, message_id, "Ok, tarefas salvas sem alteração.")
         return
 
-    parts = data.split(":")
+    # Limita a 4 segmentos para que nomes com ":" (raro mas possível) não quebrem o parse.
+    # Ex: "tg:batch:{hex}:resp_set:Lucas" → action = "resp_set:Lucas"
+    parts = data.split(":", 3)
     if len(parts) < 4:
         return
 
-    ns, kind, ref_hex, action = parts[0], parts[1], parts[2], parts[3]
+    ns, kind, ref_hex, action = parts
     if ns != "tg":
         return
 

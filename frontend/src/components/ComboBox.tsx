@@ -29,13 +29,16 @@ export default function ComboBox({
 }: Props) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
+  const [isFocused, setIsFocused] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
-  // Sync query with selected label when value changes externally
+  // Sync query with selected label when value changes externally (but not while user is typing)
   useEffect(() => {
-    const found = options.find((o) => o.value === value)
-    setQuery(found ? found.label : '')
-  }, [value, options])
+    if (!isFocused) {
+      const found = options.find((o) => o.value === value)
+      setQuery(found ? found.label : '')
+    }
+  }, [value, options, isFocused])
 
   // Close on outside click
   useEffect(() => {
@@ -75,7 +78,15 @@ export default function ComboBox({
         className={styles.input}
         value={query}
         onChange={(e) => handleInputChange(e.target.value)}
-        onFocus={() => setOpen(true)}
+        onFocus={() => { setQuery(''); setOpen(true); setIsFocused(true) }}
+        onBlur={() => {
+          setIsFocused(false)
+          // Restore label on blur if user didn't pick a new option
+          setTimeout(() => {
+            const found = options.find((o) => o.value === value)
+            setQuery(found ? found.label : '')
+          }, 150) // small delay so mousedown on option fires first
+        }}
         placeholder={placeholder}
         disabled={disabled}
         required={required && !value}

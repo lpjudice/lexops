@@ -19,12 +19,6 @@ const STATUS_LABEL: Record<StatusTarefa, string> = {
   cancelado: 'Cancelado',
 }
 
-const STATUS_NEXT: Record<StatusTarefa, StatusTarefa> = {
-  pendente: 'em_andamento',
-  em_andamento: 'concluido',
-  concluido: 'pendente',
-  cancelado: 'pendente',
-}
 
 function formatDate(d?: string | null) {
   if (!d) return null
@@ -75,7 +69,12 @@ export default function TarefasPage() {
   // ── Filters ───────────────────────────────────────────────────────────
   const [filtroStatus, setFiltroStatus] = useState<StatusTarefa | ''>('pendente')
   const [filtroCliente, setFiltroCliente] = useState('')
-  const [sortBy, setSortBy] = useState<'prazo_asc' | 'prazo_desc' | 'cliente_az'>('prazo_asc')
+  const [filtroResponsavel, setFiltroResponsavel] = useState('')
+  const [filtroMes, setFiltroMes] = useState('') // 'YYYY-MM' — só para concluídos
+  const [sortBy, setSortBy] = useState<'recente' | 'prazo_asc' | 'prazo_desc' | 'titulo_az' | 'cliente_az' | 'responsavel_az'>('recente')
+
+  // ── Status quick-menu ─────────────────────────────────────────────────
+  const [statusMenuId, setStatusMenuId] = useState<string | null>(null)
 
   // ── Card UI state ─────────────────────────────────────────────────────
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -189,7 +188,14 @@ export default function TarefasPage() {
   const tarefasFiltradas = useMemo(() => {
     let arr = [...tarefas]
     if (filtroCliente) arr = arr.filter((t) => t.cliente_id === filtroCliente)
-    if (sortBy === 'prazo_asc') {
+    if (filtroResponsavel) arr = arr.filter((t) => t.responsavel === filtroResponsavel)
+    if (filtroMes && filtroStatus === 'concluido') {
+      arr = arr.filter((t) => t.updated_at?.startsWith(filtroMes) || t.created_at?.startsWith(filtroMes))
+    }
+
+    if (sortBy === 'recente') {
+      arr.sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))
+    } else if (sortBy === 'prazo_asc') {
       arr.sort((a, b) => {
         if (!a.data_limite && !b.data_limite) return 0
         if (!a.data_limite) return 1
@@ -203,15 +209,19 @@ export default function TarefasPage() {
         if (!b.data_limite) return 1
         return b.data_limite.localeCompare(a.data_limite)
       })
+    } else if (sortBy === 'titulo_az') {
+      arr.sort((a, b) => a.titulo.localeCompare(b.titulo, 'pt-BR'))
     } else if (sortBy === 'cliente_az') {
       arr.sort((a, b) => {
         const na = clienteNome(a.cliente_id) || ''
         const nb = clienteNome(b.cliente_id) || ''
         return na.localeCompare(nb, 'pt-BR')
       })
+    } else if (sortBy === 'responsavel_az') {
+      arr.sort((a, b) => (a.responsavel ?? '').localeCompare(b.responsavel ?? '', 'pt-BR'))
     }
     return arr
-  }, [tarefas, filtroCliente, sortBy, clientes]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tarefas, filtroCliente, filtroResponsavel, filtroMes, filtroStatus, sortBy, clientes]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const processoOptions = processos.map((p) => {
     const cliente = clientes.find((c) => c.id === p.cliente_id)
@@ -437,6 +447,7 @@ export default function TarefasPage() {
       {/* ── Filters (list mode only) ─────────────────────────────────── */}
       {viewMode === 'list' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+          {/* Status tabs + ordenação */}
           <div className={t.filtros} style={{ marginBottom: 0 }}>
             {STATUS_FILTER.map((s) => (
               <button key={s}
@@ -453,18 +464,57 @@ export default function TarefasPage() {
                 background: '#fff', color: '#6b7280', cursor: 'pointer', fontFamily: 'inherit', marginLeft: 'auto',
               }}
             >
+              <option value="recente">Mais recentes primeiro</option>
               <option value="prazo_asc">Prazo ↑ (mais próximo)</option>
               <option value="prazo_desc">Prazo ↓ (mais distante)</option>
+              <option value="titulo_az">Tarefa A→Z</option>
               <option value="cliente_az">Cliente A→Z</option>
+              <option value="responsavel_az">Responsável A→Z</option>
             </select>
           </div>
-          <div style={{ maxWidth: 300 }}>
-            <ClienteCombobox
-              value={filtroCliente}
-              onChange={setFiltroCliente}
-              clientes={clientes}
-              onCreateCliente={criarClienteRapido}
-            />
+
+          {/* Filtros secundários */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div style={{ width: 260 }}>
+              <ClienteCombobox
+                value={filtroCliente}
+                onChange={setFiltroCliente}
+                clientes={clientes}
+                onCreateCliente={criarClienteRapido}
+              />
+            </div>
+            <select
+              value={filtroResponsavel}
+              onChange={(e) => setFiltroResponsavel(e.target.value)}
+              style={{ fontSize: 12, padding: '5px 10px', borderRadius: 999, border: '1px solid #e5e7eb', background: '#fff', color: filtroResponsavel ? '#1d1e20' : '#9ca3af', cursor: 'pointer', fontFamily: 'inherit' }}
+            >
+              <option value="">Responsável (todos)</option>
+              {[...new Set(tarefas.map(t => t.responsavel).filter(Boolean))].sort().map(r => (
+                <option key={r!} value={r!}>{r}</option>
+              ))}
+            </select>
+            {filtroStatus === 'concluido' && (
+              <select
+                value={filtroMes}
+                onChange={(e) => setFiltroMes(e.target.value)}
+                style={{ fontSize: 12, padding: '5px 10px', borderRadius: 999, border: '1px solid #e5e7eb', background: '#fff', color: filtroMes ? '#1d1e20' : '#9ca3af', cursor: 'pointer', fontFamily: 'inherit' }}
+              >
+                <option value="">Mês (todos)</option>
+                {Array.from({ length: 12 }, (_, i) => {
+                  const d = new Date(new Date().getFullYear(), i, 1)
+                  const val = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
+                  return <option key={val} value={val}>{d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}</option>
+                })}
+              </select>
+            )}
+            {(filtroCliente || filtroResponsavel || filtroMes) && (
+              <button
+                onClick={() => { setFiltroCliente(''); setFiltroResponsavel(''); setFiltroMes('') }}
+                style={{ fontSize: 11, color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+              >
+                Limpar filtros
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -729,13 +779,39 @@ export default function TarefasPage() {
                     )}
 
                     <div className={t.cardTop}>
-                      <button
-                        className={`${t.checkBtn} ${tarefa.status === 'concluido' ? t.checked : tarefa.status === 'em_andamento' ? t.andamento : ''}`}
-                        title="Avançar status"
-                        onClick={() => atualizar.mutate({ id: tarefa.id, data: { status: STATUS_NEXT[tarefa.status] } })}
-                      >
-                        {tarefa.status === 'concluido' ? '✓' : tarefa.status === 'em_andamento' ? '◑' : '○'}
-                      </button>
+                      {/* Status quick-menu */}
+                      <div style={{ position: 'relative', flexShrink: 0 }}>
+                        <button
+                          className={`${t.checkBtn} ${tarefa.status === 'concluido' ? t.checked : tarefa.status === 'em_andamento' ? t.andamento : ''}`}
+                          title="Alterar status"
+                          onClick={() => setStatusMenuId(statusMenuId === tarefa.id ? null : tarefa.id)}
+                        >
+                          {tarefa.status === 'concluido' ? '✓' : tarefa.status === 'em_andamento' ? '◑' : '○'}
+                        </button>
+                        {statusMenuId === tarefa.id && (
+                          <div
+                            style={{ position: 'absolute', left: 0, top: '110%', zIndex: 20, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,.12)', padding: 4, minWidth: 160 }}
+                            onMouseLeave={() => setStatusMenuId(null)}
+                          >
+                            {tarefa.status !== 'em_andamento' && (
+                              <button onClick={() => { atualizar.mutate({ id: tarefa.id, data: { status: 'em_andamento' } }); setStatusMenuId(null) }}
+                                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 12px', fontSize: 13, cursor: 'pointer', background: 'none', border: 'none', borderRadius: 7, color: '#d97706', fontFamily: 'inherit' }}>
+                                ◑ Em Andamento
+                              </button>
+                            )}
+                            <button onClick={() => { atualizar.mutate({ id: tarefa.id, data: { status: 'concluido' } }); setStatusMenuId(null) }}
+                              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 12px', fontSize: 13, cursor: 'pointer', background: 'none', border: 'none', borderRadius: 7, color: '#059669', fontFamily: 'inherit' }}>
+                              ✓ Concluído
+                            </button>
+                            {tarefa.status !== 'pendente' && (
+                              <button onClick={() => { atualizar.mutate({ id: tarefa.id, data: { status: 'pendente' } }); setStatusMenuId(null) }}
+                                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 12px', fontSize: 13, cursor: 'pointer', background: 'none', border: 'none', borderRadius: 7, color: '#9ca3af', fontFamily: 'inherit' }}>
+                                ○ Pendente
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
 
                       <div className={t.cardBody}>
                         <div className={t.tituloRow}>
@@ -752,8 +828,13 @@ export default function TarefasPage() {
                           {nomCliente && <span className={t.metaChip}>{nomCliente}</span>}
                           {labelProcesso && <span className={t.metaChip}>{labelProcesso}</span>}
                           {tarefa.responsavel && <span className={t.metaChip}>→ {tarefa.responsavel}</span>}
-                          {tarefa.criado_por_nome && !isCreator && (
+                          {tarefa.criado_por_nome && (
                             <span className={t.metaChip} style={{ color: '#9ca3af' }}>por {tarefa.criado_por_nome}</span>
+                          )}
+                          {tarefa.created_at && (
+                            <span className={t.metaChip} style={{ color: '#9ca3af' }}>
+                              {new Date(tarefa.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
+                            </span>
                           )}
                           {tarefa.data_limite && (
                             <span className={`${t.metaPrazo} ${atrasada ? t.metaPrazoAtrasado : ''}`}>
