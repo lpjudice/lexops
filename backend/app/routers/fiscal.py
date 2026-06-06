@@ -64,7 +64,7 @@ def _proximo_numero_dps(db: Session) -> int:
         .order_by(NotaFiscal.numero_dps.desc())
         .first()
     )
-    return (ultimo[0] or 0) + 1
+    return (ultimo[0] if ultimo is not None else 0) + 1
 
 
 def _descricao_auto(honorario: Honorario, tipo_servico: str = "processo") -> str:
