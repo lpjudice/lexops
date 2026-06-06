@@ -21,6 +21,8 @@ class Tarefa(Base):
     descricao: Mapped[str | None] = mapped_column(Text)
     responsavel: Mapped[str | None] = mapped_column(String(255))
     tags: Mapped[str | None] = mapped_column(String(500))
+    data_inicio: Mapped[date | None] = mapped_column(Date, nullable=True)
+    data_fim: Mapped[date | None] = mapped_column(Date, nullable=True)
     data_limite: Mapped[date | None] = mapped_column(Date)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="pendente")
     resumo_ia: Mapped[str | None] = mapped_column(Text)

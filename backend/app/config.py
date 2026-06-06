@@ -47,6 +47,19 @@ class Settings(BaseSettings):
     # Segredo do webhook: o Telegram envia no header X-Telegram-Bot-Api-Secret-Token.
     telegram_webhook_secret: str = ""
 
+    # Telegram — bot de Tarefas (Tarefas_sui_bot)
+    # Token separado do bot de Reembolsos.
+    telegram_tarefas_bot_token: str = ""
+    telegram_tarefas_webhook_secret: str = ""
+    # Email ou UUID do usuário LexOps que será `criado_por` nas tarefas criadas pelo bot.
+    telegram_tarefas_default_user: str = ""
+
+    # NFS-e Nacional — e-CNPJ A1 (mTLS)
+    nfse_cert_path: str = ""       # caminho local do .pfx
+    nfse_cert_password: str = ""   # senha do .pfx
+    nfse_api_url: str = "https://adn.nfse.gov.br"  # base URL produção
+    nfse_ambiente: int = 1         # 1=Produção, 2=Homologação
+
     @property
     def telegram_allowed_ids(self) -> set[int]:
         out: set[int] = set()

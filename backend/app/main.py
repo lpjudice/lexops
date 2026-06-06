@@ -10,7 +10,9 @@ from app.models import telegram_conversa as _telegram_conversa_model  # noqa: F4
 from app.models import processo_telegram_extra as _processo_telegram_extra_model  # noqa: F401
 from app.models import processo_parte as _processo_parte_model  # noqa: F401
 from app.models import andamento_telegram_extra as _andamento_telegram_extra_model  # noqa: F401
-from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, jurisprudencia, organizador, pje, prazos, processos, reembolsos, reunioes, system, tarefas, telegram, telegram_andamentos, teses, usuarios, webhooks
+from app.models import nota_fiscal as _nota_fiscal_model  # noqa: F401
+from app.models import telegram_task as _telegram_task_model  # noqa: F401 — TelegramTaskBatch/Item/Session
+from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, fiscal, jurisprudencia, organizador, pje, prazos, processos, reembolsos, reunioes, system, tarefas, telegram, telegram_andamentos, telegram_tasks, teses, usuarios, webhooks
 
 # Cria as tabelas (Alembic gerencia em produção; aqui facilita o dev)
 Base.metadata.create_all(bind=engine)
@@ -424,6 +426,108 @@ def _run_migrations() -> None:
             "ON andamentos_telegram_extras(notificado) WHERE notificado = FALSE"
         ))
 
+        # ── NFS-e Nacional ───────────────────────────────────────────────────
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS notas_fiscais (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                numero_nfse VARCHAR(50),
+                chave_acesso VARCHAR(200) UNIQUE,
+                serie VARCHAR(10) NOT NULL DEFAULT '1',
+                numero_dps INTEGER,
+                competencia VARCHAR(7) NOT NULL,
+                data_emissao DATE,
+                prestador_cnpj VARCHAR(14) NOT NULL DEFAULT '10901611000164',
+                tomador_cpf_cnpj VARCHAR(14) NOT NULL,
+                tomador_nome VARCHAR(200) NOT NULL,
+                tomador_email VARCHAR(100),
+                tomador_telefone VARCHAR(11),
+                tomador_logradouro VARCHAR(200),
+                tomador_numero VARCHAR(10),
+                tomador_complemento VARCHAR(60),
+                tomador_bairro VARCHAR(100),
+                tomador_cod_municipio VARCHAR(7),
+                tomador_cep VARCHAR(8),
+                cod_tributacao_nacional VARCHAR(20) NOT NULL,
+                descricao_servico TEXT NOT NULL,
+                valor_servicos NUMERIC(14,2) NOT NULL,
+                retencao_ir NUMERIC(14,2),
+                retencao_inss NUMERIC(14,2),
+                retencao_csll NUMERIC(14,2),
+                retencao_cofins NUMERIC(14,2),
+                retencao_pis NUMERIC(14,2),
+                ibs_valor NUMERIC(14,2),
+                cbs_valor NUMERIC(14,2),
+                status VARCHAR(20) NOT NULL DEFAULT 'rascunho',
+                erro_mensagem TEXT,
+                xml_nfse TEXT,
+                honorario_id UUID REFERENCES honorarios(id) ON DELETE SET NULL,
+                recebimento_id UUID REFERENCES recebimentos(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_notas_fiscais_competencia ON notas_fiscais(competencia)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_notas_fiscais_status ON notas_fiscais(status)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_notas_fiscais_honorario ON notas_fiscais(honorario_id)"
+        ))
+
+        # Tarefas: campos de período (bot de Tarefas via Telegram)
+        conn.execute(text(
+            "ALTER TABLE tarefas ADD COLUMN IF NOT EXISTS data_inicio DATE"
+        ))
+        conn.execute(text(
+            "ALTER TABLE tarefas ADD COLUMN IF NOT EXISTS data_fim DATE"
+        ))
+
+        # Bot de Tarefas — lotes e sessões
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS telegram_task_batches (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                chat_id VARCHAR(100) NOT NULL,
+                source_message_id VARCHAR(100),
+                raw_text TEXT NOT NULL,
+                status VARCHAR(50) NOT NULL DEFAULT 'ativo',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_telegram_task_batches_chat ON telegram_task_batches(chat_id)"
+        ))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS telegram_task_items (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                batch_id UUID NOT NULL REFERENCES telegram_task_batches(id) ON DELETE CASCADE,
+                tarefa_id UUID NOT NULL REFERENCES tarefas(id) ON DELETE CASCADE,
+                titulo_original VARCHAR(500) NOT NULL,
+                titulo_normalizado VARCHAR(500) NOT NULL,
+                cliente_inferido_id UUID REFERENCES clientes(id) ON DELETE SET NULL,
+                cliente_inferido_nome VARCHAR(255),
+                cliente_inferencia_score FLOAT,
+                duplicada_de_tarefa_id UUID REFERENCES tarefas(id) ON DELETE SET NULL,
+                duplicada_score FLOAT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_telegram_task_items_batch ON telegram_task_items(batch_id)"
+        ))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS telegram_task_sessions (
+                chat_id VARCHAR(100) PRIMARY KEY,
+                current_batch_id UUID REFERENCES telegram_task_batches(id) ON DELETE SET NULL,
+                pending_action VARCHAR(100),
+                payload JSONB,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+
         conn.commit()
 
 
@@ -484,6 +588,7 @@ app.include_router(diario2.router)
 app.include_router(teses.router)
 app.include_router(reembolsos.router)
 app.include_router(financeiro.router)
+app.include_router(fiscal.router)
 app.include_router(tarefas.router)
 app.include_router(conversas_ia.router)
 app.include_router(organizador.router)
@@ -496,6 +601,7 @@ app.include_router(reunioes.router)
 app.include_router(webhooks.router)
 app.include_router(telegram.router)
 app.include_router(telegram_andamentos.router)
+app.include_router(telegram_tasks.router)
 
 
 @app.on_event("startup")
