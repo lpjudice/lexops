@@ -58,7 +58,10 @@ class Settings(BaseSettings):
     nfse_cert_path: str = ""       # caminho local do .pfx (dev)
     nfse_cert_password: str = ""   # senha do .pfx
     nfse_cert_b64: str = ""        # conteúdo do .pfx em base64 (Fly.io)
-    nfse_api_url: str = "https://adn.nfse.gov.br"  # base URL produção
+    # SEFIN Nacional — emissão (POST /nfse), consulta, eventos
+    nfse_api_url: str = "https://sefin.nfse.gov.br/SefinNacional/"
+    # ADN Contribuinte — distribuição (DFe), parâmetros municipais
+    nfse_adn_url: str = "https://adn.nfse.gov.br/contribuintes/"
     nfse_ambiente: int = 1         # 1=Produção, 2=Homologação
 
     @property

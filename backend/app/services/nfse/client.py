@@ -1,7 +1,11 @@
-"""mTLS httpx client para a API NFS-e Nacional (ADN).
+"""mTLS clients para a API NFS-e Nacional.
 
-Carrega o e-CNPJ A1 (.pfx) uma vez e reutiliza o SSLContext em todas as
-chamadas. Sem sessão, sem login — cada request é autenticado pelo certificado.
+Dois ambientes/hosts distintos:
+- SEFIN Nacional  → emissão (POST /nfse), consulta, eventos, dps
+- ADN Contribuinte → distribuição (DFe), parâmetros municipais
+
+Carrega o e-CNPJ A1 (.pfx) uma vez. Sem sessão — cada request é autenticado
+pelo certificado (mTLS). O certificado também é usado para assinar o XML da DPS.
 """
 import os
 import ssl
@@ -32,23 +36,25 @@ def _load_pfx_data() -> bytes:
     )
 
 
-def _build_ssl_context() -> ssl.SSLContext:
+def load_cert_and_key() -> tuple[bytes, bytes]:
+    """Retorna (cert_pem, key_pem) do e-CNPJ A1 — usado para assinar o XML."""
     pfx_password = settings.nfse_cert_password
-
     if not pfx_password:
         raise ValueError("NFSE_CERT_PASSWORD não configurado no .env")
-
     pfx_data = _load_pfx_data()
-
     private_key, certificate, _ = pkcs12.load_key_and_certificates(
         pfx_data, pfx_password.encode()
     )
-
     cert_pem = certificate.public_bytes(Encoding.PEM)
     key_pem = private_key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption())
+    return cert_pem, key_pem
 
-    # O servidor adn.nfse.gov.br usa CA ICP-Brasil (não inclusa no bundle padrão
-    # do Linux). Desabilitamos a verificação do servidor mas mantemos o certificado
+
+def _build_ssl_context() -> ssl.SSLContext:
+    cert_pem, key_pem = load_cert_and_key()
+
+    # O servidor usa CA ICP-Brasil (não inclusa no bundle padrão do Linux).
+    # Desabilitamos a verificação do servidor mas mantemos o certificado
     # CLIENTE (mTLS) — que é o que o governo usa para autenticar o emitente.
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.check_hostname = False
@@ -75,21 +81,40 @@ def _build_ssl_context() -> ssl.SSLContext:
 _ssl_ctx: ssl.SSLContext | None = None
 
 
-def get_nfse_client() -> httpx.Client:
-    """Retorna um httpx.Client configurado com mTLS do e-CNPJ A1."""
+def _ctx() -> ssl.SSLContext:
     global _ssl_ctx
     if _ssl_ctx is None:
         _ssl_ctx = _build_ssl_context()
+    return _ssl_ctx
 
+
+def get_sefin_client() -> httpx.Client:
+    """Client para o SEFIN Nacional — emissão, consulta, eventos."""
     return httpx.Client(
         base_url=settings.nfse_api_url,
-        verify=_ssl_ctx,
-        timeout=30.0,
-        headers={"Content-Type": "application/xml", "Accept": "application/xml"},
+        verify=_ctx(),
+        timeout=60.0,
+        http2=False,  # servidor derruba conexão com HTTP/2
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
     )
 
 
+def get_adn_client() -> httpx.Client:
+    """Client para o ADN Contribuinte — distribuição, parâmetros municipais."""
+    return httpx.Client(
+        base_url=settings.nfse_adn_url,
+        verify=_ctx(),
+        timeout=30.0,
+        http2=False,
+        headers={"Accept": "application/json"},
+    )
+
+
+# Compat: nome antigo
+def get_nfse_client() -> httpx.Client:
+    return get_sefin_client()
+
+
 def reset_client() -> None:
-    """Força rebuild do SSLContext (útil se o .pfx for trocado)."""
     global _ssl_ctx
     _ssl_ctx = None

@@ -27,19 +27,16 @@ PRESTADOR_NOME    = "PIMENTA JUDICE SOCIEDADE INDIVIDUAL DE ADVOCACIA"
 MUNICIPIO_VITORIA_IBGE = "3205309"
 PAIS_BRASIL       = "1058"
 VER_APLIC         = "LexOps 1.0"
-CTN_ADVOCACIA     = "010900"   # LC 116/2003 item 17.14 — Advocacia
+CTN_ADVOCACIA     = "171401"   # Lista Serviço Nacional — Advocacia (LC 116/2003 item 17.14)
 NS                = "http://www.sped.fazenda.gov.br/nfse"
 BRT               = timezone(timedelta(hours=-3))
 
 # ─── Opções de Código de Tributação Nacional (LC 116/2003) ───────────────────
 # Formato: (código, descrição curta, descrição detalhada)
 CODIGOS_TRIBUTACAO = [
-    ("010900", "Advocacia",                    "Serviços advocatícios em geral (LC 116/2003, item 17.14)"),
-    ("010901", "Consultoria Jurídica",         "Assessoria e consultoria jurídica"),
-    ("010902", "Planejamento Jurídico",        "Planejamento jurídico-societário e patrimonial"),
-    ("010903", "Honorários de Êxito",          "Honorários advocatícios de êxito"),
-    ("010100", "Consultoria em Geral",         "Consultoria em geral, exceto nas alíneas a seguir"),
-    ("010200", "Análise e Desenvolvimento",    "Análise e desenvolvimento de sistemas"),
+    ("171401", "Advocacia",                    "Serviços advocatícios (LC 116/2003 item 17.14)"),
+    ("172001", "Consultoria/Assessoria",       "Assessoria ou consultoria de qualquer natureza (item 17.20)"),
+    ("170201", "Apoio técnico/administrativo", "Datilografia, redação, revisão e congêneres (item 17.02)"),
 ]
 
 # ─── Natureza de Operação ─────────────────────────────────────────────────────
@@ -125,7 +122,7 @@ class DadosDPS:
 
     # Serviço
     descricao_servico: str
-    cod_tributacao_nacional: str = "010900"
+    cod_tributacao_nacional: str = CTN_ADVOCACIA
 
     # Tributação
     natureza_operacao: str = "1"   # 1 = Tributado no município
@@ -143,6 +140,9 @@ class DadosDPS:
     ibs_valor: Optional[Decimal] = None
     cbs_valor: Optional[Decimal] = None
 
+    # Percentual efetivo do Simples Nacional (Lei da Transparência / pTotTribSN)
+    pct_trib_simples: Decimal = Decimal("6.00")
+
     # Controle
     ambiente: int = 1
     data_emissao: Optional[datetime] = None
@@ -159,8 +159,11 @@ def _fmt_valor(v: Decimal) -> str:
 
 
 def _id_dps(cnpj: str, serie: str, numero: int, competencia: str) -> str:
-    ano_mes = competencia.replace("-", "")
-    return f"DPS{cnpj}{serie.zfill(5)}{str(numero).zfill(15)}{ano_mes}"
+    # Padrão TSIdDPS (45 chars):
+    # "DPS" + cMunEmissor(7) + tpInscFed(1: 1=CPF,2=CNPJ) + inscFed(14) + serie(5) + nDPS(15)
+    tp_insc = "2" if len(cnpj) == 14 else "1"
+    insc = cnpj.zfill(14)
+    return f"DPS{MUNICIPIO_VITORIA_IBGE}{tp_insc}{insc}{serie.zfill(5)}{str(numero).zfill(15)}"
 
 
 def _sub(parent: etree._Element, tag: str, text: str | None = None) -> etree._Element:
@@ -191,43 +194,46 @@ def montar_dps(dados: DadosDPS) -> bytes:
     _sub(inf, "verAplic", VER_APLIC)
     _sub(inf, "serie",    dados.serie)
     _sub(inf, "nDPS",     str(dados.numero))
-    _sub(inf, "dCompet",  dados.competencia)
+    # dCompet exige data completa (TSData = AAAA-MM-DD); usamos dia 01
+    _compet = dados.competencia if len(dados.competencia) > 7 else f"{dados.competencia}-01"
+    _sub(inf, "dCompet",  _compet)
 
-    # ── Prestador ──────────────────────────────────────────────────────
+    # tpEmit: 1=Prestador (sempre emitimos como prestador)
+    _sub(inf, "tpEmit", "1")
+    # cLocEmi: município emissor (Vitória)
+    _sub(inf, "cLocEmi", MUNICIPIO_VITORIA_IBGE)
+
+    # ── Prestador (TCInfoPrestador) ────────────────────────────────────
     prest = _sub(inf, "prest")
     _sub(prest, "CNPJ", cnpj)
+    # regTrib: opSimpNac + regApTribSN + regEspTrib
+    regtrib = _sub(prest, "regTrib")
+    _sub(regtrib, "opSimpNac", "3")                 # 3 = Optante ME/EPP
+    _sub(regtrib, "regApTribSN", dados.reg_apuracao_sn or "1")
+    _sub(regtrib, "regEspTrib", "0")  # 0=Nenhum
 
-    # Regime tributário do prestador
-    trib_prest = _sub(prest, "regTrib")
-    _sub(trib_prest, "opSimpNac",    "1")                # 1 = optante Simples
-    _sub(trib_prest, "regApTribSN",  dados.reg_apuracao_sn)
-    _sub(trib_prest, "regTrib",      dados.regime_tributario)
-
-    # ── Tomador ────────────────────────────────────────────────────────
+    # ── Tomador (TCInfoPessoa) ─────────────────────────────────────────
     toma = _sub(inf, "toma")
     cpf_cnpj = _apenas_digitos(dados.tomador.cpf_cnpj)
-
     if dados.tomador.no_exterior:
-        _sub(toma, "NIF", cpf_cnpj or "NAO_INFORMADO")
-        _sub(toma, "cPais", dados.tomador.endereco.cod_pais if dados.tomador.endereco else "9999")
+        _sub(toma, "NIF", cpf_cnpj or "0")
+    elif len(cpf_cnpj) == 14:
+        _sub(toma, "CNPJ", cpf_cnpj)
     else:
-        if len(cpf_cnpj) == 14:
-            _sub(toma, "CNPJ", cpf_cnpj)
-        else:
-            _sub(toma, "CPF", cpf_cnpj.zfill(11))
-
+        _sub(toma, "CPF", cpf_cnpj.zfill(11))
     _sub(toma, "xNome", dados.tomador.nome[:150])
 
     if dados.tomador.endereco and not dados.tomador.no_exterior:
         end = dados.tomador.endereco
         e = _sub(toma, "end")
-        _sub(e, "xLgr",    end.logradouro[:125])
-        _sub(e, "nro",     end.numero[:10])
+        endnac = _sub(e, "endNac")
+        _sub(endnac, "cMun", _apenas_digitos(end.cod_municipio)[:7])
+        _sub(endnac, "CEP",  _apenas_digitos(end.cep)[:8])
+        _sub(e, "xLgr",    end.logradouro[:255])
+        _sub(e, "nro",     end.numero[:10] or "S/N")
         if end.complemento:
-            _sub(e, "xCompl", end.complemento[:60])
+            _sub(e, "xCpl", end.complemento[:60])
         _sub(e, "xBairro", end.bairro[:72])
-        _sub(e, "cMun",    _apenas_digitos(end.cod_municipio)[:7])
-        _sub(e, "CEP",     _apenas_digitos(end.cep)[:8])
 
     if dados.tomador.telefone:
         _sub(toma, "fone", _apenas_digitos(dados.tomador.telefone)[:11])
@@ -243,65 +249,42 @@ def montar_dps(dados: DadosDPS) -> bytes:
         else:
             _sub(interm, "CPF", cpf_interm.zfill(11))
         _sub(interm, "xNome", dados.intermediario.nome[:150])
-        if dados.intermediario.inscricao_municipal:
-            _sub(interm, "IM", dados.intermediario.inscricao_municipal[:15])
 
-    # ── Serviço ────────────────────────────────────────────────────────
+    # ── Serviço (TCServ) ───────────────────────────────────────────────
     serv = _sub(inf, "serv")
     loc = _sub(serv, "locPrest")
-    if dados.tomador.no_exterior:
-        _sub(loc, "cPaisResult", dados.tomador.endereco.cod_pais if dados.tomador.endereco else "9999")
-    else:
-        _sub(loc, "cLocPrestacao", MUNICIPIO_VITORIA_IBGE)
-
+    _sub(loc, "cLocPrestacao", MUNICIPIO_VITORIA_IBGE)
     cserv = _sub(serv, "cServ")
     _sub(cserv, "cTribNac",  dados.cod_tributacao_nacional)
     _sub(cserv, "xDescServ", dados.descricao_servico[:2000])
 
-    # ── Valores ────────────────────────────────────────────────────────
+    # ── Valores (TCInfoValores) ────────────────────────────────────────
     valores = _sub(inf, "valores")
     vserv_prest = _sub(valores, "vServPrest")
     _sub(vserv_prest, "vServ", _fmt_valor(dados.valor_servicos))
 
-    # Deduções/retenções
-    ret = dados.retencoes
-    retencoes_vals = [ret.ir, ret.inss, ret.csll, ret.cofins, ret.pis]
-    if any(v > 0 for v in retencoes_vals):
-        vded = _sub(valores, "vDed")
-        if ret.ir > 0:
-            _sub(vded, "vIR",     _fmt_valor(ret.ir))
-        if ret.inss > 0:
-            _sub(vded, "vINSS",   _fmt_valor(ret.inss))
-        if ret.csll > 0:
-            _sub(vded, "vCSLL",   _fmt_valor(ret.csll))
-        if ret.cofins > 0:
-            _sub(vded, "vCOFINS", _fmt_valor(ret.cofins))
-        if ret.pis > 0:
-            _sub(vded, "vPIS",    _fmt_valor(ret.pis))
-
-    # Tributação
+    # trib (TCInfoTributacao): tribMun + tribNac(opc) + totTrib
     trib = _sub(valores, "trib")
+
+    # tribMun (TCTribMunicipal): tribISSQN + ... + tpRetISSQN(obrigatório)
     trib_mun = _sub(trib, "tribMun")
+    _sub(trib_mun, "tribISSQN", "1")   # 1 = Operação tributável
+    ret = dados.retencoes
+    _sub(trib_mun, "tpRetISSQN", "2" if ret.iss_retido else "1")  # 1=Não Retido 2=Retido tomador
 
-    _sub(trib_mun, "tribISSQN", dados.natureza_operacao)
-    _sub(trib_mun, "cPaisResult", PAIS_BRASIL)
+    # tribNac (TCTribNacional): retenções federais (só se houver)
+    if any(v > 0 for v in [ret.ir, ret.inss, ret.csll]):
+        trib_nac = _sub(trib, "tribNac")
+        if ret.inss > 0:
+            _sub(trib_nac, "vRetCP",   _fmt_valor(ret.inss))
+        if ret.ir > 0:
+            _sub(trib_nac, "vRetIRRF", _fmt_valor(ret.ir))
+        if ret.csll > 0:
+            _sub(trib_nac, "vRetCSLL", _fmt_valor(ret.csll))
 
-    if dados.natureza_operacao == "1":  # tributado no município
-        bm = _sub(trib_mun, "BM")
-        _sub(bm, "cBM", MUNICIPIO_VITORIA_IBGE)
-        _sub(bm, "xBM", "Vitória")
-        if ret.iss_retido:
-            _sub(trib_mun, "issRetido", "1")
-    elif dados.natureza_operacao in ("3", "4", "5", "6"):
-        # Isenção / imunidade / suspensão — não inclui BM
-        pass
+    # totTrib: para ME/EPP (Simples) usa pTotTribSN (percentual efetivo do Simples).
+    # indTotTrib é proibido para ME/EPP (erro E0712).
+    tot = _sub(trib, "totTrib")
+    _sub(tot, "pTotTribSN", _fmt_valor(dados.pct_trib_simples))
 
-    # IBS/CBS — reforma tributária (agosto 2026)
-    if dados.ibs_valor is not None or dados.cbs_valor is not None:
-        trib_fed = _sub(trib, "tribFed")
-        if dados.ibs_valor is not None:
-            _sub(trib_fed, "vIBS", _fmt_valor(dados.ibs_valor))
-        if dados.cbs_valor is not None:
-            _sub(trib_fed, "vCBS", _fmt_valor(dados.cbs_valor))
-
-    return etree.tostring(root, xml_declaration=True, encoding="UTF-8", pretty_print=True)
+    return etree.tostring(root, xml_declaration=True, encoding="UTF-8")

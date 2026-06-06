@@ -38,7 +38,7 @@ class EmitirNFSeIn(BaseModel):
 
     # Serviço
     descricao_servico: str
-    cod_tributacao_nacional: str = "010900"
+    cod_tributacao_nacional: str = "171401"
 
     # Tributação
     natureza_operacao: str = "1"   # 1=Tributado município (padrão)
