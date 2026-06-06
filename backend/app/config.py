@@ -55,8 +55,9 @@ class Settings(BaseSettings):
     telegram_tarefas_default_user: str = ""
 
     # NFS-e Nacional — e-CNPJ A1 (mTLS)
-    nfse_cert_path: str = ""       # caminho local do .pfx
+    nfse_cert_path: str = ""       # caminho local do .pfx (dev)
     nfse_cert_password: str = ""   # senha do .pfx
+    nfse_cert_b64: str = ""        # conteúdo do .pfx em base64 (Fly.io)
     nfse_api_url: str = "https://adn.nfse.gov.br"  # base URL produção
     nfse_ambiente: int = 1         # 1=Produção, 2=Homologação
 

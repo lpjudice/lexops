@@ -14,18 +14,31 @@ from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption,
 from app.config import settings
 
 
-def _build_ssl_context() -> ssl.SSLContext:
+def _load_pfx_data() -> bytes:
+    """Carrega o .pfx: de base64 (Fly.io) ou de arquivo local (dev)."""
+    import base64
+    b64 = os.environ.get("NFSE_CERT_B64", "").strip()
+    if b64:
+        return base64.b64decode(b64)
+
     pfx_path = settings.nfse_cert_path
+    if pfx_path and os.path.exists(pfx_path):
+        with open(pfx_path, "rb") as f:
+            return f.read()
+
+    raise FileNotFoundError(
+        "Certificado e-CNPJ não encontrado. "
+        "Configure NFSE_CERT_B64 (Fly.io) ou NFSE_CERT_PATH (local) no .env"
+    )
+
+
+def _build_ssl_context() -> ssl.SSLContext:
     pfx_password = settings.nfse_cert_password
 
-    if not pfx_path or not os.path.exists(pfx_path):
-        raise FileNotFoundError(f"Certificado e-CNPJ não encontrado: {pfx_path!r}. "
-                                "Configure NFSE_CERT_PATH no .env")
     if not pfx_password:
         raise ValueError("NFSE_CERT_PASSWORD não configurado no .env")
 
-    with open(pfx_path, "rb") as f:
-        pfx_data = f.read()
+    pfx_data = _load_pfx_data()
 
     private_key, certificate, _ = pkcs12.load_key_and_certificates(
         pfx_data, pfx_password.encode()
