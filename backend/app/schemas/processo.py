@@ -57,6 +57,8 @@ class ProcessoBase(BaseModel):
     sistema_juridico: SistemaJuridico | None = None
     grau: GrauProcesso | None = None
     grau_texto: str | None = None
+    # Push diário do @jusbr_andamentos_bot — pode silenciar por processo.
+    notificar_telegram: bool = True
 
 
 class ProcessoCreate(ProcessoBase):
@@ -80,6 +82,7 @@ class ProcessoUpdate(BaseModel):
     sistema_juridico: SistemaJuridico | None = None
     grau: GrauProcesso | None = None
     grau_texto: str | None = None
+    notificar_telegram: bool | None = None
     clientes_litisconsorcio: list[ProcessoClienteIn] | None = None
 
 

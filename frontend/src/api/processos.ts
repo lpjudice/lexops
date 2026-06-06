@@ -53,6 +53,8 @@ export interface Processo {
   ultimo_sync_status?: 'ok' | 'incompleto' | 'erro' | null
   tentativas_falha?: number
   andamentos_nao_lidos?: number
+  // Push diário do bot @jusbr_andamentos_bot
+  notificar_telegram?: boolean
   created_at: string
   updated_at: string
 }
@@ -82,6 +84,7 @@ export interface ProcessoCreate {
   grau?: GrauProcesso | null
   grau_texto?: string | null
   clientes_litisconsorcio?: ProcessoClienteIn[]
+  notificar_telegram?: boolean
 }
 
 

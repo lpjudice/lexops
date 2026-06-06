@@ -210,6 +210,12 @@ export default function ProcessosPage() {
     },
   })
 
+  const toggleNotificarTelegram = useMutation({
+    mutationFn: ({ id, valor }: { id: string; valor: boolean }) =>
+      processosApi.atualizar(id, { notificar_telegram: valor } as Partial<ProcessoCreate>),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['processos'] }),
+  })
+
   const deletar = useMutation({
     mutationFn: (id: string) => processosApi.deletar(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['processos'] }),
@@ -640,6 +646,23 @@ export default function ProcessosPage() {
                   )}
                 </div>
                 <div className={ps.cardActions}>
+                  <button
+                    className={styles.btnTable}
+                    title={
+                      p.notificar_telegram === false
+                        ? 'Silenciado — push diário desligado'
+                        : 'Notificar via Telegram (push diário 19h BRT)'
+                    }
+                    onClick={() =>
+                      toggleNotificarTelegram.mutate({
+                        id: p.id,
+                        valor: !(p.notificar_telegram !== false),
+                      })
+                    }
+                    disabled={toggleNotificarTelegram.isPending}
+                  >
+                    {p.notificar_telegram === false ? '🔕' : '🔔'}
+                  </button>
                   <button className={styles.btnTable}
                     onClick={() => {
                       setDocsChatAberto(docsChatAberto === p.id ? null : p.id)
