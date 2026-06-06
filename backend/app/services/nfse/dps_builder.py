@@ -27,6 +27,7 @@ PRESTADOR_NOME    = "PIMENTA JUDICE SOCIEDADE INDIVIDUAL DE ADVOCACIA"
 MUNICIPIO_VITORIA_IBGE = "3205309"
 PAIS_BRASIL       = "1058"
 VER_APLIC         = "LexOps 1.0"
+CTN_ADVOCACIA     = "010900"   # LC 116/2003 item 17.14 — Advocacia
 NS                = "http://www.sped.fazenda.gov.br/nfse"
 BRT               = timezone(timedelta(hours=-3))
 

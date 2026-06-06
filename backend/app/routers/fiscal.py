@@ -32,9 +32,6 @@ router = APIRouter(prefix="/fiscal", tags=["fiscal"])
 log = logging.getLogger(__name__)
 BRT = timezone(timedelta(hours=-3))
 
-# Exporta constante para o dps_builder sem circular import
-CTN_ADVOCACIA = CTN_ADVOCACIA  # noqa
-
 
 # ─── Endpoints de referência ──────────────────────────────────────────────────
 
