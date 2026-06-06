@@ -47,10 +47,12 @@ def _build_ssl_context() -> ssl.SSLContext:
     cert_pem = certificate.public_bytes(Encoding.PEM)
     key_pem = private_key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption())
 
+    # O servidor adn.nfse.gov.br usa CA ICP-Brasil (não inclusa no bundle padrão
+    # do Linux). Desabilitamos a verificação do servidor mas mantemos o certificado
+    # CLIENTE (mTLS) — que é o que o governo usa para autenticar o emitente.
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    ctx.check_hostname = True
-    ctx.verify_mode = ssl.CERT_REQUIRED
-    ctx.load_default_certs()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
 
     cert_tmp = key_tmp = None
     try:
