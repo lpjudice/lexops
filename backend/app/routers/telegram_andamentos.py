@@ -1074,6 +1074,30 @@ def create_dispatcher() -> Dispatcher:
         chat_type = getattr(msg.chat.type, "value", msg.chat.type)
         await msg.answer(f"chat_id: {msg.chat.id}\ntype: {chat_type}")
 
+    @dp.message(Command("menu"))
+    async def cmd_menu(msg: Message) -> None:
+        """Força commands + Menu button no CHAT ATUAL (sobrescreve cache local)."""
+        from aiogram.types import (
+            BotCommand,
+            BotCommandScopeChat,
+            MenuButtonCommands,
+        )
+        cmds = [BotCommand(command=c, description=d) for c, d in _BOT_COMMANDS]
+        try:
+            await msg.bot.set_my_commands(cmds, scope=BotCommandScopeChat(chat_id=msg.chat.id))
+            await msg.bot.set_chat_menu_button(
+                chat_id=msg.chat.id,
+                menu_button=MenuButtonCommands(),
+            )
+            await msg.answer(
+                "✅ Menu configurado neste chat.\n"
+                "Se o botão azul ainda não aparecer no canto esquerdo, force-quit "
+                "o Telegram e abra de novo."
+            )
+        except Exception as exc:
+            logger.exception("cmd_menu falhou")
+            await msg.answer(f"❌ Falhou: {str(exc)[:160]}")
+
     @dp.message(Command("login"))
     async def cmd_login(msg: Message) -> None:
         if not _allowed(msg.from_user.id):
