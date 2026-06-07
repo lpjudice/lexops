@@ -227,7 +227,7 @@ const EMPTY: EmitirNFSeIn = {
   tomador_telefone: '',
   tomador_no_exterior: false,
   descricao_servico: '',
-  cod_tributacao_nacional: '010900',
+  cod_tributacao_nacional: '171401',
   natureza_operacao: '1',
   regime_tributario: '1',
   reg_apuracao_sn: '3',
@@ -449,10 +449,10 @@ function EmissaoModal({
           <div className={cs.formGridFull}>
             <SelectComDesc
               label="Código de Tributação Nacional"
-              value={form.cod_tributacao_nacional ?? '010900'}
+              value={form.cod_tributacao_nacional ?? '171401'}
               onChange={(v) => set('cod_tributacao_nacional', v)}
               opcoes={codigosTrib.map((c) => ({ valor: c.codigo, label: `${c.codigo} — ${c.label}`, descricao: c.descricao }))}
-              info="Código que define o tipo de serviço para fins fiscais (LC 116/2003). Para advocacia em geral, use 010900."
+              info="Código que define o tipo de serviço para fins fiscais (LC 116/2003). Para advocacia, use 171401."
             />
           </div>
 
