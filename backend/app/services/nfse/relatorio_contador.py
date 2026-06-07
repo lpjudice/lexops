@@ -79,35 +79,80 @@ def coletar_dados(db: Session, competencia: str) -> dict:
     }
 
 
+# Cor de destaque do relatório fiscal — âmbar/dourado (distinta do teal dos demais e-mails)
+AMBER = "#d4a017"
+AMBER_SOFT = "#3a3320"
+
+
 def _html(dados: dict) -> str:
     ini, fim = dados["periodo"]
-    linhas_nf = "".join(
-        f"<tr><td>{n.numero_nfse or '—'}</td><td>{n.tomador_nome}</td>"
-        f"<td style='text-align:right'>{_fmt(n.valor_servicos)}</td></tr>"
-        for n in dados["notas"]
-    ) or "<tr><td colspan=3 style='color:#888'>Nenhuma NF emitida</td></tr>"
-
     mes_label = datetime.strptime(dados["competencia"] + "-01", "%Y-%m-%d").strftime("%m/%Y")
-    return f"""<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;color:#1f2937">
-<h2 style="color:#00B090">Relatório Fiscal — {mes_label}</h2>
-<p>Período: {ini.strftime('%d/%m/%Y')} a {fim.strftime('%d/%m/%Y')} — Pimenta Judice Advogados</p>
 
-<h3>Resumo</h3>
-<ul>
-  <li><b>NFS-e emitidas:</b> {dados['nf_qtd']} — total {_fmt(dados['nf_total'])}</li>
-  <li><b>Recebimentos no mês:</b> {_fmt(dados['receb_total'])}</li>
-  <li><b>Reembolsos pagos:</b> {_fmt(dados['reemb_total'])}</li>
-</ul>
+    def _link_pdf(n) -> str:
+        if getattr(n, "drive_link", None):
+            return f'<a href="{n.drive_link}" style="color:{AMBER};text-decoration:none;font-weight:700;">PDF ↗</a>'
+        return '<span style="color:#555;">anexo</span>'
 
-<h3>Notas Fiscais emitidas</h3>
-<table border=1 cellpadding=6 cellspacing=0 style="border-collapse:collapse;font-size:13px">
-  <thead style="background:#ecfdf5"><tr><th>Nº</th><th>Tomador</th><th>Valor</th></tr></thead>
-  <tbody>{linhas_nf}</tbody>
-</table>
+    linhas_nf = "".join(
+        f'<tr>'
+        f'<td style="padding:8px 10px;border-bottom:1px solid #2a2a2a;color:#d4d4d4;">{n.numero_nfse or "—"}</td>'
+        f'<td style="padding:8px 10px;border-bottom:1px solid #2a2a2a;color:#d4d4d4;">{n.tomador_nome}</td>'
+        f'<td style="padding:8px 10px;border-bottom:1px solid #2a2a2a;text-align:right;color:#d4d4d4;">{_fmt(n.valor_servicos)}</td>'
+        f'<td style="padding:8px 10px;border-bottom:1px solid #2a2a2a;text-align:center;">{_link_pdf(n)}</td>'
+        f'</tr>'
+        for n in dados["notas"]
+    ) or '<tr><td colspan=4 style="padding:12px;color:#666;">Nenhuma NF emitida no período</td></tr>'
 
-<p style="font-size:12px;color:#6b7280;margin-top:20px">
-Os PDFs (DANFSe) das notas seguem em anexo. Relatório gerado automaticamente pelo LexOps.
-</p>
+    def _resumo(label, valor, cor="#f5f5f5"):
+        return (f'<td style="padding:14px 18px;background:#141414;border:1px solid #2a2a2a;border-radius:10px;">'
+                f'<p style="margin:0;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#777;">{label}</p>'
+                f'<p style="margin:4px 0 0;font-size:18px;font-weight:800;color:{cor};">{valor}</p></td>')
+
+    return f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"/></head>
+<body style="margin:0;padding:0;background:#111;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#111;">
+    <tr><td align="center" style="padding:40px 16px;">
+      <table width="100%" cellpadding="0" cellspacing="0" role="presentation"
+             style="max-width:640px;background:#1a1a1a;border-radius:16px;border:1px solid #2a2a2a;overflow:hidden;">
+        <!-- Header com faixa âmbar -->
+        <tr><td style="background:{AMBER_SOFT};padding:22px 32px;border-bottom:2px solid {AMBER};">
+          <p style="margin:0;font-size:13px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:{AMBER};">📊 RELATÓRIO FISCAL</p>
+          <p style="margin:2px 0 0;font-size:11px;letter-spacing:.10em;text-transform:uppercase;color:#999;">Pimenta Judice Advogados · {mes_label}</p>
+        </td></tr>
+        <!-- Corpo -->
+        <tr><td style="padding:28px 32px;">
+          <p style="margin:0 0 20px;font-size:13px;color:#888;">
+            Período: {ini.strftime('%d/%m/%Y')} a {fim.strftime('%d/%m/%Y')}
+          </p>
+          <table width="100%" cellpadding="0" cellspacing="6" role="presentation" style="margin-bottom:24px;"><tr>
+            {_resumo("NFS-e emitidas", f"{dados['nf_qtd']} · {_fmt(dados['nf_total'])}", AMBER)}
+            {_resumo("Recebimentos", _fmt(dados['receb_total']), "#4ade80")}
+            {_resumo("Reembolsos pagos", _fmt(dados['reemb_total']), "#f87171")}
+          </tr></table>
+
+          <p style="margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#777;">Notas Fiscais emitidas</p>
+          <table width="100%" cellpadding="0" cellspacing="0" role="presentation"
+                 style="border-collapse:collapse;font-size:13px;background:#141414;border-radius:8px;overflow:hidden;">
+            <thead><tr style="background:#222;">
+              <th style="padding:8px 10px;text-align:left;color:#999;font-size:11px;">Nº</th>
+              <th style="padding:8px 10px;text-align:left;color:#999;font-size:11px;">Tomador</th>
+              <th style="padding:8px 10px;text-align:right;color:#999;font-size:11px;">Valor</th>
+              <th style="padding:8px 10px;text-align:center;color:#999;font-size:11px;">DANFSe</th>
+            </tr></thead>
+            <tbody>{linhas_nf}</tbody>
+          </table>
+
+          <p style="margin:22px 0 0;font-size:12px;color:#666;line-height:1.6;">
+            Os PDFs (DANFSe) seguem <b style="color:#999;">em anexo</b> e também por <b style="color:{AMBER};">link no Drive</b> em cada nota.
+            Relatório gerado automaticamente pelo LexOps.
+          </p>
+        </td></tr>
+        <tr><td style="background:#141414;padding:16px 32px;border-top:1px solid #2a2a2a;">
+          <p style="margin:0;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#555;">Pimenta Judice · LexOps</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
 </body></html>"""
 
 
@@ -168,6 +213,7 @@ def enviar_relatorio(db: Session, competencia: str | None = None) -> dict:
     # Anexos: PDFs das NFs (gera se faltar)
     import os
     from app.services.nfse.danfse_pdf import gerar_danfse_pdf
+    from app.services.nfse.emitter import subir_pdf_drive
     anexos: list[tuple[str, bytes]] = []
     for n in dados["notas"]:
         pdf = None
@@ -179,7 +225,14 @@ def enviar_relatorio(db: Session, competencia: str | None = None) -> dict:
             except Exception:
                 pdf = None
         if pdf:
-            anexos.append((f"NFSe_{n.numero_nfse or n.chave_acesso}.pdf", pdf))
+            nome = f"NFSe_{n.numero_nfse or n.chave_acesso}.pdf"
+            anexos.append((nome, pdf))
+            # Garante link do Drive em cada NF
+            if not getattr(n, "drive_link", None):
+                link = subir_pdf_drive(pdf, nome, n.tomador_nome)
+                if link:
+                    n.drive_link = link
+    db.commit()
 
     token = _refresh_if_needed()
     if not token:

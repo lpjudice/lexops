@@ -249,6 +249,20 @@ def baixar_danfse(chave_acesso: str) -> Optional[bytes]:
     return None
 
 
+def subir_pdf_drive(pdf: bytes, nome_arquivo: str, nome_cliente: str) -> Optional[str]:
+    """Sobe o PDF da DANFSe ao Drive (pasta do cliente / Notas Fiscais). Retorna link."""
+    try:
+        from app.services.google_drive import upload_arquivo
+        return upload_arquivo(
+            conteudo=pdf, nome_arquivo=nome_arquivo,
+            nome_cliente=nome_cliente or "Notas Fiscais",
+            subfolder="Notas Fiscais", mimetype="application/pdf",
+        )
+    except Exception as exc:
+        log.warning("Falha ao subir DANFSe ao Drive: %s", exc)
+        return None
+
+
 # ─── Parâmetros municipais (ADN) ─────────────────────────────────────────────
 
 def consultar_parametros_municipio(cod_municipio: str = "3205309") -> Optional[dict]:

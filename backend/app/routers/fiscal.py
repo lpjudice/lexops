@@ -294,6 +294,14 @@ def emitir_nota(
                 with open(caminho, "wb") as f:
                     f.write(pdf)
                 nf.pdf_path = caminho
+                # Sobe ao Google Drive (pasta do cliente / Notas Fiscais)
+                try:
+                    from app.services.nfse.emitter import subir_pdf_drive
+                    link = subir_pdf_drive(pdf, f"NFSe_{nf.numero_nfse or nf.chave_acesso}.pdf", nf.tomador_nome)
+                    if link:
+                        nf.drive_link = link
+                except Exception as exc:
+                    log.warning("Drive upload NF: %s", exc)
                 db.commit()
                 db.refresh(nf)
         except Exception as exc:

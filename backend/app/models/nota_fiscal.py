@@ -67,6 +67,7 @@ class NotaFiscal(Base):
     cliente_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     processo_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     pdf_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    drive_link: Mapped[str | None] = mapped_column(String(1000), nullable=True)
 
     # ── Status ────────────────────────────────────────────────────────────
     # rascunho | emitida | cancelada | erro
