@@ -16,6 +16,8 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
+import time
+
 import httpx
 
 from .client import get_sefin_client, get_adn_client
@@ -42,6 +44,26 @@ class ResultadoCancelamento:
 
 
 # ─── Helpers de (de)compressão ───────────────────────────────────────────────
+
+def _request_retry(metodo: str, alvo: str, path: str, *, max_tentativas: int = 5, **kwargs):
+    """Faz request com retry — o servidor do gov derruba as 1ªs conexões (warm-up).
+
+    Seguro para POST /nfse: o disconnect ocorre antes do envio (nada é criado);
+    além disso a DPS tem Id único (idempotência por nDPS no servidor).
+    """
+    ultimo_erro = None
+    for tentativa in range(max_tentativas):
+        try:
+            client = get_sefin_client() if alvo == "sefin" else get_adn_client()
+            with client:
+                return client.request(metodo, path, **kwargs)
+        except (httpx.RemoteProtocolError, httpx.ConnectError, httpx.ReadError) as exc:
+            ultimo_erro = exc
+            log.warning("Conexão %s caiu (tentativa %s/%s): %s",
+                        alvo, tentativa + 1, max_tentativas, exc)
+            time.sleep(0.6 * (tentativa + 1))
+    raise ultimo_erro  # type: ignore[misc]
+
 
 def _gzip_b64(xml: bytes) -> str:
     return base64.b64encode(gzip.compress(xml)).decode("ascii")
@@ -92,10 +114,9 @@ def emitir_nfse(dados: DadosDPS) -> ResultadoEmissao:
     # 3+4) GZip + Base64 + payload JSON
     payload = {"dpsXmlGZipB64": _gzip_b64(xml_assinado)}
 
-    # 5) POST
+    # 5) POST (com retry — produção derruba as 1ªs conexões)
     try:
-        with get_sefin_client() as client:
-            resp = client.post("nfse", json=payload)
+        resp = _request_retry("POST", "sefin", "nfse", json=payload)
     except httpx.RequestError as exc:
         log.error("Erro de conexão com Sefin: %s", exc)
         return ResultadoEmissao(sucesso=False, erro_mensagem=f"Erro de conexão: {exc}")
@@ -142,8 +163,7 @@ def _numero_da_chave(chave: Optional[str]) -> Optional[str]:
 
 def consultar_nfse(chave_acesso: str) -> Optional[str]:
     try:
-        with get_sefin_client() as client:
-            resp = client.get(f"nfse/{chave_acesso}")
+        resp = _request_retry("GET", "sefin", f"nfse/{chave_acesso}")
     except httpx.RequestError as exc:
         log.error("Erro ao consultar NFS-e: %s", exc)
         return None
@@ -170,8 +190,7 @@ def cancelar_nfse(chave_acesso: str, motivo: str) -> ResultadoCancelamento:
 
     payload = {"pedidoRegistroEventoXmlGZipB64": _gzip_b64(xml_assinado)}
     try:
-        with get_sefin_client() as client:
-            resp = client.post(f"nfse/{chave_acesso}/eventos", json=payload)
+        resp = _request_retry("POST", "sefin", f"nfse/{chave_acesso}/eventos", json=payload)
     except httpx.RequestError as exc:
         return ResultadoCancelamento(sucesso=False, erro_mensagem=str(exc))
 
@@ -220,9 +239,7 @@ def baixar_danfse(chave_acesso: str) -> Optional[bytes]:
     ]
     for alvo, path in paths:
         try:
-            client = get_sefin_client() if alvo == "sefin" else get_adn_client()
-            with client:
-                resp = client.get(path, headers={"Accept": "application/pdf"})
+            resp = _request_retry("GET", alvo, path, headers={"Accept": "application/pdf"})
             if resp.status_code == 200 and resp.content[:4] == b"%PDF":
                 return resp.content
             log.warning("DANFSe %s/%s: status %s ct=%s",
@@ -236,8 +253,7 @@ def baixar_danfse(chave_acesso: str) -> Optional[bytes]:
 
 def consultar_parametros_municipio(cod_municipio: str = "3205309") -> Optional[dict]:
     try:
-        with get_adn_client() as client:
-            resp = client.get(f"parametros_municipais/{cod_municipio}/convenio")
+        resp = _request_retry("GET", "adn", f"parametros_municipais/{cod_municipio}/convenio")
     except httpx.RequestError as exc:
         log.error("Erro ao consultar parâmetros municipais: %s", exc)
         return None
