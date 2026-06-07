@@ -59,12 +59,13 @@ def _fmt_dt(v: str) -> str:
         return v
 
 
-def gerar_danfse_pdf(xml_nfse: str, chave_acesso: str) -> bytes:
+def gerar_danfse_pdf(xml_nfse: str, chave_acesso: str, prefixo_numero: str = "") -> bytes:
     """Recebe o XML da NFS-e e a chave; devolve os bytes do PDF."""
     root = etree.fromstring(xml_nfse.encode() if isinstance(xml_nfse, str) else xml_nfse)
 
     # Dados principais
     numero = _txt(root, "//n:nNFSe", "//nNFSe")
+    numero_exib = f"{prefixo_numero}{numero}" if prefixo_numero else numero
     dh_proc = _txt(root, "//n:dhProc", "//dhProc")
     cod_verif = chave_acesso
     # Emitente
@@ -138,7 +139,7 @@ def gerar_danfse_pdf(xml_nfse: str, chave_acesso: str) -> bytes:
         Paragraph("COMPETÊNCIA / EMISSÃO", st_label),
         Paragraph("MUNICÍPIO EMISSOR", st_label),
     ], [
-        Paragraph(f"<b>{numero or '—'}</b>", st_val),
+        Paragraph(f"<b>{numero_exib or '—'}</b>", st_val),
         Paragraph(_fmt_dt(dh_proc), st_val),
         Paragraph(loc_emi or "—", st_val),
     ]], colWidths=[55 * mm, 70 * mm, 55 * mm])

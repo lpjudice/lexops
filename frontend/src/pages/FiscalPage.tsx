@@ -771,20 +771,22 @@ function DetalheModal({ nf, onClose }: { nf: NotaFiscalOut; onClose: () => void 
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['notas-fiscais'] }); onClose() },
   })
 
-  // Vínculos internos: lista processos/contratos do cliente da NF (se houver)
+  // Vínculos internos: escolhe o cliente cujos processos/contratos serão listados
+  const [clienteVincId, setClienteVincId] = useState<string | undefined>(nf.cliente_id)
   const { data: procs = [] } = useQuery({
-    queryKey: ['proc-nf', nf.cliente_id],
-    queryFn: () => processosApi.listar({ cliente_id: nf.cliente_id! }),
-    enabled: !!nf.cliente_id,
+    queryKey: ['proc-nf', clienteVincId],
+    queryFn: () => processosApi.listar({ cliente_id: clienteVincId! }),
+    enabled: !!clienteVincId,
   })
   const { data: contrs = [] } = useQuery({
-    queryKey: ['contr-nf', nf.cliente_id],
-    queryFn: () => contratosApi.listar({ cliente_id: nf.cliente_id! }),
-    enabled: !!nf.cliente_id,
+    queryKey: ['contr-nf', clienteVincId],
+    queryFn: () => contratosApi.listar({ cliente_id: clienteVincId! }),
+    enabled: !!clienteVincId,
   })
   const vincMut = useMutation({
     mutationFn: () => fiscalApi.vincular(nf.id, {
-      processo_id: procSel || undefined, contrato_id: contrSel || undefined }),
+      processo_id: procSel || undefined, contrato_id: contrSel || undefined,
+      cliente_id: clienteVincId || undefined }),
     onSuccess: () => { setVincMsg('✓ Vínculos salvos'); qc.invalidateQueries({ queryKey: ['notas-fiscais'] }) },
   })
 
@@ -843,32 +845,33 @@ function DetalheModal({ nf, onClose }: { nf: NotaFiscalOut; onClose: () => void 
           )}
         </div>
 
-        {/* Vínculos internos (pode fazer depois da emissão) */}
-        {nf.cliente_id && (procs.length > 0 || contrs.length > 0) && (
-          <div style={{ marginTop: 16, padding: 12, background: 'var(--light)', borderRadius: 8 }}>
-            <div className={cs.formLabel}>🔗 Vínculos internos (opcional, não altera a nota)</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 6 }}>
-              {procs.length > 0 && (
-                <select className={cs.input} value={procSel} onChange={(e) => setProcSel(e.target.value)}>
-                  <option value="">— Processo —</option>
-                  {procs.map((p) => <option key={p.id} value={p.id}>{p.numero_cnj}</option>)}
-                </select>
-              )}
-              {contrs.length > 0 && (
-                <select className={cs.input} value={contrSel} onChange={(e) => setContrSel(e.target.value)}>
-                  <option value="">— Contrato —</option>
-                  {contrs.map((c) => <option key={c.id} value={c.id}>{c.descricao || 'Contrato'}</option>)}
-                </select>
-              )}
-            </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
-              <button className={cs.btnSecondary} disabled={vincMut.isPending} onClick={() => vincMut.mutate()}>
-                {vincMut.isPending ? 'Salvando…' : 'Salvar vínculos'}
-              </button>
-              {vincMsg && <span className={cs.fieldHint} style={{ color: '#15803d' }}>{vincMsg}</span>}
-            </div>
+        {/* Vínculos internos — sempre disponível, qualquer cliente (info interna) */}
+        <div style={{ marginTop: 16, padding: 12, background: 'var(--light)', borderRadius: 8 }}>
+          <div className={cs.formLabel}>🔗 Vínculos internos (opcional, não altera a nota)</div>
+          <div style={{ marginTop: 6 }}>
+            <ClienteSearch value="" label="Cliente (de quem listar processos/contratos)"
+              placeholder="Buscar cliente…"
+              onSelect={(c) => { if (c) { setClienteVincId(c.id); setProcSel(''); setContrSel('') } }} />
           </div>
-        )}
+          {clienteVincId && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 8 }}>
+              <select className={cs.input} value={procSel} onChange={(e) => setProcSel(e.target.value)}>
+                <option value="">— Processo {procs.length ? '' : '(nenhum)'} —</option>
+                {procs.map((p) => <option key={p.id} value={p.id}>{p.numero_cnj}</option>)}
+              </select>
+              <select className={cs.input} value={contrSel} onChange={(e) => setContrSel(e.target.value)}>
+                <option value="">— Contrato {contrs.length ? '' : '(nenhum)'} —</option>
+                {contrs.map((c) => <option key={c.id} value={c.id}>{c.descricao || 'Contrato'}</option>)}
+              </select>
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
+            <button className={cs.btnSecondary} disabled={vincMut.isPending || !clienteVincId} onClick={() => vincMut.mutate()}>
+              {vincMut.isPending ? 'Salvando…' : 'Salvar vínculos'}
+            </button>
+            {vincMsg && <span className={cs.fieldHint} style={{ color: '#15803d' }}>{vincMsg}</span>}
+          </div>
+        </div>
 
         {nf.status === 'emitida' && (
           <div style={{ marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>

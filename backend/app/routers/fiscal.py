@@ -302,7 +302,8 @@ def emitir_nota(
             pdf = baixar_danfse(nf.chave_acesso)
             if not pdf and (resultado.xml_nfse or nf.xml_nfse):
                 from app.services.nfse.danfse_pdf import gerar_danfse_pdf
-                pdf = gerar_danfse_pdf(resultado.xml_nfse or nf.xml_nfse, nf.chave_acesso)
+                pdf = gerar_danfse_pdf(resultado.xml_nfse or nf.xml_nfse, nf.chave_acesso,
+                                       (cfg.danfse_prefixo_numero if cfg else "") or "")
             if pdf:
                 import os
                 pasta = "/app/backend/uploads/nfse"
@@ -388,7 +389,10 @@ def baixar_danfse_pdf(
         if not pdf and nf.xml_nfse:
             try:
                 from app.services.nfse.danfse_pdf import gerar_danfse_pdf
-                pdf = gerar_danfse_pdf(nf.xml_nfse, nf.chave_acesso)
+                from app.models.config_fiscal import ConfigFiscal
+                _cfg = db.query(ConfigFiscal).filter(ConfigFiscal.id == 1).first()
+                _pref = (_cfg.danfse_prefixo_numero if _cfg else "") or ""
+                pdf = gerar_danfse_pdf(nf.xml_nfse, nf.chave_acesso, _pref)
             except Exception as exc:
                 log.error("Falha ao gerar DANFSe PDF: %s", exc)
         if not pdf:
@@ -510,7 +514,11 @@ def visao_fiscal(
         "aliquota_efetiva": float(aliq),
         "das_estimado": float(das),
         "quebra_tributos": {k: float(v) for k, v in quebra.items()},
-        "quebra_tributos_pct": repart_pct(faixa),
+        # % EFETIVO sobre a receita (ex.: ISS = vISS/receita*100), não % do DAS
+        "quebra_tributos_pct": {
+            k: float((Decimal(str(v)) / receita * 100).quantize(Decimal("0.01"))) if receita > 0 else 0.0
+            for k, v in quebra.items()
+        },
         "progresso_faixa_pct": progresso,
         "reforma": reforma,
         "retencoes_sofridas": float(ret_total),

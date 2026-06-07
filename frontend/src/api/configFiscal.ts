@@ -44,6 +44,7 @@ export interface ConfigFiscal {
   templates_descricao: TemplateDescricao[]
   // DANFSe
   rodape_danfse?: string
+  danfse_prefixo_numero?: string
   // Calculados (read-only)
   aliquota_simples_sugerida?: number
   faixa_simples?: string

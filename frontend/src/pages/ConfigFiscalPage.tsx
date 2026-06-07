@@ -233,6 +233,9 @@ export default function ConfigFiscalPage() {
       <Secao titulo="🔢 Numeração & DANFSe">
         <div style={GRID2}>
           <Campo label="Série padrão da DPS"><input className={inp} value={f.serie_padrao} onChange={(e) => set('serie_padrao', e.target.value)} /></Campo>
+          <Campo label="Prefixo do nº na DANFSe" hint="Ex.: PJ150 → a nota 17 aparece como PJ15017 (cosmético, não altera o nº oficial)">
+            <input className={inp} value={f.danfse_prefixo_numero ?? ''} onChange={(e) => set('danfse_prefixo_numero', e.target.value)} placeholder="PJ150" />
+          </Campo>
         </div>
         <Campo label="Texto de rodapé da DANFSe"><input className={inp} value={f.rodape_danfse ?? ''} onChange={(e) => set('rodape_danfse', e.target.value)} /></Campo>
       </Secao>

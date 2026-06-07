@@ -545,9 +545,13 @@ def _run_migrations() -> None:
                 codigos_favoritos JSONB DEFAULT '[]'::jsonb,
                 templates_descricao JSONB DEFAULT '[]'::jsonb,
                 rodape_danfse TEXT,
+                danfse_prefixo_numero VARCHAR(20) DEFAULT '',
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """))
+        conn.execute(text(
+            "ALTER TABLE config_fiscal ADD COLUMN IF NOT EXISTS danfse_prefixo_numero VARCHAR(20) DEFAULT ''"
+        ))
 
         # Tarefas: campos de período e email do responsável
         conn.execute(text(

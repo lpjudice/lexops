@@ -66,6 +66,7 @@ class ConfigFiscalBase(BaseModel):
 
     # DANFSe
     rodape_danfse: Optional[str] = None
+    danfse_prefixo_numero: str = ""
 
 
 class ConfigFiscalOut(ConfigFiscalBase):

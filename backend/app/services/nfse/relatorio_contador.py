@@ -40,9 +40,15 @@ def coletar_dados(db: Session, competencia: str) -> dict:
         db.query(NotaFiscal)
         .filter(NotaFiscal.status == "emitida", NotaFiscal.competencia == competencia,
                 NotaFiscal.ambiente == 1)
-        .order_by(NotaFiscal.data_emissao)
         .all()
     )
+    # Ordena por número da NFS-e — da mais alta (recente) para a mais baixa
+    def _num(n):
+        try:
+            return int(n.numero_nfse)
+        except (TypeError, ValueError):
+            return -1
+    notas.sort(key=_num, reverse=True)
     nf_total = sum(float(n.valor_servicos) for n in notas)
     nf_iss = 0.0  # ISS vem no XML; resumo aproximado
 
