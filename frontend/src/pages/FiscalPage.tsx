@@ -159,10 +159,12 @@ function SelectComDesc({
 // ─── Busca de cliente com auto-fill ──────────────────────────────────────────
 
 function ClienteSearch({
-  value, onSelect,
+  value, onSelect, label = 'Nome / Razão Social do Tomador *', placeholder,
 }: {
   value: string
   onSelect: (c: Cliente | null, nomeRaw: string) => void
+  label?: string
+  placeholder?: string
 }) {
   const [q, setQ] = useState(value)
   const [aberto, setAberto] = useState(false)
@@ -191,14 +193,14 @@ function ClienteSearch({
 
   return (
     <div className={cs.searchWrap}>
-      <label className={cs.formLabel}>Nome / Razão Social do Tomador *</label>
+      <label className={cs.formLabel}>{label}</label>
       <input
         className={cs.input}
         value={q}
         onChange={(e) => { setQ(e.target.value); setAberto(true); onSelect(null, e.target.value) }}
         onFocus={() => setAberto(true)}
         onBlur={() => setTimeout(() => setAberto(false), 180)}
-        placeholder="Digite para buscar cliente cadastrado…"
+        placeholder={placeholder ?? 'Digite para buscar cliente cadastrado…'}
         autoComplete="off"
       />
       {aberto && filtrados.length > 0 && (
@@ -256,6 +258,8 @@ function EmissaoModal({
   const [mostrarIntermed, setMostrarIntermed] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
   const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(null)
+  const [vincularOutro, setVincularOutro] = useState(false)
+  const [clienteVinculadoNome, setClienteVinculadoNome] = useState<string>('')
 
   const { data: codigosTrib = [] } = useQuery({
     queryKey: ['fiscal-codigos-trib'],
@@ -303,6 +307,21 @@ function EmissaoModal({
   function set<K extends keyof EmitirNFSeIn>(k: K, v: EmitirNFSeIn[K]) {
     setForm((f) => ({ ...f, [k]: v }))
   }
+
+  const criarClienteMut = useMutation({
+    mutationFn: () => clientesApi.criar({
+      nome: form.tomador_nome,
+      tipo: (form.tomador_cpf_cnpj || '').replace(/\D/g, '').length === 14 ? 'PJ' : 'PF',
+      cpf_cnpj: form.tomador_cpf_cnpj || undefined,
+      email: form.tomador_email || undefined,
+      telefone: form.tomador_telefone || undefined,
+    } as any),
+    onSuccess: (c: Cliente) => {
+      setClienteSelecionado(c)
+      set('cliente_id', c.id)
+      qc.invalidateQueries({ queryKey: ['clientes'] })
+    },
+  })
 
   function aplicarTemplate(tipo: string) {
     const tpl = TEMPLATES_DESCRICAO.find((t) => t.tipo === tipo)
@@ -392,6 +411,50 @@ function EmissaoModal({
 
           <div className={cs.formGridFull}>
             <ClienteSearch value={form.tomador_nome} onSelect={handleClienteSelect} />
+
+            {/* Cliente novo → criar na hora */}
+            {!clienteSelecionado && form.tomador_nome.trim().length > 2 && (
+              <div className={cs.prefillBanner} style={{ marginTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>Tomador não cadastrado.</span>
+                <button type="button" className={cs.templateBtn}
+                  disabled={criarClienteMut.isPending}
+                  onClick={() => criarClienteMut.mutate()}>
+                  {criarClienteMut.isPending ? 'Criando…' : `➕ Criar cliente "${form.tomador_nome.slice(0, 30)}"`}
+                </button>
+              </div>
+            )}
+
+            {/* Vínculo interno (NF contra empresa Y, mas organizar sob cliente X) */}
+            <div style={{ marginTop: 6 }}>
+              {clienteSelecionado && form.cliente_id === clienteSelecionado.id && !vincularOutro && (
+                <button type="button" className={cs.colapsarBtn}
+                  onClick={() => setVincularOutro(true)}>
+                  🔗 Vincular a outro cliente (interno)
+                  <span className={cs.colapsarLabel}>— NF contra empresa Y, organizada sob cliente X</span>
+                </button>
+              )}
+              {clienteVinculadoNome && form.cliente_id !== clienteSelecionado?.id && (
+                <div className={cs.fieldHint} style={{ color: '#065f46' }}>
+                  🔗 Vinculada internamente a: <b>{clienteVinculadoNome}</b>{' '}
+                  <button type="button" className={cs.templateBtn} style={{ marginLeft: 6 }}
+                    onClick={() => { setVincularOutro(false); setClienteVinculadoNome(''); set('cliente_id', clienteSelecionado?.id) }}>
+                    desfazer
+                  </button>
+                </div>
+              )}
+              {vincularOutro && (
+                <div style={{ marginTop: 6 }}>
+                  <ClienteSearch
+                    value=""
+                    label="Cliente vinculado (interno)"
+                    placeholder="Buscar o cliente X para organizar a NF…"
+                    onSelect={(c) => {
+                      if (c) { set('cliente_id', c.id); setClienteVinculadoNome(c.nome); setVincularOutro(false) }
+                    }}
+                  />
+                </div>
+              )}
+            </div>
           </div>
 
           <div>
@@ -689,10 +752,8 @@ function DetalheModal({ nf, onClose }: { nf: NotaFiscalOut; onClose: () => void 
       const url = URL.createObjectURL(blob as Blob)
       window.open(url, '_blank')
     } catch (err: any) {
-      const msg = err?.response?.status === 503
-        ? 'DANFSe ainda não disponível (notas de homologação não geram PDF público).'
-        : 'Não foi possível baixar o PDF.'
-      setErroPdf(msg)
+      setErroPdf('Download direto do PDF indisponível (a API do governo ainda não expõe). '
+        + 'Use o botão "Abrir / baixar DANFSe (portal nacional)" para o PDF oficial.')
     }
   }
 
@@ -738,18 +799,16 @@ function DetalheModal({ nf, onClose }: { nf: NotaFiscalOut; onClose: () => void 
           )}
         </div>
 
-        {nf.status === 'emitida' && (
+        {nf.status === 'emitida' && nf.consulta_publica_url && (
           <div style={{ marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <a className={cs.btnSecondary} href={nf.consulta_publica_url}
+              target="_blank" rel="noopener noreferrer"
+              style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>
+              📄 Abrir / baixar DANFSe (portal nacional)
+            </a>
             <button className={cs.btnSecondary} onClick={() => baixarPdf()}>
-              📄 Baixar DANFSe (PDF)
+              Tentar baixar PDF direto
             </button>
-            {nf.consulta_publica_url && (
-              <a className={cs.btnSecondary} href={nf.consulta_publica_url}
-                target="_blank" rel="noopener noreferrer"
-                style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>
-                🔗 Consulta pública
-              </a>
-            )}
           </div>
         )}
         {erroPdf && <div className={cs.erroBox} style={{ marginTop: 8 }}>⚠️ {erroPdf}</div>}
