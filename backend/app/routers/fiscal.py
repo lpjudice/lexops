@@ -170,7 +170,9 @@ def emitir_nota(
     _=Depends(get_current_user),
 ):
     from app.config import settings
+    from app.models.config_fiscal import ConfigFiscal
 
+    cfg = db.query(ConfigFiscal).filter(ConfigFiscal.id == 1).first()
     numero_dps = _proximo_numero_dps(db)
 
     endereco = None
@@ -222,6 +224,11 @@ def emitir_nota(
         ambiente=settings.nfse_ambiente,
         data_emissao=datetime.now(tz=BRT),
     )
+    # pTotTribSN e alíquota ISS vêm do Config Fiscal (se configurado)
+    if cfg:
+        from decimal import Decimal as _D
+        if cfg.aliquota_efetiva_simples is not None:
+            dados.pct_trib_simples = _D(str(cfg.aliquota_efetiva_simples))
 
     resultado = emitir_nfse(dados)
 

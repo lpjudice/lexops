@@ -16,8 +16,11 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image,
 )
+
+import os
+_LOGO_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "..", "logo.png")
 
 NS = {"n": "http://www.sped.fazenda.gov.br/nfse"}
 
@@ -109,9 +112,24 @@ def gerar_danfse_pdf(xml_nfse: str, chave_acesso: str) -> bytes:
 
     elems = []
 
-    # Cabeçalho
-    elems.append(Paragraph("DANFSe — Documento Auxiliar da NFS-e", st_titulo))
-    elems.append(Paragraph("Nota Fiscal de Serviço eletrônica — Padrão Nacional", st_sub))
+    # Cabeçalho com logo (se existir)
+    titulo_cell = [
+        Paragraph("DANFSe — Documento Auxiliar da NFS-e", st_titulo),
+        Paragraph("Nota Fiscal de Serviço eletrônica — Padrão Nacional", st_sub),
+    ]
+    if os.path.exists(_LOGO_PATH):
+        try:
+            logo = Image(_LOGO_PATH, width=42 * mm, height=21 * mm, kind="proportional")
+            cab_logo = Table([[logo, titulo_cell]], colWidths=[48 * mm, 132 * mm])
+            cab_logo.setStyle(TableStyle([
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ]))
+            elems.append(cab_logo)
+        except Exception:
+            elems.extend(titulo_cell)
+    else:
+        elems.extend(titulo_cell)
     elems.append(Spacer(1, 6 * mm))
 
     # Faixa: número / emissão / município

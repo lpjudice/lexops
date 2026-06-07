@@ -11,8 +11,9 @@ from app.models import processo_telegram_extra as _processo_telegram_extra_model
 from app.models import processo_parte as _processo_parte_model  # noqa: F401
 from app.models import andamento_telegram_extra as _andamento_telegram_extra_model  # noqa: F401
 from app.models import nota_fiscal as _nota_fiscal_model  # noqa: F401
+from app.models import config_fiscal as _config_fiscal_model  # noqa: F401
 from app.models import telegram_task as _telegram_task_model  # noqa: F401 — TelegramTaskBatch/Item/Session
-from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, fiscal, jurisprudencia, organizador, pje, prazos, processos, reembolsos, reunioes, system, tarefas, telegram, telegram_andamentos, telegram_tasks, teses, usuarios, webhooks
+from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, fiscal, config_fiscal, jurisprudencia, organizador, pje, prazos, processos, reembolsos, reunioes, system, tarefas, telegram, telegram_andamentos, telegram_tasks, teses, usuarios, webhooks
 
 # Cria as tabelas (Alembic gerencia em produção; aqui facilita o dev)
 Base.metadata.create_all(bind=engine)
@@ -487,6 +488,47 @@ def _run_migrations() -> None:
         ]:
             conn.execute(text(_col))
 
+        # ── Config Fiscal (singleton) ────────────────────────────────────────
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS config_fiscal (
+                id INTEGER PRIMARY KEY DEFAULT 1,
+                razao_social VARCHAR(200) DEFAULT 'PIMENTA JUDICE SOCIEDADE INDIVIDUAL DE ADVOCACIA',
+                cnpj VARCHAR(14) DEFAULT '10901611000164',
+                inscricao_municipal VARCHAR(20),
+                cnae VARCHAR(20) DEFAULT '6911-7/01',
+                endereco TEXT,
+                municipio_ibge VARCHAR(7) DEFAULT '3205309',
+                municipio_nome VARCHAR(100) DEFAULT 'Vitória',
+                uf VARCHAR(2) DEFAULT 'ES',
+                email_fiscal VARCHAR(255),
+                telefone_fiscal VARCHAR(20),
+                regime_tributario VARCHAR(30) DEFAULT 'simples',
+                aliquota_iss NUMERIC(5,2) DEFAULT 2.00,
+                regime_especial VARCHAR(2) DEFAULT '0',
+                anexo_simples VARCHAR(5) DEFAULT 'IV',
+                rbt12 NUMERIC(14,2),
+                aliquota_efetiva_simples NUMERIC(5,2) DEFAULT 6.00,
+                ret_ir_pct NUMERIC(5,2) DEFAULT 0,
+                ret_inss_pct NUMERIC(5,2) DEFAULT 0,
+                ret_csll_pct NUMERIC(5,2) DEFAULT 0,
+                ret_pis_pct NUMERIC(5,2) DEFAULT 0,
+                ret_cofins_pct NUMERIC(5,2) DEFAULT 0,
+                iss_retido_padrao BOOLEAN DEFAULT false,
+                ibs_pct NUMERIC(5,2) DEFAULT 0,
+                cbs_pct NUMERIC(5,2) DEFAULT 0,
+                piloto_ibscbs BOOLEAN DEFAULT false,
+                emails_contador JSONB DEFAULT '[]'::jsonb,
+                email_master VARCHAR(255) DEFAULT 'pj@pimentajudice.com.br',
+                dia_envio_relatorio INTEGER DEFAULT 1,
+                enviar_relatorio_auto BOOLEAN DEFAULT true,
+                serie_padrao VARCHAR(10) DEFAULT '1',
+                codigos_favoritos JSONB DEFAULT '[]'::jsonb,
+                templates_descricao JSONB DEFAULT '[]'::jsonb,
+                rodape_danfse TEXT,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+
         # Tarefas: campos de período e email do responsável
         conn.execute(text(
             "ALTER TABLE tarefas ADD COLUMN IF NOT EXISTS data_inicio DATE"
@@ -603,6 +645,7 @@ app.include_router(teses.router)
 app.include_router(reembolsos.router)
 app.include_router(financeiro.router)
 app.include_router(fiscal.router)
+app.include_router(config_fiscal.router)
 app.include_router(tarefas.router)
 app.include_router(conversas_ia.router)
 app.include_router(organizador.router)
