@@ -116,6 +116,7 @@ class NotaFiscalOut(BaseModel):
     contrato_id: Optional[uuid.UUID]
     cliente_id: Optional[uuid.UUID]
     processo_id: Optional[uuid.UUID]
+    processos_ids: list[str] = []
     tem_pdf: bool = False
     consulta_publica_url: Optional[str] = None
 

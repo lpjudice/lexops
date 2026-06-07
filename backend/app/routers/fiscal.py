@@ -640,17 +640,23 @@ def deletar_notas_erro(db: Session = Depends(get_db), _=Depends(get_current_user
 def vincular_nota(
     nf_id: uuid.UUID,
     processo_id: Optional[uuid.UUID] = Query(None),
+    processos_ids: Optional[str] = Query(None, description="IDs separados por vírgula (multi)"),
     contrato_id: Optional[uuid.UUID] = Query(None),
     cliente_id: Optional[uuid.UUID] = Query(None),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    """Vincula a NF (já emitida) a processo/contrato/cliente — info interna."""
+    """Vincula a NF (já emitida) a processo(s)/contrato/cliente — info interna."""
     nf = db.query(NotaFiscal).filter(NotaFiscal.id == nf_id).first()
     if not nf:
         raise HTTPException(404, "Nota fiscal não encontrada")
-    if processo_id is not None:
+    if processos_ids is not None:
+        ids = [p.strip() for p in processos_ids.split(",") if p.strip()]
+        nf.processos_ids = ids
+        nf.processo_id = ids[0] if ids else None  # primário p/ compatibilidade
+    elif processo_id is not None:
         nf.processo_id = processo_id
+        nf.processos_ids = [str(processo_id)]
     if contrato_id is not None:
         nf.contrato_id = contrato_id
     if cliente_id is not None:

@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -66,6 +66,7 @@ class NotaFiscal(Base):
     contrato_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     cliente_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     processo_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    processos_ids: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
     pdf_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     drive_link: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     ambiente: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")  # 1=Prod 2=Teste

@@ -778,7 +778,7 @@ function DetalheModal({ nf, onClose }: { nf: NotaFiscalOut; onClose: () => void 
   const [confirmando, setConfirmando] = useState(false)
   const [erroPdf, setErroPdf] = useState<string | null>(null)
   const [baixando, setBaixando] = useState(false)
-  const [procSel, setProcSel] = useState(nf.processo_id ?? '')
+  const [procIds, setProcIds] = useState<string[]>(nf.processos_ids ?? (nf.processo_id ? [nf.processo_id] : []))
   const [contrSel, setContrSel] = useState(nf.contrato_id ?? '')
   const [vincMsg, setVincMsg] = useState<string | null>(null)
   const qc = useQueryClient()
@@ -801,10 +801,12 @@ function DetalheModal({ nf, onClose }: { nf: NotaFiscalOut; onClose: () => void 
   })
   const vincMut = useMutation({
     mutationFn: () => fiscalApi.vincular(nf.id, {
-      processo_id: procSel || undefined, contrato_id: contrSel || undefined,
+      processos_ids: procIds.join(','), contrato_id: contrSel || undefined,
       cliente_id: clienteVincId || undefined }),
     onSuccess: () => { setVincMsg('✓ Vínculos salvos'); qc.invalidateQueries({ queryKey: ['notas-fiscais'] }) },
   })
+  const toggleProc = (id: string) =>
+    setProcIds((cur) => cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id])
   const [novoContrTitulo, setNovoContrTitulo] = useState('')
   const criarContrMut = useMutation({
     mutationFn: () => contratosApi.criar({ cliente_id: clienteVincId!, titulo: novoContrTitulo }),
@@ -872,14 +874,23 @@ function DetalheModal({ nf, onClose }: { nf: NotaFiscalOut; onClose: () => void 
           <div style={{ marginTop: 6 }}>
             <ClienteSearch value="" label="Cliente (de quem listar processos/contratos)"
               placeholder="Buscar cliente…"
-              onSelect={(c) => { if (c) { setClienteVincId(c.id); setProcSel(''); setContrSel('') } }} />
+              onSelect={(c) => { if (c) { setClienteVincId(c.id); setProcIds([]); setContrSel('') } }} />
           </div>
           {clienteVincId && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 8 }}>
-              <select className={cs.input} value={procSel} onChange={(e) => setProcSel(e.target.value)}>
-                <option value="">— Processo {procs.length ? '' : '(nenhum)'} —</option>
-                {procs.map((p) => <option key={p.id} value={p.id}>{p.numero_cnj}</option>)}
-              </select>
+            <div style={{ marginTop: 8 }}>
+              <div className={cs.fieldHint} style={{ marginBottom: 4 }}>
+                Processos {procs.length ? '(marque um ou mais)' : '(nenhum p/ este cliente)'}:
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+                {procs.map((p) => (
+                  <label key={p.id} style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4,
+                    background: procIds.includes(p.id) ? 'var(--teal-light)' : 'var(--white)',
+                    border: '1px solid var(--gray-border)', borderRadius: 6, padding: '4px 8px', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={procIds.includes(p.id)} onChange={() => toggleProc(p.id)} />
+                    {p.numero_cnj}
+                  </label>
+                ))}
+              </div>
               <select className={cs.input} value={contrSel} onChange={(e) => setContrSel(e.target.value)}>
                 <option value="">— Contrato {contrs.length ? '' : '(nenhum)'} —</option>
                 {contrs.map((c) => <option key={c.id} value={c.id}>{c.descricao || (c as any).titulo || 'Contrato'}</option>)}
