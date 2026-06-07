@@ -123,5 +123,5 @@ def _nota_de_xml(root, chave: str, arquivo_b64: str) -> "object":
         cod_tributacao_nacional="171401",
         descricao_servico="(importada via DFe do governo)",
         valor_servicos=float(vserv), status="emitida", ambiente=1,
-        xml_nfse=xml_full,
+        xml_nfse=xml_full, origem="dfe",
     )

@@ -326,6 +326,14 @@ def emitir_nota(
                         log.warning("Drive upload NF: %s", exc)
                 db.commit()
                 db.refresh(nf)
+                # Envia a NFS-e ao tomador por e-mail (cc master) — só produção
+                if ambiente == 1 and nf.tomador_email:
+                    try:
+                        from app.services.nfse.email_nota_cliente import enviar_nf_ao_cliente
+                        master = cfg.email_master if cfg else None
+                        enviar_nf_ao_cliente(nf, pdf, master)
+                    except Exception as exc:
+                        log.warning("Envio NF ao cliente: %s", exc)
         except Exception as exc:
             log.warning("Falha ao gerar/baixar DANFSe: %s", exc)
 
@@ -382,34 +390,33 @@ def baixar_danfse_pdf(
     if not nf.chave_acesso:
         raise HTTPException(400, "NFS-e sem chave de acesso")
 
-    # Cache em disco
-    if not (nf.pdf_path and os.path.exists(nf.pdf_path)):
-        # 1) tenta o PDF oficial do gov; 2) gera o nosso a partir do XML
+    # Sempre regenera do XML (garante layout atual: pagamento, prefixo). Fallback no gov/cache.
+    pdf = None
+    if nf.xml_nfse:
+        try:
+            from app.services.nfse.danfse_pdf import gerar_danfse_pdf
+            from app.models.config_fiscal import ConfigFiscal
+            _cfg = db.query(ConfigFiscal).filter(ConfigFiscal.id == 1).first()
+            _pref = (_cfg.danfse_prefixo_numero if _cfg else "") or ""
+            pdf = gerar_danfse_pdf(nf.xml_nfse, nf.chave_acesso, _pref)
+        except Exception as exc:
+            log.error("Falha ao gerar DANFSe PDF: %s", exc)
+    if not pdf:
         pdf = baixar_danfse(nf.chave_acesso)
-        if not pdf and nf.xml_nfse:
-            try:
-                from app.services.nfse.danfse_pdf import gerar_danfse_pdf
-                from app.models.config_fiscal import ConfigFiscal
-                _cfg = db.query(ConfigFiscal).filter(ConfigFiscal.id == 1).first()
-                _pref = (_cfg.danfse_prefixo_numero if _cfg else "") or ""
-                pdf = gerar_danfse_pdf(nf.xml_nfse, nf.chave_acesso, _pref)
-            except Exception as exc:
-                log.error("Falha ao gerar DANFSe PDF: %s", exc)
-        if not pdf:
-            raise HTTPException(503, "Não foi possível obter nem gerar o PDF da NFS-e.")
-        pasta = "/app/backend/uploads/nfse"
-        os.makedirs(pasta, exist_ok=True)
-        caminho = f"{pasta}/{nf.chave_acesso}.pdf"
-        with open(caminho, "wb") as f:
-            f.write(pdf)
-        nf.pdf_path = caminho
-        db.commit()
-
-    return FileResponse(
-        nf.pdf_path,
-        media_type="application/pdf",
-        filename=f"NFSe_{nf.numero_nfse or nf.chave_acesso}.pdf",
-    )
+    if not pdf and nf.pdf_path and os.path.exists(nf.pdf_path):
+        return FileResponse(nf.pdf_path, media_type="application/pdf",
+                            filename=f"NFSe_{nf.numero_nfse or nf.chave_acesso}.pdf")
+    if not pdf:
+        raise HTTPException(503, "Não foi possível obter nem gerar o PDF da NFS-e.")
+    pasta = "/app/backend/uploads/nfse"
+    os.makedirs(pasta, exist_ok=True)
+    caminho = f"{pasta}/{nf.chave_acesso}.pdf"
+    with open(caminho, "wb") as f:
+        f.write(pdf)
+    nf.pdf_path = caminho
+    db.commit()
+    return FileResponse(caminho, media_type="application/pdf",
+                        filename=f"NFSe_{nf.numero_nfse or nf.chave_acesso}.pdf")
 
 
 @router.post("/notas/{nf_id}/cancelar", response_model=NotaFiscalOut)
@@ -616,6 +623,25 @@ def historico_relatorios(db: Session = Depends(get_db), _=Depends(get_current_us
         proximo = {"data": prox.strftime("%d/%m/%Y"), "competencia_ref": ref,
                    "destinatarios": cfg.emails_contador or []}
     return {"historico": out, "proximo_envio": proximo}
+
+
+@router.patch("/notas/{nf_id}/pago", response_model=NotaFiscalOut)
+def marcar_pago(
+    nf_id: uuid.UUID,
+    pago: bool = Query(True),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Marca/desmarca a NF como paga."""
+    from datetime import date as _date
+    nf = db.query(NotaFiscal).filter(NotaFiscal.id == nf_id).first()
+    if not nf:
+        raise HTTPException(404, "Nota fiscal não encontrada")
+    nf.pago = pago
+    nf.data_pagamento = _date.today() if pago else None
+    db.commit()
+    db.refresh(nf)
+    return _nf_to_out(nf)
 
 
 @router.post("/dfe/sincronizar")

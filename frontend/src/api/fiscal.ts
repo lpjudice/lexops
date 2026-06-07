@@ -55,6 +55,8 @@ export interface NotaFiscalResumo {
   valor_liquido: number
   status: StatusNF
   ambiente?: number
+  pago?: boolean
+  origem?: string
   honorario_id?: string
 }
 
@@ -156,6 +158,9 @@ export const fiscalApi = {
   historicoRelatorios: () => api.get('/fiscal/relatorio/historico').then((r) => r.data),
 
   sincronizarDfe: () => api.post('/fiscal/dfe/sincronizar').then((r) => r.data),
+
+  marcarPago: (id: string, pago: boolean) =>
+    api.patch<NotaFiscalOut>(`/fiscal/notas/${id}/pago`, null, { params: { pago } }).then((r) => r.data),
 
   danfseUrl: (id: string) => `/fiscal/notas/${id}/danfse`,
 

@@ -108,6 +108,9 @@ class NotaFiscalOut(BaseModel):
     status: str
     ambiente: Optional[int] = 1
     retroativa: Optional[bool] = False
+    pago: Optional[bool] = False
+    data_pagamento: Optional[date] = None
+    origem: Optional[str] = "sistema"
     erro_mensagem: Optional[str]
     xml_nfse: Optional[str]
 
@@ -136,6 +139,8 @@ class NotaFiscalResumo(BaseModel):
     valor_liquido: float
     status: str
     ambiente: Optional[int] = 1
+    pago: Optional[bool] = False
+    origem: Optional[str] = "sistema"
     honorario_id: Optional[uuid.UUID]
     contrato_id: Optional[uuid.UUID]
 

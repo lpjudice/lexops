@@ -490,6 +490,9 @@ def _run_migrations() -> None:
             "ALTER TABLE notas_fiscais ADD COLUMN IF NOT EXISTS ambiente INTEGER NOT NULL DEFAULT 1",
             "ALTER TABLE notas_fiscais ADD COLUMN IF NOT EXISTS retroativa BOOLEAN NOT NULL DEFAULT false",
             "ALTER TABLE notas_fiscais ADD COLUMN IF NOT EXISTS processos_ids JSONB DEFAULT '[]'::jsonb",
+            "ALTER TABLE notas_fiscais ADD COLUMN IF NOT EXISTS pago BOOLEAN NOT NULL DEFAULT false",
+            "ALTER TABLE notas_fiscais ADD COLUMN IF NOT EXISTS data_pagamento DATE",
+            "ALTER TABLE notas_fiscais ADD COLUMN IF NOT EXISTS origem VARCHAR(20) NOT NULL DEFAULT 'sistema'",
         ]:
             conn.execute(text(_col))
 

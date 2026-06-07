@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fiscalApi } from '../api/fiscal'
@@ -976,6 +976,9 @@ export default function FiscalPage() {
   const [nfEmitida, setNfEmitida] = useState<NotaFiscalOut | null>(null)
   const [sincronizando, setSincronizando] = useState(false)
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
+  const [dtIni, setDtIni] = useState('')
+  const [dtFim, setDtFim] = useState('')
+  const [colapsados, setColapsados] = useState<Record<string, boolean>>({})
 
   const { data: notas = [], isLoading } = useQuery({
     queryKey: ['notas-fiscais', filtro],
@@ -983,6 +986,50 @@ export default function FiscalPage() {
   })
 
   const qc = useQueryClient()
+  const pagoMut = useMutation({
+    mutationFn: ({ id, pago }: { id: string; pago: boolean }) => fiscalApi.marcarPago(id, pago),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['notas-fiscais'] }),
+  })
+
+  function toggleGrupo(chave: string) {
+    setColapsados((c) => ({ ...c, [chave]: !c[chave] }))
+  }
+  function labelGrupo(chave: string) {
+    const [ano, mes] = chave.split('-')
+    const m = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
+    return `${m[parseInt(mes) - 1]}/${ano}`
+  }
+
+  // Filtra por data de emissão, agrupa por competência (ano-mês), ordena nº desc
+  const mesCorrente = new Date().toISOString().slice(0, 7)
+  const grupos = useMemo(() => {
+    let lista = notas.filter((n) => {
+      if (dtIni && (!n.data_emissao || n.data_emissao < dtIni)) return false
+      if (dtFim && (!n.data_emissao || n.data_emissao > dtFim)) return false
+      return true
+    })
+    const map: Record<string, typeof notas> = {}
+    for (const n of lista) {
+      const k = n.competencia
+      ;(map[k] ||= []).push(n)
+    }
+    const entradas = Object.entries(map).sort((a, b) => b[0].localeCompare(a[0]))
+    for (const [, arr] of entradas) {
+      arr.sort((a, b) => (parseInt(b.numero_nfse || '0') || 0) - (parseInt(a.numero_nfse || '0') || 0))
+    }
+    return entradas
+  }, [notas, dtIni, dtFim])
+
+  // Colapsa automaticamente meses já fechados (anteriores ao corrente)
+  useEffect(() => {
+    setColapsados((cur) => {
+      const next = { ...cur }
+      for (const [chave] of grupos) {
+        if (!(chave in next)) next[chave] = chave < mesCorrente
+      }
+      return next
+    })
+  }, [grupos.length]) // eslint-disable-line
 
   // Pré-fill vindo do Financeiro (?honorario=&recebimento=)
   useEffect(() => {
@@ -1047,12 +1094,21 @@ export default function FiscalPage() {
             {f.label}
           </button>
         ))}
+        <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--gray-mid)' }}>Emissão de</span>
+        <input type="date" className={cs.input} style={{ width: 150 }} value={dtIni}
+          onChange={(e) => setDtIni(e.target.value)} />
+        <span style={{ fontSize: 12, color: 'var(--gray-mid)' }}>até</span>
+        <input type="date" className={cs.input} style={{ width: 150 }} value={dtFim}
+          onChange={(e) => setDtFim(e.target.value)} />
+        {(dtIni || dtFim) && (
+          <button className={cs.filtroBtn} onClick={() => { setDtIni(''); setDtFim('') }}>limpar</button>
+        )}
       </div>
 
       <div className={styles.tableCard}>
         {isLoading ? (
           <div className={styles.empty}>Carregando…</div>
-        ) : notas.length === 0 ? (
+        ) : grupos.length === 0 ? (
           <div className={styles.empty}>
             Nenhuma nota fiscal encontrada.<br />
             <small>Clique em "+ Emitir NFS-e" para emitir a primeira.</small>
@@ -1061,43 +1117,52 @@ export default function FiscalPage() {
           <table className={styles.table}>
             <thead>
               <tr>
-                <th>Nº NFS-e</th>
-                <th>Competência</th>
-                <th>Tomador</th>
-                <th>Valor</th>
-                <th>Líquido</th>
-                <th>Emissão</th>
-                <th>Status</th>
-                <th></th>
+                <th>Nº NFS-e</th><th>Tomador</th><th>Valor</th><th>Líquido</th>
+                <th>Emissão</th><th>Status</th><th>Pago</th><th></th>
               </tr>
             </thead>
             <tbody>
-              {notas.map((nf) => (
-                <tr key={nf.id}>
-                  <td><strong>{nf.numero_nfse ?? '—'}</strong></td>
-                  <td>{fmtCompetencia(nf.competencia)}</td>
-                  <td>{nf.tomador_nome}</td>
-                  <td>{fmtBRL(nf.valor_servicos)}</td>
-                  <td>{fmtBRL(nf.valor_liquido)}</td>
-                  <td>{fmtData(nf.data_emissao)}</td>
-                  <td>
-                    <span className={`${styles.badge} ${STATUS_CLASS[nf.status]}`}>
-                      {STATUS_LABEL[nf.status]}
-                    </span>
-                    {nf.ambiente === 2 && (
-                      <span className={styles.badge}
-                        style={{ marginLeft: 4, background: '#fef3c7', color: '#b45309' }}>
-                        TESTE
+              {grupos.map(([chave, lista]) => (
+                <React.Fragment key={chave}>
+                  <tr style={{ background: 'var(--light)', cursor: 'pointer' }}
+                    onClick={() => toggleGrupo(chave)}>
+                    <td colSpan={8} style={{ fontWeight: 700, fontSize: 13 }}>
+                      {colapsados[chave] ? '▸' : '▾'} {labelGrupo(chave)} · {lista.length} nota(s)
+                      <span style={{ fontWeight: 400, color: 'var(--gray-mid)', marginLeft: 8 }}>
+                        {fmtBRL(lista.reduce((s, n) => s + n.valor_servicos, 0))}
                       </span>
-                    )}
-                  </td>
-                  <td>
-                    <button className={styles.btnTable}
-                      onClick={() => fiscalApi.obter(nf.id).then(setNfDetalhe)}>
-                      Ver
-                    </button>
-                  </td>
-                </tr>
+                    </td>
+                  </tr>
+                  {!colapsados[chave] && lista.map((nf) => (
+                    <tr key={nf.id}>
+                      <td><strong>{nf.numero_nfse ?? '—'}</strong>
+                        {nf.origem === 'dfe' && (
+                          <span className={styles.badge} style={{ marginLeft: 4, background: '#e0e7ff', color: '#3730a3' }}>importada</span>
+                        )}
+                      </td>
+                      <td>{nf.tomador_nome}</td>
+                      <td>{fmtBRL(nf.valor_servicos)}</td>
+                      <td>{fmtBRL(nf.valor_liquido)}</td>
+                      <td>{fmtData(nf.data_emissao)}</td>
+                      <td>
+                        <span className={`${styles.badge} ${STATUS_CLASS[nf.status]}`}>{STATUS_LABEL[nf.status]}</span>
+                        {nf.ambiente === 2 && (
+                          <span className={styles.badge} style={{ marginLeft: 4, background: '#fef3c7', color: '#b45309' }}>TESTE</span>
+                        )}
+                      </td>
+                      <td>
+                        <button className={styles.btnTable}
+                          style={nf.pago ? { background: '#dcfce7', color: '#15803d', borderColor: '#bbf7d0' } : {}}
+                          onClick={() => pagoMut.mutate({ id: nf.id, pago: !nf.pago })}>
+                          {nf.pago ? '✓ Pago' : 'Marcar pago'}
+                        </button>
+                      </td>
+                      <td>
+                        <button className={styles.btnTable} onClick={() => fiscalApi.obter(nf.id).then(setNfDetalhe)}>Ver</button>
+                      </td>
+                    </tr>
+                  ))}
+                </React.Fragment>
               ))}
             </tbody>
           </table>
