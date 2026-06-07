@@ -171,8 +171,20 @@ def emitir_nota(
 ):
     from app.config import settings
     from app.models.config_fiscal import ConfigFiscal
+    from app.services.nfse.documentos import valida_documento
+
+    # Validação de dígito do CPF/CNPJ do tomador (evita rejeição do gov, exceto exterior)
+    if not body.tomador_no_exterior:
+        ok_doc, tipo_doc = valida_documento(body.tomador_cpf_cnpj)
+        if not ok_doc:
+            raise HTTPException(422, detail={
+                "message": "CPF/CNPJ do tomador inválido",
+                "detalhe": f"O documento informado não é um {tipo_doc or 'CPF/CNPJ'} válido. "
+                           "Confira os dígitos antes de emitir.",
+            })
 
     cfg = db.query(ConfigFiscal).filter(ConfigFiscal.id == 1).first()
+    ambiente = body.ambiente or settings.nfse_ambiente
     numero_dps = _proximo_numero_dps(db)
 
     endereco = None
@@ -221,7 +233,7 @@ def emitir_nota(
         intermediario=intermediario,
         ibs_valor=body.ibs_valor,
         cbs_valor=body.cbs_valor,
-        ambiente=settings.nfse_ambiente,
+        ambiente=ambiente,
         data_emissao=datetime.now(tz=BRT),
     )
     # pTotTribSN e alíquota ISS vêm do Config Fiscal (se configurado)
@@ -273,6 +285,7 @@ def emitir_nota(
         contrato_id=body.contrato_id,
         cliente_id=body.cliente_id,
         processo_id=body.processo_id,
+        ambiente=ambiente,
     )
     db.add(nf)
     db.commit()
@@ -294,14 +307,18 @@ def emitir_nota(
                 with open(caminho, "wb") as f:
                     f.write(pdf)
                 nf.pdf_path = caminho
-                # Sobe ao Google Drive (pasta do cliente / Notas Fiscais)
-                try:
-                    from app.services.nfse.emitter import subir_pdf_drive
-                    link = subir_pdf_drive(pdf, f"NFSe_{nf.numero_nfse or nf.chave_acesso}.pdf", nf.tomador_nome)
-                    if link:
-                        nf.drive_link = link
-                except Exception as exc:
-                    log.warning("Drive upload NF: %s", exc)
+                # Sobe ao Google Drive (cliente/Notas Fiscais + Fiscal/NFe/Mês_Ano)
+                # Apenas notas de PRODUÇÃO vão ao Drive (teste não polui o fiscal)
+                if ambiente == 1:
+                    try:
+                        from app.services.nfse.emitter import subir_pdf_drive, _nome_arquivo_nf
+                        nome_arq = _nome_arquivo_nf(nf.numero_nfse or nf.chave_acesso,
+                                                    nf.competencia, nf.tomador_nome)
+                        link = subir_pdf_drive(pdf, nome_arq, nf.tomador_nome, nf.competencia)
+                        if link:
+                            nf.drive_link = link
+                    except Exception as exc:
+                        log.warning("Drive upload NF: %s", exc)
                 db.commit()
                 db.refresh(nf)
         except Exception as exc:
@@ -433,7 +450,8 @@ def visao_fiscal(
     # Receita do mês = NFs emitidas na competência
     emitidas = (
         db.query(NotaFiscal)
-        .filter(NotaFiscal.status == "emitida", NotaFiscal.competencia == competencia)
+        .filter(NotaFiscal.status == "emitida", NotaFiscal.competencia == competencia,
+                NotaFiscal.ambiente == 1)
         .all()
     )
     receita = sum((Decimal(str(n.valor_servicos)) for n in emitidas), Decimal("0"))

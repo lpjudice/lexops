@@ -45,7 +45,8 @@ class ResultadoCancelamento:
 
 # ─── Helpers de (de)compressão ───────────────────────────────────────────────
 
-def _request_retry(metodo: str, alvo: str, path: str, *, max_tentativas: int = 5, **kwargs):
+def _request_retry(metodo: str, alvo: str, path: str, *, max_tentativas: int = 5,
+                   ambiente: int | None = None, **kwargs):
     """Faz request com retry — o servidor do gov derruba as 1ªs conexões (warm-up).
 
     Seguro para POST /nfse: o disconnect ocorre antes do envio (nada é criado);
@@ -54,7 +55,7 @@ def _request_retry(metodo: str, alvo: str, path: str, *, max_tentativas: int = 5
     ultimo_erro = None
     for tentativa in range(max_tentativas):
         try:
-            client = get_sefin_client() if alvo == "sefin" else get_adn_client()
+            client = get_sefin_client(ambiente) if alvo == "sefin" else get_adn_client()
             with client:
                 return client.request(metodo, path, **kwargs)
         except (httpx.RemoteProtocolError, httpx.ConnectError, httpx.ReadError) as exc:
@@ -116,7 +117,7 @@ def emitir_nfse(dados: DadosDPS) -> ResultadoEmissao:
 
     # 5) POST (com retry — produção derruba as 1ªs conexões)
     try:
-        resp = _request_retry("POST", "sefin", "nfse", json=payload)
+        resp = _request_retry("POST", "sefin", "nfse", json=payload, ambiente=dados.ambiente)
     except httpx.RequestError as exc:
         log.error("Erro de conexão com Sefin: %s", exc)
         return ResultadoEmissao(sucesso=False, erro_mensagem=f"Erro de conexão: {exc}")
@@ -249,18 +250,51 @@ def baixar_danfse(chave_acesso: str) -> Optional[bytes]:
     return None
 
 
-def subir_pdf_drive(pdf: bytes, nome_arquivo: str, nome_cliente: str) -> Optional[str]:
-    """Sobe o PDF da DANFSe ao Drive (pasta do cliente / Notas Fiscais). Retorna link."""
+_MESES_PT = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
+             "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
+
+
+def _nome_arquivo_nf(numero: str, competencia: str, cliente: str) -> str:
+    """#nota_Mês_Cliente.pdf — limpo para sistema de arquivos."""
+    import re
+    ano, mes = competencia[:4], int(competencia[5:7])
+    mes_lbl = f"{_MESES_PT[mes-1]}{ano}"
+    cli = re.sub(r"[^\w\s-]", "", (cliente or "Cliente")).strip().replace(" ", "_")[:40]
+    return f"NFSe-{numero}_{mes_lbl}_{cli}.pdf"
+
+
+def subir_pdf_drive(pdf: bytes, nome_arquivo: str, nome_cliente: str,
+                    competencia: str | None = None) -> Optional[str]:
+    """Sobe o PDF ao Drive em DOIS locais:
+    1) pasta do cliente / Notas Fiscais
+    2) Fiscal/NFe/MêsX_Ano  (visão do setor fiscal)
+    Retorna o link da pasta do cliente.
+    """
+    from app.services.google_drive import upload_arquivo
+    link_cliente = None
     try:
-        from app.services.google_drive import upload_arquivo
-        return upload_arquivo(
+        link_cliente = upload_arquivo(
             conteudo=pdf, nome_arquivo=nome_arquivo,
             nome_cliente=nome_cliente or "Notas Fiscais",
             subfolder="Notas Fiscais", mimetype="application/pdf",
         )
     except Exception as exc:
-        log.warning("Falha ao subir DANFSe ao Drive: %s", exc)
-        return None
+        log.warning("Drive (pasta cliente) falhou: %s", exc)
+
+    # Cópia na pasta central do Fiscal: Fiscal/NFe/MêsX_Ano
+    if competencia:
+        try:
+            ano, mes = competencia[:4], int(competencia[5:7])
+            mes_pasta = f"{_MESES_PT[mes-1]}_{ano}"
+            upload_arquivo(
+                conteudo=pdf, nome_arquivo=nome_arquivo,
+                nome_cliente="Fiscal", subfolder="NFe",
+                sub_subfolder=mes_pasta, mimetype="application/pdf",
+            )
+        except Exception as exc:
+            log.warning("Drive (Fiscal/NFe) falhou: %s", exc)
+
+    return link_cliente
 
 
 # ─── Parâmetros municipais (ADN) ─────────────────────────────────────────────

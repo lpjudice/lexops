@@ -23,6 +23,7 @@ export interface EmitirNFSeIn {
   contrato_id?: string
   cliente_id?: string
   processo_id?: string
+  ambiente?: number
   competencia: string            // YYYY-MM
   tomador_cpf_cnpj: string
   tomador_nome: string
@@ -53,6 +54,7 @@ export interface NotaFiscalResumo {
   valor_servicos: number
   valor_liquido: number
   status: StatusNF
+  ambiente?: number
   honorario_id?: string
 }
 
@@ -79,6 +81,7 @@ export interface NotaFiscalOut {
   cbs_valor?: number
   valor_liquido: number
   status: StatusNF
+  ambiente?: number
   erro_mensagem?: string
   xml_nfse?: string
   tem_pdf?: boolean

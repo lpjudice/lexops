@@ -486,6 +486,7 @@ def _run_migrations() -> None:
             "ALTER TABLE notas_fiscais ADD COLUMN IF NOT EXISTS processo_id UUID",
             "ALTER TABLE notas_fiscais ADD COLUMN IF NOT EXISTS pdf_path VARCHAR(1000)",
             "ALTER TABLE notas_fiscais ADD COLUMN IF NOT EXISTS drive_link VARCHAR(1000)",
+            "ALTER TABLE notas_fiscais ADD COLUMN IF NOT EXISTS ambiente INTEGER NOT NULL DEFAULT 1",
         ]:
             conn.execute(text(_col))
 

@@ -7,6 +7,7 @@ import { clientesApi } from '../api/clientes'
 import type { Cliente } from '../api/clientes'
 import { contratosApi } from '../api/contratos'
 import { processosApi } from '../api/processos'
+import { mascaraDocumento, validaDocumento, mascaraTelefone, soDigitos } from '../utils/documentos'
 import styles from './Page.module.css'
 import cs from './FiscalPage.module.css'
 
@@ -459,10 +460,20 @@ function EmissaoModal({
 
           <div>
             <label className={cs.formLabel}>CPF / CNPJ *</label>
-            <input className={cs.input} placeholder="Apenas dígitos"
-              value={form.tomador_cpf_cnpj}
-              onChange={(e) => set('tomador_cpf_cnpj', e.target.value.replace(/\D/g, ''))}
-              maxLength={14} />
+            <input className={cs.input}
+              placeholder="CPF ou CNPJ"
+              value={mascaraDocumento(form.tomador_cpf_cnpj)}
+              onChange={(e) => set('tomador_cpf_cnpj', soDigitos(e.target.value))}
+              maxLength={18} />
+            {form.tomador_cpf_cnpj && !form.tomador_no_exterior && (() => {
+              const d = soDigitos(form.tomador_cpf_cnpj)
+              if (d.length !== 11 && d.length !== 14)
+                return <p className={cs.fieldHint} style={{ color: '#b45309' }}>Documento incompleto</p>
+              const { valido, tipo } = validaDocumento(form.tomador_cpf_cnpj)
+              return valido
+                ? <p className={cs.fieldHint} style={{ color: '#15803d' }}>✓ {tipo} válido</p>
+                : <p className={cs.fieldHint} style={{ color: '#b91c1c' }}>✕ {tipo} inválido (confira os dígitos)</p>
+            })()}
           </div>
 
           <div>
@@ -487,10 +498,10 @@ function EmissaoModal({
 
           <div>
             <label className={cs.formLabel}>Telefone</label>
-            <input className={cs.input} placeholder="Apenas dígitos"
-              value={form.tomador_telefone ?? ''}
-              onChange={(e) => set('tomador_telefone', e.target.value.replace(/\D/g, ''))}
-              maxLength={11} />
+            <input className={cs.input} placeholder="(27) 99999-9999"
+              value={mascaraTelefone(form.tomador_telefone ?? '')}
+              onChange={(e) => set('tomador_telefone', soDigitos(e.target.value))}
+              maxLength={16} />
           </div>
 
           {/* ── Sugestões de contratos ──────────────────────────────── */}
@@ -714,6 +725,15 @@ function EmissaoModal({
           </div>
         )}
 
+        {/* Modo teste (homologação) */}
+        <div className={cs.formGridFull} style={{ marginTop: 14 }}>
+          <label className={cs.checkboxLabel} style={{ color: form.ambiente === 2 ? '#b45309' : undefined }}>
+            <input type="checkbox" checked={form.ambiente === 2}
+              onChange={(e) => set('ambiente', e.target.checked ? 2 : undefined)} />
+            🧪 Modo teste (homologação) — nota <b>sem valor fiscal</b>, não gera imposto
+          </label>
+        </div>
+
         {erro && <div className={cs.erroBox}>⚠️ {erro}</div>}
 
         <div className={cs.modalFooter}>
@@ -722,10 +742,12 @@ function EmissaoModal({
             disabled={
               mutation.isPending ||
               !form.tomador_cpf_cnpj || !form.tomador_nome ||
-              !form.valor_servicos || !form.descricao_servico
+              !form.valor_servicos || !form.descricao_servico ||
+              (!form.tomador_no_exterior && !validaDocumento(form.tomador_cpf_cnpj).valido)
             }
             onClick={() => { setErro(null); mutation.mutate(form) }}>
-            {mutation.isPending ? 'Emitindo…' : '📤 Emitir NFS-e'}
+            {mutation.isPending ? 'Emitindo…'
+              : form.ambiente === 2 ? '🧪 Emitir TESTE' : '📤 Emitir NFS-e'}
           </button>
         </div>
       </div>
@@ -953,6 +975,12 @@ export default function FiscalPage() {
                     <span className={`${styles.badge} ${STATUS_CLASS[nf.status]}`}>
                       {STATUS_LABEL[nf.status]}
                     </span>
+                    {nf.ambiente === 2 && (
+                      <span className={styles.badge}
+                        style={{ marginLeft: 4, background: '#fef3c7', color: '#b45309' }}>
+                        TESTE
+                      </span>
+                    )}
                   </td>
                   <td>
                     <button className={styles.btnTable}

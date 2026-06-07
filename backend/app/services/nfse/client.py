@@ -88,10 +88,23 @@ def _ctx() -> ssl.SSLContext:
     return _ssl_ctx
 
 
-def get_sefin_client() -> httpx.Client:
-    """Client para o SEFIN Nacional — emissão, consulta, eventos."""
+SEFIN_PROD = "https://sefin.nfse.gov.br/SefinNacional/"
+SEFIN_HOMOLOG = "https://sefin.producaorestrita.nfse.gov.br/SefinNacional/"
+
+
+def sefin_base(ambiente: int) -> str:
+    """URL base do SEFIN conforme ambiente (1=Produção, 2=Homologação)."""
+    return SEFIN_HOMOLOG if int(ambiente) == 2 else SEFIN_PROD
+
+
+def get_sefin_client(ambiente: int | None = None) -> httpx.Client:
+    """Client para o SEFIN Nacional — emissão, consulta, eventos.
+
+    Se `ambiente` for informado, escolhe prod/homolog; senão usa o secret.
+    """
+    base = sefin_base(ambiente) if ambiente else settings.nfse_api_url
     return httpx.Client(
-        base_url=settings.nfse_api_url,
+        base_url=base,
         verify=_ctx(),
         timeout=60.0,
         http2=False,  # servidor derruba conexão com HTTP/2

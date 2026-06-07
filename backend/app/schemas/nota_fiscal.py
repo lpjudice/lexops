@@ -71,6 +71,9 @@ class EmitirNFSeIn(BaseModel):
     # Série (padrão "1")
     serie: str = "1"
 
+    # Ambiente: 1=Produção (real, com imposto), 2=Homologação (teste, sem valor fiscal)
+    ambiente: Optional[int] = None  # None → usa o padrão do servidor
+
 
 class NotaFiscalOut(BaseModel):
     id: uuid.UUID
@@ -103,6 +106,7 @@ class NotaFiscalOut(BaseModel):
     valor_liquido: float
 
     status: str
+    ambiente: Optional[int] = 1
     erro_mensagem: Optional[str]
     xml_nfse: Optional[str]
 
@@ -129,6 +133,7 @@ class NotaFiscalResumo(BaseModel):
     valor_servicos: float
     valor_liquido: float
     status: str
+    ambiente: Optional[int] = 1
     honorario_id: Optional[uuid.UUID]
     contrato_id: Optional[uuid.UUID]
 
