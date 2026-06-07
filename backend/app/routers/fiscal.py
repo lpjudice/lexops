@@ -429,6 +429,21 @@ def cancelar_nota(
     return _nf_to_out(nf)
 
 
+@router.post("/notas/backfill-numero")
+def backfill_numero(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Recalcula numero_nfse a partir do <nNFSe> do XML salvo (corrige notas antigas)."""
+    from app.services.nfse.emitter import _numero_do_xml
+    notas = db.query(NotaFiscal).filter(NotaFiscal.xml_nfse.isnot(None)).all()
+    corrigidas = 0
+    for n in notas:
+        num = _numero_do_xml(n.xml_nfse)
+        if num and num != n.numero_nfse:
+            n.numero_nfse = num
+            corrigidas += 1
+    db.commit()
+    return {"corrigidas": corrigidas, "total": len(notas)}
+
+
 @router.get("/visao")
 def visao_fiscal(
     mes: Optional[str] = Query(None, description="YYYY-MM (default: mês atual)"),

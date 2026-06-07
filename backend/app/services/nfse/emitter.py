@@ -139,11 +139,12 @@ def emitir_nfse(dados: DadosDPS) -> ResultadoEmissao:
         nfse_xml = None
         if data.get("nfseXmlGZipB64"):
             nfse_xml = _ungzip_b64(data["nfseXmlGZipB64"])
-        # número da NFS-e é parte da chave (posições específicas) — guardamos a chave
+        # número da NFS-e: extrai do <nNFSe> do XML retornado
+        numero = _numero_do_xml(nfse_xml)
         return ResultadoEmissao(
             sucesso=True,
             chave_acesso=chave,
-            numero_nfse=_numero_da_chave(chave),
+            numero_nfse=numero,
             xml_nfse=nfse_xml,
         )
 
@@ -151,13 +152,17 @@ def emitir_nfse(dados: DadosDPS) -> ResultadoEmissao:
     return ResultadoEmissao(sucesso=False, erro_codigo=codigo, erro_mensagem=msg)
 
 
-def _numero_da_chave(chave: Optional[str]) -> Optional[str]:
-    """Extrai o número sequencial da NFS-e da chave de acesso (50 dígitos)."""
-    if not chave or len(chave) < 25:
+def _numero_do_xml(xml_nfse: Optional[str]) -> Optional[str]:
+    """Extrai o número da NFS-e (<nNFSe>) do XML retornado pelo Sefin."""
+    if not xml_nfse:
         return None
-    # Layout da chave NFS-e nacional: o número da NFSe são 13 dígitos (pos 18-30 aprox)
-    # Retorna os dígitos centrais como referência; exibição é só informativa.
-    return chave[18:31] if len(chave) >= 31 else chave
+    try:
+        from lxml import etree
+        root = etree.fromstring(xml_nfse.encode() if isinstance(xml_nfse, str) else xml_nfse)
+        els = root.xpath("//*[local-name()='nNFSe']")
+        return els[0].text if els else None
+    except Exception:
+        return None
 
 
 # ─── Consulta ────────────────────────────────────────────────────────────────
