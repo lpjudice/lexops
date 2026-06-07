@@ -7,6 +7,7 @@ import { clientesApi } from '../api/clientes'
 import type { Cliente } from '../api/clientes'
 import { contratosApi } from '../api/contratos'
 import { processosApi } from '../api/processos'
+import { configFiscalApi } from '../api/configFiscal'
 import { mascaraDocumento, validaDocumento, mascaraTelefone, soDigitos, soAlfanum } from '../utils/documentos'
 import styles from './Page.module.css'
 import cs from './FiscalPage.module.css'
@@ -262,11 +263,22 @@ function EmissaoModal({
   const [vincularOutro, setVincularOutro] = useState(false)
   const [clienteVinculadoNome, setClienteVinculadoNome] = useState<string>('')
 
-  const { data: codigosTrib = [] } = useQuery({
+  const { data: codigosBackend = [] } = useQuery({
     queryKey: ['fiscal-codigos-trib'],
     queryFn: fiscalApi.listarCodigosTributacao,
     staleTime: Infinity,
   })
+  const { data: cfgFiscal } = useQuery({
+    queryKey: ['config-fiscal'], queryFn: configFiscalApi.obter, staleTime: 60_000,
+  })
+  // Templates: do Config se houver, senão os padrões
+  const templates = (cfgFiscal?.templates_descricao?.length
+    ? cfgFiscal.templates_descricao
+    : TEMPLATES_DESCRICAO.map((t) => ({ tipo: t.tipo, label: t.label, texto: '' })))
+  // Códigos: favoritos do Config se houver, senão os do backend
+  const codigosTrib = (cfgFiscal?.codigos_favoritos?.length
+    ? cfgFiscal.codigos_favoritos.map((c) => ({ codigo: c.codigo, label: c.label, descricao: c.descricao || '' }))
+    : codigosBackend)
 
   const { data: naturezasOp = [] } = useQuery({
     queryKey: ['fiscal-natureza-op'],
@@ -325,10 +337,14 @@ function EmissaoModal({
   })
 
   function aplicarTemplate(tipo: string) {
-    const tpl = TEMPLATES_DESCRICAO.find((t) => t.tipo === tipo)
-    if (!tpl) return
     const nome = form.tomador_nome || 'cliente'
-    set('descricao_servico', tpl.texto(nome))
+    const cfgT = cfgFiscal?.templates_descricao?.find((t) => t.tipo === tipo)
+    if (cfgT && cfgT.texto) {
+      set('descricao_servico', cfgT.texto.replace(/\{cliente\}/g, nome))
+      return
+    }
+    const tpl = TEMPLATES_DESCRICAO.find((t) => t.tipo === tipo)
+    if (tpl) set('descricao_servico', tpl.texto(nome))
   }
 
   function handleClienteSelect(c: Cliente | null, nome: string) {
@@ -588,7 +604,7 @@ function EmissaoModal({
           <div className={cs.formGridFull}>
             <label className={cs.formLabel}>Descrição do Serviço *</label>
             <div className={cs.templatesBtns}>
-              {TEMPLATES_DESCRICAO.map((t) => (
+              {templates.filter((t) => t.label).map((t) => (
                 <button key={t.tipo} type="button" className={cs.templateBtn}
                   onClick={() => aplicarTemplate(t.tipo)}>
                   {t.label}
@@ -789,6 +805,11 @@ function DetalheModal({ nf, onClose }: { nf: NotaFiscalOut; onClose: () => void 
       cliente_id: clienteVincId || undefined }),
     onSuccess: () => { setVincMsg('✓ Vínculos salvos'); qc.invalidateQueries({ queryKey: ['notas-fiscais'] }) },
   })
+  const [novoContrTitulo, setNovoContrTitulo] = useState('')
+  const criarContrMut = useMutation({
+    mutationFn: () => contratosApi.criar({ cliente_id: clienteVincId!, titulo: novoContrTitulo }),
+    onSuccess: (c) => { setContrSel(c.id); setNovoContrTitulo(''); qc.invalidateQueries({ queryKey: ['contr-nf', clienteVincId] }) },
+  })
 
   async function baixarPdf() {
     setErroPdf(null); setBaixando(true)
@@ -861,8 +882,18 @@ function DetalheModal({ nf, onClose }: { nf: NotaFiscalOut; onClose: () => void 
               </select>
               <select className={cs.input} value={contrSel} onChange={(e) => setContrSel(e.target.value)}>
                 <option value="">— Contrato {contrs.length ? '' : '(nenhum)'} —</option>
-                {contrs.map((c) => <option key={c.id} value={c.id}>{c.descricao || 'Contrato'}</option>)}
+                {contrs.map((c) => <option key={c.id} value={c.id}>{c.descricao || (c as any).titulo || 'Contrato'}</option>)}
               </select>
+            </div>
+          )}
+          {clienteVincId && (
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <input className={cs.input} placeholder="Criar contrato: título…"
+                value={novoContrTitulo} onChange={(e) => setNovoContrTitulo(e.target.value)} />
+              <button className={cs.btnSecondary} disabled={!novoContrTitulo || criarContrMut.isPending}
+                onClick={() => criarContrMut.mutate()}>
+                {criarContrMut.isPending ? 'Criando…' : '+ Contrato'}
+              </button>
             </div>
           )}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
@@ -932,6 +963,8 @@ export default function FiscalPage() {
   const [prefill, setPrefill] = useState<Partial<EmitirNFSeIn> | undefined>()
   const [nfDetalhe, setNfDetalhe] = useState<NotaFiscalOut | null>(null)
   const [nfEmitida, setNfEmitida] = useState<NotaFiscalOut | null>(null)
+  const [sincronizando, setSincronizando] = useState(false)
+  const [syncMsg, setSyncMsg] = useState<string | null>(null)
 
   const { data: notas = [], isLoading } = useQuery({
     queryKey: ['notas-fiscais', filtro],
@@ -975,10 +1008,25 @@ export default function FiscalPage() {
     <div>
       <div className={styles.pageHeader}>
         <h1 className={styles.pageTitle}>Notas Fiscais <strong>NFS-e</strong></h1>
-        <button className={styles.btnPrimary} onClick={() => { setPrefill(undefined); setEmitindo(true) }}>
-          + Emitir NFS-e
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className={cs.btnSecondary} disabled={sincronizando}
+            onClick={async () => {
+              setSincronizando(true); setSyncMsg(null)
+              try {
+                const r = await fiscalApi.sincronizarDfe()
+                setSyncMsg(`✓ ${r.novas} nova(s) importada(s) do governo`)
+                qc.invalidateQueries({ queryKey: ['notas-fiscais'] })
+              } catch { setSyncMsg('⚠️ Falha ao sincronizar') }
+              finally { setSincronizando(false) }
+            }}>
+            {sincronizando ? 'Sincronizando…' : '🔄 Sincronizar do governo'}
+          </button>
+          <button className={styles.btnPrimary} onClick={() => { setPrefill(undefined); setEmitindo(true) }}>
+            + Emitir NFS-e
+          </button>
+        </div>
       </div>
+      {syncMsg && <p className={cs.fieldHint} style={{ marginTop: -12, marginBottom: 12 }}>{syncMsg}</p>}
 
       <div className={cs.filtros}>
         {filtros.map((f) => (

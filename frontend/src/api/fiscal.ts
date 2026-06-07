@@ -154,6 +154,8 @@ export const fiscalApi = {
 
   historicoRelatorios: () => api.get('/fiscal/relatorio/historico').then((r) => r.data),
 
+  sincronizarDfe: () => api.post('/fiscal/dfe/sincronizar').then((r) => r.data),
+
   danfseUrl: (id: string) => `/fiscal/notas/${id}/danfse`,
 
   baixarDanfse: (id: string) =>

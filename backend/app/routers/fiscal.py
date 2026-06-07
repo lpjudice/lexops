@@ -618,6 +618,13 @@ def historico_relatorios(db: Session = Depends(get_db), _=Depends(get_current_us
     return {"historico": out, "proximo_envio": proximo}
 
 
+@router.post("/dfe/sincronizar")
+def sincronizar_dfe_gov(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Reconcilia notas do governo (DFe) — inclusive emitidas direto no portal."""
+    from app.services.nfse.dfe_sync import sincronizar_dfe
+    return sincronizar_dfe(db)
+
+
 @router.delete("/notas/erros")
 def deletar_notas_erro(db: Session = Depends(get_db), _=Depends(get_current_user)):
     """Remove notas com status 'erro' (limpeza de testes que não emitiram)."""

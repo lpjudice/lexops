@@ -229,6 +229,36 @@ export default function ConfigFiscalPage() {
         </div>
       )}
 
+      {/* G. Templates & Códigos */}
+      <Secao titulo="📝 Templates de Descrição & Códigos de Serviço">
+        <div className={cs.formLabel}>Templates de descrição (chips no formulário de emissão)</div>
+        {(f.templates_descricao || []).map((t, i) => (
+          <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+            <input className={inp} style={{ flex: '0 0 160px' }} placeholder="Rótulo" value={t.label}
+              onChange={(e) => { const a = [...f.templates_descricao]; a[i] = { ...a[i], label: e.target.value }; set('templates_descricao', a) }} />
+            <input className={inp} placeholder="Texto (use {cliente})" value={t.texto}
+              onChange={(e) => { const a = [...f.templates_descricao]; a[i] = { ...a[i], texto: e.target.value }; set('templates_descricao', a) }} />
+            <button className={cs.btnSecondary} onClick={() => set('templates_descricao', f.templates_descricao.filter((_, j) => j !== i))}>×</button>
+          </div>
+        ))}
+        <button className={cs.templateBtn} onClick={() => set('templates_descricao', [...(f.templates_descricao || []), { tipo: 'custom' + Date.now(), label: '', texto: '' }])}>+ Adicionar template</button>
+
+        <div className={cs.formLabel} style={{ marginTop: 16 }}>Códigos de tributação favoritos (dropdown da emissão)</div>
+        {(f.codigos_favoritos || []).map((c, i) => (
+          <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+            <input className={inp} style={{ flex: '0 0 120px' }} placeholder="Código" value={c.codigo}
+              onChange={(e) => { const a = [...f.codigos_favoritos]; a[i] = { ...a[i], codigo: e.target.value }; set('codigos_favoritos', a) }} />
+            <input className={inp} style={{ flex: '0 0 180px' }} placeholder="Rótulo" value={c.label}
+              onChange={(e) => { const a = [...f.codigos_favoritos]; a[i] = { ...a[i], label: e.target.value }; set('codigos_favoritos', a) }} />
+            <input className={inp} placeholder="Descrição" value={c.descricao ?? ''}
+              onChange={(e) => { const a = [...f.codigos_favoritos]; a[i] = { ...a[i], descricao: e.target.value }; set('codigos_favoritos', a) }} />
+            <button className={cs.btnSecondary} onClick={() => set('codigos_favoritos', f.codigos_favoritos.filter((_, j) => j !== i))}>×</button>
+          </div>
+        ))}
+        <button className={cs.templateBtn} onClick={() => set('codigos_favoritos', [...(f.codigos_favoritos || []), { codigo: '', label: '', descricao: '' }])}>+ Adicionar código</button>
+        <p className={cs.fieldHint} style={{ marginTop: 8 }}>Se vazios, o sistema usa os padrões (advocacia 171401 etc.).</p>
+      </Secao>
+
       {/* F. Numeração + DANFSe */}
       <Secao titulo="🔢 Numeração & DANFSe">
         <div style={GRID2}>
