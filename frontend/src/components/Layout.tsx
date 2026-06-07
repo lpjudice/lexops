@@ -187,6 +187,7 @@ export default function Layout() {
                 <NavLink
                   key={to}
                   to={to}
+                  end={to === '/fiscal'}
                   className={({ isActive }) =>
                     `${styles.navLink} ${isActive ? styles.active : ''}`
                   }

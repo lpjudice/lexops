@@ -416,6 +416,7 @@ def visao_fiscal(
     from app.models.config_fiscal import ConfigFiscal
     from app.services.nfse.visao_fiscal import (
         faixa_de, quebra_das, gerar_alertas, ANEXO_IV_FAIXAS,
+        repart_pct, transicao_reforma,
     )
 
     competencia = mes or datetime.now(tz=BRT).strftime("%Y-%m")
@@ -443,6 +444,20 @@ def visao_fiscal(
     quebra = quebra_das(das, faixa) if das > 0 else {}
     carga = (das / receita * 100).quantize(Decimal("0.01")) if receita > 0 else Decimal("0")
 
+    # Progresso até o limite da faixa atual
+    limite = ANEXO_IV_FAIXAS[faixa][0]
+    piso = ANEXO_IV_FAIXAS[faixa - 1][0] if faixa > 0 else Decimal("0")
+    progresso = None
+    if rbt12:
+        progresso = float(((rbt12 - piso) / (limite - piso) * 100).quantize(Decimal("0.1")))
+
+    # Reforma tributária (IBS/CBS + transição ISS)
+    ano = int(competencia.split("-")[0])
+    ibs_pct = Decimal(str(cfg.ibs_pct)) if cfg and cfg.ibs_pct else Decimal("0")
+    cbs_pct = Decimal(str(cfg.cbs_pct)) if cfg and cfg.cbs_pct else Decimal("0")
+    piloto = bool(cfg and cfg.piloto_ibscbs)
+    reforma = transicao_reforma(ano, receita, ibs_pct, cbs_pct, piloto)
+
     return {
         "competencia": competencia,
         "receita_mes": float(receita),
@@ -450,6 +465,9 @@ def visao_fiscal(
         "aliquota_efetiva": float(aliq),
         "das_estimado": float(das),
         "quebra_tributos": {k: float(v) for k, v in quebra.items()},
+        "quebra_tributos_pct": repart_pct(faixa),
+        "progresso_faixa_pct": progresso,
+        "reforma": reforma,
         "retencoes_sofridas": float(ret_total),
         "das_liquido_estimado": float(max(das - ret_total, Decimal("0"))),
         "carga_tributaria_pct": float(carga),

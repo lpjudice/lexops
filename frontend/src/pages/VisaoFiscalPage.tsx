@@ -69,24 +69,50 @@ export default function VisaoFiscalPage() {
             <Card titulo="Carga tributária" valor={`${v.carga_tributaria_pct}%`} />
           </div>
 
-          {/* Quebra de tributos */}
+          {/* Quebra de tributos com % */}
           {v.quebra_tributos && Object.keys(v.quebra_tributos).length > 0 && (
             <div className={styles.tableCard} style={{ marginBottom: 16 }}>
               <table className={styles.table}>
-                <thead><tr><th>Tributo (dentro do DAS)</th><th style={{ textAlign: 'right' }}>Valor estimado</th></tr></thead>
+                <thead><tr>
+                  <th>Tributo (dentro do DAS)</th>
+                  <th style={{ textAlign: 'right' }}>% do DAS</th>
+                  <th style={{ textAlign: 'right' }}>Valor estimado</th>
+                </tr></thead>
                 <tbody>
                   {Object.entries(v.quebra_tributos).map(([k, val]: any) => (
                     <tr key={k}>
                       <td>{TRIB_LABEL[k] || k}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--gray-mid)' }}>
+                        {v.quebra_tributos_pct?.[k] != null ? `${v.quebra_tributos_pct[k]}%` : '—'}
+                      </td>
                       <td style={{ textAlign: 'right' }}>{fmtBRL(val)}</td>
                     </tr>
                   ))}
                   <tr style={{ fontWeight: 700 }}>
                     <td>Total DAS</td>
+                    <td style={{ textAlign: 'right' }}>100%</td>
                     <td style={{ textAlign: 'right', color: '#b45309' }}>{fmtBRL(v.das_estimado)}</td>
                   </tr>
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {/* Reforma Tributária IBS/CBS */}
+          {v.reforma && (
+            <div className={styles.tableCard} style={{ padding: 16, marginBottom: 16,
+              borderLeft: '3px solid var(--teal)' }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>🆕 Reforma Tributária — {v.reforma.fase}</div>
+              <div style={{ fontSize: 13, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+                <span>ISS vigente: <b>{v.reforma.iss_pct_vigente}%</b> do valor cheio</span>
+                <span>IBS estimado: <b>{fmtBRL(v.reforma.ibs_estimado)}</b></span>
+                <span>CBS estimado: <b>{fmtBRL(v.reforma.cbs_estimado)}</b></span>
+              </div>
+              {!v.reforma.ativo && (
+                <p className={cs.fieldHint} style={{ marginTop: 8 }}>
+                  Configure os % de IBS/CBS e ative o piloto no Config Fiscal para projetar os valores.
+                </p>
+              )}
             </div>
           )}
 
@@ -99,6 +125,23 @@ export default function VisaoFiscalPage() {
               <span>Alíquota efetiva: <b>{v.aliquota_efetiva}%</b></span>
               <span>Limite da faixa: <b>{v.limite_faixa != null ? fmtBRL(v.limite_faixa) : '—'}</b></span>
             </div>
+            {/* Barra de progresso até a próxima faixa */}
+            {v.progresso_faixa_pct != null && (
+              <div style={{ marginTop: 14 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--gray-mid)', marginBottom: 4 }}>
+                  <span>Progresso na Faixa {v.faixa_simples}</span>
+                  <span><b>{v.progresso_faixa_pct}%</b> → limite {fmtBRL(v.limite_faixa)}</span>
+                </div>
+                <div style={{ height: 10, background: '#e5e7eb', borderRadius: 999, overflow: 'hidden' }}>
+                  <div style={{
+                    width: `${Math.min(v.progresso_faixa_pct, 100)}%`, height: '100%',
+                    background: v.progresso_faixa_pct >= 95 ? '#dc2626'
+                      : v.progresso_faixa_pct >= 80 ? '#f59e0b' : 'var(--teal)',
+                    transition: 'width .3s',
+                  }} />
+                </div>
+              </div>
+            )}
             <p className={cs.fieldHint} style={{ marginTop: 10 }}>{v.obs}</p>
             <p className={cs.fieldHint}>Valores estimados para conferência — confirme sempre com o contador.</p>
           </div>

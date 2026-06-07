@@ -51,6 +51,53 @@ def quebra_das(das: Decimal, faixa: int) -> dict:
     return out
 
 
+def repart_pct(faixa: int) -> dict:
+    return {k: float(v) for k, v in ANEXO_IV_REPART[faixa].items()}
+
+
+# ─── Reforma Tributária — transição ISS → IBS/CBS (EC 132 / LC 214) ───────────
+# Fator de ISS vigente por ano (substituição gradual a partir de 2029).
+ISS_FATOR_POR_ANO = {
+    2026: 1.00, 2027: 1.00, 2028: 1.00,
+    2029: 0.90, 2030: 0.80, 2031: 0.70, 2032: 0.60, 2033: 0.00,
+}
+
+
+def transicao_reforma(ano: int, receita: Decimal, ibs_pct: Decimal, cbs_pct: Decimal,
+                      piloto: bool) -> dict:
+    """Elementos de IBS/CBS e substituição do ISS no tempo."""
+    iss_fator = 1.0
+    if ano >= 2033:
+        iss_fator = 0.0
+    elif ano in ISS_FATOR_POR_ANO:
+        iss_fator = ISS_FATOR_POR_ANO[ano]
+
+    ativo = piloto or ibs_pct > 0 or cbs_pct > 0 or ano >= 2026
+    ibs_val = (receita * ibs_pct / 100).quantize(Decimal("0.01")) if ativo else Decimal("0")
+    cbs_val = (receita * cbs_pct / 100).quantize(Decimal("0.01")) if ativo else Decimal("0")
+
+    if ano <= 2025:
+        fase = "Pré-reforma (sem IBS/CBS)"
+    elif ano == 2026:
+        fase = "2026 — Teste (CBS 0,9% + IBS 0,1%, compensáveis)"
+    elif ano <= 2028:
+        fase = f"{ano} — CBS substitui PIS/COFINS; IBS em implantação"
+    elif ano <= 2032:
+        fase = f"{ano} — ISS reduzido a {int(iss_fator*100)}%; IBS crescente"
+    else:
+        fase = "2033+ — ISS extinto; IBS/CBS pleno"
+
+    return {
+        "ano": ano,
+        "fase": fase,
+        "iss_fator": iss_fator,
+        "iss_pct_vigente": round(iss_fator * 100),
+        "ibs_estimado": float(ibs_val),
+        "cbs_estimado": float(cbs_val),
+        "ativo": bool(ativo and (ibs_pct > 0 or cbs_pct > 0 or piloto)),
+    }
+
+
 def gerar_alertas(rbt12: Decimal | None) -> list[dict]:
     alertas = []
     if not rbt12 or rbt12 <= 0:
