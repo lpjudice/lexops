@@ -739,6 +739,7 @@ function DetalheModal({ nf, onClose }: { nf: NotaFiscalOut; onClose: () => void 
   const [motivo, setMotivo] = useState('')
   const [confirmando, setConfirmando] = useState(false)
   const [erroPdf, setErroPdf] = useState<string | null>(null)
+  const [baixando, setBaixando] = useState(false)
   const qc = useQueryClient()
   const cancelMut = useMutation({
     mutationFn: (m: string) => fiscalApi.cancelar(nf.id, m),
@@ -746,14 +747,15 @@ function DetalheModal({ nf, onClose }: { nf: NotaFiscalOut; onClose: () => void 
   })
 
   async function baixarPdf() {
-    setErroPdf(null)
+    setErroPdf(null); setBaixando(true)
     try {
       const blob = await fiscalApi.baixarDanfse(nf.id)
       const url = URL.createObjectURL(blob as Blob)
       window.open(url, '_blank')
     } catch (err: any) {
-      setErroPdf('Download direto do PDF indisponível (a API do governo ainda não expõe). '
-        + 'Use o botão "Abrir / baixar DANFSe (portal nacional)" para o PDF oficial.')
+      setErroPdf('Não foi possível gerar o PDF agora. Tente novamente em instantes.')
+    } finally {
+      setBaixando(false)
     }
   }
 
@@ -799,16 +801,18 @@ function DetalheModal({ nf, onClose }: { nf: NotaFiscalOut; onClose: () => void 
           )}
         </div>
 
-        {nf.status === 'emitida' && nf.consulta_publica_url && (
+        {nf.status === 'emitida' && (
           <div style={{ marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <a className={cs.btnSecondary} href={nf.consulta_publica_url}
-              target="_blank" rel="noopener noreferrer"
-              style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>
-              📄 Abrir / baixar DANFSe (portal nacional)
-            </a>
-            <button className={cs.btnSecondary} onClick={() => baixarPdf()}>
-              Tentar baixar PDF direto
+            <button className={styles.btnPrimary} onClick={() => baixarPdf()} disabled={baixando}>
+              {baixando ? 'Gerando…' : '📄 Baixar DANFSe (PDF)'}
             </button>
+            {nf.consulta_publica_url && (
+              <a className={cs.btnSecondary} href={nf.consulta_publica_url}
+                target="_blank" rel="noopener noreferrer"
+                style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>
+                🔗 Consulta pública (portal)
+              </a>
+            )}
           </div>
         )}
         {erroPdf && <div className={cs.erroBox} style={{ marginTop: 8 }}>⚠️ {erroPdf}</div>}

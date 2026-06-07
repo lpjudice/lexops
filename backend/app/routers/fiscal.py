@@ -271,11 +271,14 @@ def emitir_nota(
     db.commit()
     db.refresh(nf)
 
-    # Sucesso: tenta baixar e salvar o PDF da DANFSe
+    # Sucesso: gera/baixa e salva o PDF da DANFSe
     if resultado.sucesso and nf.chave_acesso:
         try:
             from app.services.nfse.emitter import baixar_danfse
             pdf = baixar_danfse(nf.chave_acesso)
+            if not pdf and (resultado.xml_nfse or nf.xml_nfse):
+                from app.services.nfse.danfse_pdf import gerar_danfse_pdf
+                pdf = gerar_danfse_pdf(resultado.xml_nfse or nf.xml_nfse, nf.chave_acesso)
             if pdf:
                 import os
                 pasta = "/app/backend/uploads/nfse"
@@ -287,7 +290,7 @@ def emitir_nota(
                 db.commit()
                 db.refresh(nf)
         except Exception as exc:
-            log.warning("Falha ao baixar DANFSe: %s", exc)
+            log.warning("Falha ao gerar/baixar DANFSe: %s", exc)
 
     if not resultado.sucesso:
         log.error("Falha na emissão NFS-e: [%s] %s", resultado.erro_codigo, resultado.erro_mensagem)
@@ -344,13 +347,16 @@ def baixar_danfse_pdf(
 
     # Cache em disco
     if not (nf.pdf_path and os.path.exists(nf.pdf_path)):
+        # 1) tenta o PDF oficial do gov; 2) gera o nosso a partir do XML
         pdf = baixar_danfse(nf.chave_acesso)
+        if not pdf and nf.xml_nfse:
+            try:
+                from app.services.nfse.danfse_pdf import gerar_danfse_pdf
+                pdf = gerar_danfse_pdf(nf.xml_nfse, nf.chave_acesso)
+            except Exception as exc:
+                log.error("Falha ao gerar DANFSe PDF: %s", exc)
         if not pdf:
-            raise HTTPException(
-                503,
-                "DANFSe ainda não disponível no portal nacional "
-                "(notas de homologação não geram PDF público).",
-            )
+            raise HTTPException(503, "Não foi possível obter nem gerar o PDF da NFS-e.")
         pasta = "/app/backend/uploads/nfse"
         os.makedirs(pasta, exist_ok=True)
         caminho = f"{pasta}/{nf.chave_acesso}.pdf"
