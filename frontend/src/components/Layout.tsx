@@ -92,6 +92,7 @@ const navGroups = [
     label: 'FISCAL',
     items: [
       { to: '/fiscal', label: 'Notas Fiscais', Icon: ScrollText },
+      { to: '/fiscal/visao', label: 'Visão Fiscal', Icon: TrendingUp },
       { to: '/fiscal/config', label: 'Config Fiscal', Icon: Settings },
     ],
   },
@@ -117,6 +118,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/reembolsos': 'Reembolsos',
   '/financeiro': 'Financeiro',
   '/fiscal': 'Notas Fiscais',
+  '/fiscal/visao': 'Visão Fiscal',
   '/fiscal/config': 'Config Fiscal',
   '/atendimentos': 'Atendimentos',
   '/tarefas': 'Tarefas',

@@ -23,6 +23,7 @@ import AceitarConvitePage from './pages/AceitarConvitePage'
 import ReunioesPage from './pages/ReunioesPage'
 import FiscalPage from './pages/FiscalPage'
 import ConfigFiscalPage from './pages/ConfigFiscalPage'
+import VisaoFiscalPage from './pages/VisaoFiscalPage'
 
 const queryClient = new QueryClient()
 
@@ -65,6 +66,7 @@ function AppRoutes() {
         <Route path="tarefas" element={<TarefasPage />} />
         <Route path="reunioes" element={<ReunioesPage />} />
         <Route path="fiscal" element={<FiscalPage />} />
+        <Route path="fiscal/visao" element={<VisaoFiscalPage />} />
         <Route path="fiscal/config" element={<ConfigFiscalPage />} />
       </Route>
     </Routes>

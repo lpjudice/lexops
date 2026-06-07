@@ -133,6 +133,11 @@ export const fiscalApi = {
   parametrosMunicipais: () =>
     api.get('/fiscal/parametros-municipais').then((r) => r.data),
 
+  visao: (mes?: string) =>
+    api.get('/fiscal/visao', { params: mes ? { mes } : undefined }).then((r) => r.data),
+
+  alertas: () => api.get('/fiscal/alertas').then((r) => r.data),
+
   danfseUrl: (id: string) => `/fiscal/notas/${id}/danfse`,
 
   baixarDanfse: (id: string) =>

@@ -404,6 +404,74 @@ def cancelar_nota(
     return _nf_to_out(nf)
 
 
+@router.get("/visao")
+def visao_fiscal(
+    mes: Optional[str] = Query(None, description="YYYY-MM (default: mês atual)"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Visão fiscal do mês: receita, DAS estimado, quebra por tributo, carga, alertas."""
+    from decimal import Decimal
+    from sqlalchemy import func as sqlfunc
+    from app.models.config_fiscal import ConfigFiscal
+    from app.services.nfse.visao_fiscal import (
+        faixa_de, quebra_das, gerar_alertas, ANEXO_IV_FAIXAS,
+    )
+
+    competencia = mes or datetime.now(tz=BRT).strftime("%Y-%m")
+    cfg = db.query(ConfigFiscal).filter(ConfigFiscal.id == 1).first()
+
+    # Receita do mês = NFs emitidas na competência
+    emitidas = (
+        db.query(NotaFiscal)
+        .filter(NotaFiscal.status == "emitida", NotaFiscal.competencia == competencia)
+        .all()
+    )
+    receita = sum((Decimal(str(n.valor_servicos)) for n in emitidas), Decimal("0"))
+    qtd = len(emitidas)
+    ret_total = sum(
+        (Decimal(str(n.retencao_ir or 0)) + Decimal(str(n.retencao_inss or 0)) +
+         Decimal(str(n.retencao_csll or 0)) + Decimal(str(n.retencao_pis or 0)) +
+         Decimal(str(n.retencao_cofins or 0)) for n in emitidas),
+        Decimal("0"),
+    )
+
+    aliq = Decimal(str(cfg.aliquota_efetiva_simples)) if cfg and cfg.aliquota_efetiva_simples else Decimal("0")
+    rbt12 = Decimal(str(cfg.rbt12)) if cfg and cfg.rbt12 else None
+    das = (receita * aliq / 100).quantize(Decimal("0.01"))
+    faixa = faixa_de(rbt12) if rbt12 else 0
+    quebra = quebra_das(das, faixa) if das > 0 else {}
+    carga = (das / receita * 100).quantize(Decimal("0.01")) if receita > 0 else Decimal("0")
+
+    return {
+        "competencia": competencia,
+        "receita_mes": float(receita),
+        "qtd_notas": qtd,
+        "aliquota_efetiva": float(aliq),
+        "das_estimado": float(das),
+        "quebra_tributos": {k: float(v) for k, v in quebra.items()},
+        "retencoes_sofridas": float(ret_total),
+        "das_liquido_estimado": float(max(das - ret_total, Decimal("0"))),
+        "carga_tributaria_pct": float(carga),
+        "rbt12": float(rbt12) if rbt12 else None,
+        "faixa_simples": faixa + 1 if rbt12 else None,
+        "limite_faixa": float(ANEXO_IV_FAIXAS[faixa][0]) if rbt12 else None,
+        "alertas": gerar_alertas(rbt12),
+        "obs": "CPP/INSS patronal não está no DAS do Anexo IV — recolhido à parte sobre a folha.",
+    }
+
+
+@router.get("/alertas")
+def alertas_fiscais(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Alertas fiscais para o dashboard."""
+    from decimal import Decimal
+    from app.models.config_fiscal import ConfigFiscal
+    from app.services.nfse.visao_fiscal import gerar_alertas
+    cfg = db.query(ConfigFiscal).filter(ConfigFiscal.id == 1).first()
+    rbt12 = Decimal(str(cfg.rbt12)) if cfg and cfg.rbt12 else None
+    return {"alertas": gerar_alertas(rbt12)}
+
+
 @router.get("/parametros-municipais")
 def parametros_municipais(_=Depends(get_current_user)):
     dados = consultar_parametros_municipio("3205309")
