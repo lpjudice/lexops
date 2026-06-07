@@ -12,6 +12,7 @@ from app.models import processo_parte as _processo_parte_model  # noqa: F401
 from app.models import andamento_telegram_extra as _andamento_telegram_extra_model  # noqa: F401
 from app.models import nota_fiscal as _nota_fiscal_model  # noqa: F401
 from app.models import config_fiscal as _config_fiscal_model  # noqa: F401
+from app.models import relatorio_fiscal_log as _relatorio_fiscal_log_model  # noqa: F401
 from app.models import telegram_task as _telegram_task_model  # noqa: F401 — TelegramTaskBatch/Item/Session
 from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, fiscal, config_fiscal, jurisprudencia, organizador, pje, prazos, processos, reembolsos, reunioes, system, tarefas, telegram, telegram_andamentos, telegram_tasks, teses, usuarios, webhooks
 
@@ -487,8 +488,25 @@ def _run_migrations() -> None:
             "ALTER TABLE notas_fiscais ADD COLUMN IF NOT EXISTS pdf_path VARCHAR(1000)",
             "ALTER TABLE notas_fiscais ADD COLUMN IF NOT EXISTS drive_link VARCHAR(1000)",
             "ALTER TABLE notas_fiscais ADD COLUMN IF NOT EXISTS ambiente INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE notas_fiscais ADD COLUMN IF NOT EXISTS retroativa BOOLEAN NOT NULL DEFAULT false",
         ]:
             conn.execute(text(_col))
+
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS relatorio_fiscal_log (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                competencia VARCHAR(7) NOT NULL,
+                enviado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+                destinatarios JSONB DEFAULT '[]'::jsonb,
+                cc VARCHAR(255),
+                nf_qtd INTEGER DEFAULT 0,
+                anexos INTEGER DEFAULT 0,
+                gmail_message_id VARCHAR(120),
+                drive_pasta_link VARCHAR(1000),
+                status VARCHAR(20) DEFAULT 'enviado',
+                erro TEXT
+            )
+        """))
 
         # ── Config Fiscal (singleton) ────────────────────────────────────────
         conn.execute(text("""

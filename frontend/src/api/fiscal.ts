@@ -88,8 +88,10 @@ export interface NotaFiscalOut {
   consulta_publica_url?: string
   cliente_id?: string
   processo_id?: string
+  contrato_id?: string
   honorario_id?: string
   recebimento_id?: string
+  retroativa?: boolean
   created_at: string
   updated_at: string
 }
@@ -146,6 +148,11 @@ export const fiscalApi = {
 
   enviarRelatorio: (mes?: string) =>
     api.post('/fiscal/relatorio/enviar', null, { params: mes ? { mes } : undefined }).then((r) => r.data),
+
+  vincular: (id: string, params: { processo_id?: string; contrato_id?: string; cliente_id?: string }) =>
+    api.patch<NotaFiscalOut>(`/fiscal/notas/${id}/vinculos`, null, { params }).then((r) => r.data),
+
+  historicoRelatorios: () => api.get('/fiscal/relatorio/historico').then((r) => r.data),
 
   danfseUrl: (id: string) => `/fiscal/notas/${id}/danfse`,
 

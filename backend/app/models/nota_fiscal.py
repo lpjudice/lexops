@@ -69,6 +69,7 @@ class NotaFiscal(Base):
     pdf_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     drive_link: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     ambiente: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")  # 1=Prod 2=Teste
+    retroativa: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
 
     # ── Status ────────────────────────────────────────────────────────────
     # rascunho | emitida | cancelada | erro

@@ -186,6 +186,9 @@ def emitir_nota(
     cfg = db.query(ConfigFiscal).filter(ConfigFiscal.id == 1).first()
     ambiente = body.ambiente or settings.nfse_ambiente
     numero_dps = _proximo_numero_dps(db)
+    # Competência retroativa? (mês anterior ao corrente)
+    mes_atual = datetime.now(tz=BRT).strftime("%Y-%m")
+    retroativa = body.competencia < mes_atual
 
     endereco = None
     if body.tomador_endereco:
@@ -286,6 +289,7 @@ def emitir_nota(
         cliente_id=body.cliente_id,
         processo_id=body.processo_id,
         ambiente=ambiente,
+        retroativa=retroativa,
     )
     db.add(nf)
     db.commit()
@@ -556,15 +560,89 @@ def preview_relatorio(
 @router.post("/relatorio/enviar")
 def enviar_relatorio_agora(
     mes: Optional[str] = Query(None),
+    destinatario: Optional[str] = Query(None, description="Override do destinatário (teste)"),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
     """Envia o relatório ao contador agora (manual)."""
     from app.services.nfse.relatorio_contador import enviar_relatorio
-    resultado = enviar_relatorio(db, mes)
+    resultado = enviar_relatorio(db, mes, destinatario_override=destinatario)
     if not resultado.get("enviado"):
         raise HTTPException(422, detail=resultado.get("motivo", "Falha ao enviar"))
     return resultado
+
+
+@router.get("/relatorio/historico")
+def historico_relatorios(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Histórico de relatórios enviados + texto do próximo envio automático."""
+    from app.models.relatorio_fiscal_log import RelatorioFiscalLog
+    from app.models.config_fiscal import ConfigFiscal
+    from datetime import timedelta as _td
+
+    logs = (db.query(RelatorioFiscalLog)
+            .order_by(RelatorioFiscalLog.enviado_em.desc()).limit(50).all())
+    out = []
+    for r in logs:
+        gmail = (f"https://mail.google.com/mail/u/0/#all/{r.gmail_message_id}"
+                 if r.gmail_message_id else None)
+        out.append({
+            "id": str(r.id), "competencia": r.competencia,
+            "enviado_em": r.enviado_em.isoformat() if r.enviado_em else None,
+            "destinatarios": r.destinatarios, "cc": r.cc,
+            "nf_qtd": r.nf_qtd, "anexos": r.anexos, "status": r.status,
+            "gmail_link": gmail, "drive_pasta_link": r.drive_pasta_link,
+        })
+
+    # Próximo envio automático
+    cfg = db.query(ConfigFiscal).filter(ConfigFiscal.id == 1).first()
+    proximo = None
+    if cfg and cfg.enviar_relatorio_auto:
+        hoje = datetime.now(tz=BRT).date()
+        dia = cfg.dia_envio_relatorio or 1
+        if hoje.day < dia:
+            prox = hoje.replace(day=dia)
+        else:
+            m = hoje.replace(day=1) + _td(days=32)
+            prox = m.replace(day=dia)
+        ref = (prox.replace(day=1) - _td(days=1)).strftime("%m/%Y")
+        proximo = {"data": prox.strftime("%d/%m/%Y"), "competencia_ref": ref,
+                   "destinatarios": cfg.emails_contador or []}
+    return {"historico": out, "proximo_envio": proximo}
+
+
+@router.delete("/notas/erros")
+def deletar_notas_erro(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Remove notas com status 'erro' (limpeza de testes que não emitiram)."""
+    qs = db.query(NotaFiscal).filter(NotaFiscal.status == "erro").all()
+    n = len(qs)
+    for nf in qs:
+        db.delete(nf)
+    db.commit()
+    return {"removidas": n}
+
+
+@router.patch("/notas/{nf_id}/vinculos", response_model=NotaFiscalOut)
+def vincular_nota(
+    nf_id: uuid.UUID,
+    processo_id: Optional[uuid.UUID] = Query(None),
+    contrato_id: Optional[uuid.UUID] = Query(None),
+    cliente_id: Optional[uuid.UUID] = Query(None),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Vincula a NF (já emitida) a processo/contrato/cliente — info interna."""
+    nf = db.query(NotaFiscal).filter(NotaFiscal.id == nf_id).first()
+    if not nf:
+        raise HTTPException(404, "Nota fiscal não encontrada")
+    if processo_id is not None:
+        nf.processo_id = processo_id
+    if contrato_id is not None:
+        nf.contrato_id = contrato_id
+    if cliente_id is not None:
+        nf.cliente_id = cliente_id
+    db.commit()
+    db.refresh(nf)
+    return _nf_to_out(nf)
 
 
 @router.get("/parametros-municipais")

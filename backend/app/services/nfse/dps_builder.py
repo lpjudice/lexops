@@ -214,11 +214,14 @@ def montar_dps(dados: DadosDPS) -> bytes:
 
     # ── Tomador (TCInfoPessoa) ─────────────────────────────────────────
     toma = _sub(inf, "toma")
-    cpf_cnpj = _apenas_digitos(dados.tomador.cpf_cnpj)
+    import re as _re
+    raw = (dados.tomador.cpf_cnpj or "")
+    alfa = _re.sub(r"[^0-9A-Za-z]", "", raw).upper()  # preserva CNPJ alfanumérico
+    cpf_cnpj = _apenas_digitos(raw)
     if dados.tomador.no_exterior:
-        _sub(toma, "NIF", cpf_cnpj or "0")
-    elif len(cpf_cnpj) == 14:
-        _sub(toma, "CNPJ", cpf_cnpj)
+        _sub(toma, "NIF", alfa or "0")
+    elif len(alfa) == 14:
+        _sub(toma, "CNPJ", alfa)        # numérico ou alfanumérico (2026+)
     else:
         _sub(toma, "CPF", cpf_cnpj.zfill(11))
     _sub(toma, "xNome", dados.tomador.nome[:150])

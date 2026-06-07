@@ -188,11 +188,14 @@ def _enviar(access_token: str, to_list: list[str], cc_master: str | None,
     )
     if resp.status_code not in (200, 201):
         raise RuntimeError(f"Gmail falhou: {resp.status_code} {resp.text[:200]}")
+    return resp.json().get("id")  # gmail message id
 
 
-def enviar_relatorio(db: Session, competencia: str | None = None) -> dict:
+def enviar_relatorio(db: Session, competencia: str | None = None,
+                     destinatario_override: str | None = None) -> dict:
     """Monta e envia o relatório do mês indicado (default: mês anterior)."""
     from app.models.config_fiscal import ConfigFiscal
+    from app.models.relatorio_fiscal_log import RelatorioFiscalLog
     from app.routers.reembolsos import _refresh_if_needed
 
     if not competencia:
@@ -202,13 +205,16 @@ def enviar_relatorio(db: Session, competencia: str | None = None) -> dict:
         competencia = ant.strftime("%Y-%m")
 
     cfg = db.query(ConfigFiscal).filter(ConfigFiscal.id == 1).first()
-    destinatarios = list(cfg.emails_contador) if cfg and cfg.emails_contador else []
     master = cfg.email_master if cfg else None
-    if not destinatarios and not master:
-        return {"enviado": False, "motivo": "Sem e-mails configurados (contador/master)."}
-    if not destinatarios and master:
-        destinatarios = [master]
-        master = None
+    if destinatario_override:
+        destinatarios = [destinatario_override]
+    else:
+        destinatarios = list(cfg.emails_contador) if cfg and cfg.emails_contador else []
+        if not destinatarios and not master:
+            return {"enviado": False, "motivo": "Sem e-mails configurados (contador/master)."}
+        if not destinatarios and master:
+            destinatarios = [master]
+            master = None
 
     dados = coletar_dados(db, competencia)
 
@@ -241,12 +247,32 @@ def enviar_relatorio(db: Session, competencia: str | None = None) -> dict:
         return {"enviado": False, "motivo": "Conta Google master não autenticada."}
 
     mes_label = datetime.strptime(competencia + "-01", "%Y-%m-%d").strftime("%m/%Y")
-    _enviar(token, destinatarios, master,
-            f"Relatório Fiscal {mes_label} — Pimenta Judice",
-            _html(dados), anexos)
+    msg_id = _enviar(token, destinatarios, master,
+                     f"Relatório Fiscal {mes_label} — Pimenta Judice",
+                     _html(dados), anexos)
+
+    # Link da pasta no Drive (Fiscal/NFe/Mês_Ano)
+    pasta_link = None
+    try:
+        from app.services.google_drive import link_subpasta
+        ano, mes = competencia[:4], int(competencia[5:7])
+        from app.services.nfse.emitter import _MESES_PT
+        pasta_link = link_subpasta("Fiscal", "NFe", f"{_MESES_PT[mes-1]}_{ano}")
+    except Exception:
+        pass
+
+    # Registra no histórico
+    log_row = RelatorioFiscalLog(
+        competencia=competencia, destinatarios=destinatarios, cc=master,
+        nf_qtd=dados["nf_qtd"], anexos=len(anexos),
+        gmail_message_id=msg_id, drive_pasta_link=pasta_link, status="enviado",
+    )
+    db.add(log_row)
+    db.commit()
 
     return {
         "enviado": True, "competencia": competencia,
         "destinatarios": destinatarios, "cc": master,
         "nf_qtd": dados["nf_qtd"], "anexos": len(anexos),
+        "gmail_message_id": msg_id,
     }

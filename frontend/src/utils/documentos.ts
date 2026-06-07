@@ -17,15 +17,22 @@ export function validaCPF(cpf: string): boolean {
   return true
 }
 
+export function soAlfanum(v: string): string {
+  return (v || '').replace(/[^0-9A-Za-z]/g, '').toUpperCase()
+}
+
+/** Valida CNPJ numérico OU alfanumérico (vigente a partir de 2026). */
 export function validaCNPJ(cnpj: string): boolean {
-  const c = soDigitos(cnpj)
-  if (c.length !== 14 || /^(\d)\1{13}$/.test(c)) return false
+  const c = soAlfanum(cnpj)
+  if (c.length !== 14 || /^(.)\1{13}$/.test(c)) return false
+  if (!/^[0-9A-Z]{12}\d{2}$/.test(c)) return false
+  const val = (ch: string) => ch.charCodeAt(0) - 48  // 0-9→0-9, A-Z→17-42
   const calc = (len: number) => {
     const pesos = len === 12
       ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
       : [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
     let soma = 0
-    for (let i = 0; i < len; i++) soma += parseInt(c[i]) * pesos[i]
+    for (let i = 0; i < len; i++) soma += val(c[i]) * pesos[i]
     const r = soma % 11
     return r < 2 ? 0 : 11 - r
   }
@@ -34,26 +41,28 @@ export function validaCNPJ(cnpj: string): boolean {
 
 /** Valida CPF (11) ou CNPJ (14). Retorna {valido, tipo}. */
 export function validaDocumento(doc: string): { valido: boolean; tipo: 'CPF' | 'CNPJ' | '' } {
-  const d = soDigitos(doc)
-  if (d.length === 11) return { valido: validaCPF(d), tipo: 'CPF' }
-  if (d.length === 14) return { valido: validaCNPJ(d), tipo: 'CNPJ' }
+  const a = soAlfanum(doc)
+  if (a.length === 11 && /^\d+$/.test(a)) return { valido: validaCPF(a), tipo: 'CPF' }
+  if (a.length === 14) return { valido: validaCNPJ(a), tipo: 'CNPJ' }
   return { valido: false, tipo: '' }
 }
 
-/** Máscara dinâmica: CPF ###.###.###-## ou CNPJ ##.###.###/####-## */
+/** Máscara dinâmica: CPF ###.###.###-## ou CNPJ ##.###.###/####-## (aceita letras no CNPJ). */
 export function mascaraDocumento(v: string): string {
-  const d = soDigitos(v).slice(0, 14)
-  if (d.length <= 11) {
-    return d
+  const a = soAlfanum(v).slice(0, 14)
+  // CPF só com 11 dígitos numéricos
+  if (a.length <= 11 && /^\d*$/.test(a)) {
+    return a
       .replace(/(\d{3})(\d)/, '$1.$2')
       .replace(/(\d{3})(\d)/, '$1.$2')
       .replace(/(\d{3})(\d{1,2})$/, '$1-$2')
   }
-  return d
-    .replace(/(\d{2})(\d)/, '$1.$2')
-    .replace(/(\d{3})(\d)/, '$1.$2')
-    .replace(/(\d{3})(\d)/, '$1/$2')
-    .replace(/(\d{4})(\d{1,2})$/, '$1-$2')
+  // CNPJ (numérico ou alfanumérico): ##.###.###/####-##
+  return a
+    .replace(/^([0-9A-Z]{2})([0-9A-Z])/, '$1.$2')
+    .replace(/^([0-9A-Z]{2}\.[0-9A-Z]{3})([0-9A-Z])/, '$1.$2')
+    .replace(/^([0-9A-Z]{2}\.[0-9A-Z]{3}\.[0-9A-Z]{3})([0-9A-Z])/, '$1/$2')
+    .replace(/(\/[0-9A-Z]{4})(\d{1,2})$/, '$1-$2')
 }
 
 /** Máscara de telefone: (##) #####-#### */

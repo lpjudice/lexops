@@ -462,6 +462,28 @@ def upload_arquivo(
         return None
 
 
+def link_subpasta(nome_cliente: str, subfolder: str, sub_subfolder: str | None = None) -> str | None:
+    """Retorna o link (webViewLink) de uma subpasta no Drive, criando se preciso."""
+    tokens = _load_tokens()
+    if not tokens:
+        return None
+    def _do(tkns):
+        h = _auth_headers(tkns)
+        cid = _resolver_pasta_cliente(nome_cliente, h)
+        fid = _get_or_create_subfolder(subfolder, cid, h)
+        if sub_subfolder:
+            fid = _get_or_create_subfolder(sub_subfolder, fid, h)
+        return f"https://drive.google.com/drive/folders/{fid}"
+    try:
+        return _do(tokens)
+    except Exception:
+        try:
+            return _do(_refresh(tokens))
+        except Exception as exc:
+            logger.warning("Falha ao obter link de subpasta: %s", exc)
+            return None
+
+
 def ensure_cliente_folder(nome_cliente: str) -> str | None:
     """Creates or reuses the root Drive folder for a client."""
     tokens = _load_tokens()

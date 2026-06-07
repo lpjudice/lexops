@@ -225,6 +225,26 @@ def gerar_danfse_pdf(xml_nfse: str, chave_acesso: str) -> bytes:
         f'www.nfse.gov.br/consultapublica</font></a>',
         st_sub,
     ))
+    elems.append(Spacer(1, 5 * mm))
+
+    # Bloco de pagamento
+    st_paglabel = ParagraphStyle("pl", fontName="Helvetica-Bold", fontSize=9, textColor=teal, leading=12)
+    st_pag = ParagraphStyle("pg", fontName="Helvetica", fontSize=9, textColor=dark, leading=13)
+    pag = Table([
+        [Paragraph("PAGAMENTO", st_paglabel)],
+        [Paragraph("<b>PIX</b> (chave CNPJ): 10.901.611/0001-64", st_pag)],
+        [Paragraph("<b>TED/Transferência:</b> Banco Inter (077) · Agência 0001 · "
+                   "Conta corrente 1812719-3", st_pag)],
+        [Paragraph("Favorecido: Pimenta Judice Advogados Associados", st_pag)],
+    ], colWidths=[180 * mm])
+    pag.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.5, teal),
+        ("BACKGROUND", (0, 0), (0, 0), colors.HexColor("#ecfdf5")),
+        ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+    ]))
+    elems.append(pag)
+
     elems.append(Spacer(1, 4 * mm))
     elems.append(Paragraph(
         "Documento auxiliar gerado pelo LexOps a partir do XML oficial da NFS-e. "

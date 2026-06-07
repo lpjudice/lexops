@@ -40,6 +40,12 @@ export default function ConfigFiscalPage() {
   const [salvou, setSalvou] = useState(false)
   const [enviandoRel, setEnviandoRel] = useState(false)
   const [relMsg, setRelMsg] = useState<string | null>(null)
+  const [showHist, setShowHist] = useState(false)
+  const { data: hist } = useQuery({
+    queryKey: ['relatorio-historico', showHist],
+    queryFn: fiscalApi.historicoRelatorios,
+    enabled: showHist,
+  })
 
   useEffect(() => { if (data) setForm(data) }, [data])
 
@@ -175,7 +181,53 @@ export default function ConfigFiscalPage() {
           </button>
           {relMsg && <span className={cs.fieldHint}>{relMsg}</span>}
         </div>
+        <div style={{ marginTop: 10 }}>
+          <button type="button" className={cs.colapsarBtn} onClick={() => setShowHist(true)}>
+            📜 Ver relatórios já enviados
+          </button>
+        </div>
       </Secao>
+
+      {showHist && (
+        <div className={cs.overlay} onClick={(e) => e.target === e.currentTarget && setShowHist(false)}>
+          <div className={cs.modal} style={{ maxWidth: 720 }}>
+            <button className={cs.closeBtn} onClick={() => setShowHist(false)}>✕</button>
+            <div className={cs.modalTitle}>📜 Relatórios enviados ao contador</div>
+            {hist?.proximo_envio ? (
+              <div className={cs.prefillBanner}>
+                📅 Próximo envio automático: <b>{hist.proximo_envio.data}</b> (ref. {hist.proximo_envio.competencia_ref})
+                {hist.proximo_envio.destinatarios?.length ? ` → ${hist.proximo_envio.destinatarios.join(', ')}` : ''}
+              </div>
+            ) : (
+              <div className={cs.erroBox} style={{ marginBottom: 12 }}>Envio automático desligado ou sem dia configurado.</div>
+            )}
+            {!hist?.historico?.length ? (
+              <p className={cs.fieldHint}>Nenhum relatório enviado ainda.</p>
+            ) : (
+              <table className={styles.table}>
+                <thead><tr><th>Competência</th><th>Enviado em</th><th>Destinatários</th><th>NFs</th><th>Links</th></tr></thead>
+                <tbody>
+                  {hist.historico.map((r: any) => (
+                    <tr key={r.id}>
+                      <td>{r.competencia}</td>
+                      <td>{r.enviado_em ? new Date(r.enviado_em).toLocaleString('pt-BR') : '—'}</td>
+                      <td style={{ fontSize: 12 }}>{(r.destinatarios || []).join(', ')}{r.cc ? ` (cc ${r.cc})` : ''}</td>
+                      <td>{r.nf_qtd} · {r.anexos} anexo(s)</td>
+                      <td style={{ display: 'flex', gap: 8 }}>
+                        {r.gmail_link && <a href={r.gmail_link} target="_blank" rel="noreferrer" style={{ color: '#b45309' }}>✉️ E-mail</a>}
+                        {r.drive_pasta_link && <a href={r.drive_pasta_link} target="_blank" rel="noreferrer" style={{ color: 'var(--teal)' }}>📁 Pasta</a>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <div className={cs.modalFooter}>
+              <button className={cs.btnSecondary} onClick={() => setShowHist(false)}>Fechar</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* F. Numeração + DANFSe */}
       <Secao titulo="🔢 Numeração & DANFSe">

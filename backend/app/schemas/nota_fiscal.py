@@ -107,6 +107,7 @@ class NotaFiscalOut(BaseModel):
 
     status: str
     ambiente: Optional[int] = 1
+    retroativa: Optional[bool] = False
     erro_mensagem: Optional[str]
     xml_nfse: Optional[str]
 
