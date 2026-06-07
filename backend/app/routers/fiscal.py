@@ -88,7 +88,14 @@ def _descricao_auto(honorario: Honorario, tipo_servico: str = "processo") -> str
 
 
 def _nf_to_out(nf: NotaFiscal) -> NotaFiscalOut:
-    return NotaFiscalOut.model_validate(nf)
+    import os
+    out = NotaFiscalOut.model_validate(nf)
+    out.tem_pdf = bool(nf.pdf_path and os.path.exists(nf.pdf_path))
+    if nf.chave_acesso:
+        out.consulta_publica_url = (
+            f"https://www.nfse.gov.br/consultapublica?chaveAcesso={nf.chave_acesso}"
+        )
+    return out
 
 
 # ─── CRUD de notas ────────────────────────────────────────────────────────────
@@ -257,10 +264,30 @@ def emitir_nota(
         honorario_id=body.honorario_id,
         recebimento_id=body.recebimento_id,
         contrato_id=body.contrato_id,
+        cliente_id=body.cliente_id,
+        processo_id=body.processo_id,
     )
     db.add(nf)
     db.commit()
     db.refresh(nf)
+
+    # Sucesso: tenta baixar e salvar o PDF da DANFSe
+    if resultado.sucesso and nf.chave_acesso:
+        try:
+            from app.services.nfse.emitter import baixar_danfse
+            pdf = baixar_danfse(nf.chave_acesso)
+            if pdf:
+                import os
+                pasta = "/app/backend/uploads/nfse"
+                os.makedirs(pasta, exist_ok=True)
+                caminho = f"{pasta}/{nf.chave_acesso}.pdf"
+                with open(caminho, "wb") as f:
+                    f.write(pdf)
+                nf.pdf_path = caminho
+                db.commit()
+                db.refresh(nf)
+        except Exception as exc:
+            log.warning("Falha ao baixar DANFSe: %s", exc)
 
     if not resultado.sucesso:
         log.error("Falha na emissão NFS-e: [%s] %s", resultado.erro_codigo, resultado.erro_mensagem)
@@ -284,16 +311,59 @@ def historico_nfs_cliente(
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente:
         raise HTTPException(404, "Cliente não encontrado")
+    from sqlalchemy import or_
     cpf_cnpj = _apenas_digitos(cliente.cpf_cnpj or "")
-    if not cpf_cnpj:
-        return []
+    filtros = [NotaFiscal.cliente_id == cliente_id]
+    if cpf_cnpj:
+        filtros.append(NotaFiscal.tomador_cpf_cnpj == cpf_cnpj)
     notas = (
         db.query(NotaFiscal)
-        .filter(NotaFiscal.tomador_cpf_cnpj == cpf_cnpj)
+        .filter(or_(*filtros))
         .order_by(NotaFiscal.created_at.desc())
         .all()
     )
     return [NotaFiscalResumo.model_validate(n) for n in notas]
+
+
+@router.get("/notas/{nf_id}/danfse")
+def baixar_danfse_pdf(
+    nf_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Retorna o PDF da DANFSe. Baixa do gov se ainda não estiver em cache."""
+    import os
+    from fastapi.responses import FileResponse
+    from app.services.nfse.emitter import baixar_danfse
+
+    nf = db.query(NotaFiscal).filter(NotaFiscal.id == nf_id).first()
+    if not nf:
+        raise HTTPException(404, "Nota fiscal não encontrada")
+    if not nf.chave_acesso:
+        raise HTTPException(400, "NFS-e sem chave de acesso")
+
+    # Cache em disco
+    if not (nf.pdf_path and os.path.exists(nf.pdf_path)):
+        pdf = baixar_danfse(nf.chave_acesso)
+        if not pdf:
+            raise HTTPException(
+                503,
+                "DANFSe ainda não disponível no portal nacional "
+                "(notas de homologação não geram PDF público).",
+            )
+        pasta = "/app/backend/uploads/nfse"
+        os.makedirs(pasta, exist_ok=True)
+        caminho = f"{pasta}/{nf.chave_acesso}.pdf"
+        with open(caminho, "wb") as f:
+            f.write(pdf)
+        nf.pdf_path = caminho
+        db.commit()
+
+    return FileResponse(
+        nf.pdf_path,
+        media_type="application/pdf",
+        filename=f"NFSe_{nf.numero_nfse or nf.chave_acesso}.pdf",
+    )
 
 
 @router.post("/notas/{nf_id}/cancelar", response_model=NotaFiscalOut)
@@ -337,24 +407,33 @@ def _apenas_digitos(v: str) -> str:
 
 
 def _atualizar_cliente_com_dados_nf(db: Session, body: EmitirNFSeIn) -> None:
-    """Se o tomador já existe como cliente, preenche campos em branco com os dados da NF."""
-    cpf_cnpj = _apenas_digitos(body.tomador_cpf_cnpj)
-    if not cpf_cnpj:
-        return
-    cliente = db.query(Cliente).filter(
-        Cliente.cpf_cnpj.ilike(f"%{cpf_cnpj}%")
-    ).first()
+    """Preenche/atualiza o cadastro do cliente com os dados informados na NF.
+
+    Prioriza o cliente_id (vínculo explícito feito na tela); se ausente, tenta
+    achar por CPF/CNPJ. Preenche campos em branco — cpf/cnpj, telefone, email.
+    """
+    cliente = None
+    if body.cliente_id:
+        cliente = db.query(Cliente).filter(Cliente.id == body.cliente_id).first()
+    if cliente is None:
+        cpf_cnpj = _apenas_digitos(body.tomador_cpf_cnpj)
+        if cpf_cnpj:
+            cliente = db.query(Cliente).filter(
+                Cliente.cpf_cnpj.ilike(f"%{cpf_cnpj}%")
+            ).first()
     if not cliente:
         return
+
+    cpf_cnpj = _apenas_digitos(body.tomador_cpf_cnpj)
     atualizado = False
-    if not cliente.email and body.tomador_email:
-        cliente.email = body.tomador_email
+    if not _apenas_digitos(cliente.cpf_cnpj or "") and cpf_cnpj:
+        cliente.cpf_cnpj = cpf_cnpj
         atualizado = True
-    if not cliente.telefone and body.tomador_telefone:
+    if not (cliente.telefone or "").strip() and body.tomador_telefone:
         cliente.telefone = body.tomador_telefone
         atualizado = True
-    if not cliente.cpf_cnpj and cpf_cnpj:
-        cliente.cpf_cnpj = cpf_cnpj
+    if not (cliente.email or "").strip() and body.tomador_email:
+        cliente.email = body.tomador_email
         atualizado = True
     if atualizado:
         db.commit()

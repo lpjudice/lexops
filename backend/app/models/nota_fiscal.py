@@ -64,6 +64,9 @@ class NotaFiscal(Base):
     regime_tributario: Mapped[str] = mapped_column(String(2), nullable=False, server_default="1")
     iss_retido: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
     contrato_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    cliente_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    processo_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    pdf_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
 
     # ── Status ────────────────────────────────────────────────────────────
     # rascunho | emitida | cancelada | erro

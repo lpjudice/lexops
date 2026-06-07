@@ -6,6 +6,7 @@ import type { NotaFiscalOut, EmitirNFSeIn, StatusNF } from '../api/fiscal'
 import { clientesApi } from '../api/clientes'
 import type { Cliente } from '../api/clientes'
 import { contratosApi } from '../api/contratos'
+import { processosApi } from '../api/processos'
 import styles from './Page.module.css'
 import cs from './FiscalPage.module.css'
 
@@ -281,6 +282,13 @@ function EmissaoModal({
     enabled: !!clienteSelecionado,
   })
 
+  // Processos do cliente selecionado (para vincular)
+  const { data: processos = [] } = useQuery({
+    queryKey: ['processos-cliente', clienteSelecionado?.id],
+    queryFn: () => processosApi.listar({ cliente_id: clienteSelecionado!.id }),
+    enabled: !!clienteSelecionado,
+  })
+
   const qc = useQueryClient()
   const mutation = useMutation({
     mutationFn: fiscalApi.emitir,
@@ -308,13 +316,14 @@ function EmissaoModal({
     if (c) {
       setForm((f) => ({
         ...f,
+        cliente_id: c.id,
         tomador_nome: c.nome,
         tomador_cpf_cnpj: (c.cpf_cnpj || '').replace(/\D/g, ''),
         tomador_email: c.email || f.tomador_email,
         tomador_telefone: (c.telefone || '').replace(/\D/g, '') || f.tomador_telefone,
       }))
     } else {
-      set('tomador_nome', nome)
+      setForm((f) => ({ ...f, cliente_id: undefined, tomador_nome: nome }))
     }
   }
 
@@ -439,6 +448,52 @@ function EmissaoModal({
                 ))}
               </div>
             </div>
+          )}
+
+          {/* ── Vínculos (processo / contrato) ──────────────────────── */}
+          {clienteSelecionado && (processos.length > 0 || contratos.length > 0) && (
+            <>
+              {processos.length > 0 && (
+                <div>
+                  <label className={cs.formLabel}>Vincular a Processo (opcional)</label>
+                  <select className={cs.input}
+                    value={form.processo_id ?? ''}
+                    onChange={(e) => {
+                      const pid = e.target.value || undefined
+                      set('processo_id', pid)
+                      const p = processos.find((x) => x.id === pid)
+                      if (p) set('descricao_servico',
+                        `Honorários advocatícios referentes ao Processo nº ${p.numero_cnj} — cliente ${form.tomador_nome}`)
+                    }}>
+                    <option value="">— Nenhum —</option>
+                    {processos.map((p) => (
+                      <option key={p.id} value={p.id}>{p.numero_cnj}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {contratos.length > 0 && (
+                <div>
+                  <label className={cs.formLabel}>Vincular a Contrato (opcional)</label>
+                  <select className={cs.input}
+                    value={form.contrato_id ?? ''}
+                    onChange={(e) => {
+                      const cid = e.target.value || undefined
+                      const ct = contratos.find((x) => x.id === cid)
+                      if (ct) aplicarContrato(ct)
+                      else set('contrato_id', undefined)
+                    }}>
+                    <option value="">— Nenhum —</option>
+                    {contratos.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.descricao || (c as any).objeto_texto_livre || 'Contrato'}
+                        {(c as any).valor_honorarios_num != null ? ` — ${fmtBRL((c as any).valor_honorarios_num)}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </>
           )}
 
           {/* ── Serviço ─────────────────────────────────────────────── */}
@@ -620,11 +675,26 @@ function EmissaoModal({
 function DetalheModal({ nf, onClose }: { nf: NotaFiscalOut; onClose: () => void }) {
   const [motivo, setMotivo] = useState('')
   const [confirmando, setConfirmando] = useState(false)
+  const [erroPdf, setErroPdf] = useState<string | null>(null)
   const qc = useQueryClient()
   const cancelMut = useMutation({
     mutationFn: (m: string) => fiscalApi.cancelar(nf.id, m),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['notas-fiscais'] }); onClose() },
   })
+
+  async function baixarPdf() {
+    setErroPdf(null)
+    try {
+      const blob = await fiscalApi.baixarDanfse(nf.id)
+      const url = URL.createObjectURL(blob as Blob)
+      window.open(url, '_blank')
+    } catch (err: any) {
+      const msg = err?.response?.status === 503
+        ? 'DANFSe ainda não disponível (notas de homologação não geram PDF público).'
+        : 'Não foi possível baixar o PDF.'
+      setErroPdf(msg)
+    }
+  }
 
   return (
     <div className={cs.overlay} onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -667,6 +737,22 @@ function DetalheModal({ nf, onClose }: { nf: NotaFiscalOut; onClose: () => void 
             <pre className={cs.xmlBlock}>{nf.xml_nfse.slice(0, 2000)}</pre></>
           )}
         </div>
+
+        {nf.status === 'emitida' && (
+          <div style={{ marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className={cs.btnSecondary} onClick={() => baixarPdf()}>
+              📄 Baixar DANFSe (PDF)
+            </button>
+            {nf.consulta_publica_url && (
+              <a className={cs.btnSecondary} href={nf.consulta_publica_url}
+                target="_blank" rel="noopener noreferrer"
+                style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>
+                🔗 Consulta pública
+              </a>
+            )}
+          </div>
+        )}
+        {erroPdf && <div className={cs.erroBox} style={{ marginTop: 8 }}>⚠️ {erroPdf}</div>}
 
         {nf.status === 'emitida' && (
           <div style={{ marginTop: 16 }}>

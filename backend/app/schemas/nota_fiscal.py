@@ -61,10 +61,12 @@ class EmitirNFSeIn(BaseModel):
     # Intermediário
     intermediario: Optional[IntermediarioIn] = None
 
-    # Vínculo financeiro
+    # Vínculo financeiro / cadastros
     honorario_id: Optional[uuid.UUID] = None
     recebimento_id: Optional[uuid.UUID] = None
     contrato_id: Optional[uuid.UUID] = None
+    cliente_id: Optional[uuid.UUID] = None
+    processo_id: Optional[uuid.UUID] = None
 
     # Série (padrão "1")
     serie: str = "1"
@@ -107,6 +109,10 @@ class NotaFiscalOut(BaseModel):
     honorario_id: Optional[uuid.UUID]
     recebimento_id: Optional[uuid.UUID]
     contrato_id: Optional[uuid.UUID]
+    cliente_id: Optional[uuid.UUID]
+    processo_id: Optional[uuid.UUID]
+    tem_pdf: bool = False
+    consulta_publica_url: Optional[str] = None
 
     created_at: datetime
     updated_at: datetime

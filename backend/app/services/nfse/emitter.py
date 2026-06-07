@@ -209,6 +209,29 @@ def _montar_xml_cancelamento(chave_acesso: str, motivo: str) -> bytes:
     return etree.tostring(root, xml_declaration=True, encoding="UTF-8")
 
 
+# ─── DANFSe (PDF) ────────────────────────────────────────────────────────────
+
+def baixar_danfse(chave_acesso: str) -> Optional[bytes]:
+    """Baixa o PDF da DANFSe pela chave de acesso. Tenta Sefin e ADN."""
+    paths = [
+        ("sefin", f"danfse/{chave_acesso}"),
+        ("adn",   f"danfse/{chave_acesso}"),
+        ("adn",   f"DANFSE/{chave_acesso}"),
+    ]
+    for alvo, path in paths:
+        try:
+            client = get_sefin_client() if alvo == "sefin" else get_adn_client()
+            with client:
+                resp = client.get(path, headers={"Accept": "application/pdf"})
+            if resp.status_code == 200 and resp.content[:4] == b"%PDF":
+                return resp.content
+            log.warning("DANFSe %s/%s: status %s ct=%s",
+                        alvo, path, resp.status_code, resp.headers.get("content-type"))
+        except httpx.RequestError as exc:
+            log.warning("DANFSe %s erro: %s", alvo, exc)
+    return None
+
+
 # ─── Parâmetros municipais (ADN) ─────────────────────────────────────────────
 
 def consultar_parametros_municipio(cod_municipio: str = "3205309") -> Optional[dict]:

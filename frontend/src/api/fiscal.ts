@@ -21,6 +21,8 @@ export interface EmitirNFSeIn {
   reg_apuracao_sn?: string
   iss_retido?: boolean
   contrato_id?: string
+  cliente_id?: string
+  processo_id?: string
   competencia: string            // YYYY-MM
   tomador_cpf_cnpj: string
   tomador_nome: string
@@ -79,6 +81,10 @@ export interface NotaFiscalOut {
   status: StatusNF
   erro_mensagem?: string
   xml_nfse?: string
+  tem_pdf?: boolean
+  consulta_publica_url?: string
+  cliente_id?: string
+  processo_id?: string
   honorario_id?: string
   recebimento_id?: string
   created_at: string
@@ -126,6 +132,11 @@ export const fiscalApi = {
 
   parametrosMunicipais: () =>
     api.get('/fiscal/parametros-municipais').then((r) => r.data),
+
+  danfseUrl: (id: string) => `/fiscal/notas/${id}/danfse`,
+
+  baixarDanfse: (id: string) =>
+    api.get(`/fiscal/notas/${id}/danfse`, { responseType: 'blob' }).then((r) => r.data),
 
   historicoCliente: (clienteId: string) =>
     api.get<NotaFiscalResumo[]>(`/fiscal/clientes/${clienteId}/historico`).then((r) => r.data),
