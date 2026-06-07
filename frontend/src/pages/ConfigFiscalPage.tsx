@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { configFiscalApi } from '../api/configFiscal'
 import type { ConfigFiscal } from '../api/configFiscal'
+import { fiscalApi } from '../api/fiscal'
 import styles from './Page.module.css'
 import cs from './FiscalPage.module.css'
 
@@ -37,6 +38,8 @@ export default function ConfigFiscalPage() {
   const { data, isLoading } = useQuery({ queryKey: ['config-fiscal'], queryFn: configFiscalApi.obter })
   const [form, setForm] = useState<ConfigFiscal | null>(null)
   const [salvou, setSalvou] = useState(false)
+  const [enviandoRel, setEnviandoRel] = useState(false)
+  const [relMsg, setRelMsg] = useState<string | null>(null)
 
   useEffect(() => { if (data) setForm(data) }, [data])
 
@@ -157,6 +160,21 @@ export default function ConfigFiscalPage() {
         <label className={cs.checkboxLabel}>
           <input type="checkbox" checked={f.enviar_relatorio_auto} onChange={(e) => set('enviar_relatorio_auto', e.target.checked)} /> Enviar relatório mensal automaticamente
         </label>
+        <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button type="button" className={cs.btnSecondary} disabled={enviandoRel}
+            onClick={async () => {
+              setEnviandoRel(true); setRelMsg(null)
+              try {
+                const r = await fiscalApi.enviarRelatorio()
+                setRelMsg(`✓ Enviado (${r.nf_qtd} NF, ${r.anexos} anexo(s)) para ${r.destinatarios?.join(', ')}`)
+              } catch (e: any) {
+                setRelMsg('⚠️ ' + (e?.response?.data?.detail || 'Falha ao enviar'))
+              } finally { setEnviandoRel(false) }
+            }}>
+            {enviandoRel ? 'Enviando…' : '📧 Enviar relatório agora (mês anterior)'}
+          </button>
+          {relMsg && <span className={cs.fieldHint}>{relMsg}</span>}
+        </div>
       </Secao>
 
       {/* F. Numeração + DANFSe */}

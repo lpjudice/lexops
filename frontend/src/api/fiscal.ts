@@ -138,6 +138,12 @@ export const fiscalApi = {
 
   alertas: () => api.get('/fiscal/alertas').then((r) => r.data),
 
+  relatorioPreview: (mes?: string) =>
+    api.get('/fiscal/relatorio/preview', { params: mes ? { mes } : undefined }).then((r) => r.data),
+
+  enviarRelatorio: (mes?: string) =>
+    api.post('/fiscal/relatorio/enviar', null, { params: mes ? { mes } : undefined }).then((r) => r.data),
+
   danfseUrl: (id: string) => `/fiscal/notas/${id}/danfse`,
 
   baixarDanfse: (id: string) =>

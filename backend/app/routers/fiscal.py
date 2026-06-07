@@ -490,6 +490,42 @@ def alertas_fiscais(db: Session = Depends(get_db), _=Depends(get_current_user)):
     return {"alertas": gerar_alertas(rbt12)}
 
 
+@router.get("/relatorio/preview")
+def preview_relatorio(
+    mes: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Prévia do resumo do relatório (sem enviar)."""
+    from app.services.nfse.relatorio_contador import coletar_dados
+    from datetime import timedelta
+    competencia = mes
+    if not competencia:
+        hoje = datetime.now(tz=BRT).date()
+        ant = hoje.replace(day=1) - timedelta(days=1)
+        competencia = ant.strftime("%Y-%m")
+    d = coletar_dados(db, competencia)
+    return {
+        "competencia": competencia,
+        "nf_qtd": d["nf_qtd"], "nf_total": d["nf_total"],
+        "receb_total": d["receb_total"], "reemb_total": d["reemb_total"],
+    }
+
+
+@router.post("/relatorio/enviar")
+def enviar_relatorio_agora(
+    mes: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Envia o relatório ao contador agora (manual)."""
+    from app.services.nfse.relatorio_contador import enviar_relatorio
+    resultado = enviar_relatorio(db, mes)
+    if not resultado.get("enviado"):
+        raise HTTPException(422, detail=resultado.get("motivo", "Falha ao enviar"))
+    return resultado
+
+
 @router.get("/parametros-municipais")
 def parametros_municipais(_=Depends(get_current_user)):
     dados = consultar_parametros_municipio("3205309")

@@ -282,6 +282,29 @@ def _sync_diario2_gmail() -> None:
         logger.warning("Scheduler: falha na sincronização automática do Diário 2 Gmail: %s", exc)
 
 
+def _relatorio_fiscal_contador() -> None:
+    """Diariamente às 8h30 — envia o relatório fiscal se hoje == dia configurado."""
+    from datetime import datetime
+    try:
+        from app.database import SessionLocal
+        from app.models.config_fiscal import ConfigFiscal
+        from app.services.nfse.relatorio_contador import enviar_relatorio
+        db = SessionLocal()
+        try:
+            cfg = db.query(ConfigFiscal).filter(ConfigFiscal.id == 1).first()
+            if not cfg or not cfg.enviar_relatorio_auto:
+                return
+            dia = cfg.dia_envio_relatorio or 1
+            if datetime.now().day != dia:
+                return
+            res = enviar_relatorio(db)  # mês anterior
+            logger.info("Relatório fiscal ao contador: %s", res)
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.warning("Scheduler: relatório fiscal falhou: %s", exc)
+
+
 def start_scheduler() -> None:
     if scheduler.running:
         logger.info("Scheduler já estava ativo")
@@ -352,6 +375,13 @@ def start_scheduler() -> None:
         _enviar_lembretes_reembolso,
         trigger=CronTrigger(hour=9, minute=10),
         id="lembretes_reembolso",
+        replace_existing=True,
+    )
+    # Relatório fiscal ao contador — verifica diariamente às 8h; envia no dia configurado
+    scheduler.add_job(
+        _relatorio_fiscal_contador,
+        trigger=CronTrigger(hour=8, minute=30, timezone="America/Sao_Paulo"),
+        id="relatorio_fiscal_contador",
         replace_existing=True,
     )
     scheduler.start()
