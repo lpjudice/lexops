@@ -74,8 +74,8 @@ export default function VisaoFiscalPage() {
             <div className={styles.tableCard} style={{ marginBottom: 16 }}>
               <table className={styles.table}>
                 <thead><tr>
-                  <th>Tributo (dentro do DAS)</th>
-                  <th style={{ textAlign: 'right' }}>% do DAS</th>
+                  <th>Tributo</th>
+                  <th style={{ textAlign: 'right' }}>Carga efetiva</th>
                   <th style={{ textAlign: 'right' }}>Valor estimado</th>
                 </tr></thead>
                 <tbody>
@@ -89,12 +89,22 @@ export default function VisaoFiscalPage() {
                     </tr>
                   ))}
                   <tr style={{ fontWeight: 700 }}>
-                    <td>Total DAS</td>
-                    <td style={{ textAlign: 'right' }}>100%</td>
+                    <td>Total DAS (Simples)</td>
+                    <td style={{ textAlign: 'right' }}>{v.carga_tributaria_pct}%</td>
                     <td style={{ textAlign: 'right', color: '#b45309' }}>{fmtBRL(v.das_estimado)}</td>
                   </tr>
+                  {v.carga_media_pct != null && (
+                    <tr style={{ fontWeight: 700, background: '#fffbeb' }}>
+                      <td>Carga tributária média (Lei 12.741 / IBPT)</td>
+                      <td style={{ textAlign: 'right', color: '#b45309' }}>{v.carga_media_pct}%</td>
+                      <td style={{ textAlign: 'right', color: '#b45309' }}>{fmtBRL(v.carga_media_valor)}</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
+              <p className={cs.fieldHint} style={{ marginTop: 6 }}>
+                ISS pela alíquota do município; federais rateados pelo Anexo IV. A carga média (16,33%) é a referência IBPT que vai na nota.
+              </p>
             </div>
           )}
 

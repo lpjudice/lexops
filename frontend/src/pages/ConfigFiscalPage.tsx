@@ -113,8 +113,17 @@ export default function ConfigFiscalPage() {
             </select>
           </Campo>
           <Campo label="Anexo do Simples"><input className={inp} value={f.anexo_simples} onChange={(e) => set('anexo_simples', e.target.value)} /></Campo>
-          <Campo label="RBT12 — receita bruta 12 meses (R$)" hint={f.aliquota_simples_sugerida ? `Sugerido: ${f.aliquota_simples_sugerida}% — ${f.faixa_simples}` : 'Informe para o sistema sugerir a alíquota'}>
-            <input className={inp} type="number" step="0.01" value={f.rbt12 ?? ''} onChange={(e) => set('rbt12', e.target.value ? parseFloat(e.target.value) : undefined)} />
+          <Campo label="RBT12 — receita bruta 12 meses (R$)"
+            hint={f.rbt12_acumulado_12m != null
+              ? `Acumulado no sistema (12m): R$ ${f.rbt12_acumulado_12m.toLocaleString('pt-BR', {minimumFractionDigits:2})}${f.aliquota_pelo_acumulado ? ` → alíquota ${f.aliquota_pelo_acumulado}%` : ''}`
+              : 'Informe para o sistema sugerir a alíquota'}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input className={inp} type="number" step="0.01" value={f.rbt12 ?? ''} onChange={(e) => set('rbt12', e.target.value ? parseFloat(e.target.value) : undefined)} />
+              {f.rbt12_acumulado_12m != null && (
+                <button type="button" className={cs.templateBtn}
+                  onClick={() => set('rbt12', f.rbt12_acumulado_12m!)}>usar acumulado</button>
+              )}
+            </div>
           </Campo>
           <Campo label="Alíquota efetiva do Simples (%) — pTotTribSN" hint="Confirme com o contador. O sistema sugere pela RBT12.">
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -263,8 +272,11 @@ export default function ConfigFiscalPage() {
       <Secao titulo="🔢 Numeração & DANFSe">
         <div style={GRID2}>
           <Campo label="Série padrão da DPS"><input className={inp} value={f.serie_padrao} onChange={(e) => set('serie_padrao', e.target.value)} /></Campo>
-          <Campo label="Prefixo do nº na DANFSe" hint="Ex.: PJ150 → a nota 17 aparece como PJ15017 (cosmético, não altera o nº oficial)">
+          <Campo label="Prefixo do nº na DANFSe" hint="Ex.: PJ150 → a nota 17 aparece como PJ150017 (cosmético, não altera o nº oficial)">
             <input className={inp} value={f.danfse_prefixo_numero ?? ''} onChange={(e) => set('danfse_prefixo_numero', e.target.value)} placeholder="PJ150" />
+          </Campo>
+          <Campo label="Carga tributária média % (Lei 12.741 / IBPT)" hint="Advocacia ≈ 16,33%. Aparece na DANFSe e na Visão Fiscal.">
+            <input className={inp} type="number" step="0.01" value={f.carga_media_pct ?? 16.33} onChange={(e) => set('carga_media_pct', parseFloat(e.target.value) || 0)} />
           </Campo>
         </div>
         <Campo label="Texto de rodapé da DANFSe"><input className={inp} value={f.rodape_danfse ?? ''} onChange={(e) => set('rodape_danfse', e.target.value)} /></Campo>

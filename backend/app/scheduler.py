@@ -283,11 +283,14 @@ def _sync_diario2_gmail() -> None:
 
 
 def _relatorio_fiscal_contador() -> None:
-    """Diariamente às 8h30 — envia o relatório fiscal se hoje == dia configurado."""
-    from datetime import datetime
+    """Diariamente às 8h30 — envia o relatório fiscal se hoje == dia configurado.
+    Idempotente: não reenvia se já houver log da competência (evita duplicidade).
+    """
+    from datetime import datetime, timedelta
     try:
         from app.database import SessionLocal
         from app.models.config_fiscal import ConfigFiscal
+        from app.models.relatorio_fiscal_log import RelatorioFiscalLog
         from app.services.nfse.relatorio_contador import enviar_relatorio
         db = SessionLocal()
         try:
@@ -297,12 +300,57 @@ def _relatorio_fiscal_contador() -> None:
             dia = cfg.dia_envio_relatorio or 1
             if datetime.now().day != dia:
                 return
-            res = enviar_relatorio(db)  # mês anterior
+            # Competência = mês anterior
+            hoje = datetime.now().date()
+            comp = (hoje.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+            # DEDUP: já enviado com sucesso para esta competência?
+            ja = (db.query(RelatorioFiscalLog)
+                  .filter(RelatorioFiscalLog.competencia == comp,
+                          RelatorioFiscalLog.status == "enviado").first())
+            if ja:
+                logger.info("Relatório %s já enviado em %s — pulando", comp, ja.enviado_em)
+                return
+            res = enviar_relatorio(db, comp)
             logger.info("Relatório fiscal ao contador: %s", res)
+            if not res.get("enviado"):
+                _alerta_falha_relatorio(db, cfg, comp, res.get("motivo", "desconhecido"))
         finally:
             db.close()
     except Exception as exc:
         logger.warning("Scheduler: relatório fiscal falhou: %s", exc)
+        try:
+            from app.database import SessionLocal
+            from app.models.config_fiscal import ConfigFiscal
+            db2 = SessionLocal()
+            _alerta_falha_relatorio(db2, db2.query(ConfigFiscal).get(1), "?", str(exc))
+            db2.close()
+        except Exception:
+            pass
+
+
+def _alerta_falha_relatorio(db, cfg, comp, motivo) -> None:
+    """Avisa a conta master que o envio do relatório falhou."""
+    try:
+        from app.models.relatorio_fiscal_log import RelatorioFiscalLog
+        db.add(RelatorioFiscalLog(competencia=comp or "?", status="erro", erro=str(motivo)[:500]))
+        db.commit()
+        from app.routers.reembolsos import _refresh_if_needed
+        import httpx, base64, json
+        import email.mime.text as mime_text
+        token = _refresh_if_needed()
+        master = (cfg.email_master if cfg else None) or "pj@pimentajudice.com.br"
+        if token and master:
+            msg = mime_text.MIMEText(
+                f"O envio automático do relatório fiscal ({comp}) FALHOU.\nMotivo: {motivo}\n\n"
+                f"Verifique o Config Fiscal e reenvie manualmente.", "plain", "utf-8")
+            msg["to"] = master; msg["from"] = "me"
+            msg["subject"] = f"[LexOps] ⚠️ Falha no relatório fiscal {comp}"
+            raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+            httpx.post("https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+                       headers={"Authorization": f"Bearer {token}"},
+                       content=json.dumps({"raw": raw}), timeout=30)
+    except Exception as exc:
+        logger.warning("Falha ao alertar erro de relatório: %s", exc)
 
 
 def start_scheduler() -> None:

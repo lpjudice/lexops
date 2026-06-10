@@ -67,6 +67,7 @@ class ConfigFiscalBase(BaseModel):
     # DANFSe
     rodape_danfse: Optional[str] = None
     danfse_prefixo_numero: str = ""
+    carga_media_pct: Decimal = Decimal("16.33")
 
 
 class ConfigFiscalOut(ConfigFiscalBase):
@@ -74,6 +75,8 @@ class ConfigFiscalOut(ConfigFiscalBase):
     # Sugestão calculada (não persiste) — preenchida pelo router
     aliquota_simples_sugerida: Optional[Decimal] = None
     faixa_simples: Optional[str] = None
+    rbt12_acumulado_12m: Optional[float] = None
+    aliquota_pelo_acumulado: Optional[float] = None
 
     model_config = {"from_attributes": True}
 

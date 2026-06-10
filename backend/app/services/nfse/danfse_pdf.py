@@ -59,13 +59,16 @@ def _fmt_dt(v: str) -> str:
         return v
 
 
-def gerar_danfse_pdf(xml_nfse: str, chave_acesso: str, prefixo_numero: str = "") -> bytes:
+def gerar_danfse_pdf(xml_nfse: str, chave_acesso: str, prefixo_numero: str = "",
+                     carga_media_pct: float = 16.33) -> bytes:
     """Recebe o XML da NFS-e e a chave; devolve os bytes do PDF."""
     root = etree.fromstring(xml_nfse.encode() if isinstance(xml_nfse, str) else xml_nfse)
 
     # Dados principais
     numero = _txt(root, "//n:nNFSe", "//nNFSe")
-    numero_exib = f"{prefixo_numero}{numero}" if prefixo_numero else numero
+    # Prefixo com zero-pad (ex.: PJ150 + 17 → PJ150017)
+    numero_exib = (f"{prefixo_numero}{str(numero).zfill(3)}"
+                   if prefixo_numero and numero else (numero or ""))
     dh_proc = _txt(root, "//n:dhProc", "//dhProc")
     cod_verif = chave_acesso
     # Emitente
@@ -214,7 +217,20 @@ def gerar_danfse_pdf(xml_nfse: str, chave_acesso: str, prefixo_numero: str = "")
         ("LEFTPADDING", (0, 0), (-1, -1), 6),
     ]))
     elems.append(val_t)
-    elems.append(Spacer(1, 6 * mm))
+    elems.append(Spacer(1, 3 * mm))
+
+    # Tributos totais aproximados (Lei 12.741/2012 — Lei da Transparência)
+    try:
+        base_trib = float(v_serv or v_liq or 0)
+    except Exception:
+        base_trib = 0.0
+    val_trib = base_trib * float(carga_media_pct) / 100
+    st_trib = ParagraphStyle("tr", fontName="Helvetica", fontSize=8, textColor=gray, leading=11)
+    elems.append(Paragraph(
+        f"Tributos totais incidentes (aproximado, Lei 12.741/2012): "
+        f"<b>{carga_media_pct:.2f}%</b> = {_fmt_moeda(val_trib)} — fonte IBPT.", st_trib,
+    ))
+    elems.append(Spacer(1, 4 * mm))
 
     # Chave de acesso + verificação
     elems.append(Paragraph("CHAVE DE ACESSO", st_label))

@@ -656,8 +656,15 @@ function EmissaoModal({
               <input type="checkbox" checked={form.iss_retido}
                 onChange={(e) => set('iss_retido', e.target.checked)} />
               ISS retido pelo tomador
-              <span className={cs.fieldHint} style={{ display: 'inline', marginLeft: 8 }}>
-                (marque quando o tomador PJ é responsável por reter e recolher o ISS)
+              <span title={
+                'O tomador geralmente RETÉM os tributos quando:\n'
+                + '• É órgão público (União, Estado, Município, autarquias)\n'
+                + '• É a fonte pagadora obrigada (ex.: serviços com retenção de ISS pela lei municipal)\n'
+                + '• Há contrato/CNPJ enquadrado em substituição tributária do ISS\n'
+                + '• IRRF/INSS/PIS/COFINS/CSLL: tomador PJ paga a PJ acima dos limites legais\n'
+                + 'Na dúvida, confirme com o contador. Pessoa física normalmente NÃO retém.'
+              } style={{ marginLeft: 8, cursor: 'help', color: 'var(--teal)', fontWeight: 700 }}>
+                ⓘ quando o tomador retém?
               </span>
             </label>
           </div>

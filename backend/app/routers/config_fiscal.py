@@ -45,17 +45,37 @@ def _get_or_create(db: Session) -> ConfigFiscal:
     return cfg
 
 
-def _to_out(cfg: ConfigFiscal) -> ConfigFiscalOut:
+def _rbt12_acumulado(db: Session) -> Decimal:
+    """Soma móvel dos últimos 12 meses de NFs emitidas (produção) — sugestão de RBT12."""
+    from datetime import date, timedelta
+    from app.models.nota_fiscal import NotaFiscal
+    inicio = (date.today().replace(day=1) - timedelta(days=365))
+    comp_ini = inicio.strftime("%Y-%m")
+    total = Decimal("0")
+    notas = (db.query(NotaFiscal)
+             .filter(NotaFiscal.status == "emitida", NotaFiscal.ambiente == 1,
+                     NotaFiscal.competencia >= comp_ini).all())
+    for n in notas:
+        total += Decimal(str(n.valor_servicos or 0))
+    return total.quantize(Decimal("0.01"))
+
+
+def _to_out(cfg: ConfigFiscal, db: Session | None = None) -> ConfigFiscalOut:
     out = ConfigFiscalOut.model_validate(cfg)
     sug, faixa = _sugerir_aliquota(Decimal(str(cfg.rbt12)) if cfg.rbt12 else None)
     out.aliquota_simples_sugerida = sug
     out.faixa_simples = faixa
+    if db is not None:
+        rbt = _rbt12_acumulado(db)
+        out.rbt12_acumulado_12m = float(rbt)
+        sug2, fx2 = _sugerir_aliquota(rbt)
+        out.aliquota_pelo_acumulado = float(sug2) if sug2 else None
     return out
 
 
 @router.get("", response_model=ConfigFiscalOut)
 def obter_config(db: Session = Depends(get_db), _=Depends(get_current_user)):
-    return _to_out(_get_or_create(db))
+    return _to_out(_get_or_create(db), db)
 
 
 @router.put("", response_model=ConfigFiscalOut)
@@ -73,4 +93,4 @@ def atualizar_config(
         setattr(cfg, campo, valor)
     db.commit()
     db.refresh(cfg)
-    return _to_out(cfg)
+    return _to_out(cfg, db)

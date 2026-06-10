@@ -303,7 +303,8 @@ def emitir_nota(
             if not pdf and (resultado.xml_nfse or nf.xml_nfse):
                 from app.services.nfse.danfse_pdf import gerar_danfse_pdf
                 pdf = gerar_danfse_pdf(resultado.xml_nfse or nf.xml_nfse, nf.chave_acesso,
-                                       (cfg.danfse_prefixo_numero if cfg else "") or "")
+                                       (cfg.danfse_prefixo_numero if cfg else "") or "",
+                                       float(cfg.carga_media_pct) if cfg and cfg.carga_media_pct else 16.33)
             if pdf:
                 import os
                 pasta = "/app/backend/uploads/nfse"
@@ -398,7 +399,8 @@ def baixar_danfse_pdf(
             from app.models.config_fiscal import ConfigFiscal
             _cfg = db.query(ConfigFiscal).filter(ConfigFiscal.id == 1).first()
             _pref = (_cfg.danfse_prefixo_numero if _cfg else "") or ""
-            pdf = gerar_danfse_pdf(nf.xml_nfse, nf.chave_acesso, _pref)
+            _carga = float(_cfg.carga_media_pct) if _cfg and _cfg.carga_media_pct else 16.33
+            pdf = gerar_danfse_pdf(nf.xml_nfse, nf.chave_acesso, _pref, _carga)
         except Exception as exc:
             log.error("Falha ao gerar DANFSe PDF: %s", exc)
     if not pdf:
@@ -494,11 +496,24 @@ def visao_fiscal(
     )
 
     aliq = Decimal(str(cfg.aliquota_efetiva_simples)) if cfg and cfg.aliquota_efetiva_simples else Decimal("0")
+    aliq_iss = Decimal(str(cfg.aliquota_iss)) if cfg and cfg.aliquota_iss else Decimal("0")
+    carga_media = Decimal(str(cfg.carga_media_pct)) if cfg and cfg.carga_media_pct else Decimal("16.33")
     rbt12 = Decimal(str(cfg.rbt12)) if cfg and cfg.rbt12 else None
     das = (receita * aliq / 100).quantize(Decimal("0.01"))
     faixa = faixa_de(rbt12) if rbt12 else 0
-    quebra = quebra_das(das, faixa) if das > 0 else {}
-    carga = (das / receita * 100).quantize(Decimal("0.01")) if receita > 0 else Decimal("0")
+
+    # CARGA TRIBUTÁRIA por tributo (efetivo sobre a receita), não composição do DAS:
+    #   ISS = alíquota ISS do município (ex.: 2%)
+    #   Federais = (alíq. efetiva do Simples − ISS) rateado pelas proporções federais do Anexo IV
+    rep = repart_pct(faixa)  # {IRPJ,CSLL,COFINS,PIS,ISS} em % do DAS
+    fed_keys = ["IRPJ", "CSLL", "COFINS", "PIS"]
+    soma_fed = sum(Decimal(str(rep[k])) for k in fed_keys) or Decimal("1")
+    aliq_fed = max(aliq - aliq_iss, Decimal("0"))
+    quebra_pct = {"ISS": aliq_iss}
+    for k in fed_keys:
+        quebra_pct[k] = (aliq_fed * Decimal(str(rep[k])) / soma_fed).quantize(Decimal("0.01"))
+    quebra = {k: (receita * p / 100).quantize(Decimal("0.01")) for k, p in quebra_pct.items()}
+    carga = aliq  # carga efetiva do DAS sobre a receita
 
     # Progresso até o limite da faixa atual
     limite = ANEXO_IV_FAIXAS[faixa][0]
@@ -521,16 +536,16 @@ def visao_fiscal(
         "aliquota_efetiva": float(aliq),
         "das_estimado": float(das),
         "quebra_tributos": {k: float(v) for k, v in quebra.items()},
-        # % EFETIVO sobre a receita (ex.: ISS = vISS/receita*100), não % do DAS
-        "quebra_tributos_pct": {
-            k: float((Decimal(str(v)) / receita * 100).quantize(Decimal("0.01"))) if receita > 0 else 0.0
-            for k, v in quebra.items()
-        },
+        # % efetivo de cada tributo sobre a receita (ISS = alíquota do município)
+        "quebra_tributos_pct": {k: float(p) for k, p in quebra_pct.items()},
         "progresso_faixa_pct": progresso,
         "reforma": reforma,
         "retencoes_sofridas": float(ret_total),
         "das_liquido_estimado": float(max(das - ret_total, Decimal("0"))),
         "carga_tributaria_pct": float(carga),
+        # Carga média total (IBPT / Lei 12.741) — informativa, vai na nota
+        "carga_media_pct": float(carga_media),
+        "carga_media_valor": float((receita * carga_media / 100).quantize(Decimal("0.01"))),
         "rbt12": float(rbt12) if rbt12 else None,
         "faixa_simples": faixa + 1 if rbt12 else None,
         "limite_faixa": float(ANEXO_IV_FAIXAS[faixa][0]) if rbt12 else None,
@@ -639,6 +654,31 @@ def marcar_pago(
         raise HTTPException(404, "Nota fiscal não encontrada")
     nf.pago = pago
     nf.data_pagamento = _date.today() if pago else None
+
+    # Reflete no Financeiro: se vinculada a honorário, cria/remove Recebimento
+    if nf.honorario_id:
+        from app.models.financeiro import Recebimento, Honorario
+        marca = f"[NF {nf.numero_nfse or nf.chave_acesso}]"
+        existente = (db.query(Recebimento)
+                     .filter(Recebimento.honorario_id == nf.honorario_id,
+                             Recebimento.observacao.like(f"%{marca}%")).first())
+        if pago and not existente:
+            db.add(Recebimento(
+                honorario_id=nf.honorario_id, valor=float(nf.valor_servicos),
+                data_recebimento=_date.today(), forma_pagamento="pix",
+                observacao=f"Pagamento da NFS-e {marca}",
+            ))
+        elif not pago and existente:
+            db.delete(existente)
+        # Atualiza status do honorário (pago/parcial)
+        hon = db.query(Honorario).filter(Honorario.id == nf.honorario_id).first()
+        if hon:
+            db.flush()
+            if hon.saldo_pendente <= 0:
+                hon.status = "pago"
+            elif hon.total_recebido > 0:
+                hon.status = "parcial"
+
     db.commit()
     db.refresh(nf)
     return _nf_to_out(nf)

@@ -559,6 +559,9 @@ def _run_migrations() -> None:
         conn.execute(text(
             "ALTER TABLE config_fiscal ADD COLUMN IF NOT EXISTS dfe_ultimo_nsu INTEGER DEFAULT 0"
         ))
+        conn.execute(text(
+            "ALTER TABLE config_fiscal ADD COLUMN IF NOT EXISTS carga_media_pct NUMERIC(5,2) DEFAULT 16.33"
+        ))
 
         # Tarefas: campos de período e email do responsável
         conn.execute(text(

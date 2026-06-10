@@ -113,6 +113,7 @@ def _nota_de_xml(root, chave: str, arquivo_b64: str) -> "object":
         cpf = t.xpath("./*[local-name()='CPF']/text()")
         toma_doc = (cnpj or cpf or [""])[0]
     vserv = _txt(root, "vServ") or "0"
+    desc = _txt(root, "xDescServ") or "Serviços prestados"
     xml_full = _dec(arquivo_b64).decode("utf-8", errors="replace")
 
     return NotaFiscal(
@@ -121,7 +122,7 @@ def _nota_de_xml(root, chave: str, arquivo_b64: str) -> "object":
         tomador_cpf_cnpj=so_digitos(toma_doc or "") or "00000000000",
         tomador_nome=toma_nome or "—",
         cod_tributacao_nacional="171401",
-        descricao_servico="(importada via DFe do governo)",
+        descricao_servico=desc,
         valor_servicos=float(vserv), status="emitida", ambiente=1,
         xml_nfse=xml_full, origem="dfe",
     )

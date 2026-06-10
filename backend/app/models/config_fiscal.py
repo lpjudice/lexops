@@ -65,6 +65,8 @@ class ConfigFiscal(Base):
     # Prefixo do número exibido na DANFSe (cosmético): 17 → "PJ150" + "17" = PJ15017
     danfse_prefixo_numero: Mapped[str] = mapped_column(String(20), default="", server_default="")
     dfe_ultimo_nsu: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # Carga tributária média (IBPT / Lei 12.741) — advocacia ~16,33%
+    carga_media_pct: Mapped[float] = mapped_column(Numeric(5, 2), default=16.33, server_default="16.33")
 
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

@@ -977,6 +977,8 @@ export default function ClienteDetailPage() {
                   <th style={{ padding: '8px 12px', textAlign: 'left' }}>Emissão</th>
                   <th style={{ padding: '8px 12px', textAlign: 'right' }}>Valor</th>
                   <th style={{ padding: '8px 12px', textAlign: 'left' }}>Status</th>
+                  <th style={{ padding: '8px 12px', textAlign: 'left' }}>Pago</th>
+                  <th style={{ padding: '8px 12px', textAlign: 'left' }}>Ações</th>
                 </tr>
               </thead>
               <tbody>
@@ -996,6 +998,15 @@ export default function ClienteDetailPage() {
                       }}>
                         {nf.status === 'emitida' ? 'Emitida' : nf.status === 'cancelada' ? 'Cancelada' : nf.status === 'erro' ? 'Erro' : 'Rascunho'}
                       </span>
+                    </td>
+                    <td style={{ padding: '10px 12px' }}>
+                      {nf.pago
+                        ? <span style={{ color: '#15803d', fontWeight: 600 }}>✓ Pago</span>
+                        : <span style={{ color: '#9ca3af' }}>—</span>}
+                    </td>
+                    <td style={{ padding: '10px 12px', display: 'flex', gap: 10 }}>
+                      <a href={`/fiscal`} style={{ color: 'var(--teal)', fontSize: 12 }}>Abrir no Fiscal</a>
+                      <a href={`/api/fiscal/notas/${nf.id}/danfse`} target="_blank" rel="noreferrer" style={{ color: '#b45309', fontSize: 12 }}>PDF</a>
                     </td>
                   </tr>
                 ))}
