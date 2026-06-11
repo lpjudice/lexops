@@ -439,6 +439,49 @@ def create_regra(body: RegraIn, _=Depends(get_current_user), db: Session = Depen
     return {"id": str(r.id)}
 
 
+@router.post("/seed-mock")
+def seed_mock(_=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
+    """Seed temporário de 2 meses mock para teste. REMOVER após uso."""
+    for mes in ("2026-04", "2026-05"):
+        if db.query(FiscalMes).filter_by(mes=mes).first():
+            continue
+        db.add(FiscalMes(mes=mes, ibs_full_pct=0.1, cbs_full_pct=0.9, reducao_setorial_pct=30.0, credito_modo="integral"))
+
+    db.flush()
+
+    folha_abril = {"salarios": 54000, "prolabore": 16000, "inss_patronal": 14000, "rat": 1800, "fgts": 5100, "beneficios": 6900, "outros": 0}
+    folha_maio  = {"salarios": 61000, "prolabore": 18000, "inss_patronal": 15500, "rat": 2100, "fgts": 5800, "beneficios": 7900, "outros": 0}
+    for mes, dados in [("2026-04", folha_abril), ("2026-05", folha_maio)]:
+        if not db.query(FiscalFolha).filter_by(mes=mes).first():
+            db.add(FiscalFolha(mes=mes, **dados))
+
+    despesas = [
+        # abril
+        ("2026-04", "Software jurídico",       "Legal Tech One",      8400,  True,  True,  "LC 214/2025",         "validado",  "2026-02"),
+        ("2026-04", "Marketing / publicidade",  "Studio Trinta",      12000,  True,  True,  "LC 214/2025",         "revalidar", "2025-10"),
+        ("2026-04", "Correspondentes",          "Rede Processual",    18600,  True,  True,  "LC 214/2025",         "validado",  "2026-01"),
+        ("2026-04", "Aluguel",                  "Imobiliária Centro",  9800,  True,  False, "Tese sensível",       "pendente",  None),
+        ("2026-04", "Energia elétrica",         "Concessionária",      3600,  True,  True,  "LC 214/2025",         "validado",  "2026-03"),
+        # maio
+        ("2026-05", "Software jurídico",        "Legal Tech One",      8400,  True,  True,  "LC 214/2025",         "validado",  "2026-02"),
+        ("2026-05", "Marketing / publicidade",  "Studio Trinta",      14000,  True,  True,  "LC 214/2025",         "revalidar", "2025-11"),
+        ("2026-05", "Correspondentes",          "Rede Processual",    22400,  True,  True,  "LC 214/2025",         "validado",  "2026-01"),
+        ("2026-05", "Energia elétrica",         "Concessionária",      3900,  True,  True,  "LC 214/2025",         "validado",  "2026-03"),
+        ("2026-05", "Internet",                 "Fibra Empresas",       980,  True,  True,  "LC 214/2025",         "novo",      None),
+        ("2026-05", "Aluguel",                  "Imobiliária Centro",  9800,  True,  False, "Tese sensível",       "pendente",  None),
+        ("2026-05", "Despesas com clientes",    "Diversos",            4200,  False, False, "Sem documento hábil", "pendente",  None),
+        ("2026-05", "Contabilidade",            "Escritório Fischer",  3500,  True,  True,  "LC 214/2025",         "validado",  "2026-01"),
+        ("2026-05", "Telefonia",                "Vivo Empresas",        890,  True,  True,  "LC 214/2025",         "novo",      None),
+    ]
+    for (mes, cat, forn, val, nota, eleg, base, status, check) in despesas:
+        db.add(FiscalDespesa(mes=mes, categoria=cat, fornecedor=forn, valor=val,
+                             tem_nota=nota, elegivel=eleg, base_legal=base,
+                             status=status, last_check=check))
+
+    db.commit()
+    return {"ok": True, "meses": ["2026-04", "2026-05"]}
+
+
 @router.patch("/regras/{id}")
 def patch_regra(id: uuid.UUID, body: dict, _=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
     r = db.get(RegraCredito, id)
