@@ -24,6 +24,7 @@ import ReunioesPage from './pages/ReunioesPage'
 import FiscalPage from './pages/FiscalPage'
 import ConfigFiscalPage from './pages/ConfigFiscalPage'
 import VisaoFiscalPage from './pages/VisaoFiscalPage'
+import ReformaPublicaPage from './pages/ReformaPublicaPage'
 
 const queryClient = new QueryClient()
 
@@ -39,6 +40,7 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/aceitar-convite/:token" element={<AceitarConvitePage />} />
+      <Route path="/p/reforma/:token" element={<ReformaPublicaPage />} />
       <Route
         path="/"
         element={

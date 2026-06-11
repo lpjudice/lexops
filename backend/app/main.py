@@ -14,7 +14,7 @@ from app.models import nota_fiscal as _nota_fiscal_model  # noqa: F401
 from app.models import config_fiscal as _config_fiscal_model  # noqa: F401
 from app.models import relatorio_fiscal_log as _relatorio_fiscal_log_model  # noqa: F401
 from app.models import telegram_task as _telegram_task_model  # noqa: F401 — TelegramTaskBatch/Item/Session
-from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, fiscal, config_fiscal, jurisprudencia, organizador, pje, prazos, processos, reembolsos, reunioes, system, tarefas, telegram, telegram_andamentos, telegram_tasks, teses, usuarios, webhooks
+from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, fiscal, config_fiscal, jurisprudencia, organizador, pje, prazos, processos, publico, reembolsos, reunioes, system, tarefas, telegram, telegram_andamentos, telegram_tasks, teses, usuarios, webhooks
 
 # Cria as tabelas (Alembic gerencia em produção; aqui facilita o dev)
 Base.metadata.create_all(bind=engine)
@@ -562,6 +562,9 @@ def _run_migrations() -> None:
         conn.execute(text(
             "ALTER TABLE config_fiscal ADD COLUMN IF NOT EXISTS carga_media_pct NUMERIC(5,2) DEFAULT 16.33"
         ))
+        conn.execute(text(
+            "ALTER TABLE config_fiscal ADD COLUMN IF NOT EXISTS link_publico_token VARCHAR(64)"
+        ))
 
         # Tarefas: campos de período e email do responsável
         conn.execute(text(
@@ -680,6 +683,7 @@ app.include_router(reembolsos.router)
 app.include_router(financeiro.router)
 app.include_router(fiscal.router)
 app.include_router(config_fiscal.router)
+app.include_router(publico.router)
 app.include_router(tarefas.router)
 app.include_router(conversas_ia.router)
 app.include_router(organizador.router)

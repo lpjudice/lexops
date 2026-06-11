@@ -41,6 +41,8 @@ export default function ConfigFiscalPage() {
   const [enviandoRel, setEnviandoRel] = useState(false)
   const [relMsg, setRelMsg] = useState<string | null>(null)
   const [showHist, setShowHist] = useState(false)
+  const [linkPub, setLinkPub] = useState<string | null>(null)
+  const [copiado, setCopiado] = useState(false)
   const { data: hist } = useQuery({
     queryKey: ['relatorio-historico', showHist],
     queryFn: fiscalApi.historicoRelatorios,
@@ -115,8 +117,8 @@ export default function ConfigFiscalPage() {
           <Campo label="Anexo do Simples"><input className={inp} value={f.anexo_simples} onChange={(e) => set('anexo_simples', e.target.value)} /></Campo>
           <Campo label="RBT12 — receita bruta 12 meses (R$)"
             hint={f.rbt12_acumulado_12m != null
-              ? `Acumulado no sistema (12m): R$ ${f.rbt12_acumulado_12m.toLocaleString('pt-BR', {minimumFractionDigits:2})}${f.aliquota_pelo_acumulado ? ` → alíquota ${f.aliquota_pelo_acumulado}%` : ''}`
-              : 'Informe para o sistema sugerir a alíquota'}>
+              ? `Checagem pelas NFs do sistema (12 meses anteriores, regra legal): R$ ${f.rbt12_acumulado_12m.toLocaleString('pt-BR', {minimumFractionDigits:2})}${f.aliquota_pelo_acumulado ? ` → alíquota ${f.aliquota_pelo_acumulado}%` : ''}. Pode estar abaixo do real se há notas anteriores à integração — use o RBT12 oficial da contabilidade.`
+              : 'Informe o RBT12 da contabilidade para o sistema sugerir a alíquota'}>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <input className={inp} type="number" step="0.01" value={f.rbt12 ?? ''} onChange={(e) => set('rbt12', e.target.value ? parseFloat(e.target.value) : undefined)} />
               {f.rbt12_acumulado_12m != null && (
@@ -160,6 +162,42 @@ export default function ConfigFiscalPage() {
         <label className={cs.checkboxLabel}>
           <input type="checkbox" checked={f.piloto_ibscbs} onChange={(e) => set('piloto_ibscbs', e.target.checked)} /> Operação no piloto IBS/CBS
         </label>
+
+        {/* Link público para o contador validar a transição */}
+        <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid #eee' }}>
+          <label className={cs.formLabel}>Link público para o contador (somente leitura)</label>
+          <p className={cs.fieldHint} style={{ marginTop: 0 }}>
+            Compartilha apenas a projeção da transição IBS/CBS e a receita por competência. Sem login, sem dados de clientes/processos. Pode revogar a qualquer momento.
+          </p>
+          {(() => {
+            const path = linkPub ?? (f.link_publico_token ? `/p/reforma/${f.link_publico_token}` : null)
+            const full = path ? `${window.location.origin}${path}` : null
+            return (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                {full && (
+                  <input className={inp} readOnly value={full} style={{ flex: 1, minWidth: 280 }}
+                    onFocus={(e) => e.currentTarget.select()} />
+                )}
+                {full && (
+                  <button type="button" className={cs.btnSecondary}
+                    onClick={() => { navigator.clipboard.writeText(full); setCopiado(true); setTimeout(() => setCopiado(false), 1500) }}>
+                    {copiado ? 'Copiado!' : 'Copiar'}
+                  </button>
+                )}
+                <button type="button" className={cs.btnSecondary}
+                  onClick={async () => { const r = await configFiscalApi.gerarLinkPublico(); setLinkPub(r.url) }}>
+                  {full ? 'Gerar novo' : 'Gerar link'}
+                </button>
+                {full && (
+                  <button type="button" className={cs.btnSecondary}
+                    onClick={async () => { await configFiscalApi.revogarLinkPublico(); setLinkPub(null); set('link_publico_token', null as any) }}>
+                    Revogar
+                  </button>
+                )}
+              </div>
+            )
+          })()}
+        </div>
       </Secao>
 
       {/* E. Contabilidade */}

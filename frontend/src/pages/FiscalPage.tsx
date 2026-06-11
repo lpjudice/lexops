@@ -793,6 +793,11 @@ function DetalheModal({ nf, onClose }: { nf: NotaFiscalOut; onClose: () => void 
     mutationFn: (m: string) => fiscalApi.cancelar(nf.id, m),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['notas-fiscais'] }); onClose() },
   })
+  const { data: analise } = useQuery({
+    queryKey: ['cancel-analise', nf.id, confirmando],
+    queryFn: () => fiscalApi.analiseCancelamento(nf.id),
+    enabled: confirmando,
+  })
 
   // Vínculos internos: escolhe o cliente cujos processos/contratos serão listados
   const [clienteVincId, setClienteVincId] = useState<string | undefined>(nf.cliente_id)
@@ -946,6 +951,18 @@ function DetalheModal({ nf, onClose }: { nf: NotaFiscalOut; onClose: () => void 
               </button>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {analise && analise.alertas.map((a, i) => {
+                  const cor = a.nivel === 'alerta' ? { bg: '#fef2f2', br: '#fecaca', fg: '#b91c1c' }
+                    : a.nivel === 'atencao' ? { bg: '#fffbeb', br: '#fde68a', fg: '#b45309' }
+                    : a.nivel === 'ok' ? { bg: '#f0fdf4', br: '#bbf7d0', fg: '#15803d' }
+                    : { bg: '#f8fafc', br: '#e2e8f0', fg: '#475569' }
+                  return (
+                    <div key={i} style={{ background: cor.bg, border: `1px solid ${cor.br}`, borderRadius: 8, padding: '8px 10px' }}>
+                      <div style={{ fontWeight: 700, fontSize: 12, color: cor.fg }}>{a.titulo}</div>
+                      <div style={{ fontSize: 12, color: '#374151', marginTop: 2 }}>{a.detalhe}</div>
+                    </div>
+                  )
+                })}
                 <label className={cs.formLabel}>Motivo *</label>
                 <input className={cs.input} placeholder="Mínimo 10 caracteres"
                   value={motivo} onChange={(e) => setMotivo(e.target.value)} />

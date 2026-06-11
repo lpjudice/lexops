@@ -77,6 +77,7 @@ class ConfigFiscalOut(ConfigFiscalBase):
     faixa_simples: Optional[str] = None
     rbt12_acumulado_12m: Optional[float] = None
     aliquota_pelo_acumulado: Optional[float] = None
+    link_publico_token: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

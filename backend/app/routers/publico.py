@@ -1,0 +1,92 @@
+"""Link público (somente leitura) para o contador validar a transição da
+Reforma Tributária (IBS/CBS). Sem autenticação — protegido por token opaco.
+
+Expõe apenas o material da TRANSIÇÃO: projeção plurianual IBS/CBS, alíquotas
+vigentes por ano e um resumo de receita/DAS por competência. Não expõe dados
+de clientes, processos ou qualquer informação sensível além do fiscal agregado.
+"""
+from __future__ import annotations
+
+from datetime import date
+from decimal import Decimal
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func as sqlfunc
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app.models.config_fiscal import ConfigFiscal
+from app.models.nota_fiscal import NotaFiscal
+
+router = APIRouter(prefix="/publico", tags=["publico"])
+
+
+def _cfg_por_token(db: Session, token: str) -> ConfigFiscal:
+    if not token or len(token) < 16:
+        raise HTTPException(404, "Link inválido")
+    cfg = db.query(ConfigFiscal).filter(ConfigFiscal.link_publico_token == token).first()
+    if not cfg:
+        raise HTTPException(404, "Link inválido ou revogado")
+    return cfg
+
+
+@router.get("/reforma/{token}")
+def reforma_publica(token: str, db: Session = Depends(get_db)):
+    from app.services.nfse.visao_fiscal import (
+        transicao_reforma, projecao_reforma, aliquota_efetiva, faixa_de,
+    )
+    cfg = _cfg_por_token(db, token)
+
+    hoje = date.today()
+    comp_atual = hoje.strftime("%Y-%m")
+    ibs_pct = Decimal(str(cfg.ibs_pct)) if cfg.ibs_pct else Decimal("0")
+    cbs_pct = Decimal(str(cfg.cbs_pct)) if cfg.cbs_pct else Decimal("0")
+
+    # Receita do mês corrente (base da projeção) — só notas de produção emitidas
+    receita_mes = db.query(sqlfunc.coalesce(sqlfunc.sum(NotaFiscal.valor_servicos), 0)).filter(
+        NotaFiscal.status == "emitida", NotaFiscal.ambiente == 1,
+        NotaFiscal.competencia == comp_atual,
+    ).scalar() or 0
+    receita_mes = Decimal(str(receita_mes))
+
+    reforma = transicao_reforma(hoje.year, receita_mes, ibs_pct, cbs_pct,
+                                bool(cfg.piloto_ibscbs), hoje.month)
+    reforma["projecao"] = projecao_reforma(receita_mes, ibs_pct, cbs_pct)
+
+    # Resumo dos últimos 12 meses por competência (receita + DAS estimado)
+    rbt12 = Decimal(str(cfg.rbt12)) if cfg.rbt12 else None
+    aliq = aliquota_efetiva(rbt12) if rbt12 else None
+    linhas = (db.query(NotaFiscal.competencia,
+                       sqlfunc.sum(NotaFiscal.valor_servicos).label("receita"),
+                       sqlfunc.count(NotaFiscal.id).label("qtd"))
+              .filter(NotaFiscal.status == "emitida", NotaFiscal.ambiente == 1)
+              .group_by(NotaFiscal.competencia)
+              .order_by(NotaFiscal.competencia.desc()).limit(12).all())
+    competencias = []
+    for comp, rec, qtd in linhas:
+        rec = Decimal(str(rec or 0))
+        das = (rec * aliq / 100).quantize(Decimal("0.01")) if aliq else None
+        competencias.append({
+            "competencia": comp, "qtd_notas": int(qtd),
+            "receita": float(rec), "das_estimado": float(das) if das is not None else None,
+        })
+
+    return {
+        "escritorio": cfg.razao_social,
+        "cnpj": cfg.cnpj,
+        "municipio": f"{cfg.municipio_nome}/{cfg.uf}",
+        "regime": cfg.regime_tributario,
+        "anexo": cfg.anexo_simples,
+        "gerado_em": hoje.isoformat(),
+        "competencia_referencia": comp_atual,
+        "receita_referencia": float(receita_mes),
+        "aliquota_efetiva_simples": float(aliq) if aliq else None,
+        "carga_media_pct": float(cfg.carga_media_pct) if cfg.carga_media_pct else 16.33,
+        "reforma": reforma,
+        "competencias": competencias,
+        "observacao": (
+            "Material de apoio para validação contábil da transição IBS/CBS. "
+            "Valores estimados a partir das notas conhecidas pelo sistema; alíquotas "
+            "de 2027+ dependem de regulamentação."
+        ),
+    }

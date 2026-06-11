@@ -421,6 +421,58 @@ def baixar_danfse_pdf(
                         filename=f"NFSe_{nf.numero_nfse or nf.chave_acesso}.pdf")
 
 
+def _analise_cancelamento(nf) -> dict:
+    """Implicações legais do cancelamento conforme o momento (ISS/DAS e prazo municipal).
+    Vitória/ES: cancelamento no sistema nacional; após o recolhimento do ISS, o
+    cancelamento gera crédito/retificação do PGDAS-D."""
+    from datetime import date
+    hoje = date.today()
+    alertas = []
+    nivel = "ok"
+    comp = nf.competencia or hoje.strftime("%Y-%m")
+    ano, mes = int(comp[:4]), int(comp[5:7])
+    # Vencimento do DAS = dia 20 do mês seguinte à competência
+    venc_ano, venc_mes = (ano, mes + 1) if mes < 12 else (ano + 1, 1)
+    venc_das = date(venc_ano, venc_mes, 20)
+    mesmo_mes = (hoje.year == ano and hoje.month == mes)
+
+    if mesmo_mes:
+        alertas.append({"nivel": "ok", "titulo": "Dentro da competência",
+                        "detalhe": "Cancelamento simples — o ISS ainda não foi apurado/recolhido nesta competência."})
+    elif hoje <= venc_das:
+        nivel = "atencao"
+        alertas.append({"nivel": "atencao", "titulo": "DAS ainda não vencido",
+                        "detalhe": f"Cancele ANTES de gerar/pagar o DAS (vencimento {venc_das.strftime('%d/%m/%Y')}) "
+                                   f"para não recolher ISS sobre uma nota cancelada."})
+    else:
+        nivel = "alerta"
+        alertas.append({"nivel": "alerta", "titulo": "ISS provavelmente já recolhido",
+                        "detalhe": f"O DAS da competência {comp} venceu em {venc_das.strftime('%d/%m/%Y')}. "
+                                   f"O cancelamento exige RETIFICAÇÃO do PGDAS-D; a diferença vira crédito a "
+                                   f"compensar e a retificação pode gerar multa/juros se houver imposto a pagar. "
+                                   f"Alinhe com o contador antes."})
+
+    if nf.pago:
+        nivel = "alerta"
+        alertas.append({"nivel": "alerta", "titulo": "Nota marcada como paga",
+                        "detalhe": "Há recebimento lançado no Financeiro. Cancelar a NF irá estornar esse "
+                                   "recebimento — verifique se o valor foi de fato devolvido ao cliente."})
+
+    alertas.append({"nivel": "info", "titulo": "Substituição vs. cancelamento",
+                    "detalhe": "Se o objetivo é corrigir dados (valor, tomador, descrição), prefira emitir uma "
+                               "nota de SUBSTITUIÇÃO em vez de cancelar e reemitir."})
+    return {"nivel": nivel, "pode_cancelar": True, "vencimento_das": venc_das.isoformat(),
+            "alertas": alertas}
+
+
+@router.get("/notas/{nf_id}/cancelamento-analise")
+def cancelamento_analise(nf_id: uuid.UUID, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    nf = db.query(NotaFiscal).filter(NotaFiscal.id == nf_id).first()
+    if not nf:
+        raise HTTPException(404, "Nota fiscal não encontrada")
+    return _analise_cancelamento(nf)
+
+
 @router.post("/notas/{nf_id}/cancelar", response_model=NotaFiscalOut)
 def cancelar_nota(
     nf_id: uuid.UUID,
@@ -441,6 +493,20 @@ def cancelar_nota(
         raise HTTPException(422, detail=resultado.erro_mensagem)
 
     nf.status = "cancelada"
+    # Estorna o recebimento no Financeiro, se a NF estava marcada como paga
+    if nf.pago and nf.honorario_id:
+        from app.models.financeiro import Recebimento, Honorario
+        marca = f"[NF {nf.numero_nfse or nf.chave_acesso}]"
+        rec = (db.query(Recebimento)
+               .filter(Recebimento.honorario_id == nf.honorario_id,
+                       Recebimento.observacao.like(f"%{marca}%")).first())
+        if rec:
+            db.delete(rec)
+        hon = db.query(Honorario).filter(Honorario.id == nf.honorario_id).first()
+        if hon:
+            db.flush()
+            hon.status = "pago" if hon.saldo_pendente <= 0 else ("parcial" if hon.total_recebido > 0 else "pendente")
+    nf.pago = False
     db.commit()
     db.refresh(nf)
     return _nf_to_out(nf)

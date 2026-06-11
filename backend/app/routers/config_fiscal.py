@@ -46,15 +46,28 @@ def _get_or_create(db: Session) -> ConfigFiscal:
 
 
 def _rbt12_acumulado(db: Session) -> Decimal:
-    """Soma móvel dos últimos 12 meses de NFs emitidas (produção) — sugestão de RBT12."""
-    from datetime import date, timedelta
+    """RBT12 legal (LC 123/2006, art. 18 §1º): receita bruta dos 12 meses
+    ANTERIORES ao período de apuração (mês corrente), rolling — sem incluir o
+    mês corrente. ATENÇÃO: soma apenas as NFs conhecidas pelo sistema
+    (emitidas aqui + importadas via DFe). Notas antigas emitidas direto no
+    portal antes da integração podem não constar — o valor oficial vem da
+    contabilidade. Serve como sugestão/checagem, não como fonte da verdade."""
+    from datetime import date
     from app.models.nota_fiscal import NotaFiscal
-    inicio = (date.today().replace(day=1) - timedelta(days=365))
-    comp_ini = inicio.strftime("%Y-%m")
+    hoje = date.today()
+    # comp_fim = mês anterior ao corrente; comp_ini = 11 meses antes de comp_fim
+    ano_fim, mes_fim = (hoje.year, hoje.month - 1) if hoje.month > 1 else (hoje.year - 1, 12)
+    # 12 meses terminando em (ano_fim, mes_fim): subtrai 11 meses
+    total_meses = ano_fim * 12 + (mes_fim - 1) - 11
+    ano_ini, mes_ini = divmod(total_meses, 12)
+    mes_ini += 1
+    comp_fim = f"{ano_fim:04d}-{mes_fim:02d}"
+    comp_ini = f"{ano_ini:04d}-{mes_ini:02d}"
     total = Decimal("0")
     notas = (db.query(NotaFiscal)
              .filter(NotaFiscal.status == "emitida", NotaFiscal.ambiente == 1,
-                     NotaFiscal.competencia >= comp_ini).all())
+                     NotaFiscal.competencia >= comp_ini,
+                     NotaFiscal.competencia <= comp_fim).all())
     for n in notas:
         total += Decimal(str(n.valor_servicos or 0))
     return total.quantize(Decimal("0.01"))
@@ -94,3 +107,23 @@ def atualizar_config(
     db.commit()
     db.refresh(cfg)
     return _to_out(cfg, db)
+
+
+@router.post("/link-publico")
+def gerar_link_publico(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Gera (ou regenera) o token do link público de reforma para o contador."""
+    import secrets
+    cfg = _get_or_create(db)
+    cfg.link_publico_token = secrets.token_urlsafe(24)
+    db.commit()
+    return {"token": cfg.link_publico_token,
+            "url": f"/p/reforma/{cfg.link_publico_token}"}
+
+
+@router.delete("/link-publico")
+def revogar_link_publico(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Revoga o link público (o contador deixa de acessar)."""
+    cfg = _get_or_create(db)
+    cfg.link_publico_token = None
+    db.commit()
+    return {"ok": True}

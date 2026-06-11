@@ -46,6 +46,7 @@ export interface ConfigFiscal {
   rodape_danfse?: string
   danfse_prefixo_numero?: string
   carga_media_pct?: number
+  link_publico_token?: string | null
   rbt12_acumulado_12m?: number
   aliquota_pelo_acumulado?: number
   // Calculados (read-only)
@@ -57,4 +58,6 @@ export interface ConfigFiscal {
 export const configFiscalApi = {
   obter: () => api.get<ConfigFiscal>('/config-fiscal').then((r) => r.data),
   salvar: (data: ConfigFiscal) => api.put<ConfigFiscal>('/config-fiscal', data).then((r) => r.data),
+  gerarLinkPublico: () => api.post<{ token: string; url: string }>('/config-fiscal/link-publico').then((r) => r.data),
+  revogarLinkPublico: () => api.delete('/config-fiscal/link-publico').then((r) => r.data),
 }
