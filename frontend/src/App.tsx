@@ -25,6 +25,7 @@ import FiscalPage from './pages/FiscalPage'
 import ConfigFiscalPage from './pages/ConfigFiscalPage'
 import VisaoFiscalPage from './pages/VisaoFiscalPage'
 import ReformaPublicaPage from './pages/ReformaPublicaPage'
+import BackofficeDecisaoPage from './pages/BackofficeDecisaoPage'
 
 const queryClient = new QueryClient()
 
@@ -69,6 +70,7 @@ function AppRoutes() {
         <Route path="reunioes" element={<ReunioesPage />} />
         <Route path="fiscal" element={<FiscalPage />} />
         <Route path="fiscal/visao" element={<VisaoFiscalPage />} />
+        <Route path="fiscal/decisao" element={<BackofficeDecisaoPage />} />
         <Route path="fiscal/config" element={<ConfigFiscalPage />} />
       </Route>
     </Routes>

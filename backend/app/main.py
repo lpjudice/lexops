@@ -14,7 +14,9 @@ from app.models import nota_fiscal as _nota_fiscal_model  # noqa: F401
 from app.models import config_fiscal as _config_fiscal_model  # noqa: F401
 from app.models import relatorio_fiscal_log as _relatorio_fiscal_log_model  # noqa: F401
 from app.models import telegram_task as _telegram_task_model  # noqa: F401 — TelegramTaskBatch/Item/Session
+from app.models import backoffice as _backoffice_model  # noqa: F401
 from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, fiscal, config_fiscal, jurisprudencia, organizador, pje, prazos, processos, publico, reembolsos, reunioes, system, tarefas, telegram, telegram_andamentos, telegram_tasks, teses, usuarios, webhooks
+from app.routers import backoffice
 
 # Cria as tabelas (Alembic gerencia em produção; aqui facilita o dev)
 Base.metadata.create_all(bind=engine)
@@ -621,6 +623,84 @@ def _run_migrations() -> None:
             )
         """))
 
+        # ── Backoffice Fiscal ─────────────────────────────────────────────
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fiscal_mes (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                mes VARCHAR(7) NOT NULL UNIQUE,
+                ibs_full_pct NUMERIC(6,3),
+                cbs_full_pct NUMERIC(6,3),
+                reducao_setorial_pct NUMERIC(5,2),
+                credito_modo VARCHAR(10) NOT NULL DEFAULT 'integral',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fiscal_folha (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                mes VARCHAR(7) NOT NULL UNIQUE REFERENCES fiscal_mes(mes) ON DELETE CASCADE,
+                salarios NUMERIC(14,2) NOT NULL DEFAULT 0,
+                prolabore NUMERIC(14,2) NOT NULL DEFAULT 0,
+                inss_patronal NUMERIC(14,2) NOT NULL DEFAULT 0,
+                rat NUMERIC(14,2) NOT NULL DEFAULT 0,
+                fgts NUMERIC(14,2) NOT NULL DEFAULT 0,
+                beneficios NUMERIC(14,2) NOT NULL DEFAULT 0,
+                outros NUMERIC(14,2) NOT NULL DEFAULT 0,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS regra_credito (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                categoria VARCHAR(100) NOT NULL UNIQUE,
+                descricao TEXT,
+                base_legal VARCHAR(200) NOT NULL DEFAULT 'LC 214/2025',
+                fundamento_complementar TEXT,
+                status VARCHAR(20) NOT NULL DEFAULT 'pendente',
+                elegivel BOOLEAN NOT NULL DEFAULT false,
+                last_check VARCHAR(7),
+                next_check VARCHAR(7),
+                notas TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fiscal_despesa (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                mes VARCHAR(7) NOT NULL REFERENCES fiscal_mes(mes) ON DELETE CASCADE,
+                categoria VARCHAR(100) NOT NULL,
+                fornecedor VARCHAR(200) NOT NULL,
+                descricao TEXT,
+                valor NUMERIC(14,2) NOT NULL,
+                tem_nota BOOLEAN NOT NULL DEFAULT true,
+                elegivel BOOLEAN NOT NULL DEFAULT false,
+                base_legal VARCHAR(200),
+                status VARCHAR(20) NOT NULL DEFAULT 'novo',
+                last_check VARCHAR(7),
+                regra_id UUID REFERENCES regra_credito(id),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fiscal_receita (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                mes VARCHAR(7) NOT NULL REFERENCES fiscal_mes(mes) ON DELETE CASCADE,
+                nota_fiscal_id UUID UNIQUE REFERENCES notas_fiscais(id),
+                cliente_nome VARCHAR(200) NOT NULL,
+                tipo_cliente VARCHAR(20) NOT NULL DEFAULT 'pj_regular',
+                valor NUMERIC(14,2) NOT NULL,
+                retencoes NUMERIC(14,2) NOT NULL DEFAULT 0,
+                credito_interesse BOOLEAN NOT NULL DEFAULT false,
+                modo_tributacao VARCHAR(10) NOT NULL DEFAULT 'embutido',
+                is_manual BOOLEAN NOT NULL DEFAULT false,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+
         conn.commit()
 
 
@@ -682,6 +762,7 @@ app.include_router(teses.router)
 app.include_router(reembolsos.router)
 app.include_router(financeiro.router)
 app.include_router(fiscal.router)
+app.include_router(backoffice.router)
 app.include_router(config_fiscal.router)
 app.include_router(publico.router)
 app.include_router(tarefas.router)

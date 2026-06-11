@@ -21,6 +21,9 @@ import {
   X,
   LogOut,
   ScrollText,
+  ChevronDown,
+  ChevronRight,
+  BarChart3,
 } from 'lucide-react'
 import api from '../api/client'
 import { useAuth } from '../contexts/AuthContext'
@@ -52,7 +55,18 @@ function TarefasBadge() {
   return <span className={styles.navBadge}>{count}</span>
 }
 
-const navGroups = [
+type NavItem = { to: string; label: string; Icon: React.ComponentType<{ size?: number; className?: string }> }
+type NavGroup = {
+  label: string
+  items: NavItem[]
+  subGroups?: {
+    label: string
+    prefix: string
+    items: NavItem[]
+  }[]
+}
+
+const navGroups: NavGroup[] = [
   {
     label: 'GESTÃO',
     items: [
@@ -82,18 +96,22 @@ const navGroups = [
     ],
   },
   {
-    label: 'FINANCEIRO',
+    label: 'BACKOFFICE',
     items: [
       { to: '/financeiro', label: 'Financeiro', Icon: TrendingUp },
       { to: '/reembolsos', label: 'Reembolsos', Icon: Receipt },
     ],
-  },
-  {
-    label: 'FISCAL',
-    items: [
-      { to: '/fiscal', label: 'Notas Fiscais', Icon: ScrollText },
-      { to: '/fiscal/visao', label: 'Visão Fiscal', Icon: TrendingUp },
-      { to: '/fiscal/config', label: 'Config Fiscal', Icon: Settings },
+    subGroups: [
+      {
+        label: 'Fiscal',
+        prefix: '/fiscal',
+        items: [
+          { to: '/fiscal', label: 'Notas Fiscais', Icon: ScrollText },
+          { to: '/fiscal/visao', label: 'Visão Fiscal', Icon: TrendingUp },
+          { to: '/fiscal/decisao', label: 'Decisão Tributária', Icon: BarChart3 },
+          { to: '/fiscal/config', label: 'Config Fiscal', Icon: Settings },
+        ],
+      },
     ],
   },
   {
@@ -119,6 +137,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/financeiro': 'Financeiro',
   '/fiscal': 'Notas Fiscais',
   '/fiscal/visao': 'Visão Fiscal',
+  '/fiscal/decisao': 'Decisão Tributária',
   '/fiscal/config': 'Config Fiscal',
   '/atendimentos': 'Atendimentos',
   '/tarefas': 'Tarefas',
@@ -126,10 +145,59 @@ const PAGE_TITLES: Record<string, string> = {
   '/configuracoes': 'Configurações',
 }
 
+function FiscalSubGroup({
+  label,
+  prefix,
+  items,
+  onNav,
+}: {
+  label: string
+  prefix: string
+  items: NavItem[]
+  onNav: () => void
+}) {
+  const location = useLocation()
+  const isActive = location.pathname.startsWith(prefix)
+  const [open, setOpen] = useState(isActive)
+
+  return (
+    <div>
+      <button
+        className={`${styles.navSubGroupToggle} ${isActive ? styles.navSubGroupToggleActive : ''}`}
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+      >
+        <span className={styles.navSubGroupLabel}>{label}</span>
+        {open
+          ? <ChevronDown size={13} className={styles.navSubGroupChevron} />
+          : <ChevronRight size={13} className={styles.navSubGroupChevron} />}
+      </button>
+
+      {open && (
+        <div className={styles.navSubGroupItems}>
+          {items.map(({ to, label: itemLabel, Icon }) => (
+            <NavLink
+              key={to}
+              to={to}
+              end={to === '/fiscal'}
+              className={({ isActive: a }) =>
+                `${styles.navLink} ${styles.navLinkIndented} ${a ? styles.active : ''}`
+              }
+              onClick={onNav}
+            >
+              <Icon size={15} className={styles.navIcon} />
+              <span>{itemLabel}</span>
+            </NavLink>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Topbar({ onMenuToggle }: { onMenuToggle: () => void }) {
   const location = useLocation()
-  const base = '/' + location.pathname.split('/')[1]
-  const title = PAGE_TITLES[base] ?? 'Sui'
+  const title = PAGE_TITLES[location.pathname] ?? PAGE_TITLES['/' + location.pathname.split('/')[1]] ?? 'Sui'
   const { usuario, logout } = useAuth()
 
   const initials = usuario?.nome
@@ -160,12 +228,10 @@ function Topbar({ onMenuToggle }: { onMenuToggle: () => void }) {
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
-
   const closeSidebar = () => setSidebarOpen(false)
 
   return (
     <div className={styles.shell}>
-      {/* Mobile overlay */}
       {sidebarOpen && <div className={styles.overlay} onClick={closeSidebar} />}
 
       <nav className={`${styles.sidebar} ${sidebarOpen ? styles.sidebarOpen : ''}`}>
@@ -183,11 +249,11 @@ export default function Layout() {
           {navGroups.map((group) => (
             <div key={group.label} className={styles.navGroup}>
               <span className={styles.navGroupLabel}>{group.label}</span>
+
               {group.items.map(({ to, label, Icon }) => (
                 <NavLink
                   key={to}
                   to={to}
-                  end={to === '/fiscal'}
                   className={({ isActive }) =>
                     `${styles.navLink} ${isActive ? styles.active : ''}`
                   }
@@ -197,6 +263,16 @@ export default function Layout() {
                   <span>{label}</span>
                   {to === '/tarefas' && <TarefasBadge />}
                 </NavLink>
+              ))}
+
+              {group.subGroups?.map((sg) => (
+                <FiscalSubGroup
+                  key={sg.prefix}
+                  label={sg.label}
+                  prefix={sg.prefix}
+                  items={sg.items}
+                  onNav={closeSidebar}
+                />
               ))}
             </div>
           ))}

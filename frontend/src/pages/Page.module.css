@@ -225,6 +225,60 @@
   color: var(--teal);
 }
 
+/* ─── Botão secundário compacto ─────────────────────────────────────── */
+.btnSmall {
+  background: transparent;
+  color: var(--dark);
+  border: 1px solid #e5e7eb;
+  padding: 5px 12px;
+  border-radius: var(--radius-btn);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'Archivo', sans-serif;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  white-space: nowrap;
+}
+
+.btnSmall:hover {
+  background: var(--teal-light);
+  border-color: var(--teal);
+  color: var(--teal);
+}
+
+/* ─── Campo de formulário inline ─────────────────────────────────────── */
+.fieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fieldGroup span {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gray-mid);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.fieldGroup input,
+.fieldGroup select {
+  padding: 7px 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: 'Archivo', sans-serif;
+  color: var(--dark);
+  background: #fff;
+  transition: border-color .15s;
+}
+
+.fieldGroup input:focus,
+.fieldGroup select:focus {
+  outline: none;
+  border-color: var(--teal);
+}
+
 /* ─── Empty state ────────────────────────────────────────────────────── */
 .empty {
   display: flex;
