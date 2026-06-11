@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   backofficeApi,
@@ -79,10 +79,53 @@ function mesLabel(mes: string) {
   return `${nomes[Number(mm) - 1]}/${ano}`
 }
 
+// Categorias mapeadas à LC 214/2025 — agrupadas por elegibilidade típica
 const CATEGORIAS_PADRAO = [
-  'Software jurídico','Marketing / publicidade','Correspondentes','Aluguel',
-  'Energia elétrica','Telefonia','Internet','Contabilidade','Despesas com clientes',
-  'Material de escritório','Outros',
+  // Insumos diretos da atividade (elegíveis em regra)
+  'Software jurídico (SaaS)',
+  'Correspondentes / parceiros forenses',
+  'Honorários periciais',
+  'Honorários de outros advogados',
+  'Pesquisa jurisprudencial / bases de dados',
+  'Cópias e autenticações',
+  // Infraestrutura do escritório (elegíveis se uso 100% empresarial)
+  'Aluguel comercial',
+  'Condomínio comercial',
+  'Energia elétrica',
+  'Água e esgoto',
+  'Internet',
+  'Telefonia fixa / móvel',
+  'Manutenção predial',
+  'Limpeza e conservação',
+  'Segurança / monitoramento',
+  // TI e administrativo
+  'Hardware (computadores, impressoras)',
+  'Manutenção de TI',
+  'Material de escritório',
+  'Material de copa',
+  // Profissionais terceirizados
+  'Contabilidade',
+  'Consultoria jurídica externa',
+  'Marketing / publicidade',
+  'Design / branding',
+  'Treinamento e cursos',
+  // Despesas mistas — IA pedirá detalhes
+  'Combustível',
+  'Viagens (passagens)',
+  'Hospedagem',
+  'Alimentação em viagem',
+  'Refeições com clientes',
+  'Uber / táxi',
+  'Estacionamento',
+  // Não elegíveis em regra (incluídas para classificar corretamente)
+  'Despesas de clientes (reembolsáveis)',
+  'Brindes / presentes',
+  'Multas e juros',
+  'IPTU / IPVA / tributos',
+  'Doações',
+  'Despesas pessoais',
+  // Outros
+  'Outros',
 ]
 const STATUS_COR: Record<string, string> = {
   validado: '#15803d', revalidar: '#b45309', pendente: '#6b7280', novo: '#1d4ed8',
@@ -128,7 +171,7 @@ function Combobox({
         <div style={{
           position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100,
           background: '#fff', border: '1px solid #e5e7eb', borderRadius: 6,
-          boxShadow: '0 4px 16px rgba(0,0,0,.1)', marginTop: 2, maxHeight: 240, overflowY: 'auto',
+          boxShadow: '0 4px 16px rgba(0,0,0,.1)', marginTop: 2, maxHeight: 420, overflowY: 'auto',
         }}>
           {filtered.length === 0 && !search && (
             <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--gray-mid)' }}>Nenhuma opção</div>
@@ -186,22 +229,49 @@ function IaClassificacao({
     credito_estimado: number
     confianca: string
     observacao: string
+    perguntas?: { id: string; pergunta: string; opcoes: string[] }[]
   } | null>(null)
   const [loading, setLoading] = useState(false)
-  const lastKey = useRef('')
+  const [respostas, setRespostas] = useState<Record<string, string>>({})
+  const lastKeyRef = useRef('')
 
-  // Re-classifica quando categoria muda (com debounce simples)
-  const key = `${categoria}|${fornecedor}`
-  if (categoria && key !== lastKey.current && !loading) {
-    lastKey.current = key
+  function classificar(respostasAtuais: Record<string, string>) {
     setLoading(true)
-    backofficeApi.classificarDespesa({ categoria, fornecedor, valor })
+    backofficeApi.classificarDespesa({ categoria, fornecedor, valor, respostas: respostasAtuais })
       .then(r => { setData(r); onElegivelMudou(r.elegivel) })
       .catch(() => {})
       .finally(() => setLoading(false))
   }
 
+  // Só dispara IA quando há categoria + valor > 0. Re-dispara se categoria/fornecedor mudam.
+  // Não re-dispara só por mudar valor — apenas recalcula crédito localmente.
+  useEffect(() => {
+    if (!categoria || valor <= 0) return
+    const key = `${categoria}|${fornecedor}`
+    if (key === lastKeyRef.current) return
+    lastKeyRef.current = key
+    setRespostas({})
+    classificar({})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categoria, fornecedor, valor])
+
+  // Limpa o card quando categoria some ou valor zera
+  useEffect(() => {
+    if (!categoria || valor <= 0) {
+      setData(null)
+      setRespostas({})
+      lastKeyRef.current = ''
+    }
+  }, [categoria, valor])
+
   if (!categoria) return null
+  if (valor <= 0) {
+    return (
+      <div style={{ padding: '10px 14px', background: '#f9fafb', border: '1px dashed #e5e7eb', borderRadius: 8, fontSize: 12, color: 'var(--gray-mid)' }}>
+        💡 Informe o valor para a IA analisar a elegibilidade pela LC 214/2025.
+      </div>
+    )
+  }
   if (loading && !data) {
     return (
       <div style={{ padding: '10px 14px', background: '#f9fafb', border: '1px dashed #e5e7eb', borderRadius: 8, fontSize: 12, color: 'var(--gray-mid)' }}>
@@ -211,7 +281,39 @@ function IaClassificacao({
   }
   if (!data) return null
 
-  // Crédito recalculado pelo valor atual (a IA pode ter usado 0)
+  // Se a IA pediu clarificações pendentes, renderiza perguntas
+  const pendentes = (data.perguntas ?? []).filter(p => !respostas[p.id])
+  if (pendentes.length > 0) {
+    return (
+      <div style={{ padding: '12px 14px', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 8, fontSize: 12 }}>
+        <div style={{ color: '#92400e', fontWeight: 700, marginBottom: 8 }}>
+          🤖 Preciso de mais detalhes para classificar essa despesa pela LC 214/2025:
+        </div>
+        {pendentes.map(p => (
+          <div key={p.id} style={{ marginBottom: 8 }}>
+            <div style={{ fontSize: 12, color: 'var(--dark)', marginBottom: 4 }}>{p.pergunta}</div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {p.opcoes.map(op => (
+                <button
+                  key={op}
+                  onClick={() => {
+                    const novas = { ...respostas, [p.id]: op }
+                    setRespostas(novas)
+                    if (pendentes.length === 1) classificar(novas)
+                  }}
+                  style={{ padding: '4px 10px', borderRadius: 999, border: '1px solid #fde68a', background: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer', color: '#92400e', fontFamily: 'Archivo, sans-serif' }}
+                >
+                  {op}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  // Crédito recalculado em tempo real conforme o valor — IA não roda de novo, só multiplica
   const aliqTotal = (data.aliquota_ibs_pct + data.aliquota_cbs_pct) / 100
   const credito = data.elegivel ? valor * aliqTotal : 0
   const corBg = data.elegivel ? '#f0fdf4' : '#fef2f2'
@@ -727,6 +829,20 @@ function TabelaDespesas({ mes }: { mes: string }) {
     queryKey: ['backoffice-lancamentos', mes],
     queryFn: () => backofficeApi.lancamentos(mes),
   })
+  const { data: fornecedores = [] } = useQuery({
+    queryKey: ['backoffice-fornecedores'],
+    queryFn: backofficeApi.fornecedores,
+  })
+  const { data: categoriasDb = [] } = useQuery({
+    queryKey: ['backoffice-categorias'],
+    queryFn: backofficeApi.categorias,
+  })
+  const allCats = Array.from(new Set([...CATEGORIAS_PADRAO, ...categoriasDb]))
+
+  const [editId, setEditId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState<{ fornecedor: string; categoria: string; valor: number; tem_nota: boolean; elegivel: boolean }>({
+    fornecedor: '', categoria: '', valor: 0, tem_nota: true, elegivel: false,
+  })
 
   const deleteDespesa = useMutation({
     mutationFn: (id: string) => backofficeApi.deleteDespesa(id),
@@ -740,6 +856,22 @@ function TabelaDespesas({ mes }: { mes: string }) {
       backofficeApi.patchDespesa(id, { elegivel }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['backoffice-lancamentos', mes] }),
   })
+
+  const salvarEdit = useMutation({
+    mutationFn: (id: string) => backofficeApi.patchDespesa(id, editForm),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['backoffice-lancamentos', mes] })
+      setEditId(null)
+    },
+  })
+
+  function iniciarEdit(d: Despesa) {
+    setEditForm({
+      fornecedor: d.fornecedor, categoria: d.categoria, valor: d.valor,
+      tem_nota: d.tem_nota, elegivel: d.elegivel,
+    })
+    setEditId(d.id)
+  }
 
   if (isLoading) return <div className={styles.empty}>Carregando…</div>
   const despesas = data?.despesas ?? []
@@ -773,42 +905,84 @@ function TabelaDespesas({ mes }: { mes: string }) {
             </thead>
             <tbody>
               {despesas.map((d: Despesa) => (
-                <tr key={d.id}>
-                  <td style={{ fontWeight: 600, fontSize: 12 }}>{d.fornecedor}</td>
-                  <td style={{ fontSize: 11, color: 'var(--gray-mid)' }}>{d.categoria}</td>
-                  <td style={{ textAlign: 'right' }}>{fmtBRL(d.valor)}</td>
-                  <td>
-                    {d.tem_nota
-                      ? <span style={{ fontSize: 10, background: '#dcfce7', color: '#15803d', padding: '2px 6px', borderRadius: 999 }}>sim</span>
-                      : <span style={{ fontSize: 10, color: '#ef4444' }}>não</span>}
-                  </td>
-                  <td>
-                    <button
-                      onClick={() => patchElegivel.mutate({ id: d.id, elegivel: !d.elegivel })}
-                      style={{
-                        fontSize: 10, padding: '2px 6px', borderRadius: 999, border: 'none', cursor: 'pointer',
-                        background: d.elegivel ? '#dcfce7' : '#f3f4f6',
-                        color: d.elegivel ? '#15803d' : '#6b7280', fontWeight: 600,
-                      }}
-                    >
-                      {d.elegivel ? 'sim' : 'não'}
-                    </button>
-                  </td>
-                  <td style={{ textAlign: 'right', color: d.credito.total > 0 ? 'var(--teal)' : 'var(--gray-mid)', fontWeight: d.credito.total > 0 ? 700 : 400 }}>
-                    {fmtBRL(d.credito.total)}
-                  </td>
-                  <td>
-                    <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 999, background: '#f3f4f6', color: STATUS_COR[d.status] || '#6b7280', fontWeight: 600 }}>
-                      {d.status}
-                    </span>
-                  </td>
-                  <td>
-                    <button
-                      style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: 13 }}
-                      onClick={() => deleteDespesa.mutate(d.id)}
-                    >×</button>
-                  </td>
-                </tr>
+                editId === d.id ? (
+                  <tr key={d.id} style={{ background: '#f0fdf4' }}>
+                    <td colSpan={8} style={{ padding: '12px 14px' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '2fr 2fr 1fr auto auto auto', gap: 8, alignItems: 'center' }}>
+                        <Combobox
+                          value={editForm.fornecedor}
+                          onChange={v => setEditForm(f => ({ ...f, fornecedor: v }))}
+                          options={fornecedores.map(f => ({ value: f.id, label: f.nome, hint: f.categoria_padrao ?? undefined }))}
+                          placeholder="Fornecedor"
+                          onCreate={v => setEditForm(f => ({ ...f, fornecedor: v }))}
+                        />
+                        <Combobox
+                          value={editForm.categoria}
+                          onChange={v => setEditForm(f => ({ ...f, categoria: v }))}
+                          options={allCats.map(c => ({ value: c, label: c }))}
+                          placeholder="Categoria"
+                          onCreate={v => setEditForm(f => ({ ...f, categoria: v }))}
+                        />
+                        <MoneyInput value={editForm.valor} onValue={v => setEditForm(f => ({ ...f, valor: v }))} />
+                        <label style={{ display: 'flex', gap: 4, fontSize: 11, alignItems: 'center' }}>
+                          <input type="checkbox" checked={editForm.tem_nota} onChange={e => setEditForm(f => ({ ...f, tem_nota: e.target.checked }))} /> NF
+                        </label>
+                        <label style={{ display: 'flex', gap: 4, fontSize: 11, alignItems: 'center' }}>
+                          <input type="checkbox" checked={editForm.elegivel} onChange={e => setEditForm(f => ({ ...f, elegivel: e.target.checked }))} /> Eleg.
+                        </label>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button className={styles.btnPrimary} onClick={() => salvarEdit.mutate(d.id)} disabled={salvarEdit.isPending}>
+                            {salvarEdit.isPending ? '…' : 'Salvar'}
+                          </button>
+                          <button className={styles.btnSmall} onClick={() => setEditId(null)}>Cancelar</button>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  <tr key={d.id}>
+                    <td style={{ fontWeight: 600, fontSize: 12 }}>{d.fornecedor}</td>
+                    <td style={{ fontSize: 11, color: 'var(--gray-mid)' }}>{d.categoria}</td>
+                    <td style={{ textAlign: 'right' }}>{fmtBRL(d.valor)}</td>
+                    <td>
+                      {d.tem_nota
+                        ? <span style={{ fontSize: 10, background: '#dcfce7', color: '#15803d', padding: '2px 6px', borderRadius: 999 }}>sim</span>
+                        : <span style={{ fontSize: 10, color: '#ef4444' }}>não</span>}
+                    </td>
+                    <td>
+                      <button
+                        onClick={() => patchElegivel.mutate({ id: d.id, elegivel: !d.elegivel })}
+                        style={{
+                          fontSize: 10, padding: '2px 6px', borderRadius: 999, border: 'none', cursor: 'pointer',
+                          background: d.elegivel ? '#dcfce7' : '#f3f4f6',
+                          color: d.elegivel ? '#15803d' : '#6b7280', fontWeight: 600,
+                        }}
+                      >
+                        {d.elegivel ? 'sim' : 'não'}
+                      </button>
+                    </td>
+                    <td style={{ textAlign: 'right', color: d.credito.total > 0 ? 'var(--teal)' : 'var(--gray-mid)', fontWeight: d.credito.total > 0 ? 700 : 400 }}>
+                      {fmtBRL(d.credito.total)}
+                    </td>
+                    <td>
+                      <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 999, background: '#f3f4f6', color: STATUS_COR[d.status] || '#6b7280', fontWeight: 600 }}>
+                        {d.status}
+                      </span>
+                    </td>
+                    <td style={{ display: 'flex', gap: 4 }}>
+                      <button
+                        title="Editar"
+                        style={{ background: 'none', border: 'none', color: 'var(--gray-mid)', cursor: 'pointer', fontSize: 13 }}
+                        onClick={() => iniciarEdit(d)}
+                      >✎</button>
+                      <button
+                        title="Remover"
+                        style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: 13 }}
+                        onClick={() => deleteDespesa.mutate(d.id)}
+                      >×</button>
+                    </td>
+                  </tr>
+                )
               ))}
             </tbody>
           </table>

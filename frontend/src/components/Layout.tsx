@@ -218,6 +218,7 @@ export default function Layout() {
                   <NavLink
                     key={to}
                     to={to}
+                    end
                     className={({ isActive }) =>
                       `${styles.navLink} ${isActive ? styles.active : ''}`
                     }

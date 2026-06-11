@@ -686,6 +686,7 @@ class ClassificarIn(BaseModel):
     fornecedor: str | None = None
     descricao: str | None = None
     valor: float = 0
+    respostas: dict | None = None  # respostas às clarificações de uma chamada anterior
 
 
 _CLASSIFY_PROMPT = """\
@@ -697,29 +698,44 @@ Despesa:
 - Fornecedor: {fornecedor}
 - Descrição: {descricao}
 - Valor: R$ {valor:.2f}
+- Respostas a clarificações anteriores: {respostas}
 
 Regras-chave da LC 214/2025 para advocacia:
-- Crédito amplo na aquisição de bens/serviços que sejam INSUMOS da atividade-fim
-- Software jurídico, marketing, correspondentes, energia, internet, telefonia, contabilidade,
-  material de escritório, aluguel comercial: ELEGÍVEIS (são insumos da advocacia)
-- Aluguel residencial, despesas pessoais, multas, IPVA, bebidas/alimentação:
-  NÃO elegíveis (uso/consumo pessoal ou vedação legal)
-- Despesas sem documento fiscal hábil (sem NF): NÃO geram crédito
-- Alíquotas de referência (cheias, antes de redução setorial):
-  IBS = 0,1% (2026, depois cresce), CBS = 0,9% (2026)
-- O escritório, sendo prestador advocatício, tem redução setorial de 30% na SAÍDA,
-  mas o crédito de ENTRADA é cheio (alíquota do fornecedor).
+- Crédito AMPLO na aquisição de bens/serviços que sejam INSUMOS da atividade-fim (art. 47 LC 214)
+- Insumos da advocacia: software jurídico, correspondentes, honorários periciais, bases de
+  jurisprudência, marketing/publicidade, aluguel comercial, energia/água/internet/telefonia,
+  material de escritório, contabilidade, segurança, limpeza
+- NÃO geram crédito: aluguel residencial, despesas pessoais, multas, IPVA, IPTU residencial,
+  doações, brindes, alimentação pessoal, bens de uso/consumo pessoal (art. 57 LC 214)
+- Casos AMBÍGUOS que exigem clarificação (faça perguntas para o usuário):
+  * Combustível / Uber: É deslocamento profissional (audiência, cliente)? Sim → elegível
+  * Refeição/Alimentação: É com cliente em reunião profissional? Sim → elegível como insumo
+  * Hospedagem/passagem: É viagem a trabalho? Sim → elegível
+  * Despesas reembolsáveis pelo cliente: É despesa do escritório ou repassada ao cliente?
+    Se reembolsada, NÃO gera crédito (é receita futura, não insumo).
+  * Hardware/eletrônico: É exclusivo do escritório ou misto pessoal/empresa? Misto não permite.
+  * Aluguel: Comercial dedicado ou home office? Home office só permite proporção do uso empresarial.
+- Sem NF/documento hábil → NÃO gera crédito (art. 28 LC 214)
+- Alíquotas 2026 (cheias, antes da redução setorial): IBS = 0,1%, CBS = 0,9%
+- Advocacia tem 30% de redução setorial na SAÍDA, mas crédito de ENTRADA é cheio (alíq. do fornecedor)
+
+Se a categoria for ambígua E ainda não houver respostas suficientes, retorne JSON com
+"perguntas" preenchido para coletar informações. Caso contrário, classifique normalmente.
 
 Responda APENAS um JSON com:
 {{
   "elegivel": true|false,
-  "base_legal": "trecho curto da LC 214/2025 ou regra aplicável (max 100 chars)",
+  "base_legal": "art. da LC 214/2025 ou regra aplicável (max 100 chars)",
   "aliquota_ibs_pct": 0.1,
   "aliquota_cbs_pct": 0.9,
   "credito_estimado": valor numérico do crédito esperado (ibs+cbs sobre o valor),
   "confianca": "alta|media|baixa",
-  "observacao": "breve justificativa (max 120 chars)"
+  "observacao": "breve justificativa (max 120 chars)",
+  "perguntas": [
+    {{ "id": "uso_profissional", "pergunta": "...", "opcoes": ["Sim","Não","Misto"] }}
+  ]
 }}
+"perguntas" é OPCIONAL — retorne array vazio [] ou omita se a classificação já está clara.
 Sem markdown, sem comentários adicionais."""
 
 
@@ -731,6 +747,7 @@ def classificar_despesa(body: ClassificarIn, _=Depends(get_current_user)) -> Any
         fornecedor=body.fornecedor or "—",
         descricao=body.descricao or "—",
         valor=body.valor,
+        respostas=json.dumps(body.respostas, ensure_ascii=False) if body.respostas else "—",
     )
     resp = client.messages.create(
         model="claude-haiku-4-5-20251001",
