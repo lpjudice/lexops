@@ -22,6 +22,7 @@ import {
   LogOut,
   ScrollText,
   BarChart3,
+  ShieldCheck,
 } from 'lucide-react'
 import api from '../api/client'
 import { useAuth } from '../contexts/AuthContext'
@@ -79,6 +80,7 @@ const navGroups: NavGroup[] = [
       { to: '/diario2', label: 'Recorte Digital OAB', Icon: Newspaper },
       { to: '/teses', label: 'Teses IA', Icon: Sparkles },
       { to: '/jurisprudencia', label: 'Jurisprudência', Icon: Scale },
+      { to: '/precedentcheck', label: 'PrecedentCheck', Icon: ShieldCheck },
     ],
   },
   {

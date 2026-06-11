@@ -15,8 +15,9 @@ from app.models import config_fiscal as _config_fiscal_model  # noqa: F401
 from app.models import relatorio_fiscal_log as _relatorio_fiscal_log_model  # noqa: F401
 from app.models import telegram_task as _telegram_task_model  # noqa: F401 — TelegramTaskBatch/Item/Session
 from app.models import backoffice as _backoffice_model  # noqa: F401
+from app.models import precedentcheck as _precedentcheck_model  # noqa: F401
 from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, fiscal, config_fiscal, jurisprudencia, organizador, pje, prazos, processos, publico, reembolsos, reunioes, system, tarefas, telegram, telegram_andamentos, telegram_tasks, teses, usuarios, webhooks
-from app.routers import backoffice
+from app.routers import backoffice, precedentcheck
 
 # Cria as tabelas (Alembic gerencia em produção; aqui facilita o dev)
 Base.metadata.create_all(bind=engine)
@@ -727,6 +728,25 @@ def _run_migrations() -> None:
             )
         """))
 
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS precedentcheck_analises (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL,
+                processo_id UUID,
+                titulo VARCHAR(500),
+                texto_peca TEXT NOT NULL,
+                citacoes JSONB NOT NULL DEFAULT '[]'::jsonb,
+                total_citacoes INTEGER NOT NULL DEFAULT 0,
+                total_ok INTEGER NOT NULL DEFAULT 0,
+                total_divergencia INTEGER NOT NULL DEFAULT 0,
+                total_nao_encontrado INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_precedentcheck_created ON precedentcheck_analises(created_at DESC)"
+        ))
+
         conn.commit()
 
 
@@ -804,6 +824,7 @@ app.include_router(webhooks.router)
 app.include_router(telegram.router)
 app.include_router(telegram_andamentos.router)
 app.include_router(telegram_tasks.router)
+app.include_router(precedentcheck.router)
 
 
 @app.on_event("startup")
