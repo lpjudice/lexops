@@ -12,6 +12,66 @@ import styles from './Page.module.css'
 function fmtBRL(v: number) {
   return (v ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 }
+function fmtNum(v: number) {
+  return (v ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+function parseNum(s: string): number {
+  if (!s) return 0
+  // Remove tudo exceto dígitos, vírgula e ponto. Trata "1.234,56" e "1234.56".
+  const cleaned = s.replace(/[^\d.,-]/g, '')
+  // Se tem vírgula, ela é o decimal e os pontos são milhares
+  if (cleaned.includes(',')) {
+    return parseFloat(cleaned.replace(/\./g, '').replace(',', '.')) || 0
+  }
+  return parseFloat(cleaned) || 0
+}
+function fmtCNPJ(s: string) {
+  const d = s.replace(/\D/g, '').slice(0, 14)
+  if (d.length <= 2) return d
+  if (d.length <= 5) return `${d.slice(0,2)}.${d.slice(2)}`
+  if (d.length <= 8) return `${d.slice(0,2)}.${d.slice(2,5)}.${d.slice(5)}`
+  if (d.length <= 12) return `${d.slice(0,2)}.${d.slice(2,5)}.${d.slice(5,8)}/${d.slice(8)}`
+  return `${d.slice(0,2)}.${d.slice(2,5)}.${d.slice(5,8)}/${d.slice(8,12)}-${d.slice(12)}`
+}
+
+// Input monetário X.XXX,XX — guarda texto formatado, expõe valor numérico via onValue
+function MoneyInput({
+  value,
+  onValue,
+  style,
+  disabled,
+}: {
+  value: number
+  onValue: (n: number) => void
+  style?: React.CSSProperties
+  disabled?: boolean
+}) {
+  const [text, setText] = useState(value ? fmtNum(value) : '')
+  // Sincroniza quando value muda externamente
+  const lastSyncedRef = useRef(value)
+  if (lastSyncedRef.current !== value && parseNum(text) !== value) {
+    lastSyncedRef.current = value
+    setText(value ? fmtNum(value) : '')
+  }
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={text}
+      disabled={disabled}
+      onChange={e => {
+        setText(e.target.value)
+        onValue(parseNum(e.target.value))
+      }}
+      onBlur={() => {
+        const n = parseNum(text)
+        setText(n ? fmtNum(n) : '')
+      }}
+      style={{ padding: '8px 10px', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 13, fontFamily: 'Archivo, sans-serif', textAlign: 'right', ...style }}
+    />
+  )
+}
+
 function mesAtual() { return new Date().toISOString().slice(0, 7) }
 function mesLabel(mes: string) {
   const [ano, mm] = mes.split('-')
@@ -97,22 +157,28 @@ function FormNovaDespesa({
 }) {
   const qc = useQueryClient()
   const [fornecedor, setFornecedor] = useState('')
+  const [cnpj, setCnpj] = useState('')
   const [categoria, setCategoria] = useState('')
-  const [valor, setValor] = useState('')
+  const [valor, setValor] = useState(0)
   const [temNota, setTemNota] = useState(true)
   const [elegivel, setElegivel] = useState(false)
 
   const save = useMutation({
     mutationFn: () =>
-      backofficeApi.addDespesa(mes, { categoria, fornecedor, valor: Number(valor), tem_nota: temNota, elegivel }),
+      backofficeApi.addDespesa(mes, { categoria, fornecedor, valor, tem_nota: temNota, elegivel }),
     onSuccess: async () => {
-      // Salva fornecedor se novo
+      // Salva fornecedor (com CNPJ) se preenchido
       if (fornecedor.trim()) {
-        await backofficeApi.upsertFornecedor({ nome: fornecedor.trim(), categoria_padrao: categoria || undefined })
+        await backofficeApi.upsertFornecedor({
+          nome: fornecedor.trim(),
+          cnpj: cnpj.replace(/\D/g, '') || undefined,
+          categoria_padrao: categoria || undefined,
+        })
       }
       qc.invalidateQueries({ queryKey: ['backoffice-lancamentos', mes] })
       qc.invalidateQueries({ queryKey: ['backoffice-despesas', mes] })
-      setFornecedor(''); setCategoria(''); setValor('')
+      qc.invalidateQueries({ queryKey: ['backoffice-fornecedores'] })
+      setFornecedor(''); setCnpj(''); setCategoria(''); setValor(0)
       onSaved()
     },
   })
@@ -129,8 +195,18 @@ function FormNovaDespesa({
           fornecedores={fornecedores}
           onSelect={f => {
             setFornecedor(f.nome)
+            setCnpj(f.cnpj ? fmtCNPJ(f.cnpj) : '')
             if (f.categoria_padrao && !categoria) setCategoria(f.categoria_padrao)
           }}
+        />
+      </div>
+      <div className={styles.fieldGroup}>
+        <span>CNPJ (opcional)</span>
+        <input
+          value={cnpj}
+          onChange={e => setCnpj(fmtCNPJ(e.target.value))}
+          placeholder="00.000.000/0000-00"
+          style={{ padding: '8px 10px', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 13, fontFamily: 'Archivo, sans-serif' }}
         />
       </div>
       <div className={styles.fieldGroup}>
@@ -146,12 +222,9 @@ function FormNovaDespesa({
       </div>
       <div className={styles.fieldGroup}>
         <span>Valor (R$)</span>
-        <input
-          type="number" step="0.01" value={valor} onChange={e => setValor(e.target.value)}
-          style={{ padding: '8px 10px', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 13, fontFamily: 'Archivo, sans-serif' }}
-        />
+        <MoneyInput value={valor} onValue={setValor} />
       </div>
-      <div style={{ display: 'flex', gap: 16, alignItems: 'center', paddingTop: 18 }}>
+      <div style={{ display: 'flex', gap: 16, alignItems: 'center', paddingTop: 18, gridColumn: '1/-1' }}>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, cursor: 'pointer' }}>
           <input type="checkbox" checked={temNota} onChange={e => setTemNota(e.target.checked)} />
           Tem nota fiscal
@@ -164,7 +237,7 @@ function FormNovaDespesa({
       <div style={{ gridColumn: '1/-1' }}>
         <button
           className={styles.btnPrimary}
-          disabled={!fornecedor || !valor || save.isPending}
+          disabled={!fornecedor || valor <= 0 || save.isPending}
           onClick={() => save.mutate()}
         >
           {save.isPending ? 'Salvando…' : 'Adicionar despesa'}
@@ -309,10 +382,10 @@ function SecaoExtrato({
                 >
                   {allCats.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
-                <input
-                  type="number" step="0.01" value={l.valor}
-                  onChange={e => setLinhas(prev => prev.map((x, j) => j === i ? { ...x, valor: Number(e.target.value) } : x))}
-                  style={{ fontSize: 12, border: '1px solid #e5e7eb', borderRadius: 4, padding: '4px 8px', fontFamily: 'Archivo, sans-serif', textAlign: 'right' }}
+                <MoneyInput
+                  value={l.valor}
+                  onValue={n => setLinhas(prev => prev.map((x, j) => j === i ? { ...x, valor: n } : x))}
+                  style={{ fontSize: 12, padding: '4px 8px' }}
                 />
                 <span style={{ fontSize: 11, color: 'var(--gray-mid)', whiteSpace: 'nowrap' }}>{l.data}</span>
                 <label style={{ display: 'flex', gap: 4, alignItems: 'center', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap' }}>
@@ -365,7 +438,7 @@ function SecaoRecorrentes({
   const [showForm, setShowForm] = useState(false)
   const [novaCategoria, setNovaCategoria] = useState('')
   const [novaFornecedor, setNovaFornecedor] = useState('')
-  const [novoValor, setNovoValor] = useState('')
+  const [novoValor, setNovoValor] = useState(0)
   const [novaElegivel, setNovaElegivel] = useState(false)
   const allCats = Array.from(new Set([...CATEGORIAS_PADRAO, ...categorias]))
 
@@ -394,11 +467,11 @@ function SecaoRecorrentes({
   const addRecorrente = useMutation({
     mutationFn: () => backofficeApi.createRecorrente({
       categoria: novaCategoria, fornecedor: novaFornecedor,
-      valor_padrao: Number(novoValor), elegivel: novaElegivel,
+      valor_padrao: novoValor, elegivel: novaElegivel,
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['backoffice-recorrentes'] })
-      setShowForm(false); setNovaCategoria(''); setNovaFornecedor(''); setNovoValor(''); setNovaElegivel(false)
+      setShowForm(false); setNovaCategoria(''); setNovaFornecedor(''); setNovoValor(0); setNovaElegivel(false)
     },
   })
 
@@ -441,12 +514,11 @@ function SecaoRecorrentes({
             <input type="checkbox" checked={!!sel} onChange={() => toggle(r)} />
             <span style={{ fontSize: 13 }}>{r.fornecedor}</span>
             <span style={{ fontSize: 11, color: 'var(--gray-mid)' }}>{r.categoria}</span>
-            <input
-              type="number" step="0.01"
+            <MoneyInput
               value={sel ? sel.valor : r.valor_padrao}
               disabled={!sel}
-              onChange={e => setSelecionados(prev => ({ ...prev, [r.id]: { ...prev[r.id], valor: Number(e.target.value) } }))}
-              style={{ fontSize: 12, border: '1px solid #e5e7eb', borderRadius: 4, padding: '4px 8px', textAlign: 'right', fontFamily: 'Archivo, sans-serif', background: sel ? '#fff' : '#f5f5f5' }}
+              onValue={n => setSelecionados(prev => ({ ...prev, [r.id]: { ...prev[r.id], valor: n } }))}
+              style={{ fontSize: 12, padding: '4px 8px', background: sel ? '#fff' : '#f5f5f5' }}
             />
             <label style={{ display: 'flex', gap: 4, alignItems: 'center', fontSize: 11, cursor: sel ? 'pointer' : 'default' }}>
               <input
@@ -505,8 +577,7 @@ function SecaoRecorrentes({
           </div>
           <div className={styles.fieldGroup}>
             <span>Valor padrão (R$)</span>
-            <input type="number" step="0.01" value={novoValor} onChange={e => setNovoValor(e.target.value)}
-              style={{ padding: '8px 10px', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 13, fontFamily: 'Archivo, sans-serif' }} />
+            <MoneyInput value={novoValor} onValue={setNovoValor} />
           </div>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', paddingTop: 18 }}>
             <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, cursor: 'pointer' }}>
@@ -628,11 +699,139 @@ function TabelaDespesas({ mes }: { mes: string }) {
   )
 }
 
+// ─── Aba Fornecedores ─────────────────────────────────────────────────────────
+
+function AbaFornecedores() {
+  const qc = useQueryClient()
+  const { data: fornecedores = [] } = useQuery({
+    queryKey: ['backoffice-fornecedores'],
+    queryFn: backofficeApi.fornecedores,
+  })
+  const { data: categoriasData = [] } = useQuery({
+    queryKey: ['backoffice-categorias'],
+    queryFn: backofficeApi.categorias,
+  })
+  const allCats = Array.from(new Set([...CATEGORIAS_PADRAO, ...categoriasData]))
+
+  const [busca, setBusca] = useState('')
+  const [showForm, setShowForm] = useState(false)
+  const [novoNome, setNovoNome] = useState('')
+  const [novoCnpj, setNovoCnpj] = useState('')
+  const [novaCat, setNovaCat] = useState('')
+
+  const save = useMutation({
+    mutationFn: () => backofficeApi.upsertFornecedor({
+      nome: novoNome.trim(),
+      cnpj: novoCnpj.replace(/\D/g, '') || undefined,
+      categoria_padrao: novaCat || undefined,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['backoffice-fornecedores'] })
+      setNovoNome(''); setNovoCnpj(''); setNovaCat(''); setShowForm(false)
+    },
+  })
+
+  const filtered = fornecedores.filter(f =>
+    f.nome.toLowerCase().includes(busca.toLowerCase()) ||
+    (f.cnpj ?? '').includes(busca.replace(/\D/g, ''))
+  )
+
+  return (
+    <div className={styles.tableCard}>
+      <div style={{ padding: '14px 18px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div>
+          <span style={{ fontWeight: 700, fontSize: 13 }}>Fornecedores cadastrados</span>
+          <span style={{ fontSize: 11, color: 'var(--gray-mid)', marginLeft: 8 }}>
+            {fornecedores.length} fornecedor(es)
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input
+            value={busca}
+            onChange={e => setBusca(e.target.value)}
+            placeholder="Buscar por nome ou CNPJ…"
+            style={{ padding: '6px 10px', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 12, fontFamily: 'Archivo, sans-serif', minWidth: 220 }}
+          />
+          <button className={styles.btnSmall} onClick={() => setShowForm(v => !v)}>
+            {showForm ? 'Cancelar' : '+ Novo fornecedor'}
+          </button>
+        </div>
+      </div>
+
+      {showForm && (
+        <div style={{ padding: '4px 18px 14px', display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr auto', gap: 10, alignItems: 'end', borderBottom: '1px solid #f3f4f6' }}>
+          <div className={styles.fieldGroup}>
+            <span>Nome</span>
+            <input value={novoNome} onChange={e => setNovoNome(e.target.value)}
+              style={{ padding: '8px 10px', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 13, fontFamily: 'Archivo, sans-serif' }} />
+          </div>
+          <div className={styles.fieldGroup}>
+            <span>CNPJ</span>
+            <input
+              value={novoCnpj}
+              onChange={e => setNovoCnpj(fmtCNPJ(e.target.value))}
+              placeholder="00.000.000/0000-00"
+              style={{ padding: '8px 10px', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 13, fontFamily: 'Archivo, sans-serif' }}
+            />
+          </div>
+          <div className={styles.fieldGroup}>
+            <span>Categoria padrão</span>
+            <select
+              value={novaCat}
+              onChange={e => setNovaCat(e.target.value)}
+              style={{ padding: '8px 10px', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 13, fontFamily: 'Archivo, sans-serif', color: 'var(--dark)', background: '#fff' }}
+            >
+              <option value="">—</option>
+              {allCats.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <button
+            className={styles.btnPrimary}
+            disabled={!novoNome.trim() || save.isPending}
+            onClick={() => save.mutate()}
+          >
+            {save.isPending ? 'Salvando…' : 'Salvar'}
+          </button>
+        </div>
+      )}
+
+      {filtered.length === 0 ? (
+        <div className={styles.empty}>
+          {busca ? 'Nenhum fornecedor encontrado.' : 'Nenhum fornecedor cadastrado ainda.'}
+        </div>
+      ) : (
+        <table className={styles.table}>
+          <thead>
+            <tr>
+              <th>Nome</th><th>CNPJ</th><th>Categoria padrão</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map(f => (
+              <tr key={f.id}>
+                <td style={{ fontWeight: 600 }}>{f.nome}</td>
+                <td style={{ color: 'var(--gray-mid)', fontFamily: 'monospace', fontSize: 12 }}>
+                  {f.cnpj ? fmtCNPJ(f.cnpj) : <span style={{ color: '#d1d5db' }}>—</span>}
+                </td>
+                <td style={{ color: 'var(--gray-mid)', fontSize: 12 }}>
+                  {f.categoria_padrao ?? <span style={{ color: '#d1d5db' }}>—</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  )
+}
+
 // ─── Página principal ─────────────────────────────────────────────────────────
 
+type Aba = 'lancamentos' | 'fornecedores'
 type SecaoAberta = 'nova' | 'extrato' | 'recorrentes' | null
 
 export default function DespesasPage() {
+  const [aba, setAba] = useState<Aba>('lancamentos')
   const [mes, setMes] = useState(mesAtual)
   const [secao, setSecao] = useState<SecaoAberta>(null)
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
@@ -681,18 +880,48 @@ export default function DespesasPage() {
             Lançamentos mensais · base para crédito IBS/CBS na Decisão Tributária
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <input
-            type="month"
-            value={mes}
-            onChange={e => setMes(e.target.value)}
-            style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #e5e7eb', fontSize: 13 }}
-          />
-          <button style={btnAtivo('nova')} onClick={() => toggleSecao('nova')}>+ Nova despesa</button>
-          <button style={btnAtivo('extrato')} onClick={() => toggleSecao('extrato')}>📄 Subir extrato</button>
-          <button style={btnAtivo('recorrentes')} onClick={() => toggleSecao('recorrentes')}>🔁 Recorrentes</button>
-        </div>
+        {aba === 'lancamentos' && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <input
+              type="month"
+              value={mes}
+              onChange={e => setMes(e.target.value)}
+              style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #e5e7eb', fontSize: 13 }}
+            />
+            <button style={btnAtivo('nova')} onClick={() => toggleSecao('nova')}>+ Nova despesa</button>
+            <button style={btnAtivo('extrato')} onClick={() => toggleSecao('extrato')}>📄 Subir extrato</button>
+            <button style={btnAtivo('recorrentes')} onClick={() => toggleSecao('recorrentes')}>🔁 Recorrentes</button>
+          </div>
+        )}
       </div>
+
+      {/* Sub-abas */}
+      <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid #e5e7eb' }}>
+        {([
+          { id: 'lancamentos' as Aba, label: 'Lançamentos' },
+          { id: 'fornecedores' as Aba, label: 'Fornecedores' },
+        ]).map(t => (
+          <button
+            key={t.id}
+            onClick={() => setAba(t.id)}
+            style={{
+              padding: '8px 18px',
+              background: 'none', border: 'none',
+              borderBottom: aba === t.id ? '2px solid var(--teal)' : '2px solid transparent',
+              cursor: 'pointer', fontSize: 13,
+              fontWeight: aba === t.id ? 700 : 400,
+              color: aba === t.id ? 'var(--teal)' : 'var(--gray-mid)',
+              transition: 'color .15s', marginBottom: -1,
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {aba === 'fornecedores' && <AbaFornecedores />}
+
+      {aba === 'lancamentos' && <>
 
       {/* Sync NFs */}
       <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -744,6 +973,7 @@ export default function DespesasPage() {
 
       {/* Tabela */}
       <TabelaDespesas mes={mes} />
+      </>}
     </div>
   )
 }

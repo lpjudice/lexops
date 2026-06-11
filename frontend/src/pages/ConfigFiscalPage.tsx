@@ -8,73 +8,115 @@ import cs from './FiscalPage.module.css'
 
 // ─── Popup: Tabela do Simples + ISS Vitória/ES ────────────────────────────────
 
-const FAIXAS_SN_IV = [
-  { faixa: 'Até R$ 180 mil',        aliq: 4.50, ded: 0,          issComp: 2.00 },
-  { faixa: 'De R$ 180k a R$ 360k',  aliq: 9.00, ded: 8_100,      issComp: 3.00 },
-  { faixa: 'De R$ 360k a R$ 720k',  aliq: 10.20, ded: 12_420,    issComp: 3.50 },
-  { faixa: 'De R$ 720k a R$ 1,8M',  aliq: 14.00, ded: 39_780,    issComp: 4.00 },
-  { faixa: 'De R$ 1,8M a R$ 3,6M',  aliq: 22.00, ded: 183_780,   issComp: 5.00 },
-  { faixa: 'De R$ 3,6M a R$ 4,8M',  aliq: 33.00, ded: 828_000,   issComp: 5.00 },
+// Anexo IV LC 123/2006 — faixas + repartição percentual interna (% do DAS por tributo)
+type Faixa = {
+  idx: number; faixa: string; tetoSup: number; tetoInf: number;
+  aliq: number; ded: number;
+  rep: { irpj: number; csll: number; cofins: number; pis: number; iss: number }
+}
+const FAIXAS_SN_IV: Faixa[] = [
+  { idx: 1, faixa: 'Até R$ 180 mil',        tetoInf: 0,         tetoSup: 180_000,   aliq: 4.50,  ded: 0,        rep: { irpj: 18.80, csll: 15.20, cofins: 17.67, pis: 3.83, iss: 44.50 } },
+  { idx: 2, faixa: 'De R$ 180k a R$ 360k',  tetoInf: 180_000,   tetoSup: 360_000,   aliq: 9.00,  ded: 8_100,    rep: { irpj: 19.80, csll: 15.20, cofins: 20.93, pis: 4.27, iss: 39.80 } },
+  { idx: 3, faixa: 'De R$ 360k a R$ 720k',  tetoInf: 360_000,   tetoSup: 720_000,   aliq: 10.20, ded: 12_420,   rep: { irpj: 20.80, csll: 15.20, cofins: 21.10, pis: 4.30, iss: 38.60 } },
+  { idx: 4, faixa: 'De R$ 720k a R$ 1,8M',  tetoInf: 720_000,   tetoSup: 1_800_000, aliq: 14.00, ded: 39_780,   rep: { irpj: 17.80, csll: 19.20, cofins: 21.55, pis: 4.40, iss: 37.05 } },
+  { idx: 5, faixa: 'De R$ 1,8M a R$ 3,6M',  tetoInf: 1_800_000, tetoSup: 3_600_000, aliq: 22.00, ded: 183_780,  rep: { irpj: 18.80, csll: 19.20, cofins: 22.50, pis: 4.55, iss: 34.95 } },
+  { idx: 6, faixa: 'De R$ 3,6M a R$ 4,8M',  tetoInf: 3_600_000, tetoSup: 4_800_000, aliq: 33.00, ded: 828_000,  rep: { irpj: 18.80, csll: 19.20, cofins: 22.50, pis: 4.55, iss: 34.95 } },
 ]
 
-function calcAliqEfetiva(rbt12: number, aliq: number, ded: number) {
-  if (!rbt12) return null
-  return ((rbt12 * aliq / 100) - ded) / rbt12 * 100
+function aliqEfetiva(rbt12: number, f: Faixa) {
+  return ((rbt12 * f.aliq / 100) - f.ded) / rbt12 * 100
+}
+function issEfetivo(aliqEf: number, f: Faixa) {
+  return Math.min(aliqEf * f.rep.iss / 100, 5.0) // teto de 5% LC 116/2003
+}
+function faixaDoRbt12(rbt12: number): Faixa | null {
+  return FAIXAS_SN_IV.find(f => rbt12 > f.tetoInf && rbt12 <= f.tetoSup) ?? null
 }
 
-function PopupSimples({ onClose, rbt12 }: { onClose: () => void; rbt12?: number }) {
+function PopupSimples({ onClose, rbt12: rbt12Inicial }: { onClose: () => void; rbt12?: number }) {
+  const [rbt12Input, setRbt12Input] = useState(rbt12Inicial?.toString() ?? '320000')
+  const rbt12 = parseFloat(rbt12Input) || 0
   const fmtR = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
+  const faixaAtual = faixaDoRbt12(rbt12)
+
   return (
     <div
       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
       onClick={e => e.target === e.currentTarget && onClose()}
     >
-      <div style={{ background: '#fff', borderRadius: 12, width: '100%', maxWidth: 680, maxHeight: '90vh', overflow: 'auto', padding: 28, position: 'relative' }}>
+      <div style={{ background: '#fff', borderRadius: 12, width: '100%', maxWidth: 760, maxHeight: '92vh', overflow: 'auto', padding: 28, position: 'relative' }}>
         <button onClick={onClose} style={{ position: 'absolute', top: 14, right: 14, background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--gray-mid)' }}>✕</button>
 
         <h2 style={{ fontFamily: 'Archivo, sans-serif', fontSize: 16, fontWeight: 800, marginBottom: 4, color: 'var(--dark)' }}>
-          Simples Nacional — Anexo IV (Serviços Advocatícios)
+          Simples Nacional — Anexo IV (Advocacia)
         </h2>
-        <p style={{ fontSize: 12, color: 'var(--gray-mid)', marginBottom: 16 }}>
-          LC 123/2006, Anexo IV. CPP (INSS patronal) pago separadamente, fora do DAS.
-          {rbt12 ? ` RBT12 informado: ${fmtR(rbt12)}.` : ''}
+        <p style={{ fontSize: 12, color: 'var(--gray-mid)', marginBottom: 14 }}>
+          LC 123/2006, Anexo IV. CPP (INSS patronal) é pago separadamente, fora do DAS.
         </p>
-        <div style={{ overflowX: 'auto', marginBottom: 24 }}>
+
+        {/* Baseline DRE 2025 */}
+        <div style={{ background: '#fefce8', border: '1px solid #fde047', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 12 }}>
+          <strong>📋 Baseline DRE 2025 (Empenho Contabilidade):</strong>{' '}
+          receita bruta R$ 320.000 (set–dez 2025) · Simples pago R$ 14.400 (= <strong>4,50% efetivo</strong> — faixa 1, RBT12 ainda abaixo de R$ 180k) ·
+          desp. administrativas R$ 2.864 (taxas + contabilidade).
+        </div>
+
+        {/* Input RBT12 */}
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 14, padding: '10px 14px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8 }}>
+          <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--dark)' }}>Simular com RBT12:</label>
+          <input
+            type="number" step="1000" value={rbt12Input}
+            onChange={e => setRbt12Input(e.target.value)}
+            style={{ padding: '6px 10px', border: '1px solid #bbf7d0', borderRadius: 6, fontSize: 13, fontFamily: 'Archivo, sans-serif', width: 140 }}
+          />
+          {faixaAtual && (
+            <span style={{ fontSize: 12, color: 'var(--teal)' }}>
+              → faixa {faixaAtual.idx} · alíq. efetiva <strong>{aliqEfetiva(rbt12, faixaAtual).toFixed(2).replace('.', ',')}%</strong>
+              {' '}· ISS efetivo <strong>{issEfetivo(aliqEfetiva(rbt12, faixaAtual), faixaAtual).toFixed(2).replace('.', ',')}%</strong>
+            </span>
+          )}
+        </div>
+
+        <div style={{ overflowX: 'auto', marginBottom: 20 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
               <tr style={{ background: '#f3f4f6' }}>
-                <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: 'var(--gray-mid)', textTransform: 'uppercase', fontSize: 10, letterSpacing: '.05em' }}>Faixa (RBT12)</th>
-                <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700, color: 'var(--gray-mid)', textTransform: 'uppercase', fontSize: 10, letterSpacing: '.05em' }}>Alíq. nominal</th>
-                <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700, color: 'var(--gray-mid)', textTransform: 'uppercase', fontSize: 10, letterSpacing: '.05em' }}>Dedução (R$)</th>
-                <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700, color: 'var(--gray-mid)', textTransform: 'uppercase', fontSize: 10, letterSpacing: '.05em' }}>ISS no DAS</th>
-                {rbt12 && <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700, color: 'var(--teal)', textTransform: 'uppercase', fontSize: 10, letterSpacing: '.05em' }}>Alíq. efetiva</th>}
+                <th style={{ padding: '8px 8px', textAlign: 'left', fontWeight: 700, color: 'var(--gray-mid)', textTransform: 'uppercase', fontSize: 10 }}>Faixa</th>
+                <th style={{ padding: '8px 8px', textAlign: 'right', fontWeight: 700, color: 'var(--gray-mid)', textTransform: 'uppercase', fontSize: 10 }}>Alíq.<br/>nominal</th>
+                <th style={{ padding: '8px 8px', textAlign: 'right', fontWeight: 700, color: 'var(--gray-mid)', textTransform: 'uppercase', fontSize: 10 }}>Dedução</th>
+                <th style={{ padding: '8px 8px', textAlign: 'right', fontWeight: 700, color: 'var(--gray-mid)', textTransform: 'uppercase', fontSize: 10 }}>% ISS<br/>no DAS</th>
+                <th style={{ padding: '8px 8px', textAlign: 'right', fontWeight: 700, color: 'var(--teal)', textTransform: 'uppercase', fontSize: 10 }}>Alíq. efetiva<br/>(no teto)</th>
+                <th style={{ padding: '8px 8px', textAlign: 'right', fontWeight: 700, color: '#1d4ed8', textTransform: 'uppercase', fontSize: 10 }}>ISS efetivo<br/>(no teto)</th>
               </tr>
             </thead>
             <tbody>
-              {FAIXAS_SN_IV.map((f, i) => {
-                const ef = rbt12 ? calcAliqEfetiva(rbt12, f.aliq, f.ded) : null
-                const faixaAtual = rbt12 && (
-                  (i === 0 && rbt12 <= 180_000) ||
-                  (i === 1 && rbt12 > 180_000 && rbt12 <= 360_000) ||
-                  (i === 2 && rbt12 > 360_000 && rbt12 <= 720_000) ||
-                  (i === 3 && rbt12 > 720_000 && rbt12 <= 1_800_000) ||
-                  (i === 4 && rbt12 > 1_800_000 && rbt12 <= 3_600_000) ||
-                  (i === 5 && rbt12 > 3_600_000)
-                )
+              {FAIXAS_SN_IV.map((f) => {
+                const ehAtual = faixaAtual?.idx === f.idx
+                const efTeto = aliqEfetiva(f.tetoSup, f)
+                const issTeto = issEfetivo(efTeto, f)
+                const efUsuario = ehAtual ? aliqEfetiva(rbt12, f) : null
+                const issUsuario = efUsuario != null ? issEfetivo(efUsuario, f) : null
                 return (
-                  <tr key={i} style={{ background: faixaAtual ? '#f0fdf4' : 'transparent', borderBottom: '1px solid #f3f4f6' }}>
-                    <td style={{ padding: '8px 10px', fontWeight: faixaAtual ? 700 : 400 }}>
+                  <tr key={f.idx} style={{ background: ehAtual ? '#f0fdf4' : 'transparent', borderBottom: '1px solid #f3f4f6' }}>
+                    <td style={{ padding: '8px 8px', fontWeight: ehAtual ? 700 : 400 }}>
                       {f.faixa}
-                      {faixaAtual && <span style={{ marginLeft: 6, fontSize: 10, background: '#dcfce7', color: '#15803d', padding: '1px 6px', borderRadius: 999, fontWeight: 600 }}>← você</span>}
+                      {ehAtual && <span style={{ marginLeft: 6, fontSize: 10, background: '#dcfce7', color: '#15803d', padding: '1px 6px', borderRadius: 999, fontWeight: 600 }}>← você</span>}
                     </td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right' }}>{f.aliq.toFixed(2).replace('.', ',')}%</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--gray-mid)' }}>{f.ded ? fmtR(f.ded) : '—'}</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right' }}>{f.issComp.toFixed(2).replace('.', ',')}%</td>
-                    {rbt12 && (
-                      <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700, color: faixaAtual ? 'var(--teal)' : 'var(--dark)' }}>
-                        {ef != null ? `${ef.toFixed(2).replace('.', ',')}%` : '—'}
-                      </td>
-                    )}
+                    <td style={{ padding: '8px 8px', textAlign: 'right' }}>{f.aliq.toFixed(2).replace('.', ',')}%</td>
+                    <td style={{ padding: '8px 8px', textAlign: 'right', color: 'var(--gray-mid)' }}>{f.ded ? fmtR(f.ded) : '—'}</td>
+                    <td style={{ padding: '8px 8px', textAlign: 'right', color: 'var(--gray-mid)' }}>{f.rep.iss.toFixed(2).replace('.', ',')}%</td>
+                    <td style={{ padding: '8px 8px', textAlign: 'right', fontWeight: 700, color: ehAtual ? 'var(--teal)' : 'var(--dark)' }}>
+                      {efTeto.toFixed(2).replace('.', ',')}%
+                      {efUsuario != null && (
+                        <div style={{ fontSize: 10, color: 'var(--teal)', fontWeight: 600 }}>(seu: {efUsuario.toFixed(2).replace('.', ',')}%)</div>
+                      )}
+                    </td>
+                    <td style={{ padding: '8px 8px', textAlign: 'right', fontWeight: 700, color: '#1d4ed8' }}>
+                      {issTeto.toFixed(2).replace('.', ',')}%
+                      {issUsuario != null && (
+                        <div style={{ fontSize: 10, color: '#1d4ed8', fontWeight: 600 }}>(seu: {issUsuario.toFixed(2).replace('.', ',')}%)</div>
+                      )}
+                    </td>
                   </tr>
                 )
               })}
@@ -82,14 +124,19 @@ function PopupSimples({ onClose, rbt12 }: { onClose: () => void; rbt12?: number 
           </table>
         </div>
 
+        <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: '#1e3a8a' }}>
+          <strong>💡 Sobre os 2,88% do seu contador:</strong> isso bate como <strong>ISS efetivo dentro do DAS</strong> se o RBT12 projetado dele estiver em torno de
+          R$ 450k (faixa 3). Fórmula: <code>ISS = ((RBT12 × 10,20% − 12.420) / RBT12) × 38,60%</code>. Em R$ 320k você ainda está na faixa 1 (ISS ≈ 2,00%) — confirme
+          com ele se o número considera projeção 2026 ou competência atual.
+        </div>
+
         <h3 style={{ fontFamily: 'Archivo, sans-serif', fontSize: 14, fontWeight: 800, marginBottom: 4, color: 'var(--dark)' }}>
-          ISS Municipal — Vitória/ES (Advocacia)
+          ISS Municipal — Vitória/ES (fora do Simples)
         </h3>
-        <p style={{ fontSize: 12, color: 'var(--gray-mid)', marginBottom: 12 }}>
-          Para optantes do Lucro Presumido ou Lucro Real, o ISS é pago diretamente ao município.
-          LC 116/2003 define alíquota mínima 2% e máxima 5%. Vitória/ES aplica:
+        <p style={{ fontSize: 12, color: 'var(--gray-mid)', marginBottom: 10 }}>
+          Para LP / LR, o ISS é pago direto ao município. LC 116/2003 fixa mínimo 2%, máximo 5%.
         </p>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 8 }}>
           <thead>
             <tr style={{ background: '#f3f4f6' }}>
               <th style={{ padding: '7px 10px', textAlign: 'left', fontWeight: 700, color: 'var(--gray-mid)', textTransform: 'uppercase', fontSize: 10 }}>Situação</th>
@@ -99,9 +146,8 @@ function PopupSimples({ onClose, rbt12 }: { onClose: () => void; rbt12?: number 
           </thead>
           <tbody>
             {[
-              { sit: 'Simples Nacional', aliq: 'incluso no DAS', obs: 'ISS faz parte da guia única (2% a 5% conforme faixa acima)' },
-              { sit: 'LP / LR — serviços advocatícios', aliq: '2,00%', obs: 'Alíquota mínima LC 116/2003, aplicada em Vitória — Dec. Municipal' },
-              { sit: 'LP / LR — sociedade de profissionais', aliq: '2,00%', obs: 'Regime especial: recolhimento por profissional habilitado (não por receita)' },
+              { sit: 'LP / LR — advocacia regime normal', aliq: '5,00%', obs: 'Vitória aplica a alíquota máxima da LC 116 para serviços advocatícios (lista 17.13)' },
+              { sit: 'LP / LR — sociedade de profissionais (SUP)', aliq: 'por sócio', obs: 'Regime especial Vitória: valor fixo por profissional habilitado; não incide sobre o faturamento' },
             ].map((r, i) => (
               <tr key={i} style={{ borderBottom: '1px solid #f3f4f6' }}>
                 <td style={{ padding: '7px 10px', fontWeight: 600 }}>{r.sit}</td>
@@ -112,8 +158,7 @@ function PopupSimples({ onClose, rbt12 }: { onClose: () => void; rbt12?: number 
           </tbody>
         </table>
         <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 12 }}>
-          ⚠ O contador informou 2,88% — isso é a <strong>alíquota efetiva do Simples</strong> (pTotTribSN), não o ISS isolado.
-          Confirme com ele a faixa de RBT12 para validar o cálculo acima.
+          Confirme com a contabilidade se o escritório enquadra como sociedade uniprofissional em Vitória — isso pode reduzir muito o ISS no LP.
         </p>
       </div>
     </div>
