@@ -5,13 +5,21 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+import base64
+import json
+import re
+
+import anthropic
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models.backoffice import FiscalDespesa, FiscalFolha, FiscalMes, FiscalReceita, RegraCredito
+from app.models.backoffice import (
+    DespesaRecorrente, FiscalDespesa, FiscalFolha, FiscalFornecedor,
+    FiscalMes, FiscalReceita, RegraCredito,
+)
 from app.models.config_fiscal import ConfigFiscal
 from app.models.nota_fiscal import NotaFiscal
 from app.services.fiscal_engine import EntradaMes, PremissasMes, calcular
@@ -493,3 +501,189 @@ def patch_regra(id: uuid.UUID, body: dict, _=Depends(get_current_user), db: Sess
             setattr(r, k, v)
     db.commit()
     return {"ok": True}
+
+
+# ── Fornecedores conhecidos ───────────────────────────────────────────────────
+
+@router.get("/fornecedores")
+def list_fornecedores(_=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
+    rows = db.query(FiscalFornecedor).order_by(FiscalFornecedor.nome).all()
+    return [{"id": str(r.id), "nome": r.nome, "cnpj": r.cnpj, "categoria_padrao": r.categoria_padrao} for r in rows]
+
+
+class FornecedorIn(BaseModel):
+    nome: str
+    cnpj: str | None = None
+    categoria_padrao: str | None = None
+
+
+@router.post("/fornecedores")
+def upsert_fornecedor(body: FornecedorIn, _=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
+    existing = db.query(FiscalFornecedor).filter_by(nome=body.nome).first()
+    if existing:
+        existing.cnpj = body.cnpj or existing.cnpj
+        existing.categoria_padrao = body.categoria_padrao or existing.categoria_padrao
+        db.commit()
+        return {"id": str(existing.id), "updated": True}
+    f = FiscalFornecedor(**body.model_dump())
+    db.add(f)
+    db.commit()
+    return {"id": str(f.id), "updated": False}
+
+
+@router.get("/categorias")
+def list_categorias(_=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
+    from sqlalchemy import distinct
+    cats = db.query(distinct(FiscalDespesa.categoria)).order_by(FiscalDespesa.categoria).all()
+    return [c[0] for c in cats]
+
+
+# ── Despesas recorrentes ──────────────────────────────────────────────────────
+
+@router.get("/recorrentes")
+def list_recorrentes(_=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
+    rows = db.query(DespesaRecorrente).filter_by(ativa=True).order_by(DespesaRecorrente.categoria).all()
+    return [
+        {
+            "id": str(r.id), "categoria": r.categoria, "fornecedor": r.fornecedor,
+            "descricao": r.descricao, "valor_padrao": float(r.valor_padrao),
+            "tem_nota": r.tem_nota, "elegivel": r.elegivel,
+        }
+        for r in rows
+    ]
+
+
+class RecorrenteIn(BaseModel):
+    categoria: str
+    fornecedor: str
+    descricao: str | None = None
+    valor_padrao: float = 0
+    tem_nota: bool = True
+    elegivel: bool = False
+
+
+@router.post("/recorrentes")
+def create_recorrente(body: RecorrenteIn, _=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
+    r = DespesaRecorrente(**body.model_dump())
+    db.add(r)
+    db.commit()
+    return {"id": str(r.id)}
+
+
+@router.patch("/recorrentes/{id}")
+def patch_recorrente(id: uuid.UUID, body: dict, _=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
+    r = db.get(DespesaRecorrente, id)
+    if not r:
+        raise HTTPException(404)
+    allowed = {"categoria", "fornecedor", "descricao", "valor_padrao", "tem_nota", "elegivel", "ativa"}
+    for k, v in body.items():
+        if k in allowed:
+            setattr(r, k, v)
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/recorrentes/{id}")
+def delete_recorrente(id: uuid.UUID, _=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
+    r = db.get(DespesaRecorrente, id)
+    if not r:
+        raise HTTPException(404)
+    r.ativa = False
+    db.commit()
+    return {"ok": True}
+
+
+# ── Lançamento em lote ────────────────────────────────────────────────────────
+
+class DespesaBatchItem(BaseModel):
+    categoria: str
+    fornecedor: str
+    descricao: str | None = None
+    valor: float
+    tem_nota: bool = True
+    elegivel: bool = False
+    base_legal: str = "LC 214/2025"
+    status: str = "novo"
+
+
+@router.post("/despesas/batch/{mes}")
+def add_despesas_batch(
+    mes: str,
+    items: list[DespesaBatchItem],
+    _=Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    _get_or_create_mes(mes, db)
+    ids = []
+    for item in items:
+        d = FiscalDespesa(mes=mes, **item.model_dump())
+        db.add(d)
+        db.flush()
+        ids.append(str(d.id))
+    db.commit()
+    return {"ids": ids, "count": len(ids)}
+
+
+# ── Parse de extrato bancário com IA ─────────────────────────────────────────
+
+_PARSE_PROMPT = """\
+Analise este extrato bancário e extraia as SAÍDAS (débitos/pagamentos efetuados).
+Para cada saída, retorne um JSON array com objetos contendo:
+- fornecedor: nome do destinatário/beneficiário (string, curto e legível)
+- valor: valor em reais (number, positivo)
+- data: data da transação no formato YYYY-MM-DD (string)
+- descricao: breve descrição complementar (string)
+- categoria: categoria sugerida (string — use uma destas: "Software jurídico", "Marketing / publicidade", "Correspondentes", "Aluguel", "Energia elétrica", "Telefonia", "Internet", "Contabilidade", "Despesas com clientes", "Material de escritório", "Outros")
+
+Ignore entradas (depósitos/recebimentos) e tarifa bancária que seja ínfima.
+Responda APENAS com o JSON array, sem texto adicional, markdown ou comentários.
+Exemplo: [{"fornecedor":"Vivo SA","valor":890.00,"data":"2026-04-05","descricao":"Fatura telefonia","categoria":"Telefonia"}]"""
+
+
+@router.post("/despesas/parse-extrato")
+async def parse_extrato(
+    file: UploadFile = File(...),
+    _=Depends(get_current_user),
+) -> Any:
+    content = await file.read()
+    b64 = base64.b64encode(content).decode()
+    ct = (file.content_type or "").lower()
+    filename = file.filename or ""
+
+    is_pdf = ct == "application/pdf" or filename.lower().endswith(".pdf")
+
+    client = anthropic.Anthropic()
+
+    if is_pdf:
+        media_block = {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": b64}}
+    else:
+        media_type = ct if ct.startswith("image/") else "image/jpeg"
+        media_block = {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}}
+
+    resp = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=2048,
+        messages=[{
+            "role": "user",
+            "content": [media_block, {"type": "text", "text": _PARSE_PROMPT}],
+        }],
+    )
+
+    text = resp.content[0].text.strip()
+    try:
+        linhas = json.loads(text)
+    except Exception:
+        m = re.search(r"\[.*\]", text, re.DOTALL)
+        linhas = json.loads(m.group()) if m else []
+
+    return {"linhas": linhas}
+
+
+# ── Sincronizar NFs históricas (DFe) ─────────────────────────────────────────
+
+@router.post("/sync-nfs-historico")
+def sync_nfs_historico(_=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
+    """Dispara sincronização do DFe para trazer NFs desde jun/2025 e enriquecer o RBT12."""
+    from app.services.nfse.dfe_sync import sincronizar_dfe
+    resultado = sincronizar_dfe(db, max_paginas=100)
+    return resultado

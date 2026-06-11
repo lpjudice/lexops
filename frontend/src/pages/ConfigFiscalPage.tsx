@@ -6,6 +6,120 @@ import { fiscalApi } from '../api/fiscal'
 import styles from './Page.module.css'
 import cs from './FiscalPage.module.css'
 
+// ─── Popup: Tabela do Simples + ISS Vitória/ES ────────────────────────────────
+
+const FAIXAS_SN_IV = [
+  { faixa: 'Até R$ 180 mil',        aliq: 4.50, ded: 0,          issComp: 2.00 },
+  { faixa: 'De R$ 180k a R$ 360k',  aliq: 9.00, ded: 8_100,      issComp: 3.00 },
+  { faixa: 'De R$ 360k a R$ 720k',  aliq: 10.20, ded: 12_420,    issComp: 3.50 },
+  { faixa: 'De R$ 720k a R$ 1,8M',  aliq: 14.00, ded: 39_780,    issComp: 4.00 },
+  { faixa: 'De R$ 1,8M a R$ 3,6M',  aliq: 22.00, ded: 183_780,   issComp: 5.00 },
+  { faixa: 'De R$ 3,6M a R$ 4,8M',  aliq: 33.00, ded: 828_000,   issComp: 5.00 },
+]
+
+function calcAliqEfetiva(rbt12: number, aliq: number, ded: number) {
+  if (!rbt12) return null
+  return ((rbt12 * aliq / 100) - ded) / rbt12 * 100
+}
+
+function PopupSimples({ onClose, rbt12 }: { onClose: () => void; rbt12?: number }) {
+  const fmtR = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+      onClick={e => e.target === e.currentTarget && onClose()}
+    >
+      <div style={{ background: '#fff', borderRadius: 12, width: '100%', maxWidth: 680, maxHeight: '90vh', overflow: 'auto', padding: 28, position: 'relative' }}>
+        <button onClick={onClose} style={{ position: 'absolute', top: 14, right: 14, background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--gray-mid)' }}>✕</button>
+
+        <h2 style={{ fontFamily: 'Archivo, sans-serif', fontSize: 16, fontWeight: 800, marginBottom: 4, color: 'var(--dark)' }}>
+          Simples Nacional — Anexo IV (Serviços Advocatícios)
+        </h2>
+        <p style={{ fontSize: 12, color: 'var(--gray-mid)', marginBottom: 16 }}>
+          LC 123/2006, Anexo IV. CPP (INSS patronal) pago separadamente, fora do DAS.
+          {rbt12 ? ` RBT12 informado: ${fmtR(rbt12)}.` : ''}
+        </p>
+        <div style={{ overflowX: 'auto', marginBottom: 24 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: '#f3f4f6' }}>
+                <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: 'var(--gray-mid)', textTransform: 'uppercase', fontSize: 10, letterSpacing: '.05em' }}>Faixa (RBT12)</th>
+                <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700, color: 'var(--gray-mid)', textTransform: 'uppercase', fontSize: 10, letterSpacing: '.05em' }}>Alíq. nominal</th>
+                <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700, color: 'var(--gray-mid)', textTransform: 'uppercase', fontSize: 10, letterSpacing: '.05em' }}>Dedução (R$)</th>
+                <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700, color: 'var(--gray-mid)', textTransform: 'uppercase', fontSize: 10, letterSpacing: '.05em' }}>ISS no DAS</th>
+                {rbt12 && <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700, color: 'var(--teal)', textTransform: 'uppercase', fontSize: 10, letterSpacing: '.05em' }}>Alíq. efetiva</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {FAIXAS_SN_IV.map((f, i) => {
+                const ef = rbt12 ? calcAliqEfetiva(rbt12, f.aliq, f.ded) : null
+                const faixaAtual = rbt12 && (
+                  (i === 0 && rbt12 <= 180_000) ||
+                  (i === 1 && rbt12 > 180_000 && rbt12 <= 360_000) ||
+                  (i === 2 && rbt12 > 360_000 && rbt12 <= 720_000) ||
+                  (i === 3 && rbt12 > 720_000 && rbt12 <= 1_800_000) ||
+                  (i === 4 && rbt12 > 1_800_000 && rbt12 <= 3_600_000) ||
+                  (i === 5 && rbt12 > 3_600_000)
+                )
+                return (
+                  <tr key={i} style={{ background: faixaAtual ? '#f0fdf4' : 'transparent', borderBottom: '1px solid #f3f4f6' }}>
+                    <td style={{ padding: '8px 10px', fontWeight: faixaAtual ? 700 : 400 }}>
+                      {f.faixa}
+                      {faixaAtual && <span style={{ marginLeft: 6, fontSize: 10, background: '#dcfce7', color: '#15803d', padding: '1px 6px', borderRadius: 999, fontWeight: 600 }}>← você</span>}
+                    </td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right' }}>{f.aliq.toFixed(2).replace('.', ',')}%</td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--gray-mid)' }}>{f.ded ? fmtR(f.ded) : '—'}</td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right' }}>{f.issComp.toFixed(2).replace('.', ',')}%</td>
+                    {rbt12 && (
+                      <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700, color: faixaAtual ? 'var(--teal)' : 'var(--dark)' }}>
+                        {ef != null ? `${ef.toFixed(2).replace('.', ',')}%` : '—'}
+                      </td>
+                    )}
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <h3 style={{ fontFamily: 'Archivo, sans-serif', fontSize: 14, fontWeight: 800, marginBottom: 4, color: 'var(--dark)' }}>
+          ISS Municipal — Vitória/ES (Advocacia)
+        </h3>
+        <p style={{ fontSize: 12, color: 'var(--gray-mid)', marginBottom: 12 }}>
+          Para optantes do Lucro Presumido ou Lucro Real, o ISS é pago diretamente ao município.
+          LC 116/2003 define alíquota mínima 2% e máxima 5%. Vitória/ES aplica:
+        </p>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ background: '#f3f4f6' }}>
+              <th style={{ padding: '7px 10px', textAlign: 'left', fontWeight: 700, color: 'var(--gray-mid)', textTransform: 'uppercase', fontSize: 10 }}>Situação</th>
+              <th style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 700, color: 'var(--gray-mid)', textTransform: 'uppercase', fontSize: 10 }}>Alíquota</th>
+              <th style={{ padding: '7px 10px', textAlign: 'left', fontWeight: 700, color: 'var(--gray-mid)', textTransform: 'uppercase', fontSize: 10 }}>Observação</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[
+              { sit: 'Simples Nacional', aliq: 'incluso no DAS', obs: 'ISS faz parte da guia única (2% a 5% conforme faixa acima)' },
+              { sit: 'LP / LR — serviços advocatícios', aliq: '2,00%', obs: 'Alíquota mínima LC 116/2003, aplicada em Vitória — Dec. Municipal' },
+              { sit: 'LP / LR — sociedade de profissionais', aliq: '2,00%', obs: 'Regime especial: recolhimento por profissional habilitado (não por receita)' },
+            ].map((r, i) => (
+              <tr key={i} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                <td style={{ padding: '7px 10px', fontWeight: 600 }}>{r.sit}</td>
+                <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 700, color: 'var(--teal)' }}>{r.aliq}</td>
+                <td style={{ padding: '7px 10px', color: 'var(--gray-mid)' }}>{r.obs}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 12 }}>
+          ⚠ O contador informou 2,88% — isso é a <strong>alíquota efetiva do Simples</strong> (pTotTribSN), não o ISS isolado.
+          Confirme com ele a faixa de RBT12 para validar o cálculo acima.
+        </p>
+      </div>
+    </div>
+  )
+}
+
 function Secao({ titulo, children }: { titulo: string; children: React.ReactNode }) {
   const [aberta, setAberta] = useState(true)
   return (
@@ -38,6 +152,7 @@ export default function ConfigFiscalPage() {
   const { data, isLoading } = useQuery({ queryKey: ['config-fiscal'], queryFn: configFiscalApi.obter })
   const [form, setForm] = useState<ConfigFiscal | null>(null)
   const [salvou, setSalvou] = useState(false)
+  const [showSimples, setShowSimples] = useState(false)
   const [enviandoRel, setEnviandoRel] = useState(false)
   const [relMsg, setRelMsg] = useState<string | null>(null)
   const [showHist, setShowHist] = useState(false)
@@ -114,7 +229,14 @@ export default function ConfigFiscalPage() {
               <option value="6">Sociedade de Profissionais</option>
             </select>
           </Campo>
-          <Campo label="Anexo do Simples"><input className={inp} value={f.anexo_simples} onChange={(e) => set('anexo_simples', e.target.value)} /></Campo>
+          <Campo label="Anexo do Simples">
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input className={inp} value={f.anexo_simples} onChange={(e) => set('anexo_simples', e.target.value)} style={{ flex: 1 }} />
+              <button type="button" className={cs.templateBtn} onClick={() => setShowSimples(true)}>
+                Ver tabela
+              </button>
+            </div>
+          </Campo>
           <Campo label="RBT12 — receita bruta 12 meses (R$)"
             hint={f.rbt12_acumulado_12m != null
               ? `Checagem pelas NFs do sistema (12 meses anteriores, regra legal): R$ ${f.rbt12_acumulado_12m.toLocaleString('pt-BR', {minimumFractionDigits:2})}${f.aliquota_pelo_acumulado ? ` → alíquota ${f.aliquota_pelo_acumulado}%` : ''}. Pode estar abaixo do real se há notas anteriores à integração — use o RBT12 oficial da contabilidade.`
@@ -234,6 +356,10 @@ export default function ConfigFiscalPage() {
           </button>
         </div>
       </Secao>
+
+      {showSimples && (
+        <PopupSimples onClose={() => setShowSimples(false)} rbt12={f.rbt12 ?? f.rbt12_acumulado_12m ?? undefined} />
+      )}
 
       {showHist && (
         <div className={cs.overlay} onClick={(e) => e.target === e.currentTarget && setShowHist(false)}>

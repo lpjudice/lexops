@@ -128,3 +128,29 @@ class FiscalReceita(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     fiscal_mes_rel: Mapped[FiscalMes] = relationship(back_populates="receitas")
+
+
+class FiscalFornecedor(Base):
+    """Fornecedores conhecidos — base para combobox no lançamento de despesas."""
+    __tablename__ = "fiscal_fornecedor"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    nome: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    cnpj: Mapped[str | None] = mapped_column(String(18), nullable=True)
+    categoria_padrao: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DespesaRecorrente(Base):
+    """Template de despesa recorrente — selecionável por checkbox a cada mês."""
+    __tablename__ = "despesa_recorrente"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    categoria: Mapped[str] = mapped_column(String(100), nullable=False)
+    fornecedor: Mapped[str] = mapped_column(String(200), nullable=False)
+    descricao: Mapped[str | None] = mapped_column(Text, nullable=True)
+    valor_padrao: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
+    tem_nota: Mapped[bool] = mapped_column(Boolean, default=True)
+    elegivel: Mapped[bool] = mapped_column(Boolean, default=False)
+    ativa: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

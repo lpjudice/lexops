@@ -21,8 +21,6 @@ import {
   X,
   LogOut,
   ScrollText,
-  ChevronDown,
-  ChevronRight,
   BarChart3,
 } from 'lucide-react'
 import api from '../api/client'
@@ -59,11 +57,6 @@ type NavItem = { to: string; label: string; Icon: React.ComponentType<{ size?: n
 type NavGroup = {
   label: string
   items: NavItem[]
-  subGroups?: {
-    label: string
-    prefix: string
-    items: NavItem[]
-  }[]
 }
 
 const navGroups: NavGroup[] = [
@@ -96,22 +89,15 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
-    label: 'BACKOFFICE',
+    label: 'BACKOFFICE & FINANCEIRO',
     items: [
       { to: '/financeiro', label: 'Financeiro', Icon: TrendingUp },
       { to: '/reembolsos', label: 'Reembolsos', Icon: Receipt },
-    ],
-    subGroups: [
-      {
-        label: 'Fiscal',
-        prefix: '/fiscal',
-        items: [
-          { to: '/fiscal', label: 'Notas Fiscais', Icon: ScrollText },
-          { to: '/fiscal/visao', label: 'Visão Fiscal', Icon: TrendingUp },
-          { to: '/fiscal/decisao', label: 'Decisão Tributária', Icon: BarChart3 },
-          { to: '/fiscal/config', label: 'Config Fiscal', Icon: Settings },
-        ],
-      },
+      { to: '/fiscal', label: 'Notas Fiscais', Icon: ScrollText },
+      { to: '/backoffice/despesas', label: 'Despesas', Icon: Receipt },
+      { to: '/fiscal/visao', label: 'Visão Fiscal', Icon: TrendingUp },
+      { to: '/fiscal/decisao', label: 'Decisão Tributária', Icon: BarChart3 },
+      { to: '/fiscal/config', label: 'Config Fiscal', Icon: Settings },
     ],
   },
   {
@@ -139,61 +125,13 @@ const PAGE_TITLES: Record<string, string> = {
   '/fiscal/visao': 'Visão Fiscal',
   '/fiscal/decisao': 'Decisão Tributária',
   '/fiscal/config': 'Config Fiscal',
+  '/backoffice/despesas': 'Despesas',
   '/atendimentos': 'Atendimentos',
   '/tarefas': 'Tarefas',
   '/reunioes': 'Reuniões',
   '/configuracoes': 'Configurações',
 }
 
-function FiscalSubGroup({
-  label,
-  prefix,
-  items,
-  onNav,
-}: {
-  label: string
-  prefix: string
-  items: NavItem[]
-  onNav: () => void
-}) {
-  const location = useLocation()
-  const isActive = location.pathname.startsWith(prefix)
-  const [open, setOpen] = useState(isActive)
-
-  return (
-    <div>
-      <button
-        className={`${styles.navSubGroupToggle} ${isActive ? styles.navSubGroupToggleActive : ''}`}
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-      >
-        <span className={styles.navSubGroupLabel}>{label}</span>
-        {open
-          ? <ChevronDown size={13} className={styles.navSubGroupChevron} />
-          : <ChevronRight size={13} className={styles.navSubGroupChevron} />}
-      </button>
-
-      {open && (
-        <div className={styles.navSubGroupItems}>
-          {items.map(({ to, label: itemLabel, Icon }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={to === '/fiscal'}
-              className={({ isActive: a }) =>
-                `${styles.navLink} ${styles.navLinkIndented} ${a ? styles.active : ''}`
-              }
-              onClick={onNav}
-            >
-              <Icon size={15} className={styles.navIcon} />
-              <span>{itemLabel}</span>
-            </NavLink>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
 
 function Topbar({ onMenuToggle }: { onMenuToggle: () => void }) {
   const location = useLocation()
@@ -265,15 +203,6 @@ export default function Layout() {
                 </NavLink>
               ))}
 
-              {group.subGroups?.map((sg) => (
-                <FiscalSubGroup
-                  key={sg.prefix}
-                  label={sg.label}
-                  prefix={sg.prefix}
-                  items={sg.items}
-                  onNav={closeSidebar}
-                />
-              ))}
             </div>
           ))}
         </div>

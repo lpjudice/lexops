@@ -701,6 +701,29 @@ def _run_migrations() -> None:
             )
         """))
 
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fiscal_fornecedor (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                nome VARCHAR(200) NOT NULL UNIQUE,
+                cnpj VARCHAR(18),
+                categoria_padrao VARCHAR(100),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS despesa_recorrente (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                categoria VARCHAR(100) NOT NULL,
+                fornecedor VARCHAR(200) NOT NULL,
+                descricao TEXT,
+                valor_padrao NUMERIC(14,2) NOT NULL DEFAULT 0,
+                tem_nota BOOLEAN NOT NULL DEFAULT true,
+                elegivel BOOLEAN NOT NULL DEFAULT false,
+                ativa BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+
         conn.commit()
 
 

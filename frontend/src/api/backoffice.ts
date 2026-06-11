@@ -62,6 +62,19 @@ export interface RegraCredito {
   next_check: string | null; notas: string | null
 }
 
+export interface Fornecedor {
+  id: string; nome: string; cnpj: string | null; categoria_padrao: string | null
+}
+
+export interface DespesaRecorrente {
+  id: string; categoria: string; fornecedor: string; descricao: string | null
+  valor_padrao: number; tem_nota: boolean; elegivel: boolean
+}
+
+export interface ParsedExpense {
+  fornecedor: string; valor: number; data: string; descricao: string; categoria: string
+}
+
 export const backofficeApi = {
   decisao: (mes: string) =>
     api.get<Decisao>(`/backoffice/decisao/${mes}`).then(r => r.data),
@@ -90,4 +103,44 @@ export const backofficeApi = {
     api.post('/backoffice/regras', data).then(r => r.data),
   patchRegra: (id: string, data: object) =>
     api.patch(`/backoffice/regras/${id}`, data).then(r => r.data),
+
+  // Fornecedores
+  fornecedores: () =>
+    api.get<Fornecedor[]>('/backoffice/fornecedores').then(r => r.data),
+  upsertFornecedor: (data: { nome: string; cnpj?: string; categoria_padrao?: string }) =>
+    api.post('/backoffice/fornecedores', data).then(r => r.data),
+  categorias: () =>
+    api.get<string[]>('/backoffice/categorias').then(r => r.data),
+
+  // Recorrentes
+  recorrentes: () =>
+    api.get<DespesaRecorrente[]>('/backoffice/recorrentes').then(r => r.data),
+  createRecorrente: (data: object) =>
+    api.post('/backoffice/recorrentes', data).then(r => r.data),
+  patchRecorrente: (id: string, data: object) =>
+    api.patch(`/backoffice/recorrentes/${id}`, data).then(r => r.data),
+  deleteRecorrente: (id: string) =>
+    api.delete(`/backoffice/recorrentes/${id}`).then(r => r.data),
+
+  // Batch
+  addDespesasBatch: (mes: string, items: object[]) =>
+    api.post(`/backoffice/despesas/batch/${mes}`, items).then(r => r.data),
+
+  // Parse extrato
+  parseExtrato: (file: File) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return api.post<{ linhas: ParsedExpense[] }>('/backoffice/despesas/parse-extrato', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
+
+  // Sync NFs históricas
+  syncNfsHistorico: () =>
+    api.post('/backoffice/sync-nfs-historico').then(r => r.data),
+
+  // Despesas por mês (para página dedicada)
+  despesas: (mes: string) =>
+    api.get<{ despesas: Despesa[]; premissas: Lancamentos['folha'] }>(`/backoffice/lancamentos/${mes}`)
+      .then(r => ({ despesas: r.data.despesas })),
 }
