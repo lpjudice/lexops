@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { backofficeApi, type Decisao, type Lancamentos, type Despesa, type MesAnual } from '../api/backoffice'
+import { backofficeApi, type Despesa, type MesAnual } from '../api/backoffice'
 import styles from './Page.module.css'
 
 // ─── Utilitários ─────────────────────────────────────────────────────────────
