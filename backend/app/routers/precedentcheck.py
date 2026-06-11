@@ -37,22 +37,47 @@ class AnalisarResponse(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 
+def _extrair_com_pypdf(content: bytes) -> str:
+    from pypdf import PdfReader
+    reader = PdfReader(io.BytesIO(content))
+    paginas = [page.extract_text() or "" for page in reader.pages[:50]]
+    return "\n\n".join(p.strip() for p in paginas if p.strip())
+
+
+def _extrair_com_pdfminer(content: bytes) -> str:
+    from pdfminer.high_level import extract_text as pdfminer_extract
+    return pdfminer_extract(io.BytesIO(content), maxpages=50) or ""
+
+
 @router.post("/extrair-pdf")
 async def extrair_pdf(arquivo: UploadFile = File(...)):
-    """Extrai texto de um PDF de peça ou decisão."""
+    """Extrai texto de um PDF. Tenta pypdf primeiro; cai para pdfminer em PDFs OCR/escaneados."""
     if not arquivo.filename or not arquivo.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Arquivo deve ser PDF")
     content = await arquivo.read()
+
+    texto = ""
+    erro_pypdf: str | None = None
     try:
-        from pypdf import PdfReader
-        reader = PdfReader(io.BytesIO(content))
-        paginas = [page.extract_text() or "" for page in reader.pages[:50]]
-        texto = "\n\n".join(p.strip() for p in paginas if p.strip())
+        texto = _extrair_com_pypdf(content)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao processar PDF: {e}")
+        erro_pypdf = str(e)
+
+    # Fallback pdfminer: quando pypdf falha ou retorna texto vazio (PDFs OCR)
     if not texto.strip():
-        raise HTTPException(status_code=422, detail="Não foi possível extrair texto do PDF")
-    return {"texto": texto}
+        try:
+            texto = _extrair_com_pdfminer(content)
+        except Exception as e:
+            if erro_pypdf:
+                raise HTTPException(status_code=500, detail=f"pypdf: {erro_pypdf} | pdfminer: {e}")
+            raise HTTPException(status_code=500, detail=f"Erro ao processar PDF: {e}")
+
+    if not texto.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="Não foi possível extrair texto deste PDF. O arquivo pode ser uma imagem sem camada de texto. Cole o conteúdo manualmente na área de texto.",
+        )
+    return {"texto": texto.strip()}
 
 
 @router.post("/analisar", response_model=AnalisarResponse)
