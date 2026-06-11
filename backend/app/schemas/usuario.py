@@ -13,6 +13,7 @@ class UsuarioBase(BaseModel):
     pode_ver_contratos: bool = True
     pode_ver_tarefas_outros: bool = True
     clientes_restritos: bool = False
+    acessos_backoffice: dict | None = None
 
 
 class UsuarioCreate(UsuarioBase):
@@ -28,6 +29,7 @@ class UsuarioUpdate(BaseModel):
     pode_ver_contratos: bool | None = None
     pode_ver_tarefas_outros: bool | None = None
     clientes_restritos: bool | None = None
+    acessos_backoffice: dict | None = None
     senha: str | None = None
     primeiro_acesso: bool | None = None
 

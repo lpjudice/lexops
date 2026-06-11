@@ -88,54 +88,155 @@ const STATUS_COR: Record<string, string> = {
   validado: '#15803d', revalidar: '#b45309', pendente: '#6b7280', novo: '#1d4ed8',
 }
 
-// ─── Combobox de fornecedor ────────────────────────────────────────────────────
+// ─── Combobox genérico com "+ Criar novo" ──────────────────────────────────────
 
-function FornecedorInput({
+function Combobox({
   value,
   onChange,
-  fornecedores,
-  onSelect,
+  options,
+  placeholder,
+  onCreate,
+  renderOption,
 }: {
   value: string
   onChange: (v: string) => void
-  fornecedores: Fornecedor[]
-  onSelect: (f: Fornecedor) => void
+  options: { value: string; label: string; hint?: string }[]
+  placeholder?: string
+  onCreate?: (v: string) => void
+  renderOption?: (opt: { value: string; label: string; hint?: string }) => React.ReactNode
 }) {
   const [open, setOpen] = useState(false)
-  const filtered = fornecedores.filter(f =>
-    f.nome.toLowerCase().includes(value.toLowerCase())
-  ).slice(0, 8)
+  const [search, setSearch] = useState('')
+  const display = open ? search : (value || '')
+  const filtered = options.filter(o =>
+    o.label.toLowerCase().includes((open ? search : '').toLowerCase())
+  )
+  const exactMatch = options.some(o => o.label.toLowerCase() === search.toLowerCase())
 
   return (
     <div style={{ position: 'relative' }}>
       <input
-        value={value}
-        onChange={e => { onChange(e.target.value); setOpen(true) }}
-        onFocus={() => setOpen(true)}
+        value={display}
+        onChange={e => { setSearch(e.target.value); setOpen(true); onChange(e.target.value) }}
+        onFocus={() => { setSearch(value); setOpen(true) }}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
-        placeholder="Nome do fornecedor"
-        style={{ width: '100%', padding: '8px 10px', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 13, fontFamily: 'Archivo, sans-serif' }}
+        placeholder={placeholder}
+        style={{ width: '100%', padding: '8px 28px 8px 10px', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 13, fontFamily: 'Archivo, sans-serif' }}
       />
-      {open && filtered.length > 0 && (
+      <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: '#9ca3af', fontSize: 10, pointerEvents: 'none' }}>▼</span>
+      {open && (
         <div style={{
           position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100,
           background: '#fff', border: '1px solid #e5e7eb', borderRadius: 6,
-          boxShadow: '0 4px 16px rgba(0,0,0,.1)', marginTop: 2,
+          boxShadow: '0 4px 16px rgba(0,0,0,.1)', marginTop: 2, maxHeight: 240, overflowY: 'auto',
         }}>
-          {filtered.map(f => (
+          {filtered.length === 0 && !search && (
+            <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--gray-mid)' }}>Nenhuma opção</div>
+          )}
+          {filtered.map(opt => (
             <div
-              key={f.id}
-              onMouseDown={() => { onSelect(f); setOpen(false) }}
-              style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+              key={opt.value}
+              onMouseDown={() => { onChange(opt.label); setOpen(false) }}
+              style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}
               onMouseEnter={e => (e.currentTarget.style.background = '#f0fdf4')}
               onMouseLeave={e => (e.currentTarget.style.background = '')}
             >
-              <span>{f.nome}</span>
-              {f.categoria_padrao && (
-                <span style={{ fontSize: 11, color: 'var(--gray-mid)' }}>{f.categoria_padrao}</span>
+              {renderOption ? renderOption(opt) : (
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>{opt.label}</span>
+                  {opt.hint && <span style={{ fontSize: 11, color: 'var(--gray-mid)' }}>{opt.hint}</span>}
+                </div>
               )}
             </div>
           ))}
+          {onCreate && search && !exactMatch && (
+            <div
+              onMouseDown={() => { onCreate(search); onChange(search); setOpen(false) }}
+              style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 13, borderTop: '1px solid #f3f4f6', background: '#fefce8', color: '#a16207', fontWeight: 600 }}
+              onMouseEnter={e => (e.currentTarget.style.background = '#fef3c7')}
+              onMouseLeave={e => (e.currentTarget.style.background = '#fefce8')}
+            >
+              + Criar "{search}"
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── IA: classificação LC 214/2025 ────────────────────────────────────────────
+
+function IaClassificacao({
+  categoria,
+  fornecedor,
+  valor,
+  onElegivelMudou,
+}: {
+  categoria: string
+  fornecedor: string
+  valor: number
+  onElegivelMudou: (eleg: boolean) => void
+}) {
+  const [data, setData] = useState<{
+    elegivel: boolean
+    base_legal: string
+    aliquota_ibs_pct: number
+    aliquota_cbs_pct: number
+    credito_estimado: number
+    confianca: string
+    observacao: string
+  } | null>(null)
+  const [loading, setLoading] = useState(false)
+  const lastKey = useRef('')
+
+  // Re-classifica quando categoria muda (com debounce simples)
+  const key = `${categoria}|${fornecedor}`
+  if (categoria && key !== lastKey.current && !loading) {
+    lastKey.current = key
+    setLoading(true)
+    backofficeApi.classificarDespesa({ categoria, fornecedor, valor })
+      .then(r => { setData(r); onElegivelMudou(r.elegivel) })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }
+
+  if (!categoria) return null
+  if (loading && !data) {
+    return (
+      <div style={{ padding: '10px 14px', background: '#f9fafb', border: '1px dashed #e5e7eb', borderRadius: 8, fontSize: 12, color: 'var(--gray-mid)' }}>
+        🤖 Analisando elegibilidade pela LC 214/2025…
+      </div>
+    )
+  }
+  if (!data) return null
+
+  // Crédito recalculado pelo valor atual (a IA pode ter usado 0)
+  const aliqTotal = (data.aliquota_ibs_pct + data.aliquota_cbs_pct) / 100
+  const credito = data.elegivel ? valor * aliqTotal : 0
+  const corBg = data.elegivel ? '#f0fdf4' : '#fef2f2'
+  const corBd = data.elegivel ? '#bbf7d0' : '#fecaca'
+  const corTx = data.elegivel ? '#15803d' : '#b91c1c'
+
+  return (
+    <div style={{ padding: '10px 14px', background: corBg, border: `1px solid ${corBd}`, borderRadius: 8, fontSize: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <span style={{ color: corTx, fontWeight: 700 }}>
+          🤖 {data.elegivel ? '✓ Elegível' : '✗ Não elegível'} para crédito IBS/CBS
+          <span style={{ fontSize: 10, marginLeft: 6, color: 'var(--gray-mid)', fontWeight: 400 }}>(confiança: {data.confianca})</span>
+        </span>
+        {data.elegivel && (
+          <span style={{ color: 'var(--teal)', fontWeight: 700 }}>
+            Crédito estimado: {fmtBRL(credito)}
+            <span style={{ fontSize: 10, color: 'var(--gray-mid)', fontWeight: 400, marginLeft: 4 }}>
+              (IBS {data.aliquota_ibs_pct}% + CBS {data.aliquota_cbs_pct}%)
+            </span>
+          </span>
+        )}
+      </div>
+      {data.observacao && (
+        <div style={{ marginTop: 4, color: 'var(--gray-mid)', fontSize: 11 }}>
+          {data.observacao} · <span style={{ fontStyle: 'italic' }}>{data.base_legal}</span>
         </div>
       )}
     </div>
@@ -189,15 +290,19 @@ function FormNovaDespesa({
     <div style={{ padding: '0 18px 16px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
       <div className={styles.fieldGroup}>
         <span>Fornecedor</span>
-        <FornecedorInput
+        <Combobox
           value={fornecedor}
-          onChange={setFornecedor}
-          fornecedores={fornecedores}
-          onSelect={f => {
-            setFornecedor(f.nome)
-            setCnpj(f.cnpj ? fmtCNPJ(f.cnpj) : '')
-            if (f.categoria_padrao && !categoria) setCategoria(f.categoria_padrao)
+          onChange={nome => {
+            setFornecedor(nome)
+            const f = fornecedores.find(x => x.nome === nome)
+            if (f) {
+              setCnpj(f.cnpj ? fmtCNPJ(f.cnpj) : '')
+              if (f.categoria_padrao && !categoria) setCategoria(f.categoria_padrao)
+            }
           }}
+          options={fornecedores.map(f => ({ value: f.id, label: f.nome, hint: f.categoria_padrao ?? undefined }))}
+          placeholder="Selecione ou digite um novo"
+          onCreate={setFornecedor}
         />
       </div>
       <div className={styles.fieldGroup}>
@@ -211,20 +316,30 @@ function FormNovaDespesa({
       </div>
       <div className={styles.fieldGroup}>
         <span>Categoria</span>
-        <select
+        <Combobox
           value={categoria}
-          onChange={e => setCategoria(e.target.value)}
-          style={{ padding: '8px 10px', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 13, fontFamily: 'Archivo, sans-serif', color: 'var(--dark)', background: '#fff' }}
-        >
-          <option value="">Selecione…</option>
-          {allCats.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
+          onChange={setCategoria}
+          options={allCats.map(c => ({ value: c, label: c }))}
+          placeholder="Selecione ou digite uma nova"
+          onCreate={c => setCategoria(c)}
+        />
       </div>
       <div className={styles.fieldGroup}>
         <span>Valor (R$)</span>
         <MoneyInput value={valor} onValue={setValor} />
       </div>
-      <div style={{ display: 'flex', gap: 16, alignItems: 'center', paddingTop: 18, gridColumn: '1/-1' }}>
+
+      {/* IA: classificação de crédito IBS/CBS */}
+      <div style={{ gridColumn: '1/-1' }}>
+        <IaClassificacao
+          categoria={categoria}
+          fornecedor={fornecedor}
+          valor={valor}
+          onElegivelMudou={setElegivel}
+        />
+      </div>
+
+      <div style={{ display: 'flex', gap: 16, alignItems: 'center', paddingTop: 6, gridColumn: '1/-1' }}>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, cursor: 'pointer' }}>
           <input type="checkbox" checked={temNota} onChange={e => setTemNota(e.target.checked)} />
           Tem nota fiscal
@@ -375,13 +490,13 @@ function SecaoExtrato({
                   onChange={e => setLinhas(prev => prev.map((x, j) => j === i ? { ...x, fornecedor: e.target.value } : x))}
                   style={{ fontSize: 12, border: '1px solid #e5e7eb', borderRadius: 4, padding: '4px 8px', fontFamily: 'Archivo, sans-serif' }}
                 />
-                <select
+                <Combobox
                   value={l.categoria}
-                  onChange={e => setLinhas(prev => prev.map((x, j) => j === i ? { ...x, categoria: e.target.value } : x))}
-                  style={{ fontSize: 12, border: '1px solid #e5e7eb', borderRadius: 4, padding: '4px 6px', fontFamily: 'Archivo, sans-serif', color: 'var(--dark)' }}
-                >
-                  {allCats.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
+                  onChange={c => setLinhas(prev => prev.map((x, j) => j === i ? { ...x, categoria: c } : x))}
+                  options={allCats.map(c => ({ value: c, label: c }))}
+                  placeholder="Categoria"
+                  onCreate={c => setLinhas(prev => prev.map((x, j) => j === i ? { ...x, categoria: c } : x))}
+                />
                 <MoneyInput
                   value={l.valor}
                   onValue={n => setLinhas(prev => prev.map((x, j) => j === i ? { ...x, valor: n } : x))}
@@ -557,23 +672,27 @@ function SecaoRecorrentes({
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, padding: '10px 0' }}>
           <div className={styles.fieldGroup}>
             <span>Fornecedor</span>
-            <FornecedorInput
+            <Combobox
               value={novaFornecedor}
-              onChange={setNovaFornecedor}
-              fornecedores={fornecedores}
-              onSelect={f => { setNovaFornecedor(f.nome); if (f.categoria_padrao) setNovaCategoria(f.categoria_padrao) }}
+              onChange={nome => {
+                setNovaFornecedor(nome)
+                const f = fornecedores.find(x => x.nome === nome)
+                if (f?.categoria_padrao && !novaCategoria) setNovaCategoria(f.categoria_padrao)
+              }}
+              options={fornecedores.map(f => ({ value: f.id, label: f.nome, hint: f.categoria_padrao ?? undefined }))}
+              placeholder="Selecione ou digite um novo"
+              onCreate={setNovaFornecedor}
             />
           </div>
           <div className={styles.fieldGroup}>
             <span>Categoria</span>
-            <select
+            <Combobox
               value={novaCategoria}
-              onChange={e => setNovaCategoria(e.target.value)}
-              style={{ padding: '8px 10px', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 13, fontFamily: 'Archivo, sans-serif', color: 'var(--dark)', background: '#fff' }}
-            >
-              <option value="">Selecione…</option>
-              {allCats.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
+              onChange={setNovaCategoria}
+              options={allCats.map(c => ({ value: c, label: c }))}
+              placeholder="Selecione ou digite uma nova"
+              onCreate={setNovaCategoria}
+            />
           </div>
           <div className={styles.fieldGroup}>
             <span>Valor padrão (R$)</span>
@@ -776,14 +895,13 @@ function AbaFornecedores() {
           </div>
           <div className={styles.fieldGroup}>
             <span>Categoria padrão</span>
-            <select
+            <Combobox
               value={novaCat}
-              onChange={e => setNovaCat(e.target.value)}
-              style={{ padding: '8px 10px', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 13, fontFamily: 'Archivo, sans-serif', color: 'var(--dark)', background: '#fff' }}
-            >
-              <option value="">—</option>
-              {allCats.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
+              onChange={setNovaCat}
+              options={allCats.map(c => ({ value: c, label: c }))}
+              placeholder="—"
+              onCreate={setNovaCat}
+            />
           </div>
           <button
             className={styles.btnPrimary}

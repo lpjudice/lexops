@@ -1,5 +1,15 @@
 import api from './client'
 
+export interface AcessosBackoffice {
+  financeiro?: boolean
+  reembolsos?: boolean
+  notas_fiscais?: boolean
+  despesas?: boolean
+  visao_fiscal?: boolean
+  decisao?: boolean
+  config_fiscal?: boolean
+}
+
 export interface Usuario {
   id: string
   email: string
@@ -10,6 +20,7 @@ export interface Usuario {
   pode_ver_contratos: boolean
   pode_ver_tarefas_outros: boolean
   clientes_restritos: boolean
+  acessos_backoffice?: AcessosBackoffice | null
   created_at: string
   clientes_ids: string[]
   primeiro_acesso: boolean
@@ -55,6 +66,7 @@ export interface UsuarioUpdate {
   pode_ver_contratos?: boolean
   pode_ver_tarefas_outros?: boolean
   clientes_restritos?: boolean
+  acessos_backoffice?: AcessosBackoffice | null
   senha?: string
 }
 

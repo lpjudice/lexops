@@ -3,8 +3,118 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { configFiscalApi } from '../api/configFiscal'
 import type { ConfigFiscal } from '../api/configFiscal'
 import { fiscalApi } from '../api/fiscal'
+import { usuariosApi, type AcessosBackoffice, type Usuario } from '../api/usuarios'
+import { useAuth } from '../contexts/AuthContext'
 import styles from './Page.module.css'
 import cs from './FiscalPage.module.css'
+
+const ACESSOS_BACKOFFICE_KEYS: { key: keyof AcessosBackoffice; label: string }[] = [
+  { key: 'financeiro',     label: 'Financeiro' },
+  { key: 'reembolsos',     label: 'Reembolsos' },
+  { key: 'notas_fiscais',  label: 'Notas Fiscais' },
+  { key: 'despesas',       label: 'Despesas' },
+  { key: 'visao_fiscal',   label: 'Visão Fiscal' },
+  { key: 'decisao',        label: 'Decisão Tributária' },
+  { key: 'config_fiscal',  label: 'Config Fiscal' },
+]
+
+function PermissoesModal({ onClose }: { onClose: () => void }) {
+  const qc = useQueryClient()
+  const { data: usuarios = [] } = useQuery({ queryKey: ['usuarios'], queryFn: usuariosApi.listar })
+
+  const patch = useMutation({
+    mutationFn: ({ id, acessos }: { id: string; acessos: AcessosBackoffice | null }) =>
+      usuariosApi.atualizar(id, { acessos_backoffice: acessos }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['usuarios'] }),
+  })
+
+  function liberar(u: Usuario) {
+    const todos: AcessosBackoffice = Object.fromEntries(
+      ACESSOS_BACKOFFICE_KEYS.map(k => [k.key, true])
+    ) as AcessosBackoffice
+    patch.mutate({ id: u.id, acessos: todos })
+  }
+  function bloquear(u: Usuario) {
+    patch.mutate({ id: u.id, acessos: null })
+  }
+  function togglarItem(u: Usuario, key: keyof AcessosBackoffice) {
+    const atual = u.acessos_backoffice ?? {}
+    patch.mutate({ id: u.id, acessos: { ...atual, [key]: !(atual[key] ?? false) } })
+  }
+
+  // Usuarios que não são super admin — esses são os candidatos a permissões
+  const candidatos = usuarios.filter(u => u.role !== 'super_admin')
+
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+      onClick={e => e.target === e.currentTarget && onClose()}
+    >
+      <div style={{ background: '#fff', borderRadius: 12, width: '100%', maxWidth: 880, maxHeight: '92vh', overflow: 'auto', padding: 28, position: 'relative' }}>
+        <button onClick={onClose} style={{ position: 'absolute', top: 14, right: 14, background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--gray-mid)' }}>✕</button>
+
+        <h2 style={{ fontFamily: 'Archivo, sans-serif', fontSize: 16, fontWeight: 800, marginBottom: 4, color: 'var(--dark)' }}>
+          Permissões — Backoffice & Financeiro
+        </h2>
+        <p style={{ fontSize: 12, color: 'var(--gray-mid)', marginBottom: 16 }}>
+          Por padrão, apenas <strong>Super Admin</strong> vê esse grupo. Libere usuários individuais —
+          ao liberar, todos os submenus ficam ativos; você pode desativar itens específicos.
+        </p>
+
+        {candidatos.length === 0 ? (
+          <div style={{ padding: 24, textAlign: 'center', color: 'var(--gray-mid)', fontSize: 13 }}>
+            Nenhum outro usuário cadastrado ainda. Convide pelo menu Configurações.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {candidatos.map(u => {
+              const liberado = !!u.acessos_backoffice
+              return (
+                <div key={u.id} style={{
+                  border: `1px solid ${liberado ? '#bbf7d0' : '#e5e7eb'}`,
+                  borderRadius: 8, padding: '12px 14px',
+                  background: liberado ? '#f0fdf4' : '#fafafa',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: liberado ? 12 : 0, gap: 12 }}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 13 }}>{u.nome}</div>
+                      <div style={{ fontSize: 11, color: 'var(--gray-mid)' }}>{u.email} · {u.role}</div>
+                    </div>
+                    {liberado ? (
+                      <button
+                        onClick={() => bloquear(u)}
+                        style={{ background: 'transparent', border: '1px solid #fecaca', color: '#b91c1c', padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'Archivo, sans-serif' }}
+                      >Bloquear tudo</button>
+                    ) : (
+                      <button
+                        onClick={() => liberar(u)}
+                        style={{ background: 'var(--teal)', border: 'none', color: '#fff', padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'Archivo, sans-serif' }}
+                      >Liberar acesso</button>
+                    )}
+                  </div>
+
+                  {liberado && (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 6 }}>
+                      {ACESSOS_BACKOFFICE_KEYS.map(({ key, label }) => {
+                        const ativo = u.acessos_backoffice?.[key] === true
+                        return (
+                          <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, padding: '4px 8px', borderRadius: 4, background: ativo ? 'rgba(255,255,255,.7)' : 'transparent' }}>
+                            <input type="checkbox" checked={ativo} onChange={() => togglarItem(u, key)} />
+                            <span style={{ color: ativo ? 'var(--dark)' : 'var(--gray-mid)', fontWeight: ativo ? 600 : 400 }}>{label}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 // ─── Popup: Tabela do Simples + ISS Vitória/ES ────────────────────────────────
 
@@ -196,8 +306,11 @@ export default function ConfigFiscalPage() {
   const qc = useQueryClient()
   const { data, isLoading } = useQuery({ queryKey: ['config-fiscal'], queryFn: configFiscalApi.obter })
   const [form, setForm] = useState<ConfigFiscal | null>(null)
+  const { usuario } = useAuth()
+  const isSuperAdmin = usuario?.role === 'super_admin'
   const [salvou, setSalvou] = useState(false)
   const [showSimples, setShowSimples] = useState(false)
+  const [showPermissoes, setShowPermissoes] = useState(false)
   const [enviandoRel, setEnviandoRel] = useState(false)
   const [relMsg, setRelMsg] = useState<string | null>(null)
   const [showHist, setShowHist] = useState(false)
@@ -231,11 +344,24 @@ export default function ConfigFiscalPage() {
     <div>
       <div className={styles.pageHeader}>
         <h1 className={styles.pageTitle}>Configurações <strong>Fiscais</strong></h1>
-        <button className={styles.btnPrimary} disabled={mut.isPending}
-          onClick={() => mut.mutate(f)}>
-          {mut.isPending ? 'Salvando…' : salvou ? '✓ Salvo' : 'Salvar alterações'}
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {isSuperAdmin && (
+            <button
+              type="button"
+              onClick={() => setShowPermissoes(true)}
+              style={{ background: 'transparent', border: '1px solid #e5e7eb', color: 'var(--dark)', padding: '8px 16px', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'Archivo, sans-serif' }}
+            >
+              🔐 Permissões
+            </button>
+          )}
+          <button className={styles.btnPrimary} disabled={mut.isPending}
+            onClick={() => mut.mutate(f)}>
+            {mut.isPending ? 'Salvando…' : salvou ? '✓ Salvo' : 'Salvar alterações'}
+          </button>
+        </div>
       </div>
+
+      {showPermissoes && <PermissoesModal onClose={() => setShowPermissoes(false)} />}
 
       {/* A. Emitente */}
       <Secao titulo="🏢 Dados do Emitente">

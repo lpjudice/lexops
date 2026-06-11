@@ -679,6 +679,73 @@ async def parse_extrato(
     return {"linhas": linhas}
 
 
+# ── Classificação IA de despesa (LC 214/2025) ─────────────────────────────────
+
+class ClassificarIn(BaseModel):
+    categoria: str
+    fornecedor: str | None = None
+    descricao: str | None = None
+    valor: float = 0
+
+
+_CLASSIFY_PROMPT = """\
+Você é um especialista em Reforma Tributária brasileira (LC 214/2025 — IBS/CBS).
+Classifique se a despesa abaixo gera crédito de IBS/CBS para um escritório de advocacia.
+
+Despesa:
+- Categoria: {categoria}
+- Fornecedor: {fornecedor}
+- Descrição: {descricao}
+- Valor: R$ {valor:.2f}
+
+Regras-chave da LC 214/2025 para advocacia:
+- Crédito amplo na aquisição de bens/serviços que sejam INSUMOS da atividade-fim
+- Software jurídico, marketing, correspondentes, energia, internet, telefonia, contabilidade,
+  material de escritório, aluguel comercial: ELEGÍVEIS (são insumos da advocacia)
+- Aluguel residencial, despesas pessoais, multas, IPVA, bebidas/alimentação:
+  NÃO elegíveis (uso/consumo pessoal ou vedação legal)
+- Despesas sem documento fiscal hábil (sem NF): NÃO geram crédito
+- Alíquotas de referência (cheias, antes de redução setorial):
+  IBS = 0,1% (2026, depois cresce), CBS = 0,9% (2026)
+- O escritório, sendo prestador advocatício, tem redução setorial de 30% na SAÍDA,
+  mas o crédito de ENTRADA é cheio (alíquota do fornecedor).
+
+Responda APENAS um JSON com:
+{{
+  "elegivel": true|false,
+  "base_legal": "trecho curto da LC 214/2025 ou regra aplicável (max 100 chars)",
+  "aliquota_ibs_pct": 0.1,
+  "aliquota_cbs_pct": 0.9,
+  "credito_estimado": valor numérico do crédito esperado (ibs+cbs sobre o valor),
+  "confianca": "alta|media|baixa",
+  "observacao": "breve justificativa (max 120 chars)"
+}}
+Sem markdown, sem comentários adicionais."""
+
+
+@router.post("/classificar-despesa")
+def classificar_despesa(body: ClassificarIn, _=Depends(get_current_user)) -> Any:
+    client = anthropic.Anthropic()
+    prompt = _CLASSIFY_PROMPT.format(
+        categoria=body.categoria,
+        fornecedor=body.fornecedor or "—",
+        descricao=body.descricao or "—",
+        valor=body.valor,
+    )
+    resp = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=512,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    text = resp.content[0].text.strip()
+    try:
+        data = json.loads(text)
+    except Exception:
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        data = json.loads(m.group()) if m else {"elegivel": False, "base_legal": "—", "credito_estimado": 0, "confianca": "baixa", "observacao": "Falha ao classificar"}
+    return data
+
+
 # ── Sincronizar NFs históricas (DFe) ─────────────────────────────────────────
 
 @router.post("/sync-nfs-historico")

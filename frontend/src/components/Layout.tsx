@@ -108,6 +108,17 @@ const navGroups: NavGroup[] = [
   },
 ]
 
+// Mapa de rota do BACKOFFICE → chave de permissão em usuario.acessos_backoffice
+const BACKOFFICE_ACCESS_KEY: Record<string, keyof NonNullable<import('../api/usuarios').AcessosBackoffice>> = {
+  '/financeiro': 'financeiro',
+  '/reembolsos': 'reembolsos',
+  '/fiscal': 'notas_fiscais',
+  '/backoffice/despesas': 'despesas',
+  '/fiscal/visao': 'visao_fiscal',
+  '/fiscal/decisao': 'decisao',
+  '/fiscal/config': 'config_fiscal',
+}
+
 const PAGE_TITLES: Record<string, string> = {
   '/dashboard': 'Dashboard',
   '/clientes': 'Clientes',
@@ -167,6 +178,18 @@ function Topbar({ onMenuToggle }: { onMenuToggle: () => void }) {
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const closeSidebar = () => setSidebarOpen(false)
+  const { usuario } = useAuth()
+
+  const isSuperAdmin = usuario?.role === 'super_admin'
+  const acessos = usuario?.acessos_backoffice ?? null
+
+  function podeVer(to: string): boolean {
+    const key = BACKOFFICE_ACCESS_KEY[to]
+    if (!key) return true  // não é item de backoffice — visível
+    if (isSuperAdmin) return true
+    if (!acessos) return false
+    return acessos[key] === true
+  }
 
   return (
     <div className={styles.shell}>
@@ -184,27 +207,31 @@ export default function Layout() {
         </div>
 
         <div className={styles.nav}>
-          {navGroups.map((group) => (
-            <div key={group.label} className={styles.navGroup}>
-              <span className={styles.navGroupLabel}>{group.label}</span>
+          {navGroups.map((group) => {
+            const visibleItems = group.items.filter(item => podeVer(item.to))
+            if (visibleItems.length === 0) return null
+            return (
+              <div key={group.label} className={styles.navGroup}>
+                <span className={styles.navGroupLabel}>{group.label}</span>
 
-              {group.items.map(({ to, label, Icon }) => (
-                <NavLink
-                  key={to}
-                  to={to}
-                  className={({ isActive }) =>
-                    `${styles.navLink} ${isActive ? styles.active : ''}`
-                  }
-                  onClick={closeSidebar}
-                >
-                  <Icon size={16} className={styles.navIcon} />
-                  <span>{label}</span>
-                  {to === '/tarefas' && <TarefasBadge />}
-                </NavLink>
-              ))}
+                {visibleItems.map(({ to, label, Icon }) => (
+                  <NavLink
+                    key={to}
+                    to={to}
+                    className={({ isActive }) =>
+                      `${styles.navLink} ${isActive ? styles.active : ''}`
+                    }
+                    onClick={closeSidebar}
+                  >
+                    <Icon size={16} className={styles.navIcon} />
+                    <span>{label}</span>
+                    {to === '/tarefas' && <TarefasBadge />}
+                  </NavLink>
+                ))}
 
-            </div>
-          ))}
+              </div>
+            )
+          })}
         </div>
 
         <div className={styles.sidebarFooter}>Sui v1.0</div>

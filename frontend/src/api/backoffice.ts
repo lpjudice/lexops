@@ -139,6 +139,18 @@ export const backofficeApi = {
   syncNfsHistorico: () =>
     api.post('/backoffice/sync-nfs-historico').then(r => r.data),
 
+  // Classificar despesa por IA (LC 214/2025)
+  classificarDespesa: (data: { categoria: string; fornecedor?: string; descricao?: string; valor?: number }) =>
+    api.post<{
+      elegivel: boolean
+      base_legal: string
+      aliquota_ibs_pct: number
+      aliquota_cbs_pct: number
+      credito_estimado: number
+      confianca: string
+      observacao: string
+    }>('/backoffice/classificar-despesa', data).then(r => r.data),
+
   // Despesas por mês (para página dedicada)
   despesas: (mes: string) =>
     api.get<{ despesas: Despesa[]; premissas: Lancamentos['folha'] }>(`/backoffice/lancamentos/${mes}`)

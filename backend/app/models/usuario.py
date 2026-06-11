@@ -21,6 +21,10 @@ class Usuario(Base):
     pode_ver_contratos: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     pode_ver_tarefas_outros: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     clientes_restritos: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Permissões para o menu BACKOFFICE & FINANCEIRO. None/chave ausente = sem acesso.
+    # Super admin tem acesso total sempre. Chaves: financeiro, reembolsos, notas_fiscais,
+    # despesas, visao_fiscal, decisao, config_fiscal
+    acessos_backoffice: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # Magic link invite
     invite_token: Mapped[str | None] = mapped_column(String(128), nullable=True)
     invite_token_expires: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
