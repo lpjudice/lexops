@@ -9,7 +9,8 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import { precedentCheckApi, CitacaoVerificada, AnaliseResumida } from '../api/precedentcheck'
+import { precedentCheckApi } from '../api/precedentcheck'
+import type { CitacaoVerificada, AnaliseResumida } from '../api/precedentcheck'
 import styles from './Page.module.css'
 import cs from './PrecedentCheckPage.module.css'
 
@@ -65,7 +66,6 @@ function formatData(iso: string) {
 
 function CitacaoCard({
   citacao,
-  idx,
   verificando,
 }: {
   citacao: CitacaoVerificada
