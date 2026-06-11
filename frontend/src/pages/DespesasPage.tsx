@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   backofficeApi,
@@ -127,9 +127,6 @@ const CATEGORIAS_PADRAO = [
   // Outros
   'Outros',
 ]
-const STATUS_COR: Record<string, string> = {
-  validado: '#15803d', revalidar: '#b45309', pendente: '#6b7280', novo: '#1d4ed8',
-}
 
 // ─── Combobox genérico com "+ Criar novo" ──────────────────────────────────────
 
@@ -363,12 +360,18 @@ function FormNovaDespesa({
   const [cnpj, setCnpj] = useState('')
   const [categoria, setCategoria] = useState('')
   const [valor, setValor] = useState(0)
+  const [dataDespesa, setDataDespesa] = useState(() => {
+    // Default: hoje, mas se o mês selecionado não for o atual, primeiro dia do mês
+    const hoje = new Date().toISOString().slice(0, 10)
+    if (hoje.startsWith(mes)) return hoje
+    return `${mes}-01`
+  })
   const [temNota, setTemNota] = useState(true)
   const [elegivel, setElegivel] = useState(false)
 
   const save = useMutation({
     mutationFn: () =>
-      backofficeApi.addDespesa(mes, { categoria, fornecedor, valor, tem_nota: temNota, elegivel }),
+      backofficeApi.addDespesa(mes, { categoria, fornecedor, valor, data: dataDespesa, tem_nota: temNota, elegivel }),
     onSuccess: async () => {
       // Salva fornecedor (com CNPJ) se preenchido
       if (fornecedor.trim()) {
@@ -382,6 +385,8 @@ function FormNovaDespesa({
       qc.invalidateQueries({ queryKey: ['backoffice-despesas', mes] })
       qc.invalidateQueries({ queryKey: ['backoffice-fornecedores'] })
       setFornecedor(''); setCnpj(''); setCategoria(''); setValor(0)
+      const hoje = new Date().toISOString().slice(0, 10)
+      setDataDespesa(hoje.startsWith(mes) ? hoje : `${mes}-01`)
       onSaved()
     },
   })
@@ -429,6 +434,22 @@ function FormNovaDespesa({
       <div className={styles.fieldGroup}>
         <span>Valor (R$)</span>
         <MoneyInput value={valor} onValue={setValor} />
+      </div>
+      <div className={styles.fieldGroup}>
+        <span>
+          Data da despesa
+          {!dataDespesa.startsWith(mes) && (
+            <span style={{ color: '#b45309', marginLeft: 6, fontSize: 10, fontWeight: 700 }}>
+              ⚠ vai para {dataDespesa.slice(0, 7)}
+            </span>
+          )}
+        </span>
+        <input
+          type="date"
+          value={dataDespesa}
+          onChange={e => setDataDespesa(e.target.value)}
+          style={{ padding: '8px 10px', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 13, fontFamily: 'Archivo, sans-serif' }}
+        />
       </div>
 
       {/* IA: classificação de crédito IBS/CBS */}
@@ -823,6 +844,135 @@ function SecaoRecorrentes({
 
 // ─── Tabela de despesas do mês ────────────────────────────────────────────────
 
+function fmtData(iso?: string | null) {
+  if (!iso) return '—'
+  const [y, m, d] = iso.split('-')
+  return `${d}/${m}/${y.slice(2)}`
+}
+
+function LinhaDespesa({
+  d, depth = 0, fornecedores, allCats,
+  editId, editForm, setEditForm, setEditId,
+  iniciarEdit, salvarEdit, patchElegivel, deleteDespesa,
+}: {
+  d: Despesa; depth?: number
+  fornecedores: Fornecedor[]; allCats: string[]
+  editId: string | null
+  editForm: any; setEditForm: any; setEditId: (id: string | null) => void
+  iniciarEdit: (d: Despesa) => void
+  salvarEdit: { mutate: (id: string) => void; isPending: boolean }
+  patchElegivel: { mutate: (a: { id: string; elegivel: boolean }) => void }
+  deleteDespesa: { mutate: (id: string) => void }
+}) {
+  const indent = depth * 18
+  if (editId === d.id) {
+    return (
+      <tr key={d.id} style={{ background: '#f0fdf4' }}>
+        <td colSpan={9} style={{ padding: '12px 14px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '110px 2fr 2fr 1fr auto auto auto', gap: 8, alignItems: 'center' }}>
+            <input
+              type="date"
+              value={editForm.data ?? ''}
+              onChange={e => setEditForm((f: any) => ({ ...f, data: e.target.value }))}
+              style={{ padding: '6px 8px', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 12, fontFamily: 'Archivo, sans-serif' }}
+            />
+            <Combobox
+              value={editForm.fornecedor}
+              onChange={v => setEditForm((f: any) => ({ ...f, fornecedor: v }))}
+              options={fornecedores.map(f => ({ value: f.id, label: f.nome, hint: f.categoria_padrao ?? undefined }))}
+              placeholder="Fornecedor"
+              onCreate={v => setEditForm((f: any) => ({ ...f, fornecedor: v }))}
+            />
+            <Combobox
+              value={editForm.categoria}
+              onChange={v => setEditForm((f: any) => ({ ...f, categoria: v }))}
+              options={allCats.map(c => ({ value: c, label: c }))}
+              placeholder="Categoria"
+              onCreate={v => setEditForm((f: any) => ({ ...f, categoria: v }))}
+            />
+            <MoneyInput value={editForm.valor} onValue={v => setEditForm((f: any) => ({ ...f, valor: v }))} />
+            <label style={{ display: 'flex', gap: 4, fontSize: 11, alignItems: 'center' }}>
+              <input type="checkbox" checked={editForm.tem_nota} onChange={e => setEditForm((f: any) => ({ ...f, tem_nota: e.target.checked }))} /> NF
+            </label>
+            <label style={{ display: 'flex', gap: 4, fontSize: 11, alignItems: 'center' }}>
+              <input type="checkbox" checked={editForm.elegivel} onChange={e => setEditForm((f: any) => ({ ...f, elegivel: e.target.checked }))} /> Eleg.
+            </label>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button className={styles.btnPrimary} onClick={() => salvarEdit.mutate(d.id)} disabled={salvarEdit.isPending}>
+                {salvarEdit.isPending ? '…' : 'Salvar'}
+              </button>
+              <button className={styles.btnSmall} onClick={() => setEditId(null)}>Cancelar</button>
+            </div>
+          </div>
+        </td>
+      </tr>
+    )
+  }
+  return (
+    <tr key={d.id} style={d.origem === 'reembolso' ? { background: '#fafafa' } : undefined}>
+      <td style={{ fontSize: 11, color: 'var(--gray-mid)', whiteSpace: 'nowrap', paddingLeft: 14 + indent }}>{fmtData(d.data)}</td>
+      <td style={{ fontWeight: 600, fontSize: 12 }}>
+        {d.fornecedor}
+        {d.origem === 'reembolso' && (
+          <span style={{ marginLeft: 6, fontSize: 9, background: d.reembolso_status === 'cancelado' ? '#fee2e2' : '#e0e7ff', color: d.reembolso_status === 'cancelado' ? '#b91c1c' : '#3730a3', padding: '1px 6px', borderRadius: 999, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em' }}>
+            {d.reembolso_status === 'cancelado' ? 'PERDA' : 'REEMB.'}
+          </span>
+        )}
+        {d.criado_por_nome && (
+          <span style={{ marginLeft: 6, fontSize: 9, background: '#f3f4f6', color: '#6b7280', padding: '1px 6px', borderRadius: 999, fontWeight: 600 }} title="Cadastrado por">
+            {d.criado_por_nome.split(' ')[0]}
+          </span>
+        )}
+      </td>
+      <td style={{ fontSize: 11, color: 'var(--gray-mid)' }}>{d.categoria}</td>
+      <td style={{ textAlign: 'right' }}>{fmtBRL(d.valor)}</td>
+      <td>
+        {d.tem_nota
+          ? <span style={{ fontSize: 10, background: '#dcfce7', color: '#15803d', padding: '2px 6px', borderRadius: 999 }}>sim</span>
+          : <span style={{ fontSize: 10, color: '#ef4444' }}>não</span>}
+      </td>
+      <td>
+        <button
+          disabled={d.origem === 'reembolso'}
+          onClick={() => patchElegivel.mutate({ id: d.id, elegivel: !d.elegivel })}
+          style={{
+            fontSize: 10, padding: '2px 6px', borderRadius: 999, border: 'none',
+            cursor: d.origem === 'reembolso' ? 'not-allowed' : 'pointer',
+            background: d.elegivel ? '#dcfce7' : '#f3f4f6',
+            color: d.elegivel ? '#15803d' : '#6b7280', fontWeight: 600,
+            opacity: d.origem === 'reembolso' ? 0.7 : 1,
+          }}
+        >
+          {d.elegivel ? 'sim' : 'não'}
+        </button>
+      </td>
+      <td style={{ textAlign: 'right', fontSize: 11, color: (d.alq_iva_pct ?? 0) > 0 ? 'var(--teal)' : '#d1d5db', fontWeight: (d.alq_iva_pct ?? 0) > 0 ? 600 : 400 }}>
+        {(d.alq_iva_pct ?? 0) > 0 ? `${(d.alq_iva_pct ?? 0).toFixed(2).replace('.', ',')}%` : '—'}
+      </td>
+      <td style={{ textAlign: 'right', color: d.credito.total > 0 ? 'var(--teal)' : 'var(--gray-mid)', fontWeight: d.credito.total > 0 ? 700 : 400 }}>
+        {fmtBRL(d.credito.total)}
+      </td>
+      <td style={{ display: 'flex', gap: 4 }}>
+        {d.origem === 'reembolso' ? (
+          d.drive_link ? (
+            <a href={d.drive_link} target="_blank" rel="noreferrer" title="Abrir reembolso no Drive" style={{ color: 'var(--teal)', fontSize: 13, textDecoration: 'none' }}>🔗</a>
+          ) : (
+            <span style={{ fontSize: 10, color: '#d1d5db' }} title="Sem link no Drive">🔗</span>
+          )
+        ) : (
+          <>
+            {d.drive_link && (
+              <a href={d.drive_link} target="_blank" rel="noreferrer" title="Comprovante no Drive" style={{ color: 'var(--teal)', fontSize: 12, textDecoration: 'none' }}>📎</a>
+            )}
+            <button title="Editar" style={{ background: 'none', border: 'none', color: 'var(--gray-mid)', cursor: 'pointer', fontSize: 13 }} onClick={() => iniciarEdit(d)}>✎</button>
+            <button title="Remover" style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: 13 }} onClick={() => deleteDespesa.mutate(d.id)}>×</button>
+          </>
+        )}
+      </td>
+    </tr>
+  )
+}
+
 function TabelaDespesas({ mes }: { mes: string }) {
   const qc = useQueryClient()
   const { data, isLoading } = useQuery({
@@ -840,23 +990,21 @@ function TabelaDespesas({ mes }: { mes: string }) {
   const allCats = Array.from(new Set([...CATEGORIAS_PADRAO, ...categoriasDb]))
 
   const [editId, setEditId] = useState<string | null>(null)
-  const [editForm, setEditForm] = useState<{ fornecedor: string; categoria: string; valor: number; tem_nota: boolean; elegivel: boolean }>({
-    fornecedor: '', categoria: '', valor: 0, tem_nota: true, elegivel: false,
+  const [editForm, setEditForm] = useState<{ fornecedor: string; categoria: string; valor: number; data: string; tem_nota: boolean; elegivel: boolean }>({
+    fornecedor: '', categoria: '', valor: 0, data: '', tem_nota: true, elegivel: false,
   })
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  const toggle = (k: string) => setExpanded(p => ({ ...p, [k]: !p[k] }))
 
   const deleteDespesa = useMutation({
     mutationFn: (id: string) => backofficeApi.deleteDespesa(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['backoffice-lancamentos', mes] })
-    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['backoffice-lancamentos', mes] }),
   })
-
   const patchElegivel = useMutation({
     mutationFn: ({ id, elegivel }: { id: string; elegivel: boolean }) =>
       backofficeApi.patchDespesa(id, { elegivel }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['backoffice-lancamentos', mes] }),
   })
-
   const salvarEdit = useMutation({
     mutationFn: (id: string) => backofficeApi.patchDespesa(id, editForm),
     onSuccess: () => {
@@ -864,20 +1012,42 @@ function TabelaDespesas({ mes }: { mes: string }) {
       setEditId(null)
     },
   })
-
   function iniciarEdit(d: Despesa) {
     setEditForm({
       fornecedor: d.fornecedor, categoria: d.categoria, valor: d.valor,
-      tem_nota: d.tem_nota, elegivel: d.elegivel,
+      data: d.data ?? '', tem_nota: d.tem_nota, elegivel: d.elegivel,
     })
     setEditId(d.id)
   }
 
   if (isLoading) return <div className={styles.empty}>Carregando…</div>
-  const despesas = data?.despesas ?? []
+  const despesasManuais = (data?.despesas ?? []).filter(d => d.origem !== 'reembolso')
+  const grupos = data?.reembolso_grupos ?? []
 
-  const total = despesas.reduce((s, d) => s + d.valor, 0)
-  const totalCredito = despesas.reduce((s, d) => s + d.credito.total, 0)
+  const totalManuais = despesasManuais.reduce((s, d) => s + d.valor, 0)
+  const totalGrupos = grupos.reduce((s, g) => s + g.valor_total, 0)
+  const total = totalManuais + totalGrupos
+  const totalCredito = despesasManuais.reduce((s, d) => s + d.credito.total, 0) + grupos.reduce((s, g) => s + g.credito_total, 0)
+
+  // Agrupar despesas manuais por fornecedor — qualquer fornecedor com 2+ lançamentos vira pasta
+  const porFornecedor: Record<string, Despesa[]> = {}
+  for (const d of despesasManuais) {
+    (porFornecedor[d.fornecedor] ||= []).push(d)
+  }
+  const linhasManuais: Array<{ tipo: 'unica'; despesa: Despesa } | { tipo: 'grupoFornecedor'; nome: string; itens: Despesa[] }> = []
+  for (const [nome, itens] of Object.entries(porFornecedor)) {
+    if (itens.length >= 2) linhasManuais.push({ tipo: 'grupoFornecedor', nome, itens })
+    else linhasManuais.push({ tipo: 'unica', despesa: itens[0] })
+  }
+
+  // Cor do badge por status de reembolso
+  const statusReembBadge = (status: string) => {
+    if (status === 'cancelado') return { bg: '#fee2e2', color: '#b91c1c', label: 'PERDA' }
+    if (status === 'pago') return { bg: '#dcfce7', color: '#15803d', label: 'PAGO' }
+    if (status === 'enviado') return { bg: '#e0e7ff', color: '#3730a3', label: 'ENVIADO' }
+    if (status === 'aguardando_pagamento') return { bg: '#fef3c7', color: '#92400e', label: 'AGUARDANDO' }
+    return { bg: '#f3f4f6', color: '#6b7280', label: 'RASCUNHO' }
+  }
 
   return (
     <div className={styles.tableCard}>
@@ -885,127 +1055,120 @@ function TabelaDespesas({ mes }: { mes: string }) {
         <div>
           <span style={{ fontWeight: 700, fontSize: 13 }}>Despesas de {mesLabel(mes)}</span>
           <span style={{ fontSize: 11, color: 'var(--gray-mid)', marginLeft: 8 }}>
-            {despesas.length} itens · {fmtBRL(total)} · crédito IBS/CBS {fmtBRL(totalCredito)}
+            {despesasManuais.length + grupos.reduce((s, g) => s + g.itens.length, 0)} itens · {fmtBRL(total)} · crédito IBS/CBS {fmtBRL(totalCredito)}
           </span>
         </div>
       </div>
-      {despesas.some(d => d.origem === 'reembolso') && (
+      {grupos.length > 0 && (
         <div style={{ padding: '0 18px 8px', fontSize: 11, color: 'var(--gray-mid)' }}>
-          🔗 Itens de reembolso aparecem em cinza: <strong>em trânsito</strong> (rascunho/enviado/pago) não geram crédito;
-          apenas <strong>cancelados</strong> viram despesa real (perda). Edite pelo módulo Reembolsos.
+          🔗 Reembolsos aparecem agrupados por pasta (1 card de reembolso = 1 grupo). Clique na seta para expandir.
+          <strong> Cancelados</strong> viram despesa real; demais status não geram crédito (apenas referência).
         </div>
       )}
-      {despesas.length === 0 ? (
+      {linhasManuais.length === 0 && grupos.length === 0 ? (
         <div className={styles.empty}>Nenhuma despesa lançada neste mês.</div>
       ) : (
         <div style={{ overflowX: 'auto' }}>
           <table className={styles.table}>
             <thead>
               <tr>
-                <th>Fornecedor</th><th>Categoria</th>
+                <th>Data</th><th>Fornecedor</th><th>Categoria</th>
                 <th style={{ textAlign: 'right' }}>Valor</th>
-                <th>Nota</th><th>Elegível</th>
+                <th>Nota</th><th>Eleg.</th>
+                <th style={{ textAlign: 'right' }}>% IVA</th>
                 <th style={{ textAlign: 'right' }}>Crédito est.</th>
-                <th>Status</th><th></th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
-              {despesas.map((d: Despesa) => (
-                editId === d.id ? (
-                  <tr key={d.id} style={{ background: '#f0fdf4' }}>
-                    <td colSpan={8} style={{ padding: '12px 14px' }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: '2fr 2fr 1fr auto auto auto', gap: 8, alignItems: 'center' }}>
-                        <Combobox
-                          value={editForm.fornecedor}
-                          onChange={v => setEditForm(f => ({ ...f, fornecedor: v }))}
-                          options={fornecedores.map(f => ({ value: f.id, label: f.nome, hint: f.categoria_padrao ?? undefined }))}
-                          placeholder="Fornecedor"
-                          onCreate={v => setEditForm(f => ({ ...f, fornecedor: v }))}
-                        />
-                        <Combobox
-                          value={editForm.categoria}
-                          onChange={v => setEditForm(f => ({ ...f, categoria: v }))}
-                          options={allCats.map(c => ({ value: c, label: c }))}
-                          placeholder="Categoria"
-                          onCreate={v => setEditForm(f => ({ ...f, categoria: v }))}
-                        />
-                        <MoneyInput value={editForm.valor} onValue={v => setEditForm(f => ({ ...f, valor: v }))} />
-                        <label style={{ display: 'flex', gap: 4, fontSize: 11, alignItems: 'center' }}>
-                          <input type="checkbox" checked={editForm.tem_nota} onChange={e => setEditForm(f => ({ ...f, tem_nota: e.target.checked }))} /> NF
-                        </label>
-                        <label style={{ display: 'flex', gap: 4, fontSize: 11, alignItems: 'center' }}>
-                          <input type="checkbox" checked={editForm.elegivel} onChange={e => setEditForm(f => ({ ...f, elegivel: e.target.checked }))} /> Eleg.
-                        </label>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          <button className={styles.btnPrimary} onClick={() => salvarEdit.mutate(d.id)} disabled={salvarEdit.isPending}>
-                            {salvarEdit.isPending ? '…' : 'Salvar'}
-                          </button>
-                          <button className={styles.btnSmall} onClick={() => setEditId(null)}>Cancelar</button>
-                        </div>
-                      </div>
-                    </td>
-                  </tr>
-                ) : (
-                  <tr key={d.id} style={d.origem === 'reembolso' ? { background: '#fafafa' } : undefined}>
-                    <td style={{ fontWeight: 600, fontSize: 12 }}>
-                      {d.fornecedor}
-                      {d.origem === 'reembolso' && (
-                        <span style={{ marginLeft: 6, fontSize: 9, background: d.reembolso_status === 'cancelado' ? '#fee2e2' : '#e0e7ff', color: d.reembolso_status === 'cancelado' ? '#b91c1c' : '#3730a3', padding: '1px 6px', borderRadius: 999, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em' }}>
-                          {d.reembolso_status === 'cancelado' ? 'PERDA' : 'REEMB.'}
+              {/* Grupos de reembolso */}
+              {grupos.map(g => {
+                const open = expanded[g.id]
+                const badge = statusReembBadge(g.reembolso_status)
+                return (
+                  <Fragment key={g.id}>
+                    <tr style={{ background: '#f8fafc', cursor: 'pointer' }} onClick={() => toggle(g.id)}>
+                      <td style={{ fontSize: 11, color: 'var(--gray-mid)', whiteSpace: 'nowrap' }}>
+                        <span style={{ marginRight: 4, display: 'inline-block', transition: 'transform .15s', transform: open ? 'rotate(90deg)' : '' }}>▶</span>
+                        {g.data_inicio && g.data_fim && g.data_inicio !== g.data_fim
+                          ? `${fmtData(g.data_inicio)} – ${fmtData(g.data_fim)}`
+                          : fmtData(g.data_inicio)}
+                      </td>
+                      <td style={{ fontWeight: 700, fontSize: 12 }}>
+                        📁 {g.reembolso_titulo}
+                        <span style={{ marginLeft: 6, fontSize: 9, background: badge.bg, color: badge.color, padding: '1px 6px', borderRadius: 999, fontWeight: 700, letterSpacing: '.04em' }}>
+                          {badge.label}
                         </span>
-                      )}
-                    </td>
-                    <td style={{ fontSize: 11, color: 'var(--gray-mid)' }}>{d.categoria}</td>
-                    <td style={{ textAlign: 'right' }}>{fmtBRL(d.valor)}</td>
-                    <td>
-                      {d.tem_nota
-                        ? <span style={{ fontSize: 10, background: '#dcfce7', color: '#15803d', padding: '2px 6px', borderRadius: 999 }}>sim</span>
-                        : <span style={{ fontSize: 10, color: '#ef4444' }}>não</span>}
-                    </td>
-                    <td>
-                      <button
-                        disabled={d.origem === 'reembolso'}
-                        onClick={() => patchElegivel.mutate({ id: d.id, elegivel: !d.elegivel })}
-                        style={{
-                          fontSize: 10, padding: '2px 6px', borderRadius: 999, border: 'none',
-                          cursor: d.origem === 'reembolso' ? 'not-allowed' : 'pointer',
-                          background: d.elegivel ? '#dcfce7' : '#f3f4f6',
-                          color: d.elegivel ? '#15803d' : '#6b7280', fontWeight: 600,
-                          opacity: d.origem === 'reembolso' ? 0.7 : 1,
-                        }}
-                      >
-                        {d.elegivel ? 'sim' : 'não'}
-                      </button>
-                    </td>
-                    <td style={{ textAlign: 'right', color: d.credito.total > 0 ? 'var(--teal)' : 'var(--gray-mid)', fontWeight: d.credito.total > 0 ? 700 : 400 }}>
-                      {fmtBRL(d.credito.total)}
-                    </td>
-                    <td>
-                      <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 999, background: '#f3f4f6', color: STATUS_COR[d.status] || '#6b7280', fontWeight: 600 }}>
-                        {d.status}
-                      </span>
-                    </td>
-                    <td style={{ display: 'flex', gap: 4 }}>
-                      {d.origem === 'reembolso' ? (
-                        <span style={{ fontSize: 10, color: '#d1d5db' }} title="Edite pelo módulo Reembolsos">🔗</span>
-                      ) : (
-                        <>
-                          <button
-                            title="Editar"
-                            style={{ background: 'none', border: 'none', color: 'var(--gray-mid)', cursor: 'pointer', fontSize: 13 }}
-                            onClick={() => iniciarEdit(d)}
-                          >✎</button>
-                          <button
-                            title="Remover"
-                            style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: 13 }}
-                            onClick={() => deleteDespesa.mutate(d.id)}
-                          >×</button>
-                        </>
-                      )}
-                    </td>
-                  </tr>
+                        {g.cliente_nome && (
+                          <span style={{ marginLeft: 6, fontSize: 10, color: 'var(--gray-mid)' }}>· {g.cliente_nome}</span>
+                        )}
+                      </td>
+                      <td style={{ fontSize: 11, color: 'var(--gray-mid)' }}>
+                        {g.itens.length} {g.itens.length === 1 ? 'despesa' : 'despesas'}
+                      </td>
+                      <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmtBRL(g.valor_total)}</td>
+                      <td colSpan={3}></td>
+                      <td style={{ textAlign: 'right', color: g.credito_total > 0 ? 'var(--teal)' : '#d1d5db', fontWeight: g.credito_total > 0 ? 700 : 400 }}>
+                        {fmtBRL(g.credito_total)}
+                      </td>
+                      <td onClick={e => e.stopPropagation()}>
+                        {g.drive_link ? (
+                          <a href={g.drive_link} target="_blank" rel="noreferrer" title="Abrir reembolso no Drive" style={{ color: 'var(--teal)', fontSize: 14, textDecoration: 'none' }}>🔗</a>
+                        ) : (
+                          <span style={{ fontSize: 11, color: '#d1d5db' }} title="Sem link no Drive">🔗</span>
+                        )}
+                      </td>
+                    </tr>
+                    {open && g.itens.map(it => (
+                      <LinhaDespesa key={it.id} d={it} depth={1}
+                        fornecedores={fornecedores} allCats={allCats}
+                        editId={editId} editForm={editForm} setEditForm={setEditForm} setEditId={setEditId}
+                        iniciarEdit={iniciarEdit} salvarEdit={salvarEdit} patchElegivel={patchElegivel} deleteDespesa={deleteDespesa}
+                      />
+                    ))}
+                  </Fragment>
                 )
-              ))}
+              })}
+
+              {/* Despesas manuais (com agrupamento por fornecedor quando 2+) */}
+              {linhasManuais.map((l, idx) => {
+                if (l.tipo === 'unica') {
+                  return <LinhaDespesa key={l.despesa.id} d={l.despesa}
+                    fornecedores={fornecedores} allCats={allCats}
+                    editId={editId} editForm={editForm} setEditForm={setEditForm} setEditId={setEditId}
+                    iniciarEdit={iniciarEdit} salvarEdit={salvarEdit} patchElegivel={patchElegivel} deleteDespesa={deleteDespesa}
+                  />
+                }
+                const grpKey = `fornecedor:${l.nome}`
+                const open = expanded[grpKey]
+                const valorTotal = l.itens.reduce((s, x) => s + x.valor, 0)
+                const credTotal = l.itens.reduce((s, x) => s + x.credito.total, 0)
+                return (
+                  <Fragment key={`grp-${idx}`}>
+                    <tr style={{ background: '#fafafa', cursor: 'pointer' }} onClick={() => toggle(grpKey)}>
+                      <td style={{ fontSize: 11, color: 'var(--gray-mid)', whiteSpace: 'nowrap' }}>
+                        <span style={{ marginRight: 4, display: 'inline-block', transition: 'transform .15s', transform: open ? 'rotate(90deg)' : '' }}>▶</span>
+                        ({l.itens.length})
+                      </td>
+                      <td style={{ fontWeight: 700, fontSize: 12 }}>{l.nome}</td>
+                      <td style={{ fontSize: 11, color: 'var(--gray-mid)' }}>{l.itens.length} lançamentos</td>
+                      <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmtBRL(valorTotal)}</td>
+                      <td colSpan={3}></td>
+                      <td style={{ textAlign: 'right', color: credTotal > 0 ? 'var(--teal)' : '#d1d5db', fontWeight: credTotal > 0 ? 700 : 400 }}>
+                        {fmtBRL(credTotal)}
+                      </td>
+                      <td></td>
+                    </tr>
+                    {open && l.itens.map(it => (
+                      <LinhaDespesa key={it.id} d={it} depth={1}
+                        fornecedores={fornecedores} allCats={allCats}
+                        editId={editId} editForm={editForm} setEditForm={setEditForm} setEditId={setEditId}
+                        iniciarEdit={iniciarEdit} salvarEdit={salvarEdit} patchElegivel={patchElegivel} deleteDespesa={deleteDespesa}
+                      />
+                    ))}
+                  </Fragment>
+                )
+              })}
             </tbody>
           </table>
         </div>

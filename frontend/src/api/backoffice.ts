@@ -40,9 +40,30 @@ export interface Despesa {
   valor: number; tem_nota: boolean; elegivel: boolean; base_legal: string | null
   status: string; last_check: string | null
   credito: { ibs: number; cbs: number; total: number }
+  alq_iva_pct?: number
+  data?: string | null
   origem?: 'manual' | 'reembolso'
   reembolso_status?: string | null
   reembolso_id?: string | null
+  reembolso_titulo?: string | null
+  cliente_nome?: string | null
+  drive_link?: string | null
+  criado_por_nome?: string | null
+}
+
+export interface ReembolsoGrupo {
+  id: string
+  origem: 'reembolso_grupo'
+  reembolso_id: string
+  reembolso_titulo: string
+  reembolso_status: string
+  cliente_nome: string | null
+  drive_link: string | null
+  valor_total: number
+  credito_total: number
+  itens: Despesa[]
+  data_inicio: string | null
+  data_fim: string | null
 }
 
 export interface Folha {
@@ -52,6 +73,9 @@ export interface Folha {
 
 export interface Lancamentos {
   mes: string; receitas: Receita[]; folha: Folha; despesas: Despesa[]
+  reembolso_grupos?: ReembolsoGrupo[]
+  aliq_iva_total_pct?: number
+  aliq_iva_efetiva_pct?: number
 }
 
 export interface MesAnual {

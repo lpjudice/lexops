@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from typing import Any
 
 import base64
@@ -208,21 +208,31 @@ def get_decisao(mes: str, _=Depends(get_current_user), db: Session = Depends(get
 
 @router.get("/lancamentos/{mes}")
 def get_lancamentos(mes: str, _=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
+    from app.models.usuario import Usuario as _U
     mes_obj = _get_or_create_mes(mes, db)
     db.commit()
     receitas = db.query(FiscalReceita).filter_by(mes=mes).order_by(FiscalReceita.created_at).all()
-    despesas = db.query(FiscalDespesa).filter_by(mes=mes).order_by(FiscalDespesa.created_at).all()
+    despesas = db.query(FiscalDespesa).filter_by(mes=mes).order_by(FiscalDespesa.data.desc().nullslast(), FiscalDespesa.created_at).all()
     folha = db.query(FiscalFolha).filter_by(mes=mes).first()
     cfg = _get_config(db)
     premissas = _premissas(mes_obj, cfg)
+    aliq_total_pct = round(premissas.ibs_entrada_pct + premissas.cbs_entrada_pct, 3)
+    fator_global = 0.5 if premissas.credito_modo == "parcial" else 1.0
+    aliq_efetiva_pct = round(aliq_total_pct * fator_global, 3)
 
     def _credito_despesa(d: FiscalDespesa) -> dict:
         if not d.tem_nota or not d.elegivel:
             return {"ibs": 0.0, "cbs": 0.0, "total": 0.0}
-        fator = 0.5 if premissas.credito_modo == "parcial" else 1.0
-        ibs = float(d.valor) * premissas.ibs_entrada_pct / 100 * fator
-        cbs = float(d.valor) * premissas.cbs_entrada_pct / 100 * fator
+        ibs = float(d.valor) * premissas.ibs_entrada_pct / 100 * fator_global
+        cbs = float(d.valor) * premissas.cbs_entrada_pct / 100 * fator_global
         return {"ibs": round(ibs, 2), "cbs": round(cbs, 2), "total": round(ibs + cbs, 2)}
+
+    # Cache de nomes de usuários para o chip "cadastrado por"
+    user_ids = {d.criado_por_id for d in despesas if d.criado_por_id}
+    users_map = {}
+    if user_ids:
+        for u in db.query(_U).filter(_U.id.in_(user_ids)).all():
+            users_map[u.id] = u.nome
 
     despesas_resp = [
         {
@@ -231,59 +241,104 @@ def get_lancamentos(mes: str, _=Depends(get_current_user), db: Session = Depends
             "fornecedor": d.fornecedor,
             "descricao": d.descricao,
             "valor": float(d.valor),
+            "data": d.data.isoformat() if d.data else None,
             "tem_nota": d.tem_nota,
             "elegivel": d.elegivel,
             "base_legal": d.base_legal,
             "status": d.status,
             "last_check": d.last_check,
             "credito": _credito_despesa(d),
+            "alq_iva_pct": aliq_efetiva_pct if (d.tem_nota and d.elegivel) else 0,
             "origem": "manual",
             "reembolso_status": None,
             "reembolso_id": None,
+            "reembolso_titulo": None,
+            "cliente_nome": None,
+            "drive_link": d.drive_link,
+            "criado_por_nome": users_map.get(d.criado_por_id),
         }
         for d in despesas
     ]
 
-    # Reembolsos cancelados (perda) viram despesa real do mês com crédito.
-    # Reembolsos pendentes/pagos aparecem como "em trânsito" sem crédito (apenas referência).
+    # Reembolsos: agrupar por reembolso_id (pasta = card de reembolso).
+    # Cancelado = "perda" → entra na linha-pai do grupo com flag de crédito.
+    # Demais status → grupo "em trânsito" só para visualização (sem crédito).
     itens_reemb = (
         db.query(ItemReembolso, Reembolso)
         .join(Reembolso, ItemReembolso.reembolso_id == Reembolso.id)
         .filter(ItemReembolso.data.between(f"{mes}-01", f"{mes}-31"))
+        .order_by(Reembolso.id, ItemReembolso.data)
         .all()
     )
+    # Cliente lookup
+    from app.models.cliente import Cliente as _C
+    cli_ids = {r.cliente_id for _, r in itens_reemb}
+    cli_map = {c.id: c.nome for c in db.query(_C).filter(_C.id.in_(cli_ids)).all()} if cli_ids else {}
+
+    grupos: dict[uuid.UUID, dict] = {}
     for item, reemb in itens_reemb:
         is_perda = reemb.status == "cancelado"
         valor_f = float(item.valor)
         if is_perda:
-            # Vira despesa de verdade — usa premissas para crédito
             tem_nota_v = bool(item.documento_comprobatorio or item.comprovante_path)
-            elegivel_v = True  # presumido elegível; usuário ajusta se não for
-            fator = 0.5 if premissas.credito_modo == "parcial" else 1.0
-            ibs = valor_f * premissas.ibs_entrada_pct / 100 * fator if elegivel_v and tem_nota_v else 0
-            cbs = valor_f * premissas.cbs_entrada_pct / 100 * fator if elegivel_v and tem_nota_v else 0
+            elegivel_v = True
+            ibs = valor_f * premissas.ibs_entrada_pct / 100 * fator_global if elegivel_v and tem_nota_v else 0
+            cbs = valor_f * premissas.cbs_entrada_pct / 100 * fator_global if elegivel_v and tem_nota_v else 0
             credito = {"ibs": round(ibs, 2), "cbs": round(cbs, 2), "total": round(ibs + cbs, 2)}
+            alq_iva = aliq_efetiva_pct if (elegivel_v and tem_nota_v) else 0
         else:
-            tem_nota_v = False  # em trânsito não gera crédito
+            tem_nota_v = False
             elegivel_v = False
             credito = {"ibs": 0.0, "cbs": 0.0, "total": 0.0}
+            alq_iva = 0
 
-        despesas_resp.append({
+        child = {
             "id": f"reemb:{item.id}",
             "categoria": item.natureza,
-            "fornecedor": item.descricao[:80] if item.descricao else "—",
+            "fornecedor": (item.descricao[:80] if item.descricao else "—"),
             "descricao": item.descricao,
             "valor": valor_f,
+            "data": item.data.isoformat() if item.data else None,
             "tem_nota": tem_nota_v,
             "elegivel": elegivel_v,
             "base_legal": "Reembolso cancelado (perda)" if is_perda else "Reembolso em trânsito",
             "status": "perda" if is_perda else "transito",
             "last_check": None,
             "credito": credito,
+            "alq_iva_pct": alq_iva,
             "origem": "reembolso",
             "reembolso_status": reemb.status,
             "reembolso_id": str(reemb.id),
+            "reembolso_titulo": reemb.titulo,
+            "cliente_nome": cli_map.get(reemb.cliente_id),
+            "drive_link": reemb.drive_link,
+            "criado_por_nome": None,
+        }
+        g = grupos.setdefault(reemb.id, {
+            "id": f"reembgrp:{reemb.id}",
+            "origem": "reembolso_grupo",
+            "reembolso_id": str(reemb.id),
+            "reembolso_titulo": reemb.titulo,
+            "reembolso_status": reemb.status,
+            "cliente_nome": cli_map.get(reemb.cliente_id),
+            "drive_link": reemb.drive_link,
+            "valor_total": 0.0,
+            "credito_total": 0.0,
+            "itens": [],
+            "data_inicio": None,
+            "data_fim": None,
         })
+        g["valor_total"] += valor_f
+        g["credito_total"] += credito["total"]
+        if item.data:
+            iso = item.data.isoformat()
+            if not g["data_inicio"] or iso < g["data_inicio"]:
+                g["data_inicio"] = iso
+            if not g["data_fim"] or iso > g["data_fim"]:
+                g["data_fim"] = iso
+        g["itens"].append(child)
+
+    grupos_resp = list(grupos.values())
 
     return {
         "mes": mes,
@@ -311,6 +366,9 @@ def get_lancamentos(mes: str, _=Depends(get_current_user), db: Session = Depends
             "outros": float(folha.outros) if folha else 0,
         },
         "despesas": despesas_resp,
+        "reembolso_grupos": grupos_resp,
+        "aliq_iva_total_pct": aliq_total_pct,
+        "aliq_iva_efetiva_pct": aliq_efetiva_pct,
     }
 
 
@@ -346,29 +404,36 @@ class DespesaIn(BaseModel):
     fornecedor: str
     descricao: str | None = None
     valor: float
+    data: date | None = None  # se vier, o mes é derivado dela
     tem_nota: bool = True
     elegivel: bool = False
     base_legal: str | None = None
     status: str = "novo"
+    drive_link: str | None = None
 
 
 @router.post("/despesas/{mes}")
-def add_despesa(mes: str, body: DespesaIn, _=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
-    _get_or_create_mes(mes, db)
+def add_despesa(mes: str, body: DespesaIn, user=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
+    # Se vier data, ela define o mês — caso contrário usa o mês da URL
+    mes_real = body.data.strftime("%Y-%m") if body.data else mes
+    _get_or_create_mes(mes_real, db)
     d = FiscalDespesa(
-        mes=mes,
+        mes=mes_real,
         categoria=body.categoria,
         fornecedor=body.fornecedor,
         descricao=body.descricao,
         valor=body.valor,
+        data=body.data,
         tem_nota=body.tem_nota,
         elegivel=body.elegivel,
         base_legal=body.base_legal or "LC 214/2025",
         status=body.status,
+        criado_por_id=getattr(user, "id", None),
+        drive_link=body.drive_link,
     )
     db.add(d)
     db.commit()
-    return {"id": str(d.id)}
+    return {"id": str(d.id), "mes": mes_real}
 
 
 @router.patch("/despesas/{id}")
@@ -376,9 +441,13 @@ def patch_despesa(id: uuid.UUID, body: dict, _=Depends(get_current_user), db: Se
     d = db.get(FiscalDespesa, id)
     if not d:
         raise HTTPException(404, "Despesa não encontrada")
-    allowed = {"categoria", "fornecedor", "descricao", "valor", "tem_nota", "elegivel", "base_legal", "status"}
+    allowed = {"categoria", "fornecedor", "descricao", "valor", "data", "tem_nota", "elegivel", "base_legal", "status", "drive_link"}
     for k, v in body.items():
         if k in allowed:
+            # Se a data muda, ajusta o mês
+            if k == "data" and v:
+                d.mes = date.fromisoformat(v).strftime("%Y-%m") if isinstance(v, str) else v.strftime("%Y-%m")
+                _get_or_create_mes(d.mes, db)
             setattr(d, k, v)
     db.commit()
     return {"ok": True}

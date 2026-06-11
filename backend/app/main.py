@@ -705,6 +705,9 @@ def _run_migrations() -> None:
         conn.execute(text(
             "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS acessos_backoffice JSONB"
         ))
+        conn.execute(text("ALTER TABLE fiscal_despesa ADD COLUMN IF NOT EXISTS data DATE"))
+        conn.execute(text("ALTER TABLE fiscal_despesa ADD COLUMN IF NOT EXISTS criado_por_id UUID"))
+        conn.execute(text("ALTER TABLE fiscal_despesa ADD COLUMN IF NOT EXISTS drive_link VARCHAR(1000)"))
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS fiscal_fornecedor (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
