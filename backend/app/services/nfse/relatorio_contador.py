@@ -29,12 +29,18 @@ def _periodo(competencia: str) -> tuple[date, date]:
     return ini, fim
 
 
-def coletar_dados(db: Session, competencia: str) -> dict:
+def coletar_dados(db: Session, competencia: str, parcial: bool = False, ate: date | None = None) -> dict:
     from app.models.nota_fiscal import NotaFiscal
     from app.models.financeiro import Recebimento
     from app.models.reembolso import Reembolso
+    from app.models.backoffice import FiscalDespesa
 
     ini, fim = _periodo(competencia)
+    # Modo parcial: corta o fim no dia informado (ou hoje)
+    if parcial:
+        hoje = ate or date.today()
+        if hoje < fim:
+            fim = hoje
 
     notas = (
         db.query(NotaFiscal)
@@ -73,9 +79,23 @@ def coletar_dados(db: Session, competencia: str) -> dict:
     except Exception as exc:
         log.warning("Reembolsos no relatório: %s", exc)
 
+    # Despesas do mes
+    despesas = (
+        db.query(FiscalDespesa)
+        .filter(FiscalDespesa.mes == competencia)
+        .order_by(FiscalDespesa.data.desc().nullslast(), FiscalDespesa.created_at)
+        .all()
+    )
+    # Se parcial: filtra pelo campo data (quando existir)
+    if parcial:
+        despesas = [d for d in despesas if not d.data or d.data <= fim]
+    desp_total = sum(float(d.valor) for d in despesas)
+    desp_elegivel = sum(float(d.valor) for d in despesas if d.tem_nota and d.elegivel)
+
     return {
         "competencia": competencia,
         "periodo": (ini, fim),
+        "parcial": parcial,
         "notas": notas,
         "nf_total": nf_total,
         "nf_qtd": len(notas),
@@ -83,6 +103,10 @@ def coletar_dados(db: Session, competencia: str) -> dict:
         "receb_total": receb_total,
         "reembolsos": reembolsos,
         "reemb_total": reemb_total,
+        "despesas": despesas,
+        "desp_total": desp_total,
+        "desp_elegivel": desp_elegivel,
+        "nf_iss": nf_iss,
     }
 
 
@@ -91,6 +115,53 @@ AMBER = "#b45309"        # âmbar escuro — legível sobre branco
 AMBER_BG = "#fef6e7"     # faixa âmbar clara
 DARK = "#1f2937"
 GRAY = "#6b7280"
+
+
+def _bloco_despesas(dados: dict) -> str:
+    """Tabela de despesas do mês com flag de elegibilidade IBS/CBS."""
+    despesas = dados.get('despesas') or []
+    if not despesas:
+        return ""
+    linhas = []
+    for d in despesas:
+        cat = (d.categoria or '—')[:40]
+        forn = (d.fornecedor or '—')[:40]
+        dt = d.data.strftime('%d/%m') if getattr(d, 'data', None) else '—'
+        nf_label = '✓' if d.tem_nota else '—'
+        eleg_label = '✓ IBS/CBS' if (d.tem_nota and d.elegivel) else '—'
+        cor_eleg = '#15803d' if (d.tem_nota and d.elegivel) else '#9ca3af'
+        link = ''
+        if getattr(d, 'drive_link', None):
+            link = f'<a href="{d.drive_link}" style="color:#1d4ed8;text-decoration:none;font-weight:700;">📎</a>'
+        linhas.append(
+            f'<tr><td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;">{dt}</td>'
+            f'<td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#1f2937;font-weight:600;">{forn}</td>'
+            f'<td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;font-size:11px;color:#6b7280;">{cat}</td>'
+            f'<td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;font-size:12px;text-align:right;">{_fmt(float(d.valor))}</td>'
+            f'<td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;text-align:center;font-size:11px;">{nf_label}</td>'
+            f'<td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;font-size:10px;font-weight:600;color:{cor_eleg};">{eleg_label}</td>'
+            f'<td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;text-align:center;">{link}</td></tr>'
+        )
+    return f"""
+      <p style="margin:24px 0 8px;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#6b7280;">Despesas do mês</p>
+      <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:collapse;font-size:13px;border:1px solid #eee;border-radius:8px;overflow:hidden;margin-bottom:12px;">
+        <thead><tr style="background:#f9fafb;">
+          <th style="padding:9px 10px;text-align:left;color:#6b7280;font-size:11px;">Data</th>
+          <th style="padding:9px 10px;text-align:left;color:#6b7280;font-size:11px;">Fornecedor</th>
+          <th style="padding:9px 10px;text-align:left;color:#6b7280;font-size:11px;">Categoria</th>
+          <th style="padding:9px 10px;text-align:right;color:#6b7280;font-size:11px;">Valor</th>
+          <th style="padding:9px 10px;text-align:center;color:#6b7280;font-size:11px;">NF</th>
+          <th style="padding:9px 10px;text-align:left;color:#6b7280;font-size:11px;">Elegível</th>
+          <th style="padding:9px 10px;text-align:center;color:#6b7280;font-size:11px;">Anexo</th>
+        </tr></thead>
+        <tbody>{''.join(linhas)}</tbody>
+        <tfoot><tr style="background:#f9fafb;font-weight:700;">
+          <td colspan="3" style="padding:9px 10px;font-size:11px;color:#374151;">Total · {len(despesas)} despesa(s) — elegível IBS/CBS: {_fmt(dados.get('desp_elegivel', 0))}</td>
+          <td style="padding:9px 10px;text-align:right;color:#1f2937;">{_fmt(dados.get('desp_total', 0))}</td>
+          <td colspan="3"></td>
+        </tr></tfoot>
+      </table>
+    """
 
 
 def _html(dados: dict) -> str:
@@ -135,8 +206,11 @@ def _html(dados: dict) -> str:
           <table width="100%" cellpadding="0" cellspacing="6" role="presentation" style="margin-bottom:24px;"><tr>
             {_resumo("NFS-e emitidas", f"{dados['nf_qtd']} · {_fmt(dados['nf_total'])}", AMBER)}
             {_resumo("Recebimentos", _fmt(dados['receb_total']), "#15803d")}
+            {_resumo("Despesas do mês", _fmt(dados.get('desp_total', 0)), "#1d4ed8")}
             {_resumo("Reembolsos pagos", _fmt(dados['reemb_total']), "#b91c1c")}
           </tr></table>
+
+          {"<p style='margin:0 0 16px;padding:8px 12px;background:#fef9c3;border:1px solid #fde047;border-radius:6px;font-size:12px;color:#92400e;'><b>⚠ Parcial:</b> dados até " + fim.strftime('%d/%m/%Y') + " — mês ainda não fechado.</p>" if dados.get('parcial') else ""}
 
           <p style="margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:{GRAY};">Notas Fiscais emitidas</p>
           <table width="100%" cellpadding="0" cellspacing="0" role="presentation"
@@ -149,6 +223,8 @@ def _html(dados: dict) -> str:
             </tr></thead>
             <tbody>{linhas_nf}</tbody>
           </table>
+
+          {(_bloco_despesas(dados) if dados.get('despesas') else "")}
 
           <p style="margin:22px 0 0;font-size:12px;color:{GRAY};line-height:1.6;">
             Os PDFs (DANFSe) seguem <b style="color:{DARK};">em anexo</b> e também por <b style="color:{AMBER};">link no Drive</b> em cada nota.
@@ -198,8 +274,12 @@ def _enviar(access_token: str, to_list: list[str], cc_master: str | None,
 
 
 def enviar_relatorio(db: Session, competencia: str | None = None,
-                     destinatario_override: str | None = None) -> dict:
-    """Monta e envia o relatório do mês indicado (default: mês anterior)."""
+                     destinatario_override: str | None = None,
+                     parcial: bool = False) -> dict:
+    """Monta e envia o relatório do mês indicado (default: mês anterior).
+
+    Se ``parcial=True``, corta o período no dia atual e marca o relatório como parcial.
+    """
     from app.models.config_fiscal import ConfigFiscal
     from app.models.relatorio_fiscal_log import RelatorioFiscalLog
     from app.routers.reembolsos import _refresh_if_needed
@@ -222,7 +302,7 @@ def enviar_relatorio(db: Session, competencia: str | None = None,
             destinatarios = [master]
             master = None
 
-    dados = coletar_dados(db, competencia)
+    dados = coletar_dados(db, competencia, parcial=parcial)
 
     # Anexos: PDFs das NFs (gera se faltar)
     import os

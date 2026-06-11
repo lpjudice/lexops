@@ -302,6 +302,108 @@ function Campo({ label, children, hint }: { label: string; children: React.React
 
 const GRID2: React.CSSProperties = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }
 
+// Estágios da Reforma Tributária — alíquotas e regras por período
+type EstagioCfg = {
+  id: string
+  label: string
+  desde: string  // YYYY-MM-DD início
+  ate: string    // YYYY-MM-DD fim
+  ibs_pct: number
+  cbs_pct: number
+  cobranca_efetiva: 'nenhuma' | 'cbs' | 'parcial' | 'total'
+  resumo: string
+}
+
+const ESTAGIOS_REFORMA: EstagioCfg[] = [
+  { id: 'pre_reforma', label: 'Pré-Reforma',                desde: '2024-01-01', ate: '2026-07-31',
+    ibs_pct: 0,    cbs_pct: 0,    cobranca_efetiva: 'nenhuma',
+    resumo: 'Antes de ago/2026 — nada do IBS/CBS na NF.' },
+  { id: 'teste_2026', label: 'Teste 2026 (ago–dez)',         desde: '2026-08-01', ate: '2026-12-31',
+    ibs_pct: 0.1,  cbs_pct: 0.9,  cobranca_efetiva: 'nenhuma',
+    resumo: 'Destacar IBS 0,1% + CBS 0,9% na NF como referência. Sem cobrança efetiva.' },
+  { id: 'cbs_ativo', label: '2027–2028: CBS plena, IBS simbólico', desde: '2027-01-01', ate: '2028-12-31',
+    ibs_pct: 0.1,  cbs_pct: 8.8,  cobranca_efetiva: 'cbs',
+    resumo: 'CBS começa a ser cobrada (≈8,8%). IBS continua só como referência (0,1%). PIS/COFINS extintos.' },
+  { id: 'transicao', label: '2029–2032: transição',          desde: '2029-01-01', ate: '2032-12-31',
+    ibs_pct: 2.0,  cbs_pct: 8.8,  cobranca_efetiva: 'parcial',
+    resumo: 'IBS sobe gradualmente (2029=10% pleno) e ICMS/ISS reduzem na mesma proporção.' },
+  { id: 'pleno', label: '2033+: IBS/CBS pleno',              desde: '2033-01-01', ate: '2099-12-31',
+    ibs_pct: 17.7, cbs_pct: 8.8,  cobranca_efetiva: 'total',
+    resumo: 'Reforma 100%. ICMS, ISS, PIS, COFINS, IPI extintos.' },
+]
+
+function recomendarEstagio(today: Date): EstagioCfg {
+  const iso = today.toISOString().slice(0, 10)
+  return ESTAGIOS_REFORMA.find(e => iso >= e.desde && iso <= e.ate) ?? ESTAGIOS_REFORMA[0]
+}
+
+function EstagioReforma({ f, set }: { f: any; set: (k: any, v: any) => void }) {
+  const hoje = new Date()
+  const recomendado = recomendarEstagio(hoje)
+  const atual = ESTAGIOS_REFORMA.find(e => e.id === (f.estagio_reforma ?? 'pre_reforma')) ?? ESTAGIOS_REFORMA[0]
+
+  function aplicarEstagio(id: string) {
+    const e = ESTAGIOS_REFORMA.find(x => x.id === id)
+    if (!e) return
+    set('estagio_reforma', id)
+    set('ibs_pct', e.ibs_pct)
+    set('cbs_pct', e.cbs_pct)
+  }
+
+  const corCobranca = (c: EstagioCfg['cobranca_efetiva']) => ({
+    nenhuma: '#6b7280', cbs: '#1d4ed8', parcial: '#b45309', total: '#15803d',
+  }[c])
+  const labelCobranca = (c: EstagioCfg['cobranca_efetiva']) => ({
+    nenhuma: 'Apenas referência na NF (não cobrado)',
+    cbs: 'CBS efetivamente cobrada',
+    parcial: 'CBS + IBS parcial',
+    total: 'IBS + CBS pleno (cobrança total)',
+  }[c])
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <p className={cs.fieldHint} style={{ marginBottom: 8 }}>
+        🗓 Hoje ({hoje.toLocaleDateString('pt-BR')}): estágio recomendado
+        <strong style={{ color: 'var(--teal)', marginLeft: 4 }}>{recomendado.label}</strong>.
+        Selecione abaixo para aplicar automaticamente as alíquotas e regras.
+      </p>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8, marginBottom: 12 }}>
+        {ESTAGIOS_REFORMA.map(e => {
+          const ativo = atual.id === e.id
+          const isRec = recomendado.id === e.id
+          return (
+            <button
+              key={e.id}
+              type="button"
+              onClick={() => aplicarEstagio(e.id)}
+              style={{
+                textAlign: 'left', padding: '10px 12px', borderRadius: 8, cursor: 'pointer',
+                border: `2px solid ${ativo ? 'var(--teal)' : '#e5e7eb'}`,
+                background: ativo ? 'rgba(0,176,144,.06)' : '#fff',
+                fontFamily: 'Archivo, sans-serif',
+              }}
+            >
+              <div style={{ fontWeight: 700, fontSize: 12, color: 'var(--dark)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>{e.label}</span>
+                {isRec && <span style={{ fontSize: 9, background: '#dcfce7', color: '#15803d', padding: '1px 6px', borderRadius: 999, fontWeight: 700 }}>HOJE</span>}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--gray-mid)', marginTop: 4 }}>
+                IBS {e.ibs_pct}% · CBS {e.cbs_pct}%
+              </div>
+              <div style={{ fontSize: 10, color: corCobranca(e.cobranca_efetiva), fontWeight: 600, marginTop: 2 }}>
+                {labelCobranca(e.cobranca_efetiva)}
+              </div>
+            </button>
+          )
+        })}
+      </div>
+      <div style={{ padding: '8px 12px', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 11, color: 'var(--gray-mid)' }}>
+        <strong style={{ color: 'var(--dark)' }}>Estágio selecionado:</strong> {atual.resumo}
+      </div>
+    </div>
+  )
+}
+
 export default function ConfigFiscalPage() {
   const qc = useQueryClient()
   const { data, isLoading } = useQuery({ queryKey: ['config-fiscal'], queryFn: configFiscalApi.obter })
@@ -445,12 +547,12 @@ export default function ConfigFiscalPage() {
         </div>
       </Secao>
 
-      {/* D. IBS/CBS */}
+      {/* D. IBS/CBS — Estágios da Reforma */}
       <Secao titulo="🆕 Reforma Tributária (IBS / CBS)">
-        <p className={cs.fieldHint} style={{ marginBottom: 10 }}>Entra em teste a partir de ago/2026. Deixe configurado para quando ativar.</p>
+        <EstagioReforma f={f} set={set} />
         <div style={GRID2}>
-          <Campo label="IBS (%)"><input className={inp} type="number" step="0.01" value={f.ibs_pct} onChange={(e) => set('ibs_pct', parseFloat(e.target.value) || 0)} /></Campo>
-          <Campo label="CBS (%)"><input className={inp} type="number" step="0.01" value={f.cbs_pct} onChange={(e) => set('cbs_pct', parseFloat(e.target.value) || 0)} /></Campo>
+          <Campo label="IBS (%) — destacar na NF"><input className={inp} type="number" step="0.01" value={f.ibs_pct} onChange={(e) => set('ibs_pct', parseFloat(e.target.value) || 0)} /></Campo>
+          <Campo label="CBS (%) — destacar na NF"><input className={inp} type="number" step="0.01" value={f.cbs_pct} onChange={(e) => set('cbs_pct', parseFloat(e.target.value) || 0)} /></Campo>
         </div>
         <label className={cs.checkboxLabel}>
           <input type="checkbox" checked={f.piloto_ibscbs} onChange={(e) => set('piloto_ibscbs', e.target.checked)} /> Operação no piloto IBS/CBS
@@ -506,21 +608,38 @@ export default function ConfigFiscalPage() {
         <label className={cs.checkboxLabel}>
           <input type="checkbox" checked={f.enviar_relatorio_auto} onChange={(e) => set('enviar_relatorio_auto', e.target.checked)} /> Enviar relatório mensal automaticamente
         </label>
-        <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <button type="button" className={cs.btnSecondary} disabled={enviandoRel}
             onClick={async () => {
               setEnviandoRel(true); setRelMsg(null)
               try {
                 const r = await fiscalApi.enviarRelatorio()
-                setRelMsg(`✓ Enviado (${r.nf_qtd} NF, ${r.anexos} anexo(s)) para ${r.destinatarios?.join(', ')}`)
+                setRelMsg(`✓ Mês fechado enviado (${r.nf_qtd} NF, ${r.anexos} anexo(s)) para ${r.destinatarios?.join(', ')}`)
               } catch (e: any) {
                 setRelMsg('⚠️ ' + (e?.response?.data?.detail || 'Falha ao enviar'))
               } finally { setEnviandoRel(false) }
             }}>
-            {enviandoRel ? 'Enviando…' : '📧 Enviar relatório agora (mês anterior)'}
+            {enviandoRel ? 'Enviando…' : '📧 Mês fechado (anterior)'}
+          </button>
+          <button type="button" className={cs.btnSecondary} disabled={enviandoRel}
+            onClick={async () => {
+              if (!confirm('Enviar parcial do mês atual? Apenas dados até hoje serão incluídos (NFs + Despesas + Reembolsos).')) return
+              setEnviandoRel(true); setRelMsg(null)
+              try {
+                const mesAtual = new Date().toISOString().slice(0, 7)
+                const r = await fiscalApi.enviarRelatorio(mesAtual, true)
+                setRelMsg(`✓ Parcial enviado (${r.nf_qtd} NF, ${r.anexos} anexo(s)) — destacado como parcial no e-mail.`)
+              } catch (e: any) {
+                setRelMsg('⚠️ ' + (e?.response?.data?.detail || 'Falha ao enviar'))
+              } finally { setEnviandoRel(false) }
+            }}>
+            {enviandoRel ? 'Enviando…' : '📊 Parcial do mês atual'}
           </button>
           {relMsg && <span className={cs.fieldHint}>{relMsg}</span>}
         </div>
+        <p className={cs.fieldHint} style={{ marginTop: 6, fontSize: 11 }}>
+          Ambos os modos agora incluem <b>NFs emitidas</b>, <b>recebimentos</b>, <b>despesas do mês</b> (com flag de crédito IBS/CBS) e <b>reembolsos pagos</b>.
+        </p>
         <div style={{ marginTop: 10 }}>
           <button type="button" className={cs.colapsarBtn} onClick={() => setShowHist(true)}>
             📜 Ver relatórios já enviados

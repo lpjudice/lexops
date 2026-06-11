@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   backofficeApi,
@@ -147,29 +148,61 @@ function Combobox({
 }) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
+  const [rect, setRect] = useState<{ top: number; left: number; width: number } | null>(null)
+  const inputRef = useRef<HTMLInputElement | null>(null)
   const display = open ? search : (value || '')
   const filtered = options.filter(o =>
     o.label.toLowerCase().includes((open ? search : '').toLowerCase())
   )
   const exactMatch = options.some(o => o.label.toLowerCase() === search.toLowerCase())
 
+  // Atualiza posição do dropdown (fixed) ao abrir e em scroll/resize
+  useEffect(() => {
+    if (!open) return
+    const update = () => {
+      const el = inputRef.current
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      setRect({ top: r.bottom + 4, left: r.left, width: r.width })
+    }
+    update()
+    window.addEventListener('scroll', update, true)
+    window.addEventListener('resize', update)
+    return () => {
+      window.removeEventListener('scroll', update, true)
+      window.removeEventListener('resize', update)
+    }
+  }, [open])
+
   return (
     <div style={{ position: 'relative' }}>
       <input
+        ref={inputRef}
         value={display}
         onChange={e => { setSearch(e.target.value); setOpen(true); onChange(e.target.value) }}
         onFocus={() => { setSearch(value); setOpen(true) }}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        onBlur={() => setTimeout(() => setOpen(false), 180)}
         placeholder={placeholder}
         style={{ width: '100%', padding: '8px 28px 8px 10px', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 13, fontFamily: 'Archivo, sans-serif' }}
       />
       <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: '#9ca3af', fontSize: 10, pointerEvents: 'none' }}>▼</span>
-      {open && (
-        <div style={{
-          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100,
-          background: '#fff', border: '1px solid #e5e7eb', borderRadius: 6,
-          boxShadow: '0 4px 16px rgba(0,0,0,.1)', marginTop: 2, maxHeight: 420, overflowY: 'auto',
-        }}>
+      {open && rect && createPortal(
+        <div
+          style={{
+            position: 'fixed', top: rect.top, left: rect.left, width: rect.width, zIndex: 10000,
+            background: '#fff', border: '1px solid #e5e7eb', borderRadius: 6,
+            boxShadow: '0 8px 24px rgba(0,0,0,.15)', maxHeight: 420, overflowY: 'auto',
+            overscrollBehavior: 'contain',
+          }}
+          onWheel={e => {
+            // Trava scroll do dropdown — se chegou no fim, não propaga pro body
+            const el = e.currentTarget
+            const dy = e.deltaY
+            const atTop = el.scrollTop === 0
+            const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 1
+            if ((dy < 0 && atTop) || (dy > 0 && atBottom)) e.preventDefault()
+          }}
+        >
           {filtered.length === 0 && !search && (
             <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--gray-mid)' }}>Nenhuma opção</div>
           )}
@@ -199,7 +232,8 @@ function Combobox({
               + Criar "{search}"
             </div>
           )}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )
@@ -368,10 +402,22 @@ function FormNovaDespesa({
   })
   const [temNota, setTemNota] = useState(true)
   const [elegivel, setElegivel] = useState(false)
+  const [arquivo, setArquivo] = useState<File | null>(null)
+  const [uploading, setUploading] = useState(false)
 
   const save = useMutation({
-    mutationFn: () =>
-      backofficeApi.addDespesa(mes, { categoria, fornecedor, valor, data: dataDespesa, tem_nota: temNota, elegivel }),
+    mutationFn: async () => {
+      let drive_link: string | undefined
+      if (arquivo) {
+        setUploading(true)
+        try {
+          const mesUpload = dataDespesa ? dataDespesa.slice(0, 7) : mes
+          const r = await backofficeApi.uploadComprovante(mesUpload, arquivo)
+          drive_link = r.link
+        } finally { setUploading(false) }
+      }
+      return backofficeApi.addDespesa(mes, { categoria, fornecedor, valor, data: dataDespesa, tem_nota: temNota, elegivel, drive_link })
+    },
     onSuccess: async () => {
       // Salva fornecedor (com CNPJ) se preenchido
       if (fornecedor.trim()) {
@@ -384,7 +430,7 @@ function FormNovaDespesa({
       qc.invalidateQueries({ queryKey: ['backoffice-lancamentos', mes] })
       qc.invalidateQueries({ queryKey: ['backoffice-despesas', mes] })
       qc.invalidateQueries({ queryKey: ['backoffice-fornecedores'] })
-      setFornecedor(''); setCnpj(''); setCategoria(''); setValor(0)
+      setFornecedor(''); setCnpj(''); setCategoria(''); setValor(0); setArquivo(null)
       const hoje = new Date().toISOString().slice(0, 10)
       setDataDespesa(hoje.startsWith(mes) ? hoje : `${mes}-01`)
       onSaved()
@@ -462,7 +508,7 @@ function FormNovaDespesa({
         />
       </div>
 
-      <div style={{ display: 'flex', gap: 16, alignItems: 'center', paddingTop: 6, gridColumn: '1/-1' }}>
+      <div style={{ display: 'flex', gap: 16, alignItems: 'center', paddingTop: 6, gridColumn: '1/-1', flexWrap: 'wrap' }}>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, cursor: 'pointer' }}>
           <input type="checkbox" checked={temNota} onChange={e => setTemNota(e.target.checked)} />
           Tem nota fiscal
@@ -472,13 +518,32 @@ function FormNovaDespesa({
           Elegível IBS/CBS
         </label>
       </div>
+
+      {/* Upload de comprovante (opcional) → /Backoffice/Despesas/{mes}/ no Drive */}
+      <div style={{ gridColumn: '1/-1', padding: '10px 14px', border: '1px dashed #e5e7eb', borderRadius: 8, background: '#fafafa' }}>
+        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--gray-mid)', textTransform: 'uppercase', letterSpacing: '.04em', display: 'block', marginBottom: 6 }}>
+          📎 Comprovante (opcional · PDF ou imagem)
+        </label>
+        <input
+          type="file"
+          accept=".pdf,image/*"
+          onChange={e => setArquivo(e.target.files?.[0] ?? null)}
+          style={{ fontSize: 12 }}
+        />
+        {arquivo && (
+          <div style={{ fontSize: 11, color: 'var(--teal)', marginTop: 6 }}>
+            ✓ {arquivo.name} ({Math.round(arquivo.size / 1024)} KB) — será salvo em /Backoffice/Despesas/{(dataDespesa || mes).slice(0, 7)}
+          </div>
+        )}
+      </div>
+
       <div style={{ gridColumn: '1/-1' }}>
         <button
           className={styles.btnPrimary}
           disabled={!fornecedor || valor <= 0 || save.isPending}
           onClick={() => save.mutate()}
         >
-          {save.isPending ? 'Salvando…' : 'Adicionar despesa'}
+          {uploading ? 'Enviando arquivo…' : save.isPending ? 'Salvando…' : 'Adicionar despesa'}
         </button>
       </div>
     </div>
@@ -1311,8 +1376,6 @@ export default function DespesasPage() {
   const [aba, setAba] = useState<Aba>('lancamentos')
   const [mes, setMes] = useState(mesAtual)
   const [secao, setSecao] = useState<SecaoAberta>(null)
-  const [syncMsg, setSyncMsg] = useState<string | null>(null)
-  const [syncing, setSyncing] = useState(false)
 
   const { data: fornecedoresData = [] } = useQuery({
     queryKey: ['backoffice-fornecedores'],
@@ -1322,18 +1385,6 @@ export default function DespesasPage() {
     queryKey: ['backoffice-categorias'],
     queryFn: backofficeApi.categorias,
   })
-
-  async function syncNfs() {
-    setSyncing(true); setSyncMsg(null)
-    try {
-      const r = await backofficeApi.syncNfsHistorico()
-      setSyncMsg(`✓ DFe sincronizado — ${r.processados ?? 0} NF(s) processada(s).`)
-    } catch {
-      setSyncMsg('⚠ Falha ao sincronizar. Verifique o certificado digital.')
-    } finally {
-      setSyncing(false)
-    }
-  }
 
   function toggleSecao(s: SecaoAberta) {
     setSecao(prev => prev === s ? null : s)
@@ -1399,14 +1450,6 @@ export default function DespesasPage() {
       {aba === 'fornecedores' && <AbaFornecedores />}
 
       {aba === 'lancamentos' && <>
-
-      {/* Sync NFs */}
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-        <button className={styles.btnSmall} disabled={syncing} onClick={syncNfs}>
-          {syncing ? 'Sincronizando…' : '↻ Sincronizar NFs históricas (DFe)'}
-        </button>
-        {syncMsg && <span style={{ fontSize: 12, color: syncMsg.startsWith('✓') ? '#15803d' : '#b45309' }}>{syncMsg}</span>}
-      </div>
 
       {/* Painéis expansíveis */}
       {secao === 'nova' && (

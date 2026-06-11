@@ -812,6 +812,37 @@ async def parse_extrato(
     return {"linhas": linhas}
 
 
+# ── Upload de comprovante para Drive ──────────────────────────────────────────
+
+from fastapi import File, Form, UploadFile
+
+
+@router.post("/despesas/upload-comprovante")
+async def upload_comprovante(
+    file: UploadFile = File(...),
+    mes: str = Form(...),
+    _=Depends(get_current_user),
+):
+    """Salva o arquivo em /Backoffice/Despesas/{mes}/ no Drive e devolve o link."""
+    from app.services.google_drive import upload_arquivo_raiz
+    conteudo = await file.read()
+    if not conteudo:
+        raise HTTPException(400, "Arquivo vazio")
+    if len(conteudo) > 25 * 1024 * 1024:
+        raise HTTPException(413, "Arquivo > 25MB")
+    nome = file.filename or "comprovante"
+    mime = file.content_type or "application/octet-stream"
+    link = upload_arquivo_raiz(
+        conteudo=conteudo,
+        nome_arquivo=nome,
+        subpath=["Backoffice", "Despesas", mes],
+        mimetype=mime,
+    )
+    if not link:
+        raise HTTPException(502, "Falha ao enviar ao Drive — verifique a autenticação Google")
+    return {"link": link, "filename": nome}
+
+
 # ── Classificação IA de despesa (LC 214/2025) ─────────────────────────────────
 
 class ClassificarIn(BaseModel):
@@ -896,11 +927,4 @@ def classificar_despesa(body: ClassificarIn, _=Depends(get_current_user)) -> Any
     return data
 
 
-# ── Sincronizar NFs históricas (DFe) ─────────────────────────────────────────
-
-@router.post("/sync-nfs-historico")
-def sync_nfs_historico(_=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
-    """Dispara sincronização do DFe para trazer NFs desde jun/2025 e enriquecer o RBT12."""
-    from app.services.nfse.dfe_sync import sincronizar_dfe
-    resultado = sincronizar_dfe(db, max_paginas=100)
-    return resultado
+# ── Sincronização de NFs migrada para o módulo Notas Fiscais (ver fiscalApi.sincronizarDfe).

@@ -708,6 +708,7 @@ def _run_migrations() -> None:
         conn.execute(text("ALTER TABLE fiscal_despesa ADD COLUMN IF NOT EXISTS data DATE"))
         conn.execute(text("ALTER TABLE fiscal_despesa ADD COLUMN IF NOT EXISTS criado_por_id UUID"))
         conn.execute(text("ALTER TABLE fiscal_despesa ADD COLUMN IF NOT EXISTS drive_link VARCHAR(1000)"))
+        conn.execute(text("ALTER TABLE config_fiscal ADD COLUMN IF NOT EXISTS estagio_reforma VARCHAR(20) NOT NULL DEFAULT 'pre_reforma'"))
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS fiscal_fornecedor (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

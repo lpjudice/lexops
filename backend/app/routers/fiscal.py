@@ -221,6 +221,17 @@ def emitir_nota(
         cofins=body.retencao_cofins, pis=body.retencao_pis, iss_retido=body.iss_retido,
     )
 
+    # Auto-cálculo de IBS/CBS baseado no estágio da reforma — se o usuário não informou
+    ibs_v = body.ibs_valor
+    cbs_v = body.cbs_valor
+    if cfg and (cfg.estagio_reforma or "pre_reforma") != "pre_reforma":
+        if ibs_v is None and cfg.ibs_pct:
+            from decimal import Decimal as _D
+            ibs_v = _D(str(body.valor_servicos)) * _D(str(cfg.ibs_pct)) / _D("100")
+        if cbs_v is None and cfg.cbs_pct:
+            from decimal import Decimal as _D
+            cbs_v = _D(str(body.valor_servicos)) * _D(str(cfg.cbs_pct)) / _D("100")
+
     dados = DadosDPS(
         serie=body.serie,
         numero=numero_dps,
@@ -234,8 +245,8 @@ def emitir_nota(
         valor_servicos=body.valor_servicos,
         retencoes=retencoes,
         intermediario=intermediario,
-        ibs_valor=body.ibs_valor,
-        cbs_valor=body.cbs_valor,
+        ibs_valor=ibs_v,
+        cbs_valor=cbs_v,
         ambiente=ambiente,
         data_emissao=datetime.now(tz=BRT),
     )
@@ -278,8 +289,8 @@ def emitir_nota(
         retencao_csll=float(body.retencao_csll) if body.retencao_csll else None,
         retencao_cofins=float(body.retencao_cofins) if body.retencao_cofins else None,
         retencao_pis=float(body.retencao_pis) if body.retencao_pis else None,
-        ibs_valor=float(body.ibs_valor) if body.ibs_valor else None,
-        cbs_valor=float(body.cbs_valor) if body.cbs_valor else None,
+        ibs_valor=float(ibs_v) if ibs_v else None,
+        cbs_valor=float(cbs_v) if cbs_v else None,
         status="emitida" if resultado.sucesso else "erro",
         erro_mensagem=resultado.erro_mensagem,
         xml_nfse=resultado.xml_nfse,
@@ -671,12 +682,13 @@ def preview_relatorio(
 def enviar_relatorio_agora(
     mes: Optional[str] = Query(None),
     destinatario: Optional[str] = Query(None, description="Override do destinatário (teste)"),
+    parcial: bool = Query(False, description="True = corta no dia atual (mes ainda nao fechado)"),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
     """Envia o relatório ao contador agora (manual)."""
     from app.services.nfse.relatorio_contador import enviar_relatorio
-    resultado = enviar_relatorio(db, mes, destinatario_override=destinatario)
+    resultado = enviar_relatorio(db, mes, destinatario_override=destinatario, parcial=parcial)
     if not resultado.get("enviado"):
         raise HTTPException(422, detail=resultado.get("motivo", "Falha ao enviar"))
     return resultado

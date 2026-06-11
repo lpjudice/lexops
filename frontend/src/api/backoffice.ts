@@ -162,9 +162,19 @@ export const backofficeApi = {
     }).then(r => r.data)
   },
 
-  // Sync NFs históricas
-  syncNfsHistorico: () =>
-    api.post('/backoffice/sync-nfs-historico').then(r => r.data),
+
+  // Upload de comprovante de despesa para Drive
+  uploadComprovante: async (mes: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('mes', mes)
+    const r = await api.post<{ link: string; filename: string }>(
+      '/backoffice/despesas/upload-comprovante',
+      form,
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    )
+    return r.data
+  },
 
   // Classificar despesa por IA (LC 214/2025)
   classificarDespesa: (data: { categoria: string; fornecedor?: string; descricao?: string; valor?: number; respostas?: Record<string, string> }) =>

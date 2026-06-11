@@ -50,6 +50,7 @@ class ConfigFiscalBase(BaseModel):
     ibs_pct: Decimal
     cbs_pct: Decimal
     piloto_ibscbs: bool
+    estagio_reforma: str = "pre_reforma"
 
     # Contabilidade
     emails_contador: list[str] = []

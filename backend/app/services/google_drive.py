@@ -586,6 +586,75 @@ def upload_pdf_raiz(
         return None
 
 
+def upload_arquivo_raiz(
+    conteudo: bytes,
+    nome_arquivo: str,
+    subpath: list[str],
+    mimetype: str = "application/octet-stream",
+) -> str | None:
+    """
+    Upload de arquivo qualquer (PDF/imagem/etc) sob a raiz LexOps,
+    navegando/criando o caminho `subpath` (lista de nomes de pasta).
+
+    Exemplo: subpath=["Backoffice", "Despesas", "2026-06"] →
+      LexOps/Backoffice/Despesas/2026-06/{nome_arquivo}
+    """
+    tokens = _load_tokens()
+    if not tokens:
+        return None
+
+    def _do(tkns: dict) -> str | None:
+        h = _auth_headers(tkns)
+        parent_id = DRIVE_FOLDER_ID
+        for nome in subpath:
+            parent_id = _get_or_create_subfolder(nome, parent_id, h)
+
+        metadata = json.dumps({
+            "name": nome_arquivo,
+            "parents": [parent_id],
+            "mimeType": mimetype,
+        }).encode()
+        boundary = "boundary_lexops_upload"
+        body = (
+            f"--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n"
+        ).encode() + metadata + (
+            f"\r\n--{boundary}\r\nContent-Type: {mimetype}\r\n\r\n"
+        ).encode() + conteudo + f"\r\n--{boundary}--".encode()
+
+        r = httpx.post(
+            f"{DRIVE_API}/files",
+            headers={**h, "Content-Type": f"multipart/related; boundary={boundary}"},
+            params={"uploadType": "multipart", "supportsAllDrives": True, "fields": "id,webViewLink"},
+            content=body,
+            timeout=60,
+        )
+        if r.status_code == 401:
+            return None
+        r.raise_for_status()
+        fid = r.json().get("id")
+        return r.json().get("webViewLink", f"https://drive.google.com/file/d/{fid}/view")
+
+    try:
+        link = _do(tokens)
+    except Exception as exc:
+        if not _is_unauthorized(exc):
+            logger.warning("Falha ao enviar arquivo (raiz) ao Drive: %s", exc)
+            return None
+        try:
+            return _do(_refresh(tokens))
+        except Exception as exc2:
+            logger.warning("Falha ao enviar arquivo (raiz) ao Drive apos refresh: %s", exc2)
+            return None
+
+    if link is not None:
+        return link
+    try:
+        return _do(_refresh(tokens))
+    except Exception as exc:
+        logger.warning("Falha ao enviar arquivo (raiz) ao Drive apos refresh: %s", exc)
+        return None
+
+
 def listar_arquivos(nome_cliente: str, subfolder: str, sub_subfolder: str | None = None) -> list[dict]:
     """Lists files from {nome_cliente}/{subfolder}[/{sub_subfolder}] in Drive."""
     tokens = _load_tokens()

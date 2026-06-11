@@ -152,8 +152,10 @@ export const fiscalApi = {
   relatorioPreview: (mes?: string) =>
     api.get('/fiscal/relatorio/preview', { params: mes ? { mes } : undefined }).then((r) => r.data),
 
-  enviarRelatorio: (mes?: string) =>
-    api.post('/fiscal/relatorio/enviar', null, { params: mes ? { mes } : undefined }).then((r) => r.data),
+  enviarRelatorio: (mes?: string, parcial?: boolean) =>
+    api.post('/fiscal/relatorio/enviar', null, {
+      params: { ...(mes ? { mes } : {}), ...(parcial ? { parcial: true } : {}) },
+    }).then((r) => r.data),
 
   vincular: (id: string, params: { processos_ids?: string; contrato_id?: string; cliente_id?: string }) =>
     api.patch<NotaFiscalOut>(`/fiscal/notas/${id}/vinculos`, null, { params }).then((r) => r.data),

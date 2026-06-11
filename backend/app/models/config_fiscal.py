@@ -46,6 +46,13 @@ class ConfigFiscal(Base):
     ibs_pct: Mapped[float] = mapped_column(Numeric(5, 2), default=0)
     cbs_pct: Mapped[float] = mapped_column(Numeric(5, 2), default=0)
     piloto_ibscbs: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Estágio da reforma — controla destaque vs cobrança na NF:
+    #   pre_reforma   = não mostrar nada (até jul/2026)
+    #   teste_2026    = destacar IBS/CBS na NF como referência (sem cobrar)
+    #   cbs_ativo     = cobrar CBS, IBS apenas referência
+    #   transicao     = IBS começa a crescer e ICMS/ISS reduzir
+    #   pleno         = IBS/CBS pleno (2033+)
+    estagio_reforma: Mapped[str] = mapped_column(String(20), default="pre_reforma", server_default="pre_reforma")
 
     # ── E. Contabilidade / relatórios ─────────────────────────────────────
     emails_contador: Mapped[list] = mapped_column(JSONB, default=list)

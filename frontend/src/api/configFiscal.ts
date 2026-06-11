@@ -32,6 +32,7 @@ export interface ConfigFiscal {
   ibs_pct: number
   cbs_pct: number
   piloto_ibscbs: boolean
+  estagio_reforma?: string
   // Contabilidade
   emails_contador: string[]
   email_master?: string
