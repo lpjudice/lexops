@@ -22,6 +22,7 @@ from app.models.backoffice import (
 )
 from app.models.config_fiscal import ConfigFiscal
 from app.models.nota_fiscal import NotaFiscal
+from app.models.reembolso import ItemReembolso, Reembolso
 from app.services.fiscal_engine import EntradaMes, PremissasMes, calcular
 
 router = APIRouter(prefix="/backoffice", tags=["backoffice"])
@@ -73,6 +74,23 @@ def _entrada(mes: str, mes_obj: FiscalMes, db: Session) -> EntradaMes:
     retencoes = sum(float(r.retencoes) for r in receitas)
     despesas_total = sum(float(d.valor) for d in despesas)
     despesas_elegiveis = sum(float(d.valor) for d in despesas if d.tem_nota and d.elegivel)
+
+    # Reembolsos cancelados = perda real = entram como despesa para a decisão tributária
+    perdas_reemb = (
+        db.query(ItemReembolso)
+        .join(Reembolso, ItemReembolso.reembolso_id == Reembolso.id)
+        .filter(
+            Reembolso.status == "cancelado",
+            ItemReembolso.data.between(f"{mes}-01", f"{mes}-31"),
+        )
+        .all()
+    )
+    despesas_total += sum(float(i.valor) for i in perdas_reemb)
+    # Presume elegível com nota se houver documento comprobatório
+    despesas_elegiveis += sum(
+        float(i.valor) for i in perdas_reemb
+        if (i.documento_comprobatorio or i.comprovante_path)
+    )
 
     f = folha
     return EntradaMes(
@@ -206,6 +224,67 @@ def get_lancamentos(mes: str, _=Depends(get_current_user), db: Session = Depends
         cbs = float(d.valor) * premissas.cbs_entrada_pct / 100 * fator
         return {"ibs": round(ibs, 2), "cbs": round(cbs, 2), "total": round(ibs + cbs, 2)}
 
+    despesas_resp = [
+        {
+            "id": str(d.id),
+            "categoria": d.categoria,
+            "fornecedor": d.fornecedor,
+            "descricao": d.descricao,
+            "valor": float(d.valor),
+            "tem_nota": d.tem_nota,
+            "elegivel": d.elegivel,
+            "base_legal": d.base_legal,
+            "status": d.status,
+            "last_check": d.last_check,
+            "credito": _credito_despesa(d),
+            "origem": "manual",
+            "reembolso_status": None,
+            "reembolso_id": None,
+        }
+        for d in despesas
+    ]
+
+    # Reembolsos cancelados (perda) viram despesa real do mês com crédito.
+    # Reembolsos pendentes/pagos aparecem como "em trânsito" sem crédito (apenas referência).
+    itens_reemb = (
+        db.query(ItemReembolso, Reembolso)
+        .join(Reembolso, ItemReembolso.reembolso_id == Reembolso.id)
+        .filter(ItemReembolso.data.between(f"{mes}-01", f"{mes}-31"))
+        .all()
+    )
+    for item, reemb in itens_reemb:
+        is_perda = reemb.status == "cancelado"
+        valor_f = float(item.valor)
+        if is_perda:
+            # Vira despesa de verdade — usa premissas para crédito
+            tem_nota_v = bool(item.documento_comprobatorio or item.comprovante_path)
+            elegivel_v = True  # presumido elegível; usuário ajusta se não for
+            fator = 0.5 if premissas.credito_modo == "parcial" else 1.0
+            ibs = valor_f * premissas.ibs_entrada_pct / 100 * fator if elegivel_v and tem_nota_v else 0
+            cbs = valor_f * premissas.cbs_entrada_pct / 100 * fator if elegivel_v and tem_nota_v else 0
+            credito = {"ibs": round(ibs, 2), "cbs": round(cbs, 2), "total": round(ibs + cbs, 2)}
+        else:
+            tem_nota_v = False  # em trânsito não gera crédito
+            elegivel_v = False
+            credito = {"ibs": 0.0, "cbs": 0.0, "total": 0.0}
+
+        despesas_resp.append({
+            "id": f"reemb:{item.id}",
+            "categoria": item.natureza,
+            "fornecedor": item.descricao[:80] if item.descricao else "—",
+            "descricao": item.descricao,
+            "valor": valor_f,
+            "tem_nota": tem_nota_v,
+            "elegivel": elegivel_v,
+            "base_legal": "Reembolso cancelado (perda)" if is_perda else "Reembolso em trânsito",
+            "status": "perda" if is_perda else "transito",
+            "last_check": None,
+            "credito": credito,
+            "origem": "reembolso",
+            "reembolso_status": reemb.status,
+            "reembolso_id": str(reemb.id),
+        })
+
     return {
         "mes": mes,
         "receitas": [
@@ -231,22 +310,7 @@ def get_lancamentos(mes: str, _=Depends(get_current_user), db: Session = Depends
             "beneficios": float(folha.beneficios) if folha else 0,
             "outros": float(folha.outros) if folha else 0,
         },
-        "despesas": [
-            {
-                "id": str(d.id),
-                "categoria": d.categoria,
-                "fornecedor": d.fornecedor,
-                "descricao": d.descricao,
-                "valor": float(d.valor),
-                "tem_nota": d.tem_nota,
-                "elegivel": d.elegivel,
-                "base_legal": d.base_legal,
-                "status": d.status,
-                "last_check": d.last_check,
-                "credito": _credito_despesa(d),
-            }
-            for d in despesas
-        ],
+        "despesas": despesas_resp,
     }
 
 

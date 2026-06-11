@@ -40,6 +40,9 @@ export interface Despesa {
   valor: number; tem_nota: boolean; elegivel: boolean; base_legal: string | null
   status: string; last_check: string | null
   credito: { ibs: number; cbs: number; total: number }
+  origem?: 'manual' | 'reembolso'
+  reembolso_status?: string | null
+  reembolso_id?: string | null
 }
 
 export interface Folha {

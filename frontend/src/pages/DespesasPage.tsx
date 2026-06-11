@@ -889,6 +889,12 @@ function TabelaDespesas({ mes }: { mes: string }) {
           </span>
         </div>
       </div>
+      {despesas.some(d => d.origem === 'reembolso') && (
+        <div style={{ padding: '0 18px 8px', fontSize: 11, color: 'var(--gray-mid)' }}>
+          🔗 Itens de reembolso aparecem em cinza: <strong>em trânsito</strong> (rascunho/enviado/pago) não geram crédito;
+          apenas <strong>cancelados</strong> viram despesa real (perda). Edite pelo módulo Reembolsos.
+        </div>
+      )}
       {despesas.length === 0 ? (
         <div className={styles.empty}>Nenhuma despesa lançada neste mês.</div>
       ) : (
@@ -940,8 +946,15 @@ function TabelaDespesas({ mes }: { mes: string }) {
                     </td>
                   </tr>
                 ) : (
-                  <tr key={d.id}>
-                    <td style={{ fontWeight: 600, fontSize: 12 }}>{d.fornecedor}</td>
+                  <tr key={d.id} style={d.origem === 'reembolso' ? { background: '#fafafa' } : undefined}>
+                    <td style={{ fontWeight: 600, fontSize: 12 }}>
+                      {d.fornecedor}
+                      {d.origem === 'reembolso' && (
+                        <span style={{ marginLeft: 6, fontSize: 9, background: d.reembolso_status === 'cancelado' ? '#fee2e2' : '#e0e7ff', color: d.reembolso_status === 'cancelado' ? '#b91c1c' : '#3730a3', padding: '1px 6px', borderRadius: 999, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em' }}>
+                          {d.reembolso_status === 'cancelado' ? 'PERDA' : 'REEMB.'}
+                        </span>
+                      )}
+                    </td>
                     <td style={{ fontSize: 11, color: 'var(--gray-mid)' }}>{d.categoria}</td>
                     <td style={{ textAlign: 'right' }}>{fmtBRL(d.valor)}</td>
                     <td>
@@ -951,11 +964,14 @@ function TabelaDespesas({ mes }: { mes: string }) {
                     </td>
                     <td>
                       <button
+                        disabled={d.origem === 'reembolso'}
                         onClick={() => patchElegivel.mutate({ id: d.id, elegivel: !d.elegivel })}
                         style={{
-                          fontSize: 10, padding: '2px 6px', borderRadius: 999, border: 'none', cursor: 'pointer',
+                          fontSize: 10, padding: '2px 6px', borderRadius: 999, border: 'none',
+                          cursor: d.origem === 'reembolso' ? 'not-allowed' : 'pointer',
                           background: d.elegivel ? '#dcfce7' : '#f3f4f6',
                           color: d.elegivel ? '#15803d' : '#6b7280', fontWeight: 600,
+                          opacity: d.origem === 'reembolso' ? 0.7 : 1,
                         }}
                       >
                         {d.elegivel ? 'sim' : 'não'}
@@ -970,16 +986,22 @@ function TabelaDespesas({ mes }: { mes: string }) {
                       </span>
                     </td>
                     <td style={{ display: 'flex', gap: 4 }}>
-                      <button
-                        title="Editar"
-                        style={{ background: 'none', border: 'none', color: 'var(--gray-mid)', cursor: 'pointer', fontSize: 13 }}
-                        onClick={() => iniciarEdit(d)}
-                      >✎</button>
-                      <button
-                        title="Remover"
-                        style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: 13 }}
-                        onClick={() => deleteDespesa.mutate(d.id)}
-                      >×</button>
+                      {d.origem === 'reembolso' ? (
+                        <span style={{ fontSize: 10, color: '#d1d5db' }} title="Edite pelo módulo Reembolsos">🔗</span>
+                      ) : (
+                        <>
+                          <button
+                            title="Editar"
+                            style={{ background: 'none', border: 'none', color: 'var(--gray-mid)', cursor: 'pointer', fontSize: 13 }}
+                            onClick={() => iniciarEdit(d)}
+                          >✎</button>
+                          <button
+                            title="Remover"
+                            style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: 13 }}
+                            onClick={() => deleteDespesa.mutate(d.id)}
+                          >×</button>
+                        </>
+                      )}
                     </td>
                   </tr>
                 )
