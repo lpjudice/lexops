@@ -274,6 +274,7 @@ export default function PrecedentCheckPage() {
   const [analisando, setAnalisando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
 
+  const [, setAnaliseId] = useState<string | null>(null)
   const [citacoes, setCitacoes] = useState<CitacaoVerificada[]>([])
   const [verificandoIdx, setVerificandoIdx] = useState<number | null>(null)
   const [totalVerificadas, setTotalVerificadas] = useState(0)
