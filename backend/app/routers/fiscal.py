@@ -523,11 +523,25 @@ def visao_fiscal(
         progresso = float(((rbt12 - piso) / (limite - piso) * 100).quantize(Decimal("0.1")))
 
     # Reforma tributária (IBS/CBS + transição ISS)
-    ano = int(competencia.split("-")[0])
+    from app.services.nfse.visao_fiscal import projecao_reforma
+    partes = competencia.split("-")
+    ano = int(partes[0])
+    mes = int(partes[1]) if len(partes) > 1 else 1
     ibs_pct = Decimal(str(cfg.ibs_pct)) if cfg and cfg.ibs_pct else Decimal("0")
     cbs_pct = Decimal(str(cfg.cbs_pct)) if cfg and cfg.cbs_pct else Decimal("0")
     piloto = bool(cfg and cfg.piloto_ibscbs)
-    reforma = transicao_reforma(ano, receita, ibs_pct, cbs_pct, piloto)
+    reforma = transicao_reforma(ano, receita, ibs_pct, cbs_pct, piloto, mes)
+    reforma["projecao"] = projecao_reforma(receita, ibs_pct, cbs_pct)
+
+    alertas = gerar_alertas(rbt12)
+    if reforma.get("cbs_destaque_obrigatorio"):
+        alertas.insert(0, {
+            "nivel": "alerta",
+            "titulo": "CBS — destaque obrigatório (Reforma Tributária)",
+            "detalhe": (f"A partir de ago/2026 a CBS ({reforma['cbs_aliq']}% já com a redução "
+                        f"de 30% da advocacia) deve ser destacada na nota, ainda que compensável "
+                        f"com PIS/COFINS em 2026. Confirme o enquadramento com o contador."),
+        })
 
     return {
         "competencia": competencia,
@@ -549,7 +563,7 @@ def visao_fiscal(
         "rbt12": float(rbt12) if rbt12 else None,
         "faixa_simples": faixa + 1 if rbt12 else None,
         "limite_faixa": float(ANEXO_IV_FAIXAS[faixa][0]) if rbt12 else None,
-        "alertas": gerar_alertas(rbt12),
+        "alertas": alertas,
         "obs": "CPP/INSS patronal não está no DAS do Anexo IV — recolhido à parte sobre a folha.",
     }
 

@@ -112,16 +112,55 @@ export default function VisaoFiscalPage() {
           {v.reforma && (
             <div className={styles.tableCard} style={{ padding: 16, marginBottom: 16,
               borderLeft: '3px solid var(--teal)' }}>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>🆕 Reforma Tributária — {v.reforma.fase}</div>
+              <div style={{ fontWeight: 700, marginBottom: 6, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                🆕 Reforma Tributária — {v.reforma.fase}
+                {v.reforma.cbs_destaque_obrigatorio && (
+                  <span style={{ background: '#fee2e2', color: '#b91c1c', fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999 }}>
+                    CBS: destaque obrigatório
+                  </span>
+                )}
+                {v.reforma.compensavel_2026 && (
+                  <span style={{ background: '#dcfce7', color: '#15803d', fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999 }}>
+                    compensável com PIS/COFINS
+                  </span>
+                )}
+              </div>
               <div style={{ fontSize: 13, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
                 <span>ISS vigente: <b>{v.reforma.iss_pct_vigente}%</b> do valor cheio</span>
-                <span>IBS estimado: <b>{fmtBRL(v.reforma.ibs_estimado)}</b></span>
-                <span>CBS estimado: <b>{fmtBRL(v.reforma.cbs_estimado)}</b></span>
+                <span>CBS <b>{v.reforma.cbs_aliq}%</b>: <b>{fmtBRL(v.reforma.cbs_estimado)}</b></span>
+                <span>IBS <b>{v.reforma.ibs_aliq}%</b>: <b>{fmtBRL(v.reforma.ibs_estimado)}</b></span>
               </div>
-              {!v.reforma.ativo && (
-                <p className={cs.fieldHint} style={{ marginTop: 8 }}>
-                  Configure os % de IBS/CBS e ative o piloto no Config Fiscal para projetar os valores.
-                </p>
+              <p className={cs.fieldHint} style={{ marginTop: 6 }}>
+                Alíquotas já com a redução de {v.reforma.reducao_advocacia_pct}% da advocacia. {v.reforma.nota}
+              </p>
+
+              {/* Projeção plurianual da transição (material p/ o contador validar) */}
+              {Array.isArray(v.reforma.projecao) && (
+                <details style={{ marginTop: 10 }}>
+                  <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>
+                    Projeção da transição 2026→2033 (validar com o contador)
+                  </summary>
+                  <table className={styles.table} style={{ marginTop: 8 }}>
+                    <thead><tr>
+                      <th>Ano</th><th>ISS vigente</th><th style={{ textAlign: 'right' }}>CBS</th>
+                      <th style={{ textAlign: 'right' }}>IBS</th><th>Fase</th>
+                    </tr></thead>
+                    <tbody>
+                      {v.reforma.projecao.map((l: any) => (
+                        <tr key={l.ano} style={l.ano === v.reforma.ano ? { background: '#f0fdfa', fontWeight: 600 } : undefined}>
+                          <td>{l.ano}</td>
+                          <td>{l.iss_pct_vigente}%</td>
+                          <td style={{ textAlign: 'right' }}>{l.cbs_aliq}% · {fmtBRL(l.cbs_estimado)}</td>
+                          <td style={{ textAlign: 'right' }}>{l.ibs_aliq}% · {fmtBRL(l.ibs_estimado)}</td>
+                          <td style={{ fontSize: 11, color: 'var(--gray-mid)' }}>{l.fase}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className={cs.fieldHint} style={{ marginTop: 6 }}>
+                    Alíquotas de 2027+ dependem de regulamentação (LC/resolução) — configure no Config Fiscal quando definidas.
+                  </p>
+                </details>
               )}
             </div>
           )}
