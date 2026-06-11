@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.database import SessionLocal, get_db
 from app.models.andamento import AndamentoProcesso
 from app.models.processo import Processo
+from app.models.processo_parte import ProcessoParte
 from app.schemas.andamento import AndamentoOut, SincronizacaoResult
 
 router = APIRouter(prefix="/andamentos", tags=["andamentos"])
@@ -473,10 +474,23 @@ def gerar_relatorio_lote_endpoint(body: RelatorioLoteBody, db: Session = Depends
         if novos_n:
             por_created = sorted(andamentos, key=lambda a: a.created_at or epoch, reverse=True)
             novos_ids = {a.id for a in por_created[:novos_n]}
+        # Partes (autor = polo ATIVO, réu = polo PASSIVO) coletadas via PDPJ.
+        partes = (
+            db.query(ProcessoParte)
+            .filter(ProcessoParte.processo_id == pid)
+            .order_by(ProcessoParte.ordem)
+            .all()
+        )
+        autores = [pt.nome for pt in partes if (pt.polo or "").upper() == "ATIVO"]
+        reus = [pt.nome for pt in partes if (pt.polo or "").upper() == "PASSIVO"]
         processos_data.append({
             "cnj": proc.numero_cnj,
             "cliente": proc.cliente.nome if proc.cliente else None,
             "tribunal": proc.tribunal,
+            "vara": proc.vara,
+            "objeto": proc.objeto,
+            "autores": autores,
+            "reus": reus,
             "andamentos": [
                 {
                     "data": a.data_andamento,

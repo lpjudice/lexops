@@ -51,7 +51,17 @@ def _estilos() -> dict[str, ParagraphStyle]:
         ),
         "processoSub": ParagraphStyle(
             "processoSub", parent=base["Normal"], fontName="Helvetica",
-            fontSize=8.5, textColor=CINZA, spaceAfter=6,
+            fontSize=8.5, textColor=CINZA, spaceAfter=2,
+        ),
+        "processoMeta": ParagraphStyle(
+            "processoMeta", parent=base["Normal"], fontName="Helvetica",
+            fontSize=8.5, textColor=colors.HexColor("#374151"), spaceAfter=2,
+            leading=11,
+        ),
+        "processoResumo": ParagraphStyle(
+            "processoResumo", parent=base["Normal"], fontName="Helvetica-Oblique",
+            fontSize=8.5, textColor=colors.HexColor("#374151"), spaceAfter=6,
+            leading=11,
         ),
         "andHeader": ParagraphStyle(
             "andHeader", parent=base["Normal"], fontName="Helvetica-Bold",
@@ -87,11 +97,24 @@ def _fmt_data(d: Any) -> str:
         return s
 
 
+def _fmt_partes(nomes: list[str] | None, limite: int = 3) -> str:
+    """Junta nomes de partes, truncando para no máx. `limite` + '(+N)'."""
+    nomes = [n.strip() for n in (nomes or []) if n and n.strip()]
+    if not nomes:
+        return ""
+    if len(nomes) > limite:
+        extra = len(nomes) - limite
+        return "; ".join(nomes[:limite]) + f" (+{extra})"
+    return "; ".join(nomes)
+
+
 def gerar_relatorio_lote(processos: list[dict[str, Any]], gerado_em: datetime | None = None) -> bytes:
     """
     `processos`: lista de
       {
         "cnj": str, "cliente": str, "tribunal": str | None,
+        "vara": str | None, "objeto": str | None,
+        "autores": [str], "reus": [str],
         "andamentos": [
           {"data": date|None, "tipo": str|None, "descricao": str,
            "arquivo_nome": str|None, "arquivo_drive_link": str|None, "novo": bool},
@@ -124,15 +147,34 @@ def gerar_relatorio_lote(processos: list[dict[str, Any]], gerado_em: datetime | 
 
     for p in processos:
         bloco: list[Any] = []
+        cabecalho: list[Any] = []
         sub = " · ".join(
-            [x for x in [p.get("tribunal"), f"{len(p['andamentos'])} andamento(s) listado(s)"] if x]
+            [x for x in [p.get("tribunal"), p.get("vara"),
+                         f"{len(p['andamentos'])} andamento(s) listado(s)"] if x]
         )
-        bloco.append(Paragraph(
+        cabecalho.append(Paragraph(
             f"{escape(p['cnj'])} &nbsp;—&nbsp; {escape(p.get('cliente') or 'Cliente não informado')}",
             st["processo"],
         ))
         if sub:
-            bloco.append(Paragraph(escape(sub), st["processoSub"]))
+            cabecalho.append(Paragraph(escape(sub), st["processoSub"]))
+
+        autores = _fmt_partes(p.get("autores"))
+        reus = _fmt_partes(p.get("reus"))
+        if autores or reus:
+            partes_txt = " &nbsp;·&nbsp; ".join(
+                x for x in [
+                    f"<b>Autor:</b> {escape(autores)}" if autores else "",
+                    f"<b>Réu:</b> {escape(reus)}" if reus else "",
+                ] if x
+            )
+            cabecalho.append(Paragraph(partes_txt, st["processoMeta"]))
+
+        objeto = (p.get("objeto") or "").strip()
+        if objeto:
+            cabecalho.append(Paragraph(f"<b>Resumo:</b> {escape(objeto)}", st["processoResumo"]))
+
+        bloco.extend(cabecalho)
 
         for a in p["andamentos"]:
             novo = bool(a.get("novo"))
@@ -156,9 +198,10 @@ def gerar_relatorio_lote(processos: list[dict[str, Any]], gerado_em: datetime | 
         if not p["andamentos"]:
             bloco.append(Paragraph("Sem andamentos registrados.", st["andCorpo"]))
 
-        # Mantém o cabeçalho do processo junto do 1º andamento quando possível.
-        flow.append(KeepTogether(bloco[:2]))
-        flow.extend(bloco[2:])
+        # Mantém o cabeçalho do processo (CNJ, partes, vara, resumo) junto.
+        n_cab = len(cabecalho)
+        flow.append(KeepTogether(bloco[:n_cab]))
+        flow.extend(bloco[n_cab:])
         flow.append(Spacer(1, 4))
 
     flow.append(Spacer(1, 10))
