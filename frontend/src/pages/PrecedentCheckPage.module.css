@@ -119,6 +119,17 @@
   overflow: hidden;
 }
 
+/* ─── Título dos resultados ──────────────────────────────────────────── */
+.resultadosTitulo {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1d1e20;
+  padding: 4px 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ─── Summary bar ────────────────────────────────────────────────────── */
 .summaryBar {
   display: flex;

@@ -418,7 +418,7 @@ export default function PrecedentCheckPage() {
         </h1>
         {(citacoes.length > 0 || texto) && (
           <button className={styles.btnSmall} onClick={limpar}>
-            <X size={13} /> Nova análise
+            <X size={13} /> {citacoes.length > 0 ? 'Fechar' : 'Limpar'}
           </button>
         )}
       </div>
@@ -482,6 +482,9 @@ export default function PrecedentCheckPage() {
 
         {/* Painel direito */}
         <div className={cs.resultados}>
+          {citacoes.length > 0 && titulo && (
+            <div className={cs.resultadosTitulo}>{titulo}</div>
+          )}
           {citacoes.length > 0 && (
             <div className={cs.summaryBar}>
               <span className={cs.summaryLabel}>
