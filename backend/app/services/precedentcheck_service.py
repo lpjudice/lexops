@@ -164,14 +164,11 @@ def buscar_julgado(tribunal: str, numero: str) -> str:
 # Serviço principal
 # ---------------------------------------------------------------------------
 
-def extrair_citacoes(texto_peca: str) -> list[dict]:
-    """Etapa 1: extrai citações de julgados da peça via Claude."""
+def _extrair_citacoes_chunk(texto: str) -> list[dict]:
+    """Extrai citações de um chunk de texto via Claude."""
     from app.services.ia_cliente import chat_claude
-
-    prompt = PROMPT_EXTRAIR_CITACOES.format(texto=texto_peca[:20000])
+    prompt = PROMPT_EXTRAIR_CITACOES.format(texto=texto)
     resposta = chat_claude(pergunta=prompt, historico=[], cliente_id="", contexto="")
-
-    # Extrai o JSON da resposta
     match = re.search(r"\[.*\]", resposta, re.DOTALL)
     if not match:
         return []
@@ -179,6 +176,37 @@ def extrair_citacoes(texto_peca: str) -> list[dict]:
         return json.loads(match.group(0))
     except json.JSONDecodeError:
         return []
+
+
+def extrair_citacoes(texto_peca: str) -> list[dict]:
+    """
+    Etapa 1: extrai citações de julgados da peça via Claude.
+    Para textos longos, divide em chunks de 80k chars com sobreposição de 2k
+    para não perder citações na quebra, depois deduplica por número.
+    """
+    CHUNK = 80_000
+    OVERLAP = 2_000
+
+    if len(texto_peca) <= CHUNK:
+        return _extrair_citacoes_chunk(texto_peca)
+
+    # Divide em chunks com sobreposição
+    todas: list[dict] = []
+    pos = 0
+    while pos < len(texto_peca):
+        chunk = texto_peca[pos: pos + CHUNK]
+        todas.extend(_extrair_citacoes_chunk(chunk))
+        pos += CHUNK - OVERLAP
+
+    # Deduplica por número (mantém primeira ocorrência)
+    vistos: set[str] = set()
+    unicas: list[dict] = []
+    for c in todas:
+        chave = re.sub(r"\s+", "", c.get("numero", "")).upper()
+        if chave and chave not in vistos:
+            vistos.add(chave)
+            unicas.append(c)
+    return unicas
 
 
 def verificar_citacao(citacao: dict, contexto_peca: str) -> dict:
