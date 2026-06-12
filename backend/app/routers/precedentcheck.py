@@ -145,9 +145,11 @@ async def analisar(body: AnalisarRequest, db: Session = Depends(get_db)):
     if not body.texto.strip():
         raise HTTPException(status_code=400, detail="Texto vazio")
 
+    import asyncio
     from app.services.precedentcheck_service import extrair_citacoes
 
-    citacoes_raw = extrair_citacoes(body.texto)
+    # Roda em thread pool para não bloquear o event loop do uvicorn
+    citacoes_raw = await asyncio.to_thread(extrair_citacoes, body.texto)
 
     # Salva a análise no banco com citacoes sem verificação ainda
     citacoes_inicial = [
@@ -190,12 +192,13 @@ async def verificar_citacao(analise_id: str, idx: int, db: Session = Depends(get
 
     citacao_raw = analise.citacoes[idx]
 
+    import asyncio
     from app.services.precedentcheck_service import verificar_citacao as _verificar
 
-    # Extrai contexto geral da peça (primeiros 3000 chars da peça)
     contexto_peca = analise.texto_peca[:3000] if analise.texto_peca else ""
 
-    resultado = _verificar(citacao_raw, contexto_peca)
+    # Roda em thread pool para não bloquear o event loop do uvicorn
+    resultado = await asyncio.to_thread(_verificar, citacao_raw, contexto_peca)
 
     # Atualiza o registro no banco
     citacoes = list(analise.citacoes)
