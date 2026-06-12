@@ -379,7 +379,7 @@ export default function PrecedentCheckPage() {
             {uploading ? (
               <div className={cs.uploadingState}>
                 <div className={cs.loadingDot} />
-                Lendo PDF com OCR… pode levar alguns segundos
+                Extraindo texto do PDF…
               </div>
             ) : (
               <textarea

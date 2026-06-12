@@ -97,31 +97,40 @@ async def extrair_pdf(arquivo: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Arquivo deve ser PDF")
     content = await arquivo.read()
 
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info("extrair-pdf: arquivo=%s tamanho=%d bytes", arquivo.filename, len(content))
+
     # Tentativa 1: pypdf
     texto = ""
     try:
         texto = _extrair_com_pypdf(content)
-    except Exception:
-        pass
+        logger.info("pypdf extraiu %d chars", len(texto))
+    except Exception as exc:
+        logger.warning("pypdf falhou: %s", exc)
 
     # Tentativa 2: pdfminer
     if not texto.strip():
         try:
             texto = _extrair_com_pdfminer(content)
-        except Exception:
-            pass
+            logger.info("pdfminer extraiu %d chars", len(texto))
+        except Exception as exc:
+            logger.warning("pdfminer falhou: %s", exc)
 
     # Tentativa 3: Claude OCR (PDFs escaneados — imagem sem texto)
     if not texto.strip():
+        logger.info("tentando Claude OCR")
         try:
             texto = _extrair_com_claude_ocr(content)
+            logger.info("Claude OCR extraiu %d chars", len(texto))
         except Exception as e:
+            logger.error("Claude OCR falhou: %s", e)
             raise HTTPException(status_code=500, detail=f"Não foi possível extrair texto do PDF: {e}")
 
     if not texto.strip():
         raise HTTPException(
             status_code=422,
-            detail="PDF sem conteúdo textual identificável mesmo após OCR. Tente colar o texto manualmente.",
+            detail="Não foi possível extrair texto deste PDF. Tente colar o texto manualmente.",
         )
     return {"texto": texto.strip()}
 
