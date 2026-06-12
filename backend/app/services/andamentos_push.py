@@ -44,14 +44,20 @@ def sync_jusbr_notificaveis() -> None:
 
 
 async def _async_sync() -> None:
-    from app.services.consulta_processual.jusbr_session import load_session
+    """O bot tem sessão própria (id=2, offline_access perene). Usamos ela como
+    PRIORITÁRIA — não dependemos da sessão do lexops (id=1) ficar viva. Se por
+    algum motivo a id=2 cair, caímos pra id=1 como rede de segurança."""
+    from app.services.andamentos_auth import load_session as load_bot_session
+    from app.services.consulta_processual.jusbr_session import load_session as load_lexops_session
     from app.services.consulta_processual.orchestrator import sincronizar_processo_jusbr
     from app.services.andamento_extra_collector import sincronizar_extra
 
-    sess = load_session()
+    sess = load_bot_session() or load_lexops_session()
     if not sess:
-        logger.warning("push_18h45: sessão jus.br inativa — pulando sync (DataJud já roda às 3h).")
+        logger.warning("push_18h45: nem id=2 (bot) nem id=1 (lexops) ativa — pulando sync.")
         return
+    fonte = "id=2 (bot, perene)" if load_bot_session() else "id=1 (lexops, fallback)"
+    logger.info("push_18h45: usando sessão %s", fonte)
 
     token = sess.get("token")
 
