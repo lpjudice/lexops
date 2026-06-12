@@ -356,7 +356,7 @@ export default function PrecedentCheckPage() {
 
   const [, setAnaliseId] = useState<string | null>(null)
   const [citacoes, setCitacoes] = useState<CitacaoVerificada[]>([])
-  const [verificandoIdx, setVerificandoIdx] = useState<number | null>(null)
+  const [verificandoSet, setVerificandoSet] = useState<Set<number>>(new Set())
   const [totalVerificadas, setTotalVerificadas] = useState(0)
 
   const uploadPdf = async (file: File) => {
@@ -381,6 +381,7 @@ export default function PrecedentCheckPage() {
     setCitacoes([])
     setAnaliseId(null)
     setTotalVerificadas(0)
+    setVerificandoSet(new Set())
 
     try {
       const res = await precedentCheckApi.analisar({ texto, titulo: titulo || undefined })
@@ -389,22 +390,37 @@ export default function PrecedentCheckPage() {
       // Aparece no histórico imediatamente (sem aguardar todas as verificações)
       qc.invalidateQueries({ queryKey: ['precedentcheck-historico'] })
 
-      for (let i = 0; i < res.citacoes.length; i++) {
-        setVerificandoIdx(i)
-        try {
-          const verificada = await precedentCheckApi.verificarCitacao(res.analise_id, i)
-          setCitacoes((prev) => { const next = [...prev]; next[i] = verificada; return next })
-        } catch { /* continua */ }
-        setTotalVerificadas(i + 1)
+      // Verifica em paralelo com pool de concorrência limitada — muito mais
+      // rápido que sequencial (40 citações × 20s = 13min vira ~2min).
+      const CONCORRENCIA = 6
+      let proximo = 0
+      const total = res.citacoes.length
+
+      const worker = async () => {
+        while (proximo < total) {
+          const i = proximo++
+          setVerificandoSet((prev) => new Set(prev).add(i))
+          try {
+            const verificada = await precedentCheckApi.verificarCitacao(res.analise_id, i)
+            setCitacoes((prev) => { const next = [...prev]; next[i] = verificada; return next })
+          } catch { /* continua */ }
+          setVerificandoSet((prev) => { const next = new Set(prev); next.delete(i); return next })
+          setTotalVerificadas((n) => n + 1)
+        }
       }
-      setVerificandoIdx(null)
+
+      await Promise.all(
+        Array.from({ length: Math.min(CONCORRENCIA, total) }, () => worker())
+      )
+
+      setVerificandoSet(new Set())
       qc.invalidateQueries({ queryKey: ['precedentcheck-historico'] })
     } catch (e: unknown) {
       const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       setErro(detail || 'Erro ao analisar.')
     } finally {
       setAnalisando(false)
-      setVerificandoIdx(null)
+      setVerificandoSet(new Set())
     }
   }
 
@@ -523,12 +539,12 @@ export default function PrecedentCheckPage() {
             <div className={cs.summaryBar}>
               <span className={cs.summaryLabel}>
                 {citacoes.length} citaç{citacoes.length === 1 ? 'ão' : 'ões'} encontrada{citacoes.length === 1 ? '' : 's'}
-                {verificandoIdx !== null && ` — verificando ${totalVerificadas + 1}/${citacoes.length}`}
+                {analisando && ` — verificadas ${totalVerificadas}/${citacoes.length}`}
               </span>
               {totalOk > 0  && <span className={`${cs.chip} ${cs.chipOk}`}>{totalOk} ok</span>}
               {totalDiv > 0 && <span className={`${cs.chip} ${cs.chipDiv}`}>{totalDiv} div.</span>}
               {totalNao > 0 && <span className={`${cs.chip} ${cs.chipNao}`}>{totalNao} n/e</span>}
-              {verificandoIdx === null && citacoes.length > 0 && (
+              {!analisando && citacoes.length > 0 && (
                 <span className={cs.custoBadge}>
                   {formatCusto(citacoes.length * CUSTO_VERIFICACAO_USD)} estimado
                 </span>
@@ -541,7 +557,7 @@ export default function PrecedentCheckPage() {
               key={i}
               idx={i}
               citacao={c}
-              verificando={verificandoIdx === i}
+              verificando={verificandoSet.has(i)}
             />
           ))}
 
