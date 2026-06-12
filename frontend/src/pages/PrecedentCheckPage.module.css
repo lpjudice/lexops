@@ -110,6 +110,52 @@
   border-bottom: 1px solid #fecaca;
 }
 
+/* ─── Barra de progresso ─────────────────────────────────────────────── */
+.progressWrap {
+  height: 3px;
+  background: #f3f4f6;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: #00b090;
+  transition: width 0.4s ease;
+}
+
+.progressFillIndeterminate {
+  height: 100%;
+  background: #00b090;
+  width: 40%;
+  animation: indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes indeterminate {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
+/* ─── Chip de custo ──────────────────────────────────────────────────── */
+.custoBadge {
+  font-size: 10px;
+  color: #9ca3af;
+  background: #f3f4f6;
+  border-radius: 4px;
+  padding: 1px 5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ─── Estado verificando dentro do card ──────────────────────────────── */
+.verificandoMsg {
+  padding: 12px 16px;
+  font-size: 13px;
+  color: #9ca3af;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* ─── Painel direito (resultados) ────────────────────────────────────── */
 .resultados {
   display: flex;

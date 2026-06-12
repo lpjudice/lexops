@@ -71,6 +71,15 @@ function formatData(iso: string) {
 // Card de citação
 // ---------------------------------------------------------------------------
 
+// Estimativa de custo: extração ~$0.05 total + verificação ~$0.015/citação (Claude Sonnet)
+const CUSTO_VERIFICACAO_USD = 0.015
+const USD_BRL = 5.7
+
+function formatCusto(usd: number) {
+  const brl = usd * USD_BRL
+  return `~R$${brl.toFixed(2)}`
+}
+
 function CitacaoCard({ citacao, verificando }: { citacao: CitacaoVerificada; idx: number; verificando: boolean }) {
   const [aberto, setAberto] = useState(false)
   const [mesmoAberto, setMesmoAberto] = useState(false)
@@ -101,10 +110,20 @@ function CitacaoCard({ citacao, verificando }: { citacao: CitacaoVerificada; idx
             {citacao.status_geral === 'pendente'       && 'Pendente'}
           </span>
         )}
+        {citacao.verificado && (
+          <span className={cs.custoBadge}>{formatCusto(CUSTO_VERIFICACAO_USD)}</span>
+        )}
         <ChevronDown size={15} className={`${cs.cardChevron} ${aberto ? cs.cardChevronOpen : ''}`} />
       </div>
 
-      {aberto && (
+      {aberto && (verificando || !citacao.verificado) && (
+        <div className={cs.verificandoMsg}>
+          <div className={cs.loadingDot} />
+          Verificando nas fontes…
+        </div>
+      )}
+
+      {aberto && citacao.verificado && (
         <div className={cs.cardBody}>
 
           {/* 7 dimensões */}
@@ -367,6 +386,8 @@ export default function PrecedentCheckPage() {
       const res = await precedentCheckApi.analisar({ texto, titulo: titulo || undefined })
       setAnaliseId(res.analise_id)
       setCitacoes(res.citacoes)
+      // Aparece no histórico imediatamente (sem aguardar todas as verificações)
+      qc.invalidateQueries({ queryKey: ['precedentcheck-historico'] })
 
       for (let i = 0; i < res.citacoes.length; i++) {
         setVerificandoIdx(i)
@@ -429,6 +450,19 @@ export default function PrecedentCheckPage() {
           <div className={cs.painelHeader}>
             <span className={cs.painelTitle}>Peça ou decisão</span>
           </div>
+          {/* barra de progresso: indeterminada no upload, determinada na verificação */}
+          {(uploading || analisando) && (
+            <div className={cs.progressWrap}>
+              {uploading && <div className={cs.progressFillIndeterminate} />}
+              {analisando && citacoes.length > 0 && (
+                <div
+                  className={cs.progressFill}
+                  style={{ width: `${Math.round((totalVerificadas / citacoes.length) * 100)}%` }}
+                />
+              )}
+              {analisando && citacoes.length === 0 && <div className={cs.progressFillIndeterminate} />}
+            </div>
+          )}
           {erro && <div className={cs.erroBanner}>{erro}</div>}
           <div className={cs.painelBody}>
             <input
@@ -489,11 +523,16 @@ export default function PrecedentCheckPage() {
             <div className={cs.summaryBar}>
               <span className={cs.summaryLabel}>
                 {citacoes.length} citaç{citacoes.length === 1 ? 'ão' : 'ões'} encontrada{citacoes.length === 1 ? '' : 's'}
-                {verificandoIdx !== null && ` — verificando ${totalVerificadas + 1} de ${citacoes.length}...`}
+                {verificandoIdx !== null && ` — verificando ${totalVerificadas + 1}/${citacoes.length}`}
               </span>
               {totalOk > 0  && <span className={`${cs.chip} ${cs.chipOk}`}>{totalOk} ok</span>}
               {totalDiv > 0 && <span className={`${cs.chip} ${cs.chipDiv}`}>{totalDiv} div.</span>}
               {totalNao > 0 && <span className={`${cs.chip} ${cs.chipNao}`}>{totalNao} n/e</span>}
+              {verificandoIdx === null && citacoes.length > 0 && (
+                <span className={cs.custoBadge}>
+                  {formatCusto(citacoes.length * CUSTO_VERIFICACAO_USD)} estimado
+                </span>
+              )}
             </div>
           )}
 
