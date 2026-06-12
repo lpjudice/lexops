@@ -149,7 +149,7 @@ async def analisar(body: AnalisarRequest, db: Session = Depends(get_db)):
     from app.services.precedentcheck_service import extrair_citacoes
 
     # Roda em thread pool para não bloquear o event loop do uvicorn
-    citacoes_raw = await asyncio.to_thread(extrair_citacoes, body.texto)
+    citacoes_raw, custo_extracao = await asyncio.to_thread(extrair_citacoes, body.texto)
 
     # Salva a análise no banco com citacoes sem verificação ainda
     citacoes_inicial = [
@@ -164,6 +164,7 @@ async def analisar(body: AnalisarRequest, db: Session = Depends(get_db)):
         texto_peca=body.texto,
         citacoes=citacoes_inicial,
         total_citacoes=len(citacoes_inicial),
+        custo_usd=custo_extracao,
     )
     db.add(analise)
     db.commit()
@@ -205,10 +206,11 @@ async def verificar_citacao(analise_id: str, idx: int, db: Session = Depends(get
     citacoes[idx] = {**citacao_raw, **resultado, "verificado": True}
     analise.citacoes = citacoes
 
-    # Recalcula contadores
+    # Recalcula contadores e acumula custo
     analise.total_ok = sum(1 for c in citacoes if c.get("status_geral") == "verificado")
     analise.total_divergencia = sum(1 for c in citacoes if c.get("status_geral") == "divergencia")
     analise.total_nao_encontrado = sum(1 for c in citacoes if c.get("status_geral") == "nao_encontrado")
+    analise.custo_usd = round((analise.custo_usd or 0.0) + float(resultado.get("custo_usd") or 0.0), 4)
 
     from sqlalchemy.orm.attributes import flag_modified
     flag_modified(analise, "citacoes")
@@ -226,6 +228,7 @@ def _serializar(a: PrecedentCheckAnalise) -> dict:
         "total_divergencia": a.total_divergencia,
         "total_nao_encontrado": a.total_nao_encontrado,
         "arquivado": bool(a.arquivado),
+        "custo_usd": float(a.custo_usd or 0.0),
         "created_at": a.created_at.isoformat() if a.created_at else None,
     }
 

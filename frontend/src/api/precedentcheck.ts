@@ -27,6 +27,7 @@ export interface CitacaoVerificada {
   link_inteiro_teor?: string | null
   decisoes_mesmo_sentido?: { referencia: string; ementa: string; link?: string }[]
   decisoes_sentido_contrario?: { referencia: string; ementa: string; link?: string }[]
+  custo_usd?: number
 }
 
 export interface AnaliseResumida {
@@ -37,6 +38,7 @@ export interface AnaliseResumida {
   total_divergencia: number
   total_nao_encontrado: number
   arquivado: boolean
+  custo_usd?: number
   created_at: string
 }
 

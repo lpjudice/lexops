@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from app.database import Base
@@ -22,4 +22,5 @@ class PrecedentCheckAnalise(Base):
     total_divergencia = Column(Integer, nullable=False, default=0)
     total_nao_encontrado = Column(Integer, nullable=False, default=0)
     arquivado = Column(Boolean, nullable=False, default=False)
+    custo_usd = Column(Float, nullable=False, default=0.0)
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)

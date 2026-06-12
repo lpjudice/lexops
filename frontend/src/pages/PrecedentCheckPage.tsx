@@ -71,13 +71,14 @@ function formatData(iso: string) {
 // Card de citação
 // ---------------------------------------------------------------------------
 
-// Estimativa de custo: extração ~$0.05 total + verificação ~$0.015/citação (Claude Sonnet)
-const CUSTO_VERIFICACAO_USD = 0.015
+// Custo real vem do backend (usage.input_tokens/output_tokens + web_search).
 const USD_BRL = 5.7
 
 function formatCusto(usd: number) {
   const brl = usd * USD_BRL
-  return `~R$${brl.toFixed(2)}`
+  const prefixo = brl >= 0.01 ? 'R$' : 'R$<'
+  const valor = brl >= 0.01 ? brl.toFixed(2) : '0,01'
+  return `${prefixo}${valor}`.replace('.', ',')
 }
 
 function CitacaoCard({ citacao, verificando }: { citacao: CitacaoVerificada; idx: number; verificando: boolean }) {
@@ -110,8 +111,8 @@ function CitacaoCard({ citacao, verificando }: { citacao: CitacaoVerificada; idx
             {citacao.status_geral === 'pendente'       && 'Pendente'}
           </span>
         )}
-        {citacao.verificado && (
-          <span className={cs.custoBadge}>{formatCusto(CUSTO_VERIFICACAO_USD)}</span>
+        {citacao.verificado && typeof citacao.custo_usd === 'number' && citacao.custo_usd > 0 && (
+          <span className={cs.custoBadge}>{formatCusto(citacao.custo_usd)}</span>
         )}
         <ChevronDown size={15} className={`${cs.cardChevron} ${aberto ? cs.cardChevronOpen : ''}`} />
       </div>
@@ -544,11 +545,15 @@ export default function PrecedentCheckPage() {
               {totalOk > 0  && <span className={`${cs.chip} ${cs.chipOk}`}>{totalOk} ok</span>}
               {totalDiv > 0 && <span className={`${cs.chip} ${cs.chipDiv}`}>{totalDiv} div.</span>}
               {totalNao > 0 && <span className={`${cs.chip} ${cs.chipNao}`}>{totalNao} n/e</span>}
-              {!analisando && citacoes.length > 0 && (
-                <span className={cs.custoBadge}>
-                  {formatCusto(citacoes.length * CUSTO_VERIFICACAO_USD)} estimado
-                </span>
-              )}
+              {citacoes.length > 0 && (() => {
+                const total = citacoes.reduce((acc, c) => acc + (c.custo_usd || 0), 0)
+                if (total <= 0) return null
+                return (
+                  <span className={cs.custoBadge}>
+                    {formatCusto(total)} {analisando ? 'parcial' : 'real'}
+                  </span>
+                )
+              })()}
             </div>
           )}
 

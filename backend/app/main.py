@@ -753,6 +753,9 @@ def _run_migrations() -> None:
         conn.execute(text(
             "ALTER TABLE precedentcheck_analises ADD COLUMN IF NOT EXISTS arquivado BOOLEAN NOT NULL DEFAULT FALSE"
         ))
+        conn.execute(text(
+            "ALTER TABLE precedentcheck_analises ADD COLUMN IF NOT EXISTS custo_usd DOUBLE PRECISION NOT NULL DEFAULT 0"
+        ))
 
         conn.commit()
 

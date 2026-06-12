@@ -10,46 +10,90 @@ Fluxo:
 import json
 import logging
 import re
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # Modelo e limites dedicados ao PrecedentCheck.
-# IMPORTANTE: max_tokens alto — uma peça pode ter 20+ citações, e o JSON de
-# extração/verificação estoura facilmente 2k tokens (era o bug do chat_claude).
 _MODELO = "claude-sonnet-4-6"
 _MAX_TOKENS = 8192
 
+# Preços Sonnet 4.6 (USD por milhão de tokens) e web_search (USD por busca).
+_PRECO_INPUT_PER_MTOK = 3.0
+_PRECO_OUTPUT_PER_MTOK = 15.0
+_PRECO_WEB_SEARCH = 0.01
 
-def _chamar_claude(prompt: str) -> str:
+
+def _calcular_custo(usage) -> float:
+    """Custo real em USD a partir do objeto usage retornado pela API."""
+    if usage is None:
+        return 0.0
+    inp = getattr(usage, "input_tokens", 0) or 0
+    out = getattr(usage, "output_tokens", 0) or 0
+    custo = (inp * _PRECO_INPUT_PER_MTOK + out * _PRECO_OUTPUT_PER_MTOK) / 1_000_000
+    server_tool = getattr(usage, "server_tool_use", None)
+    if server_tool is not None:
+        buscas = getattr(server_tool, "web_search_requests", 0) or 0
+        custo += buscas * _PRECO_WEB_SEARCH
+    return round(custo, 4)
+
+
+def _extrair_texto(content) -> str:
+    """Concatena todos os blocos `text` da resposta (ignora server_tool_use)."""
+    if not content:
+        return ""
+    partes = []
+    for bloco in content:
+        if getattr(bloco, "type", None) == "text":
+            partes.append(getattr(bloco, "text", "") or "")
+    return "\n".join(partes)
+
+
+def _chamar_claude(prompt: str, com_web_search: bool = False) -> tuple[str, float]:
     """
-    Chamada Claude dedicada ao PrecedentCheck — sem o system prompt de
-    'assistente jurídico' nem PDFs de cliente, e com max_tokens grande para
-    não truncar o JSON de saída.
+    Chamada Claude dedicada ao PrecedentCheck.
+    Retorna (texto, custo_usd). com_web_search=True habilita o tool nativo
+    `web_search` para a verificação ir buscar julgados reais em Jusbrasil, STJ, STF.
     """
     from app.config import settings
 
     if not settings.anthropic_api_key:
         logger.error("PrecedentCheck: ANTHROPIC_API_KEY não configurada")
-        return ""
+        return "", 0.0
     try:
         import anthropic
 
         client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-        msg = client.messages.create(
-            model=_MODELO,
-            max_tokens=_MAX_TOKENS,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        texto = msg.content[0].text if msg.content else ""
+        kwargs = {
+            "model": _MODELO,
+            "max_tokens": _MAX_TOKENS,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        if com_web_search:
+            kwargs["tools"] = [{
+                "type": "web_search_20250305",
+                "name": "web_search",
+                "max_uses": 3,
+                "allowed_domains": [
+                    "jusbrasil.com.br",
+                    "stj.jus.br",
+                    "stf.jus.br",
+                    "cnj.jus.br",
+                    "trf1.jus.br", "trf2.jus.br", "trf3.jus.br",
+                    "trf4.jus.br", "trf5.jus.br", "trf6.jus.br",
+                ],
+            }]
+
+        msg = client.messages.create(**kwargs)
+        texto = _extrair_texto(msg.content)
+        custo = _calcular_custo(getattr(msg, "usage", None))
         logger.info(
-            "PrecedentCheck: claude stop_reason=%s, %d chars de saída",
-            msg.stop_reason, len(texto),
+            "PrecedentCheck: stop=%s, out=%d chars, custo=$%.4f",
+            msg.stop_reason, len(texto), custo,
         )
-        return texto
+        return texto, custo
     except Exception as e:
         logger.error("PrecedentCheck: erro ao chamar Claude: %s", e)
-        return ""
+        return "", 0.0
 
 
 def _limpar_fence(texto: str) -> str:
@@ -147,10 +191,16 @@ Você é um verificador de precedentes jurídicos. Sua tarefa é verificar a aut
 **CONTEXTO GERAL DA PEÇA/TESE:**
 {contexto_peca}
 
-**RESULTADO DA BUSCA NAS FONTES:**
-{resultado_busca}
+**INSTRUÇÕES DE PESQUISA:**
+Use a ferramenta `web_search` para localizar o julgado em fontes oficiais e no Jusbrasil.
+Tente buscas como:
+  - "site:jusbrasil.com.br {tribunal} {numero}"
+  - "site:stj.jus.br {numero}" (se STJ)
+  - "site:stf.jus.br {numero}" (se STF)
+  - "{tribunal} {numero} relator ementa"
+Use no máximo 3 buscas. Se nem o Jusbrasil tiver o julgado, marque como `nao_encontrado` com sinceridade — NÃO invente dados nem use "conhecimento do modelo" sem confirmação.
 
-Com base nas informações acima, responda as seguintes dimensões em JSON:
+Com base no que você encontrar via web_search, responda em JSON:
 
 {{
   "numero_existe": {{
@@ -203,112 +253,92 @@ Retorne APENAS o JSON, sem texto antes ou depois.
 
 
 # ---------------------------------------------------------------------------
-# Funções de busca nas fontes oficiais
-# ---------------------------------------------------------------------------
-
-def _buscar_stj(numero: str) -> dict[str, Any]:
-    """Tenta localizar o julgado no portal STJ."""
-    try:
-        import httpx
-        # Normaliza o número para a API do STJ
-        numero_limpo = re.sub(r"[^\w/]", "", numero.replace(".", "").replace("-", ""))
-        url = f"https://jurisprudencia.stj.jus.br/SCON/pesquisa.jsp?tipo_visualizacao=RESUMO&b=ACOR&livre={numero_limpo}"
-        r = httpx.get(url, timeout=10, follow_redirects=True)
-        return {"fonte": "STJ", "url": url, "encontrado": r.status_code == 200, "conteudo": r.text[:3000]}
-    except Exception as e:
-        return {"fonte": "STJ", "encontrado": False, "erro": str(e)}
-
-
-def _buscar_stf(numero: str) -> dict[str, Any]:
-    """Tenta localizar o julgado no portal STF."""
-    try:
-        import httpx
-        url = f"https://jurisprudencia.stf.jus.br/pages/search?base=acordaos&sinonimo=true&plural=true&page=1&pageSize=5&queryString={numero}&sort=_score&sortBy=desc"
-        r = httpx.get(url, timeout=10, follow_redirects=True, headers={"Accept": "application/json"})
-        if r.status_code == 200:
-            return {"fonte": "STF", "url": url, "encontrado": True, "conteudo": r.text[:3000]}
-        return {"fonte": "STF", "encontrado": False}
-    except Exception as e:
-        return {"fonte": "STF", "encontrado": False, "erro": str(e)}
-
-
-def _buscar_jusbrasil(numero: str, tribunal: str) -> dict[str, Any]:
-    """Fallback: busca no Jusbrasil via web search (sem scraping direto)."""
-    return {
-        "fonte": "Jusbrasil",
-        "encontrado": False,
-        "nota": "Busca Jusbrasil requer pesquisa web — será delegada ao modelo de IA com tool web_search.",
-        "query_sugerida": f"site:jusbrasil.com.br {tribunal} {numero}",
-    }
-
-
-def buscar_julgado(tribunal: str, numero: str) -> str:
-    """Busca o julgado nas fontes disponíveis e retorna texto consolidado."""
-    resultados = []
-
-    tribunal_upper = tribunal.upper()
-    if "STJ" in tribunal_upper:
-        resultados.append(_buscar_stj(numero))
-    elif "STF" in tribunal_upper:
-        resultados.append(_buscar_stf(numero))
-
-    # Fallback Jusbrasil sempre
-    resultados.append(_buscar_jusbrasil(numero, tribunal))
-
-    return json.dumps(resultados, ensure_ascii=False)
-
-
-# ---------------------------------------------------------------------------
 # Serviço principal
 # ---------------------------------------------------------------------------
 
-def _extrair_citacoes_chunk(texto: str) -> list[dict]:
-    """Extrai citações de um chunk de texto via Claude."""
-    prompt = PROMPT_EXTRAIR_CITACOES.format(texto=texto)
-    resposta = _chamar_claude(prompt)
-    citacoes = _parse_json_array(resposta)
-    logger.info("PrecedentCheck: chunk de %d chars → %d citações", len(texto), len(citacoes))
-    return citacoes
+# Tipos de recurso comuns — usados pra normalizar variantes ("Recurso Especial"
+# vs "REsp", "Agravo Regimental" vs "AgRg") na chave de dedup.
+_NORMALIZE_RECURSOS = [
+    (r"RECURSO\s+ESPECIAL", "RESP"),
+    (r"RECURSO\s+EXTRAORDIN[ÁA]RIO", "RE"),
+    (r"AGRAVO\s+REGIMENTAL", "AGRG"),
+    (r"AGRAVO\s+INTERNO", "AGINT"),
+    (r"EMBARGOS\s+DE\s+DECLARA[ÇC][ÃA]O", "EDCL"),
+    (r"EMBARGOS\s+DE\s+DIVERG[ÊE]NCIA", "ERESP"),
+    (r"A[ÇC][ÃA]O\s+DIRETA\s+DE\s+INCONSTITUCIONALIDADE", "ADI"),
+    (r"A[ÇC][ÃA]O\s+DECLARAT[ÓO]RIA\s+DE\s+CONSTITUCIONALIDADE", "ADC"),
+    (r"ARGUI[ÇC][ÃA]O\s+DE\s+DESCUMPRIMENTO", "ADPF"),
+    (r"MANDADO\s+DE\s+SEGURAN[ÇC]A", "MS"),
+    (r"HABEAS\s+CORPUS", "HC"),
+]
 
 
-def extrair_citacoes(texto_peca: str) -> list[dict]:
+def _chave_dedup(numero: str) -> str:
     """
-    Etapa 1: extrai citações de julgados da peça via Claude.
-    Para textos longos, divide em chunks de 80k chars com sobreposição de 2k
-    para não perder citações na quebra, depois deduplica por número.
+    Normaliza o número da citação para deduplicar variantes textuais.
+    Ex.: "REsp 1.234.567/SP", "Recurso Especial nº 1234567 - SP" → "RESP1234567SP".
+    """
+    if not numero:
+        return ""
+    s = numero.upper()
+    s = s.replace("Nº", "").replace("N.", "").replace("N°", "")
+    for padrao, sigla in _NORMALIZE_RECURSOS:
+        s = re.sub(padrao, sigla, s)
+    # Remove tudo que não seja letra ou dígito (espaços, pontos, hífens, barras)
+    s = re.sub(r"[^A-Z0-9]", "", s)
+    return s
+
+
+def _extrair_citacoes_chunk(texto: str) -> tuple[list[dict], float]:
+    """Extrai citações de um chunk de texto via Claude. Retorna (citações, custo)."""
+    prompt = PROMPT_EXTRAIR_CITACOES.format(texto=texto)
+    resposta, custo = _chamar_claude(prompt)
+    citacoes = _parse_json_array(resposta)
+    logger.info("PrecedentCheck: chunk de %d chars → %d citações ($%.4f)", len(texto), len(citacoes), custo)
+    return citacoes, custo
+
+
+def extrair_citacoes(texto_peca: str) -> tuple[list[dict], float]:
+    """
+    Etapa 1: extrai citações da peça via Claude. Retorna (citações_unicas, custo_total).
+    Divide em chunks de 80k chars com 2k de sobreposição e deduplica com chave
+    normalizada (REsp vs Recurso Especial, com/sem pontuação, etc.).
     """
     CHUNK = 80_000
     OVERLAP = 2_000
 
-    if len(texto_peca) <= CHUNK:
-        return _extrair_citacoes_chunk(texto_peca)
-
-    # Divide em chunks com sobreposição
     todas: list[dict] = []
-    pos = 0
-    while pos < len(texto_peca):
-        chunk = texto_peca[pos: pos + CHUNK]
-        todas.extend(_extrair_citacoes_chunk(chunk))
-        pos += CHUNK - OVERLAP
+    custo_total = 0.0
 
-    # Deduplica por número (mantém primeira ocorrência)
+    if len(texto_peca) <= CHUNK:
+        todas, custo_total = _extrair_citacoes_chunk(texto_peca)
+    else:
+        pos = 0
+        while pos < len(texto_peca):
+            chunk = texto_peca[pos: pos + CHUNK]
+            cits, custo = _extrair_citacoes_chunk(chunk)
+            todas.extend(cits)
+            custo_total += custo
+            pos += CHUNK - OVERLAP
+
+    # Dedup com chave normalizada
     vistos: set[str] = set()
     unicas: list[dict] = []
     for c in todas:
-        chave = re.sub(r"\s+", "", c.get("numero", "")).upper()
+        chave = _chave_dedup(c.get("numero", ""))
         if chave and chave not in vistos:
             vistos.add(chave)
             unicas.append(c)
-    return unicas
+
+    logger.info(
+        "PrecedentCheck: extração total %d brutas → %d únicas (custo $%.4f)",
+        len(todas), len(unicas), custo_total,
+    )
+    return unicas, round(custo_total, 4)
 
 
 def verificar_citacao(citacao: dict, contexto_peca: str) -> dict:
-    """Etapa 2: verifica uma citação individual."""
-    resultado_busca = buscar_julgado(
-        tribunal=citacao.get("tribunal", ""),
-        numero=citacao.get("numero", ""),
-    )
-
+    """Etapa 2: verifica uma citação individual usando web_search nativo."""
     prompt = PROMPT_VERIFICAR_CITACAO.format(
         tribunal=citacao.get("tribunal", ""),
         numero=citacao.get("numero", ""),
@@ -317,10 +347,9 @@ def verificar_citacao(citacao: dict, contexto_peca: str) -> dict:
         trecho_citado=citacao.get("trecho_citado", ""),
         contexto_na_peca=citacao.get("contexto_na_peca", ""),
         contexto_peca=contexto_peca[:3000],
-        resultado_busca=resultado_busca,
     )
 
-    resposta = _chamar_claude(prompt)
+    resposta, custo = _chamar_claude(prompt, com_web_search=True)
 
     verificacao = _parse_json_object(resposta)
     if verificacao is None:
@@ -328,7 +357,8 @@ def verificar_citacao(citacao: dict, contexto_peca: str) -> dict:
         return {
             "status_geral": "nao_encontrado",
             "erro": "Não foi possível processar a verificação",
+            "custo_usd": custo,
         }
-    # Injeta metadados da citação original
     verificacao["referencia_original"] = citacao
+    verificacao["custo_usd"] = custo
     return verificacao
