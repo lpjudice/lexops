@@ -1,13 +1,19 @@
 /* ─── Layout ─────────────────────────────────────────────────────────── */
 .layout {
   display: grid;
-  grid-template-columns: 400px 1fr;
+  grid-template-columns: 360px 1fr;
   gap: 1.25rem;
   align-items: start;
+  min-width: 0;
 }
 
-@media (max-width: 900px) {
+.layout > * {
+  min-width: 0;
+}
+
+@media (max-width: 860px) {
   .layout { grid-template-columns: 1fr; }
+  .painel { position: static; }
 }
 
 /* ─── Painel esquerdo (entrada) ──────────────────────────────────────── */
@@ -109,6 +115,8 @@
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  min-width: 0;
+  overflow: hidden;
 }
 
 /* ─── Summary bar ────────────────────────────────────────────────────── */
@@ -165,6 +173,7 @@
   cursor: pointer;
   user-select: none;
   background: #fff;
+  min-width: 0;
 }
 .cardHeader:hover { background: #fafafa; }
 
@@ -401,7 +410,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 10px 14px;
+  padding: 8px 14px;
   border-bottom: 1px solid #e5e7eb;
   background: #fafafa;
   font-size: 11px;
@@ -410,6 +419,59 @@
   letter-spacing: 0.07em;
   color: #00b090;
 }
+
+.historicoTabBtn {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: 1px solid #e5e7eb;
+  border-radius: 5px;
+  padding: 3px 8px;
+  font-size: 11px;
+  color: #6a7070;
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+}
+.historicoTabBtn:hover { border-color: #9ca3af; color: #374151; }
+
+.historicoVazio {
+  padding: 14px;
+  font-size: 12px;
+  color: #9ca3af;
+  text-align: center;
+}
+
+.editTituloInput {
+  flex: 1;
+  border: 1px solid #00b090;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #1d1e20;
+  outline: none;
+  font-family: inherit;
+}
+
+.historicoIconBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #9ca3af;
+  padding: 2px 3px;
+  border-radius: 4px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.historicoIconBtn:hover { color: #6a7070; background: #f3f4f6; }
+.historicoIconBtnDanger:hover { color: #dc2626; background: #fee2e2; }
 
 .historicoRow {
   display: flex;
@@ -426,6 +488,7 @@
 
 .historicoTitulo {
   flex: 1;
+  min-width: 0;
   font-weight: 500;
   color: #1d1e20;
   white-space: nowrap;

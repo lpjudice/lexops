@@ -750,6 +750,9 @@ def _run_migrations() -> None:
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_precedentcheck_created ON precedentcheck_analises(created_at DESC)"
         ))
+        conn.execute(text(
+            "ALTER TABLE precedentcheck_analises ADD COLUMN IF NOT EXISTS arquivado BOOLEAN NOT NULL DEFAULT FALSE"
+        ))
 
         conn.commit()
 

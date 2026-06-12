@@ -36,6 +36,7 @@ export interface AnaliseResumida {
   total_ok: number
   total_divergencia: number
   total_nao_encontrado: number
+  arquivado: boolean
   created_at: string
 }
 
@@ -60,11 +61,14 @@ export const precedentCheckApi = {
   verificarCitacao: (analise_id: string, idx: number) =>
     api.post<CitacaoVerificada>(`/precedentcheck/verificar/${analise_id}/${idx}`).then((r) => r.data),
 
-  listarHistorico: () =>
-    api.get<AnaliseResumida[]>('/precedentcheck/historico').then((r) => r.data),
+  listarHistorico: (arquivado = false) =>
+    api.get<AnaliseResumida[]>(`/precedentcheck/historico?arquivado=${arquivado}`).then((r) => r.data),
 
   obterAnalise: (id: string) =>
     api.get<AnaliseCompleta>(`/precedentcheck/historico/${id}`).then((r) => r.data),
+
+  patch: (id: string, body: { titulo?: string; arquivado?: boolean }) =>
+    api.patch<AnaliseResumida>(`/precedentcheck/historico/${id}`, body).then((r) => r.data),
 
   deletar: (id: string) =>
     api.delete(`/precedentcheck/historico/${id}`).then((r) => r.data),

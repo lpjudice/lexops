@@ -1,10 +1,13 @@
 import { useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  Archive,
+  ArchiveRestore,
   ChevronDown,
   ExternalLink,
   FileUp,
   History,
+  Pencil,
   ShieldCheck,
   Trash2,
   X,
@@ -222,36 +225,94 @@ function CitacaoCard({ citacao, verificando }: { citacao: CitacaoVerificada; idx
 
 function HistoricoPanel({ onCarregar }: { onCarregar: (id: string) => void }) {
   const qc = useQueryClient()
+  const [verArquivados, setVerArquivados] = useState(false)
+  const [editandoId, setEditandoId] = useState<string | null>(null)
+  const [editTitulo, setEditTitulo] = useState('')
+
   const { data: historico = [], isLoading } = useQuery({
-    queryKey: ['precedentcheck-historico'],
-    queryFn: () => precedentCheckApi.listarHistorico(),
+    queryKey: ['precedentcheck-historico', verArquivados],
+    queryFn: () => precedentCheckApi.listarHistorico(verArquivados),
   })
+
+  const invalidar = () => {
+    qc.invalidateQueries({ queryKey: ['precedentcheck-historico'] })
+  }
+
+  const arquivar = async (id: string, arquivar: boolean, e: React.MouseEvent) => {
+    e.stopPropagation()
+    await precedentCheckApi.patch(id, { arquivado: arquivar })
+    invalidar()
+  }
 
   const deletar = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
     await precedentCheckApi.deletar(id)
-    qc.invalidateQueries({ queryKey: ['precedentcheck-historico'] })
+    invalidar()
   }
 
-  if (isLoading || historico.length === 0) return null
+  const iniciarEdicao = (a: AnaliseResumida, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setEditandoId(a.id)
+    setEditTitulo(a.titulo || '')
+  }
+
+  const salvarEdicao = async (id: string) => {
+    await precedentCheckApi.patch(id, { titulo: editTitulo })
+    setEditandoId(null)
+    invalidar()
+  }
+
+  if (isLoading) return null
 
   return (
     <div className={cs.historico}>
       <div className={cs.historicoHeader}>
-        <History size={13} /> Histórico
+        <History size={13} />
+        <span>{verArquivados ? 'Arquivados' : 'Histórico'}</span>
+        <button
+          type="button"
+          className={cs.historicoTabBtn}
+          onClick={() => setVerArquivados((v) => !v)}
+        >
+          {verArquivados ? <><ArchiveRestore size={12} /> Ativos</> : <><Archive size={12} /> Arquivados</>}
+        </button>
       </div>
+
+      {historico.length === 0 && (
+        <div className={cs.historicoVazio}>{verArquivados ? 'Nenhum item arquivado.' : 'Sem histórico.'}</div>
+      )}
+
       {historico.map((a: AnaliseResumida) => (
         <div key={a.id} className={cs.historicoRow} onClick={() => onCarregar(a.id)}>
-          <div className={cs.historicoTitulo}>{a.titulo || 'Sem título'}</div>
-          {a.total_ok > 0 && <span className={`${cs.chip} ${cs.chipOk}`}>{a.total_ok} ok</span>}
-          {a.total_divergencia > 0 && <span className={`${cs.chip} ${cs.chipDiv}`}>{a.total_divergencia} div.</span>}
-          {a.total_nao_encontrado > 0 && <span className={`${cs.chip} ${cs.chipNao}`}>{a.total_nao_encontrado} n/e</span>}
+          {editandoId === a.id ? (
+            <input
+              className={cs.editTituloInput}
+              value={editTitulo}
+              autoFocus
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => setEditTitulo(e.target.value)}
+              onBlur={() => salvarEdicao(a.id)}
+              onKeyDown={(e) => { if (e.key === 'Enter') salvarEdicao(a.id); if (e.key === 'Escape') setEditandoId(null) }}
+            />
+          ) : (
+            <div className={cs.historicoTitulo}>{a.titulo || 'Sem título'}</div>
+          )}
+          {a.total_ok > 0 && <span className={`${cs.chip} ${cs.chipOk}`}>{a.total_ok}</span>}
+          {a.total_divergencia > 0 && <span className={`${cs.chip} ${cs.chipDiv}`}>{a.total_divergencia}</span>}
+          {a.total_nao_encontrado > 0 && <span className={`${cs.chip} ${cs.chipNao}`}>{a.total_nao_encontrado}</span>}
           <span className={cs.historicoData}>{formatData(a.created_at)}</span>
+          <button type="button" className={cs.historicoIconBtn} title="Renomear" onClick={(e) => iniciarEdicao(a, e)}>
+            <Pencil size={11} />
+          </button>
           <button
-            className={styles.btnDanger}
-            style={{ padding: '2px 6px', fontSize: '0.7rem' }}
-            onClick={(e) => deletar(a.id, e)}
+            type="button"
+            className={cs.historicoIconBtn}
+            title={a.arquivado ? 'Restaurar' : 'Arquivar'}
+            onClick={(e) => arquivar(a.id, !a.arquivado, e)}
           >
+            {a.arquivado ? <ArchiveRestore size={11} /> : <Archive size={11} />}
+          </button>
+          <button type="button" className={`${cs.historicoIconBtn} ${cs.historicoIconBtnDanger}`} title="Excluir" onClick={(e) => deletar(a.id, e)}>
             <Trash2 size={11} />
           </button>
         </div>

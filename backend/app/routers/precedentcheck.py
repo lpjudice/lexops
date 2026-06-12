@@ -214,27 +214,50 @@ async def verificar_citacao(analise_id: str, idx: int, db: Session = Depends(get
     return citacoes[idx]
 
 
+def _serializar(a: PrecedentCheckAnalise) -> dict:
+    return {
+        "id": str(a.id),
+        "titulo": a.titulo,
+        "total_citacoes": a.total_citacoes,
+        "total_ok": a.total_ok,
+        "total_divergencia": a.total_divergencia,
+        "total_nao_encontrado": a.total_nao_encontrado,
+        "arquivado": bool(a.arquivado),
+        "created_at": a.created_at.isoformat() if a.created_at else None,
+    }
+
+
 @router.get("/historico")
-def listar_historico(db: Session = Depends(get_db)):
-    """Lista todas as análises salvas, mais recentes primeiro."""
+def listar_historico(arquivado: bool = False, db: Session = Depends(get_db)):
+    """Lista análises salvas. ?arquivado=true para ver as arquivadas."""
     analises = (
         db.query(PrecedentCheckAnalise)
+        .filter(PrecedentCheckAnalise.arquivado == arquivado)
         .order_by(PrecedentCheckAnalise.created_at.desc())
-        .limit(50)
+        .limit(100)
         .all()
     )
-    return [
-        {
-            "id": str(a.id),
-            "titulo": a.titulo,
-            "total_citacoes": a.total_citacoes,
-            "total_ok": a.total_ok,
-            "total_divergencia": a.total_divergencia,
-            "total_nao_encontrado": a.total_nao_encontrado,
-            "created_at": a.created_at.isoformat() if a.created_at else None,
-        }
-        for a in analises
-    ]
+    return [_serializar(a) for a in analises]
+
+
+class PatchAnaliseRequest(BaseModel):
+    titulo: str | None = None
+    arquivado: bool | None = None
+
+
+@router.patch("/historico/{analise_id}")
+def patch_analise(analise_id: str, body: PatchAnaliseRequest, db: Session = Depends(get_db)):
+    analise = db.query(PrecedentCheckAnalise).filter(
+        PrecedentCheckAnalise.id == uuid.UUID(analise_id)
+    ).first()
+    if not analise:
+        raise HTTPException(status_code=404, detail="Análise não encontrada")
+    if body.titulo is not None:
+        analise.titulo = body.titulo
+    if body.arquivado is not None:
+        analise.arquivado = body.arquivado
+    db.commit()
+    return _serializar(analise)
 
 
 @router.get("/historico/{analise_id}")
@@ -246,15 +269,9 @@ def obter_analise(analise_id: str, db: Session = Depends(get_db)):
     if not analise:
         raise HTTPException(status_code=404, detail="Análise não encontrada")
     return {
-        "id": str(analise.id),
-        "titulo": analise.titulo,
+        **_serializar(analise),
         "texto_peca": analise.texto_peca,
         "citacoes": analise.citacoes,
-        "total_citacoes": analise.total_citacoes,
-        "total_ok": analise.total_ok,
-        "total_divergencia": analise.total_divergencia,
-        "total_nao_encontrado": analise.total_nao_encontrado,
-        "created_at": analise.created_at.isoformat() if analise.created_at else None,
     }
 
 

@@ -84,11 +84,21 @@ Com base nas informações acima, responda as seguintes dimensões em JSON:
     "detalhe": "síntese: o julgado de fato suporta a tese da peça?"
   }},
   "ementa_real": "ementa ou síntese real do julgado (se encontrado), ou null",
-  "link_inteiro_teor": "URL do PDF/página do inteiro teor, ou null",
+  "link_inteiro_teor": "URL direta do PDF ou página do inteiro teor (não URL de busca), ou null se não encontrado",
   "status_geral": "verificado" | "divergencia" | "nao_encontrado" | "parcial",
-  "decisoes_mesmo_sentido": [],
-  "decisoes_sentido_contrario": []
+  "decisoes_mesmo_sentido": [
+    {{"referencia": "ex: STJ — REsp 1.234.567/SP", "ementa": "súmula de 1 frase do entendimento", "link": null}}
+  ],
+  "decisoes_sentido_contrario": [
+    {{"referencia": "ex: STJ — AgRg no REsp 987.654/RJ", "ementa": "súmula de 1 frase do entendimento contrário", "link": null}}
+  ]
 }}
+
+IMPORTANTE sobre decisoes_mesmo_sentido e decisoes_sentido_contrario:
+- Liste 2 a 4 julgados REAIS de STJ ou STF no mesmo sentido (que corroboram a tese da peça).
+- Liste 1 a 2 julgados REAIS de STJ ou STF em sentido contrário (se existirem).
+- Se não souber julgados reais com certeza, retorne [] (não invente números de processos).
+- Não repita o julgado principal que está sendo verificado.
 
 Retorne APENAS o JSON, sem texto antes ou depois.
 """
