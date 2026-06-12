@@ -8,8 +8,106 @@ Fluxo:
 """
 
 import json
+import logging
 import re
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+# Modelo e limites dedicados ao PrecedentCheck.
+# IMPORTANTE: max_tokens alto — uma peça pode ter 20+ citações, e o JSON de
+# extração/verificação estoura facilmente 2k tokens (era o bug do chat_claude).
+_MODELO = "claude-sonnet-4-6"
+_MAX_TOKENS = 8192
+
+
+def _chamar_claude(prompt: str) -> str:
+    """
+    Chamada Claude dedicada ao PrecedentCheck — sem o system prompt de
+    'assistente jurídico' nem PDFs de cliente, e com max_tokens grande para
+    não truncar o JSON de saída.
+    """
+    from app.config import settings
+
+    if not settings.anthropic_api_key:
+        logger.error("PrecedentCheck: ANTHROPIC_API_KEY não configurada")
+        return ""
+    try:
+        import anthropic
+
+        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        msg = client.messages.create(
+            model=_MODELO,
+            max_tokens=_MAX_TOKENS,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        texto = msg.content[0].text if msg.content else ""
+        logger.info(
+            "PrecedentCheck: claude stop_reason=%s, %d chars de saída",
+            msg.stop_reason, len(texto),
+        )
+        return texto
+    except Exception as e:
+        logger.error("PrecedentCheck: erro ao chamar Claude: %s", e)
+        return ""
+
+
+def _limpar_fence(texto: str) -> str:
+    """Remove fences markdown (```json ... ```) se presentes."""
+    t = texto.strip()
+    if t.startswith("```"):
+        t = re.sub(r"^```(?:json)?\s*", "", t)
+        t = re.sub(r"\s*```$", "", t)
+    return t.strip()
+
+
+def _parse_json_array(resposta: str) -> list[dict]:
+    """
+    Extrai um array JSON da resposta, tolerando truncamento.
+    Se o JSON foi cortado (max_tokens), recupera os objetos completos
+    fechando o array manualmente.
+    """
+    if not resposta:
+        return []
+    t = _limpar_fence(resposta)
+    inicio = t.find("[")
+    if inicio == -1:
+        return []
+    candidato = t[inicio:]
+
+    # Tentativa direta
+    try:
+        return json.loads(candidato)
+    except json.JSONDecodeError:
+        pass
+
+    # Recuperação de array truncado: pega até o último "}" e fecha o "]"
+    ultimo = candidato.rfind("}")
+    if ultimo != -1:
+        recuperado = candidato[: ultimo + 1] + "]"
+        try:
+            dados = json.loads(recuperado)
+            logger.warning("PrecedentCheck: JSON array truncado recuperado (%d itens)", len(dados))
+            return dados
+        except json.JSONDecodeError:
+            pass
+    logger.warning("PrecedentCheck: falha ao parsear array JSON")
+    return []
+
+
+def _parse_json_object(resposta: str) -> dict | None:
+    """Extrai um objeto JSON da resposta, tolerando fence markdown."""
+    if not resposta:
+        return None
+    t = _limpar_fence(resposta)
+    inicio = t.find("{")
+    fim = t.rfind("}")
+    if inicio == -1 or fim == -1 or fim <= inicio:
+        return None
+    try:
+        return json.loads(t[inicio : fim + 1])
+    except json.JSONDecodeError:
+        return None
 
 # ---------------------------------------------------------------------------
 # Prompts
@@ -166,16 +264,11 @@ def buscar_julgado(tribunal: str, numero: str) -> str:
 
 def _extrair_citacoes_chunk(texto: str) -> list[dict]:
     """Extrai citações de um chunk de texto via Claude."""
-    from app.services.ia_cliente import chat_claude
     prompt = PROMPT_EXTRAIR_CITACOES.format(texto=texto)
-    resposta = chat_claude(pergunta=prompt, historico=[], cliente_id="", contexto="")
-    match = re.search(r"\[.*\]", resposta, re.DOTALL)
-    if not match:
-        return []
-    try:
-        return json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return []
+    resposta = _chamar_claude(prompt)
+    citacoes = _parse_json_array(resposta)
+    logger.info("PrecedentCheck: chunk de %d chars → %d citações", len(texto), len(citacoes))
+    return citacoes
 
 
 def extrair_citacoes(texto_peca: str) -> list[dict]:
@@ -211,8 +304,6 @@ def extrair_citacoes(texto_peca: str) -> list[dict]:
 
 def verificar_citacao(citacao: dict, contexto_peca: str) -> dict:
     """Etapa 2: verifica uma citação individual."""
-    from app.services.ia_cliente import chat_claude
-
     resultado_busca = buscar_julgado(
         tribunal=citacao.get("tribunal", ""),
         numero=citacao.get("numero", ""),
@@ -229,18 +320,15 @@ def verificar_citacao(citacao: dict, contexto_peca: str) -> dict:
         resultado_busca=resultado_busca,
     )
 
-    resposta = chat_claude(pergunta=prompt, historico=[], cliente_id="", contexto="")
+    resposta = _chamar_claude(prompt)
 
-    match = re.search(r"\{.*\}", resposta, re.DOTALL)
-    if not match:
+    verificacao = _parse_json_object(resposta)
+    if verificacao is None:
+        logger.warning("PrecedentCheck: verificação sem JSON válido (%d chars)", len(resposta))
         return {
             "status_geral": "nao_encontrado",
             "erro": "Não foi possível processar a verificação",
         }
-    try:
-        verificacao = json.loads(match.group(0))
-        # Injeta metadados da citação original
-        verificacao["referencia_original"] = citacao
-        return verificacao
-    except json.JSONDecodeError:
-        return {"status_geral": "nao_encontrado", "erro": "JSON inválido na resposta"}
+    # Injeta metadados da citação original
+    verificacao["referencia_original"] = citacao
+    return verificacao
