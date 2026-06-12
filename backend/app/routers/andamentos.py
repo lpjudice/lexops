@@ -372,6 +372,87 @@ def marcar_lidos(processo_id: uuid.UUID, db: Session = Depends(get_db)):
     db.commit()
 
 
+# ── Dashboard: avisos de andamentos novos ─────────────────────────────────────
+
+@router.get("/dashboard/avisos")
+def dashboard_avisos(db: Session = Depends(get_db)):
+    """Resumo dos andamentos não lidos por processo, pro card na home."""
+    from sqlalchemy import func as sql_func
+    from app.models.cliente import Cliente
+
+    # Conta direto na tabela de andamentos (mais confiável que o cache no Processo)
+    sub = (
+        db.query(
+            AndamentoProcesso.processo_id.label("pid"),
+            sql_func.count(AndamentoProcesso.id).label("qtd"),
+            sql_func.max(AndamentoProcesso.data_andamento).label("mais_recente"),
+        )
+        .filter(AndamentoProcesso.lido.is_(False))
+        .group_by(AndamentoProcesso.processo_id)
+        .subquery()
+    )
+
+    rows = (
+        db.query(Processo, Cliente.nome, sub.c.qtd, sub.c.mais_recente)
+        .join(Cliente, Cliente.id == Processo.cliente_id)
+        .join(sub, sub.c.pid == Processo.id)
+        .order_by(sub.c.mais_recente.desc().nullslast())
+        .all()
+    )
+
+    items = []
+    total_andamentos = 0
+    for p, nome_cliente, qtd, mais_recente in rows:
+        total_andamentos += int(qtd)
+        items.append({
+            "processo_id": str(p.id),
+            "numero_cnj": p.numero_cnj,
+            "cliente_nome": nome_cliente,
+            "tribunal": p.tribunal,
+            "vara": p.vara,
+            "qtd_nao_lidos": int(qtd),
+            "mais_recente": mais_recente.isoformat() if mais_recente else None,
+            "ultimo_desc": (p.ultimo_andamento_desc or "")[:200],
+        })
+
+    return {
+        "total_processos": len(items),
+        "total_andamentos": total_andamentos,
+        "items": items,
+    }
+
+
+@router.post("/dashboard/marcar-lidos-lote")
+def dashboard_marcar_lote(body: dict, db: Session = Depends(get_db)):
+    """Marca lido em vários processos (ou todos) de uma vez.
+
+    Body: {"processo_ids": ["uuid", ...]} ou {"all": true}
+    """
+    if (body or {}).get("all"):
+        # Marca tudo
+        db.query(AndamentoProcesso).filter(
+            AndamentoProcesso.lido.is_(False)
+        ).update({"lido": True}, synchronize_session=False)
+        db.query(Processo).filter(Processo.andamentos_nao_lidos > 0).update(
+            {Processo.andamentos_nao_lidos: 0}, synchronize_session=False
+        )
+        db.commit()
+        return {"ok": True, "scope": "all"}
+
+    ids = (body or {}).get("processo_ids") or []
+    if not ids:
+        raise HTTPException(status_code=422, detail="Informe processo_ids ou all=true.")
+    db.query(AndamentoProcesso).filter(
+        AndamentoProcesso.processo_id.in_(ids),
+        AndamentoProcesso.lido.is_(False),
+    ).update({"lido": True}, synchronize_session=False)
+    db.query(Processo).filter(Processo.id.in_(ids)).update(
+        {Processo.andamentos_nao_lidos: 0}, synchronize_session=False
+    )
+    db.commit()
+    return {"ok": True, "scope": "lote", "qtd": len(ids)}
+
+
 @router.get("/arquivo/{andamento_id}")
 def abrir_arquivo_andamento(andamento_id: uuid.UUID, db: Session = Depends(get_db)):
     andamento = db.query(AndamentoProcesso).filter(AndamentoProcesso.id == andamento_id).first()

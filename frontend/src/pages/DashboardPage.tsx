@@ -10,6 +10,7 @@ import { contratosApi } from '../api/contratos'
 import { tarefasApi } from '../api/tarefas'
 import { diarioApi } from '../api/diario'
 import type { AnaliseIA } from '../api/diario'
+import AvisosAndamentos from '../components/AvisosAndamentos'
 import styles from './DashboardPage.module.css'
 
 function formatCurrency(value: number) {
@@ -152,6 +153,9 @@ export default function DashboardPage() {
 
       {/* ── Masonry: painéis se encaixam, sem espaço branco irregular ──── */}
       <div className={styles.masonry}>
+
+        {/* Andamentos novos — destaque no topo, atualiza a cada 5min */}
+        <AvisosAndamentos />
 
         {/* Prazos Pendentes — card list */}
         <div className={styles.panel}>

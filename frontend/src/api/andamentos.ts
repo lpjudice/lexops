@@ -151,6 +151,27 @@ export const andamentosApi = {
   limparSessaoJusBR: () =>
     api.delete('/andamentos/jusbr/session').then((r) => r.data),
 
+  dashboardAvisos: () =>
+    api
+      .get<{
+        total_processos: number
+        total_andamentos: number
+        items: Array<{
+          processo_id: string
+          numero_cnj: string
+          cliente_nome: string
+          tribunal: string | null
+          vara: string | null
+          qtd_nao_lidos: number
+          mais_recente: string | null
+          ultimo_desc: string
+        }>
+      }>('/andamentos/dashboard/avisos')
+      .then((r) => r.data),
+
+  marcarLidosLote: (payload: { processo_ids?: string[]; all?: boolean }) =>
+    api.post('/andamentos/dashboard/marcar-lidos-lote', payload).then((r) => r.data),
+
   iniciarPkceJusBR: () =>
     api
       .post<{ url: string; state_id: string; expires_in: number }>('/andamentos/jusbr/pkce/start')
