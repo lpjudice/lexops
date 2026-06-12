@@ -239,11 +239,14 @@ def _gravar_despesa(db: Session, draft: dict) -> Reembolso:
         db.refresh(r)
 
     data_despesa = date.today()
+    draft.pop("data_invalida", None)
     if draft.get("data_despesa"):
         try:
-            data_despesa = date.fromisoformat(draft["data_despesa"])
-        except ValueError:
-            pass
+            data_despesa = date.fromisoformat(str(draft["data_despesa"]).strip())
+        except (TypeError, ValueError):
+            # Data inexistente/ilegível (ex.: "2026-06-31"). Cai para hoje e
+            # sinaliza para o caller avisar o usuário em vez de gravar lixo.
+            draft["data_invalida"] = str(draft["data_despesa"])
 
     item = ItemReembolso(
         reembolso_id=r.id,
@@ -1011,10 +1014,16 @@ def _finalizar(db: Session, c: TelegramConversa, data: dict, chat_id: int) -> No
     r = _gravar_despesa(db, draft)
     total, itens = r.total, list(r.itens)
     linhas = "\n".join(f"• {i.descricao} — {_fmt_brl(float(i.valor))}" for i in itens)
+    aviso_data = ""
+    if draft.get("data_invalida"):
+        aviso_data = (
+            f"\n⚠️ A data lida (`{draft['data_invalida']}`) não existe — usei "
+            f"*{date.today().strftime('%d/%m/%Y')}*. Edite a despesa se precisar ajustar."
+        )
     telegram_api.send_message(
         chat_id,
         f"✅ Incluído!\n\n📁 *{r.titulo}*\n{linhas}\n"
-        f"━━━━━━━━━━\n*Total em aberto: {_fmt_brl(total)}*",
+        f"━━━━━━━━━━\n*Total em aberto: {_fmt_brl(total)}*{aviso_data}",
     )
     data["batch_done"] = data.get("batch_done", 0) + 1
     touched: list = data.setdefault("touched", [])

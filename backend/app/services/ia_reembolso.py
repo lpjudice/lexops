@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+from datetime import date
 
 from app.config import settings
 
@@ -81,6 +82,13 @@ def extrair_dados(image_bytes: bytes, mime: str, caption: str | None = None) -> 
                 data["valor"] = round(float(data["valor"]), 2)
             except (TypeError, ValueError):
                 data["valor"] = None
+        # Normaliza data: descarta datas inexistentes (ex.: "2026-06-31"), que a
+        # IA às vezes alucina. Mantém só ISO YYYY-MM-DD válido; senão vira None.
+        if data.get("data") is not None:
+            try:
+                date.fromisoformat(str(data["data"]).strip())
+            except (TypeError, ValueError):
+                data["data"] = None
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
