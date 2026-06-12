@@ -50,50 +50,71 @@ def _extrair_texto(content) -> str:
 
 def _chamar_claude(prompt: str, com_web_search: bool = False) -> tuple[str, float]:
     """
-    Chamada Claude dedicada ao PrecedentCheck.
+    Chamada Claude dedicada ao PrecedentCheck, com retry para 429 (rate limit).
     Retorna (texto, custo_usd). com_web_search=True habilita o tool nativo
-    `web_search` para a verificação ir buscar julgados reais em Jusbrasil, STJ, STF.
+    `web_search` para a verificação buscar julgados reais em Jusbrasil/STJ/STF.
     """
+    import time
+
     from app.config import settings
 
     if not settings.anthropic_api_key:
         logger.error("PrecedentCheck: ANTHROPIC_API_KEY não configurada")
         return "", 0.0
-    try:
-        import anthropic
 
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-        kwargs = {
-            "model": _MODELO,
-            "max_tokens": _MAX_TOKENS,
-            "messages": [{"role": "user", "content": prompt}],
-        }
-        if com_web_search:
-            kwargs["tools"] = [{
-                "type": "web_search_20250305",
-                "name": "web_search",
-                "max_uses": 3,
-                "allowed_domains": [
-                    "jusbrasil.com.br",
-                    "stj.jus.br",
-                    "stf.jus.br",
-                    "cnj.jus.br",
-                    "trf1.jus.br", "trf2.jus.br", "trf3.jus.br",
-                    "trf4.jus.br", "trf5.jus.br", "trf6.jus.br",
-                ],
-            }]
+    import anthropic
 
-        msg = client.messages.create(**kwargs)
-        texto = _extrair_texto(msg.content)
-        custo = _calcular_custo(getattr(msg, "usage", None))
-        logger.info(
-            "PrecedentCheck: stop=%s, out=%d chars, custo=$%.4f",
-            msg.stop_reason, len(texto), custo,
-        )
-        return texto, custo
-    except Exception as e:
-        logger.error("PrecedentCheck: erro ao chamar Claude: %s", e)
-        return "", 0.0
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    kwargs = {
+        "model": _MODELO,
+        "max_tokens": _MAX_TOKENS,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    if com_web_search:
+        kwargs["tools"] = [{
+            "type": "web_search_20250305",
+            "name": "web_search",
+            "max_uses": 3,
+            "allowed_domains": [
+                "jusbrasil.com.br",
+                "stj.jus.br",
+                "stf.jus.br",
+                "cnj.jus.br",
+                "trf1.jus.br", "trf2.jus.br", "trf3.jus.br",
+                "trf4.jus.br", "trf5.jus.br", "trf6.jus.br",
+            ],
+        }]
+
+    # Tier baixo da Anthropic estoura 30k tok/min e 50 req/min facilmente
+    # com verificação em paralelo — retry com backoff resolve.
+    delays = [3, 8, 20, 40]
+    for tentativa, delay in enumerate([0] + delays):
+        if delay:
+            time.sleep(delay)
+        try:
+            msg = client.messages.create(**kwargs)
+            texto = _extrair_texto(msg.content)
+            custo = _calcular_custo(getattr(msg, "usage", None))
+            logger.info(
+                "PrecedentCheck: stop=%s, out=%d chars, custo=$%.4f%s",
+                msg.stop_reason, len(texto), custo,
+                f" (tentativa {tentativa + 1})" if tentativa else "",
+            )
+            return texto, custo
+        except anthropic.RateLimitError as e:
+            if tentativa < len(delays):
+                logger.warning(
+                    "PrecedentCheck: 429 rate limit — aguardando %ds (tentativa %d/%d)",
+                    delays[tentativa] if tentativa < len(delays) else 0,
+                    tentativa + 1, len(delays) + 1,
+                )
+                continue
+            logger.error("PrecedentCheck: 429 após %d tentativas: %s", tentativa + 1, e)
+            return "", 0.0
+        except Exception as e:
+            logger.error("PrecedentCheck: erro ao chamar Claude: %s", e)
+            return "", 0.0
+    return "", 0.0
 
 
 def _limpar_fence(texto: str) -> str:

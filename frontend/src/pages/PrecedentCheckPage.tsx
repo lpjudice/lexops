@@ -391,9 +391,9 @@ export default function PrecedentCheckPage() {
       // Aparece no histórico imediatamente (sem aguardar todas as verificações)
       qc.invalidateQueries({ queryKey: ['precedentcheck-historico'] })
 
-      // Verifica em paralelo com pool de concorrência limitada — muito mais
-      // rápido que sequencial (40 citações × 20s = 13min vira ~2min).
-      const CONCORRENCIA = 6
+      // Pool de concorrência: 3 é o sweet spot com o tier baixo da Anthropic
+      // (30k input tok/min, 50 req/min). 6 estourava 429 em quase tudo.
+      const CONCORRENCIA = 3
       let proximo = 0
       const total = res.citacoes.length
 
