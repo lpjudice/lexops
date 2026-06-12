@@ -49,33 +49,79 @@ def _extrair_com_pdfminer(content: bytes) -> str:
     return pdfminer_extract(io.BytesIO(content), maxpages=50) or ""
 
 
+def _extrair_com_claude_ocr(content: bytes) -> str:
+    """Último recurso: envia o PDF para Claude ler via visão nativa (PDFs escaneados sem texto)."""
+    import base64
+    import anthropic
+    client = anthropic.Anthropic()
+    # Limita a 5MB para evitar timeouts
+    if len(content) > 5 * 1024 * 1024:
+        content = content[:5 * 1024 * 1024]
+    resp = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=8192,
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "document",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "application/pdf",
+                        "data": base64.b64encode(content).decode(),
+                    },
+                },
+                {
+                    "type": "text",
+                    "text": (
+                        "Extraia TODO o texto desta peça ou decisão judicial exatamente como está, "
+                        "preservando parágrafos, numerações e formatação. "
+                        "Retorne APENAS o texto extraído, sem comentários adicionais."
+                    ),
+                },
+            ],
+        }],
+    )
+    return resp.content[0].text if resp.content else ""
+
+
 @router.post("/extrair-pdf")
 async def extrair_pdf(arquivo: UploadFile = File(...)):
-    """Extrai texto de um PDF. Tenta pypdf primeiro; cai para pdfminer em PDFs OCR/escaneados."""
+    """
+    Extrai texto de PDF em 3 tentativas:
+      1. pypdf (rápido, funciona em PDFs com texto selecionável)
+      2. pdfminer (melhor com codificações exóticas)
+      3. Claude vision (PDFs escaneados sem camada de texto)
+    """
     if not arquivo.filename or not arquivo.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Arquivo deve ser PDF")
     content = await arquivo.read()
 
+    # Tentativa 1: pypdf
     texto = ""
-    erro_pypdf: str | None = None
     try:
         texto = _extrair_com_pypdf(content)
-    except Exception as e:
-        erro_pypdf = str(e)
+    except Exception:
+        pass
 
-    # Fallback pdfminer: quando pypdf falha ou retorna texto vazio (PDFs OCR)
+    # Tentativa 2: pdfminer
     if not texto.strip():
         try:
             texto = _extrair_com_pdfminer(content)
+        except Exception:
+            pass
+
+    # Tentativa 3: Claude OCR (PDFs escaneados — imagem sem texto)
+    if not texto.strip():
+        try:
+            texto = _extrair_com_claude_ocr(content)
         except Exception as e:
-            if erro_pypdf:
-                raise HTTPException(status_code=500, detail=f"pypdf: {erro_pypdf} | pdfminer: {e}")
-            raise HTTPException(status_code=500, detail=f"Erro ao processar PDF: {e}")
+            raise HTTPException(status_code=500, detail=f"Não foi possível extrair texto do PDF: {e}")
 
     if not texto.strip():
         raise HTTPException(
             status_code=422,
-            detail="Não foi possível extrair texto deste PDF. O arquivo pode ser uma imagem sem camada de texto. Cole o conteúdo manualmente na área de texto.",
+            detail="PDF sem conteúdo textual identificável mesmo após OCR. Tente colar o texto manualmente.",
         )
     return {"texto": texto.strip()}
 

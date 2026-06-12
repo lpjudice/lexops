@@ -368,6 +368,7 @@ export default function PrecedentCheckPage() {
           <div className={cs.painelHeader}>
             <span className={cs.painelTitle}>Peça ou decisão</span>
           </div>
+          {erro && <div className={cs.erroBanner}>{erro}</div>}
           <div className={cs.painelBody}>
             <input
               className={cs.tituloInput}
@@ -375,13 +376,19 @@ export default function PrecedentCheckPage() {
               value={titulo}
               onChange={(e) => setTitulo(e.target.value)}
             />
-            <textarea
-              className={cs.textarea}
-              placeholder="Cole aqui o texto da peça, decisão, sentença ou acórdão — ou carregue um PDF abaixo."
-              value={texto}
-              onChange={(e) => setTexto(e.target.value)}
-            />
-            {erro && <div className={cs.erroBanner}>{erro}</div>}
+            {uploading ? (
+              <div className={cs.uploadingState}>
+                <div className={cs.loadingDot} />
+                Lendo PDF com OCR… pode levar alguns segundos
+              </div>
+            ) : (
+              <textarea
+                className={cs.textarea}
+                placeholder="Cole aqui o texto da peça, decisão, sentença ou acórdão — ou carregue um PDF abaixo."
+                value={texto}
+                onChange={(e) => setTexto(e.target.value)}
+              />
+            )}
           </div>
           <div className={cs.painelFooter}>
             <div className={cs.uploadRow}>
@@ -390,19 +397,20 @@ export default function PrecedentCheckPage() {
                 type="file"
                 accept=".pdf"
                 style={{ display: 'none' }}
-                onChange={(e) => e.target.files?.[0] && uploadPdf(e.target.files[0])}
+                onChange={(e) => { if (e.target.files?.[0]) uploadPdf(e.target.files[0]) }}
               />
-              <button className={styles.btnSmall} onClick={() => fileRef.current?.click()} disabled={uploading}>
-                <FileUp size={13} /> {uploading ? 'Carregando...' : 'PDF'}
+              <button type="button" className={styles.btnSmall} onClick={() => fileRef.current?.click()} disabled={uploading}>
+                <FileUp size={13} /> {uploading ? 'Lendo…' : 'PDF'}
               </button>
-              {texto && (
+              {texto && !uploading && (
                 <span className={cs.charCount}>{texto.length.toLocaleString('pt-BR')} chars</span>
               )}
             </div>
             <button
+              type="button"
               className={styles.btnPrimary}
               onClick={iniciarAnalise}
-              disabled={analisando || !texto.trim()}
+              disabled={analisando || uploading || !texto.trim()}
             >
               {analisando
                 ? `Verificando ${totalVerificadas}/${citacoes.length || '?'}...`

@@ -204,6 +204,20 @@
 }
 .cardChevronOpen { transform: rotate(180deg); }
 
+.uploadingState {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  padding: 1rem;
+  color: #6a7070;
+  font-size: 0.85rem;
+  background: #fafafa;
+  border-radius: 8px;
+  border: 1px dashed #e5e7eb;
+  margin: 0;
+}
+
 .loadingDot {
   width: 14px;
   height: 14px;
