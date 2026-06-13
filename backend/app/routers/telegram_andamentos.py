@@ -863,13 +863,19 @@ def _carregar_push_andamentos(kind: str, ref_id: str) -> list:
 
 
 def _push_doc_url(a) -> str | None:
-    """Retorna a URL pra baixar o documento do andamento (PDPJ hrefBinario)."""
+    """Retorna a URL pra baixar o documento do andamento (PDPJ hrefBinario).
+
+    Só os AndamentoTelegramExtra (avulsos) têm arquivo_url. Os AndamentoProcesso
+    (escritório) já tiveram o arquivo baixado e estão em arquivo_path/drive_link.
+    """
     return getattr(a, "arquivo_url", None)
 
 
 def _push_tem_doc(a) -> bool:
+    # AndamentoProcesso (escritório) — NÃO tem arquivo_url (model diferente!)
     if hasattr(a, "arquivo_drive_link"):
-        return bool(a.arquivo_drive_link or a.arquivo_path or a.arquivo_nome or a.arquivo_url)
+        return bool(a.arquivo_drive_link or a.arquivo_path or a.arquivo_nome)
+    # AndamentoTelegramExtra (avulsos) — tem arquivo_url, sem drive_link
     return bool(getattr(a, "arquivo_url", None) or getattr(a, "arquivo_nome", None))
 
 
@@ -949,17 +955,48 @@ async def _send_push_documentos(bot: Bot, chat_id: int, kind: str, ref_id: str, 
         await bot.send_message(chat_id, "❌ Sessão jus.br inativa. Use /login.")
         return
 
-    await bot.send_message(chat_id, f"⏳ Baixando {len(docs)} documento(s)...")
+    await bot.send_message(chat_id, f"⏳ Buscando {len(docs)} documento(s)...")
     for rel_i, a in docs:
         abs_i = start + rel_i + 1
         data_str = a.data_andamento.strftime("%d/%m/%Y") if a.data_andamento else "—"
         caption = f"*{abs_i}.* 📅 {data_str}\n{(a.descricao or '')[:200]}"
 
+        # AndamentoProcesso (escritório) — já foi baixado pelo lexops: tem
+        # drive_link e/ou arquivo_path local. Não baixamos de novo do PDPJ.
+        if hasattr(a, "arquivo_drive_link"):
+            arquivo_nome = a.arquivo_nome or "documento.pdf"
+            if a.arquivo_drive_link:
+                # Manda o link Drive (clicável). É o caminho mais leve.
+                await _safe_send(
+                    bot, chat_id,
+                    f"{caption}\n\n📎 *{arquivo_nome}*\n{a.arquivo_drive_link}",
+                )
+                continue
+            if a.arquivo_path:
+                # Documento existe local — tenta ler e enviar
+                try:
+                    from pathlib import Path
+                    p = Path(a.arquivo_path)
+                    if p.exists() and p.is_file():
+                        content = p.read_bytes()
+                        filename, tipo = _nome_documento(content, None, arquivo_nome, abs_i)
+                        dica = {"PDF": None, "RTF": "abra no Word / Pages", "HTML": "abra no navegador"}.get(tipo)
+                        cap = caption if not dica else f"{caption}\n_({tipo} — {dica})_"
+                        try:
+                            await bot.send_document(chat_id, document=BufferedInputFile(content, filename=filename), caption=cap, parse_mode="Markdown")
+                        except TelegramBadRequest:
+                            await bot.send_document(chat_id, document=BufferedInputFile(content, filename=filename), caption=cap)
+                        continue
+                except Exception:
+                    logger.exception("Erro lendo arquivo local %s", a.arquivo_path)
+            await bot.send_message(chat_id, f"⚠️ Andamento {abs_i}: documento ainda não baixado pelo lexops. Use o sync manual.")
+            continue
+
+        # AndamentoTelegramExtra (avulso) — usa hrefBinario do PDPJ
         url = _push_doc_url(a)
         if not url:
             await bot.send_message(chat_id, f"⚠️ Andamento {abs_i}: sem URL de documento.")
             continue
-
         try:
             result = await baixar_documento_jusbr(url, token=sess.get("token"), session_data=sess)
         except Exception as exc:
@@ -968,17 +1005,14 @@ async def _send_push_documentos(bot: Bot, chat_id: int, kind: str, ref_id: str, 
         if not result:
             await bot.send_message(chat_id, f"⚠️ Documento {abs_i} indisponível.")
             continue
-
         content, mimetype = result
         filename, tipo = _nome_documento(content, mimetype, a.arquivo_nome, abs_i)
-        dica = {"PDF": None, "RTF": "abra no Word / Pages / qualquer editor de texto", "HTML": "abra no navegador"}.get(tipo)
+        dica = {"PDF": None, "RTF": "abra no Word / Pages", "HTML": "abra no navegador"}.get(tipo)
         cap = caption if not dica else f"{caption}\n_({tipo} — {dica})_"
-        doc = BufferedInputFile(content, filename=filename)
         try:
-            await bot.send_document(chat_id, document=doc, caption=cap, parse_mode="Markdown")
+            await bot.send_document(chat_id, document=BufferedInputFile(content, filename=filename), caption=cap, parse_mode="Markdown")
         except TelegramBadRequest:
-            doc = BufferedInputFile(content, filename=filename)
-            await bot.send_document(chat_id, document=doc, caption=cap)
+            await bot.send_document(chat_id, document=BufferedInputFile(content, filename=filename), caption=cap)
 
 
 async def _run_lookup(bot: Bot, chat_id: int, cnj: str) -> None:
@@ -1307,15 +1341,31 @@ def create_dispatcher() -> Dispatcher:
     @dp.callback_query(F.data.startswith("apv:"))
     async def cb_push_view(query: CallbackQuery) -> None:
         """Push diário: 'Ver andamentos' (paginado 10/pág)."""
+        logger.info(
+            "apv: chat=%s user=%s data=%r",
+            query.message.chat.id if query.message else "?",
+            query.from_user.id if query.from_user else "?",
+            query.data,
+        )
         if not _allowed(query.from_user.id):
-            await query.answer()
+            await query.answer("Usuário não autorizado neste bot.", show_alert=True)
             return
-        parts = query.data.split(":")
-        kind = parts[1]
-        ref_id = parts[2]
-        page = int(parts[3]) if len(parts) > 3 else 0
-        await query.answer()
-        await _send_push_andamentos(query.bot, query.message.chat.id, kind, ref_id, page)
+        try:
+            parts = query.data.split(":")
+            kind = parts[1]
+            ref_id = parts[2]
+            page = int(parts[3]) if len(parts) > 3 else 0
+            await query.answer()
+            await _send_push_andamentos(query.bot, query.message.chat.id, kind, ref_id, page)
+        except Exception as exc:
+            logger.exception("cb_push_view falhou (chat=%s)", query.message.chat.id if query.message else "?")
+            try:
+                await query.bot.send_message(
+                    query.message.chat.id,
+                    f"❌ Erro ao carregar andamentos: {str(exc)[:200]}",
+                )
+            except Exception:
+                pass
 
     @dp.callback_query(F.data.startswith("apvd:"))
     async def cb_push_docs(query: CallbackQuery) -> None:

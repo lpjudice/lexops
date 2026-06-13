@@ -129,7 +129,13 @@ async def _async_push() -> None:
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
     cutoff = datetime.now(timezone.utc) - timedelta(hours=_JANELA_HORAS)
+    # Andamentos com data MUITO velha (histórico retroativo do jus.br na primeira
+    # sync) não entram no push — só são marcados como notificados silenciosamente
+    # pra não voltar todo dia. Janela larga (14 dias) cobre retroativo de tribunal.
+    from datetime import date as _date
+    cutoff_data = _date.today() - timedelta(days=14)
     grupos: list[dict] = []
+    silenciados: list[tuple[str, int]] = []  # (tipo, qtd) só pra log
 
     db = SessionLocal()
     try:
@@ -146,9 +152,25 @@ async def _async_push() -> None:
                 .filter(AndamentoProcesso.processo_id == p.id)
                 .filter(AndamentoProcesso.notificado.is_(False))
                 .filter(AndamentoProcesso.created_at >= cutoff)
+                .filter(AndamentoProcesso.data_andamento >= cutoff_data)
                 .order_by(AndamentoProcesso.data_andamento.desc().nullslast())
                 .all()
             )
+            # Histórico antigo (data_andamento < 14 dias atrás) — marca como
+            # notificado silenciosamente, não envia, pra não voltar amanhã.
+            antigos_ids = [
+                x[0] for x in db.query(AndamentoProcesso.id)
+                .filter(AndamentoProcesso.processo_id == p.id)
+                .filter(AndamentoProcesso.notificado.is_(False))
+                .filter(AndamentoProcesso.data_andamento < cutoff_data)
+                .all()
+            ]
+            if antigos_ids:
+                db.query(AndamentoProcesso).filter(
+                    AndamentoProcesso.id.in_(antigos_ids)
+                ).update({AndamentoProcesso.notificado: True}, synchronize_session=False)
+                db.commit()
+                silenciados.append(("proc", len(antigos_ids)))
             if not novos:
                 continue
             grupos.append({
@@ -168,9 +190,23 @@ async def _async_push() -> None:
                 .filter(AndamentoTelegramExtra.extra_id == e.id)
                 .filter(AndamentoTelegramExtra.notificado.is_(False))
                 .filter(AndamentoTelegramExtra.created_at >= cutoff)
+                .filter(AndamentoTelegramExtra.data_andamento >= cutoff_data)
                 .order_by(AndamentoTelegramExtra.data_andamento.desc().nullslast())
                 .all()
             )
+            antigos_extra_ids = [
+                x[0] for x in db.query(AndamentoTelegramExtra.id)
+                .filter(AndamentoTelegramExtra.extra_id == e.id)
+                .filter(AndamentoTelegramExtra.notificado.is_(False))
+                .filter(AndamentoTelegramExtra.data_andamento < cutoff_data)
+                .all()
+            ]
+            if antigos_extra_ids:
+                db.query(AndamentoTelegramExtra).filter(
+                    AndamentoTelegramExtra.id.in_(antigos_extra_ids)
+                ).update({AndamentoTelegramExtra.notificado: True}, synchronize_session=False)
+                db.commit()
+                silenciados.append(("extra", len(antigos_extra_ids)))
             if not novos:
                 continue
             grupos.append({
@@ -183,6 +219,13 @@ async def _async_push() -> None:
             })
     finally:
         db.close()
+
+    if silenciados:
+        total_sil = sum(q for _, q in silenciados)
+        logger.info(
+            "push_19h: %d andamento(s) antigos (data < %s) marcados como notificados sem envio.",
+            total_sil, cutoff_data.isoformat(),
+        )
 
     bot = Bot(token=bot_token)
     hoje_br = datetime.now(_BRT).strftime("%d/%m/%Y")
