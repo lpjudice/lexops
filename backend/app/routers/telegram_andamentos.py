@@ -69,14 +69,12 @@ _HELP_TEXT = (
     "🏛️ *Bot de Andamentos Processuais*\n"
     "Consulta andamentos e documentos direto do jus.br/PDPJ.\n\n"
     "*Buscar andamentos:*\n"
-    "• Envie o *número CNJ* (formatado ou 20 dígitos corridos) — busca direto.\n"
-    "• `/buscar <cnj>` — mesma coisa via comando.\n\n"
-    "*Buscar pelo cliente (cadastro do lexops):*\n"
-    "• `/busca <nome>` — filtra clientes pelo nome e lista os processos.\n"
-    "• `/busca` — lista *todos* os clientes em ordem alfabética, paginado.\n\n"
-    "*Monitorar processos (push diário 19h):*\n"
-    "• `/add <cnj>` — adiciona um CNJ avulso (mesmo fora da carteira do escritório).\n"
+    "• Envie o *número CNJ* — formatado (`0001234-56.2023.8.26.0100`) ou os 20 dígitos corridos. "
+    "Detecto sozinho.\n"
+    "• `/busca <cnj>` — mesma coisa via comando.\n\n"
+    "*Lista e monitoramento (push diário 19h):*\n"
     "• `/lista` — todos os processos monitorados (escritório + avulsos).\n"
+    "• `/add <cnj>` — adiciona um CNJ avulso (fora da carteira do escritório).\n"
     "• `/silenciar <cnj>` · `/ativar <cnj>` — controla o push individualmente.\n"
     "• `/silenciados` — lista só os que estão silenciados.\n"
     "• `/cancelar` — aborta um cadastro em andamento.\n\n"
@@ -1081,26 +1079,28 @@ def create_dispatcher() -> Dispatcher:
         else:
             await msg.answer("❌ Sem sessão ativa. Envie um CNJ para iniciar o login.")
 
-    @dp.message(Command("buscar"))
-    async def cmd_buscar(msg: Message, command: CommandObject) -> None:
-        if not _allowed(msg.from_user.id):
-            return
-        cnj = _extract_cnj(command.args or "")
-        if not cnj:
-            await msg.answer("Formato inválido. Ex: `0001234-56.2023.8.26.0100` ou os 20 dígitos corridos.", parse_mode="Markdown")
-            return
-        await _run_lookup(msg.bot, msg.chat.id, cnj)
-
     @dp.message(Command("busca"))
     async def cmd_busca(msg: Message, command: CommandObject) -> None:
+        """`/busca <cnj>` busca andamentos no jus.br. Aceita CNJ formatado OU 20
+        dígitos corridos. (Listar processos cadastrados: use `/lista`.)"""
         if not _allowed(msg.from_user.id):
             return
-        termo = (command.args or "").strip()
-        # /busca sem termo → lista todos os clientes; com termo → busca parcial
-        if termo and len(termo) < 2:
-            await msg.answer("Digite ao menos 2 letras, ou só `/busca` para listar todos.", parse_mode="Markdown")
+        arg = (command.args or "").strip()
+        if not arg:
+            await msg.answer(
+                "Use `/busca <cnj>` (formatado ou 20 dígitos).\n"
+                "Pra listar todos os processos cadastrados: `/lista`.",
+                parse_mode="Markdown",
+            )
             return
-        await _busca_clientes(msg.bot, msg.chat.id, termo)
+        cnj = _extract_cnj(arg)
+        if not cnj:
+            await msg.answer(
+                "Não reconheci como CNJ. Ex: `0001234-56.2023.8.26.0100` ou 20 dígitos corridos.",
+                parse_mode="Markdown",
+            )
+            return
+        await _run_lookup(msg.bot, msg.chat.id, cnj)
 
     @dp.message(Command("chatid"))
     async def cmd_chatid(msg: Message) -> None:
@@ -1258,6 +1258,17 @@ def create_dispatcher() -> Dispatcher:
                     await _iniciar_add(msg.bot, chat_id, pendente.removeprefix("__addcnj__"))
                 else:
                     await _run_lookup(msg.bot, chat_id, pendente)
+            return
+
+        # Texto não reconhecido. Se tem MUITOS dígitos, dica de CNJ.
+        import re as _re
+        n_digits = len(_re.findall(r"\d", text))
+        if n_digits >= 12:
+            await msg.answer(
+                f"Não reconheci como CNJ ({n_digits} dígitos detectados; CNJ tem 20). "
+                "Confere o número, ou tente colar formatado: `NNNNNNN-DD.AAAA.J.TT.OOOO`.",
+                parse_mode="Markdown",
+            )
 
     @dp.callback_query(F.data.startswith("acli:"))
     async def cb_cliente(query: CallbackQuery) -> None:
@@ -1463,13 +1474,12 @@ def create_dispatcher() -> Dispatcher:
 
 
 _BOT_COMMANDS = [
-    ("buscar", "Buscar andamentos por CNJ (formatado ou 20 dígitos)"),
-    ("busca", "Buscar clientes do lexops (sem termo lista todos)"),
-    ("add", "Adicionar um CNJ avulso ao monitoramento"),
+    ("busca", "Buscar andamentos por CNJ (formatado ou 20 dígitos)"),
     ("lista", "Listar todos os processos monitorados"),
-    ("silenciados", "Ver só os processos com push desligado"),
+    ("add", "Adicionar um CNJ avulso ao monitoramento"),
     ("silenciar", "Silenciar push diário de um CNJ"),
     ("ativar", "Reativar push diário de um CNJ"),
+    ("silenciados", "Ver só os processos com push desligado"),
     ("login", "Revalidar o acesso jus.br (gov.br)"),
     ("sessao", "Status da sessão jus.br"),
     ("chatid", "Mostra o id do chat atual (setup do grupo)"),
