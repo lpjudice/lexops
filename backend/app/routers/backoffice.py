@@ -2,7 +2,15 @@
 from __future__ import annotations
 
 import uuid
+import calendar
 from datetime import date, datetime, timezone, timedelta
+
+
+def _fim_do_mes(mes: str) -> str:
+    """Devolve o último dia do mês YYYY-MM como YYYY-MM-DD (respeita mês curto/bissexto)."""
+    ano, m = int(mes[:4]), int(mes[5:7])
+    ultimo = calendar.monthrange(ano, m)[1]
+    return f"{mes}-{ultimo:02d}"
 from typing import Any
 
 import base64
@@ -81,7 +89,7 @@ def _entrada(mes: str, mes_obj: FiscalMes, db: Session) -> EntradaMes:
         .join(Reembolso, ItemReembolso.reembolso_id == Reembolso.id)
         .filter(
             Reembolso.status == "cancelado",
-            ItemReembolso.data.between(f"{mes}-01", f"{mes}-31"),
+            ItemReembolso.data.between(f"{mes}-01", _fim_do_mes(mes)),
         )
         .all()
     )
@@ -266,7 +274,7 @@ def get_lancamentos(mes: str, _=Depends(get_current_user), db: Session = Depends
     itens_reemb = (
         db.query(ItemReembolso, Reembolso)
         .join(Reembolso, ItemReembolso.reembolso_id == Reembolso.id)
-        .filter(ItemReembolso.data.between(f"{mes}-01", f"{mes}-31"))
+        .filter(ItemReembolso.data.between(f"{mes}-01", _fim_do_mes(mes)))
         .order_by(Reembolso.id, ItemReembolso.data)
         .all()
     )
