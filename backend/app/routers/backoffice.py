@@ -800,7 +800,9 @@ Formato de cada item:
 {"fornecedor":"...","valor":NNNN.NN,"data":"YYYY-MM-DD","descricao":"...","categoria":"..."}"""
 
 
-@router.post("/despesas/parse-extrato")
+# NOTA: caminho fora de "/despesas/..." para não colidir com POST /despesas/{mes} (add_despesa),
+# que é registrado antes e capturaria "parse-extrato" como se fosse um mês.
+@router.post("/extrato/parse")
 async def parse_extrato(
     file: UploadFile = File(...),
     _=Depends(get_current_user),
@@ -879,7 +881,8 @@ async def parse_extrato(
 from fastapi import File, Form, UploadFile
 
 
-@router.post("/despesas/upload-comprovante")
+# NOTA: fora de "/despesas/..." para não colidir com POST /despesas/{mes}.
+@router.post("/comprovante/upload")
 async def upload_comprovante(
     file: UploadFile = File(...),
     mes: str = Form(...),

@@ -160,7 +160,7 @@ export const backofficeApi = {
     const fd = new FormData()
     fd.append('file', file)
     const token = localStorage.getItem('gestor_jwt')
-    const resp = await fetch('/api/backoffice/despesas/parse-extrato', {
+    const resp = await fetch('/api/backoffice/extrato/parse', {
       method: 'POST',
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: fd,
@@ -182,7 +182,7 @@ export const backofficeApi = {
     form.append('file', file)
     form.append('mes', mes)
     const token = localStorage.getItem('gestor_jwt')
-    const resp = await fetch('/api/backoffice/despesas/upload-comprovante', {
+    const resp = await fetch('/api/backoffice/comprovante/upload', {
       method: 'POST',
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: form,
