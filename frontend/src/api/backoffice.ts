@@ -49,6 +49,8 @@ export interface Despesa {
   cliente_nome?: string | null
   drive_link?: string | null
   criado_por_nome?: string | null
+  reembolso_ids?: string[]
+  reembolsos_vinculados?: { id: string; titulo: string; cliente_nome: string | null }[]
 }
 
 export interface ReembolsoGrupo {

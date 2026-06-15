@@ -9,7 +9,15 @@ import {
   type ParsedExpense,
   type ParsedEntrada,
 } from '../api/backoffice'
+import { reembolsosApi } from '../api/reembolsos'
+import { clientesApi } from '../api/clientes'
 import styles from './Page.module.css'
+
+// Categorias que disparam o vínculo com reembolso (despesa paga em nome do cliente)
+function ehReembolsavel(categoria: string): boolean {
+  const c = (categoria || '').toLowerCase()
+  return c.includes('reembols') || c.includes('cliente')
+}
 
 function fmtBRL(v: number) {
   return (v ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -551,6 +559,120 @@ function FormNovaDespesa({
   )
 }
 
+// ─── Vínculo de pagamento a reembolso(s) — N:N informativo ─────────────────────
+
+function VincularReembolso({
+  value,
+  onChange,
+}: {
+  value: string[]
+  onChange: (ids: string[]) => void
+}) {
+  const qc = useQueryClient()
+  const { data: reembolsos = [] } = useQuery({
+    queryKey: ['reembolsos'],
+    queryFn: () => reembolsosApi.listar(),
+  })
+  const { data: clientes = [] } = useQuery({
+    queryKey: ['clientes'],
+    queryFn: () => clientesApi.listar(),
+  })
+  const cliNome = (id: string) => clientes.find(c => c.id === id)?.nome ?? '—'
+  const reembMap = Object.fromEntries(reembolsos.map(r => [r.id, r]))
+
+  const [criando, setCriando] = useState(false)
+  const [novoCliente, setNovoCliente] = useState('')   // nome digitado/selecionado
+  const [novoClienteId, setNovoClienteId] = useState('')
+  const [novoTitulo, setNovoTitulo] = useState('')
+
+  const criar = useMutation({
+    mutationFn: () => reembolsosApi.criar({
+      cliente_id: novoClienteId,
+      titulo: novoTitulo.trim(),
+      data_emissao: new Date().toISOString().slice(0, 10),
+    }),
+    onSuccess: (novo) => {
+      qc.invalidateQueries({ queryKey: ['reembolsos'] })
+      onChange([...value, novo.id])
+      setCriando(false); setNovoCliente(''); setNovoClienteId(''); setNovoTitulo('')
+    },
+    onError: (e: any) => alert(`Erro ao criar reembolso: ${e?.response?.data?.detail || e?.message}`),
+  })
+
+  // Reembolsos disponíveis (abertos) que ainda não estão vinculados a esta linha
+  const disponiveis = reembolsos
+    .filter(r => r.status !== 'pago' && r.status !== 'cancelado' && !value.includes(r.id))
+    .map(r => ({ value: r.id, label: `${cliNome(r.cliente_id)} — ${r.titulo}` }))
+
+  return (
+    <div style={{ gridColumn: '1 / -1', padding: '8px 10px 4px 34px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ fontSize: 11, color: '#92400e', fontWeight: 600 }}>
+        🔗 Vincular a reembolso(s) — a quais clientes esse adiantamento se refere?
+      </div>
+
+      {/* Chips dos vinculados */}
+      {value.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {value.map(id => {
+            const r = reembMap[id]
+            return (
+              <span key={id} style={{ fontSize: 11, background: '#e0e7ff', color: '#3730a3', padding: '2px 8px', borderRadius: 999, fontWeight: 600, display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                {r ? `${cliNome(r.cliente_id)} — ${r.titulo}` : id.slice(0, 8)}
+                <span style={{ cursor: 'pointer' }} onClick={() => onChange(value.filter(x => x !== id))}>×</span>
+              </span>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Adicionar existente — Combobox devolve o label; mapeamos de volta ao id */}
+      <div style={{ maxWidth: 360 }}>
+        <Combobox
+          value=""
+          onChange={(label) => {
+            const opt = disponiveis.find(o => o.label === label)
+            if (opt && !value.includes(opt.value)) onChange([...value, opt.value])
+          }}
+          options={disponiveis}
+          placeholder="+ vincular reembolso existente…"
+        />
+      </div>
+
+      {/* Criar novo inline */}
+      {!criando ? (
+        <button type="button" className={styles.btnSmall} style={{ alignSelf: 'flex-start' }} onClick={() => setCriando(true)}>
+          + Novo reembolso
+        </button>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto auto', gap: 6, alignItems: 'center', maxWidth: 540 }}>
+          <Combobox
+            value={novoCliente}
+            onChange={(nome) => {
+              setNovoCliente(nome)
+              const c = clientes.find(x => x.nome === nome)
+              setNovoClienteId(c?.id ?? '')
+            }}
+            options={clientes.map(c => ({ value: c.id, label: c.nome }))}
+            placeholder="Cliente"
+          />
+          <input
+            value={novoTitulo}
+            onChange={e => setNovoTitulo(e.target.value)}
+            placeholder="Título (ex.: Certidões ONR)"
+            style={{ padding: '7px 10px', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 12, fontFamily: 'Archivo, sans-serif' }}
+          />
+          <button type="button" className={styles.btnPrimary} style={{ padding: '5px 12px', fontSize: 12 }}
+            disabled={!novoClienteId || !novoTitulo.trim() || criar.isPending}
+            onClick={() => criar.mutate()}>
+            {criar.isPending ? '…' : 'Criar'}
+          </button>
+          <button type="button" className={styles.btnSmall} style={{ fontSize: 12 }} onClick={() => setCriando(false)}>Cancelar</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Upload de extrato bancário ────────────────────────────────────────────────
 
 function SecaoExtrato({
@@ -566,7 +688,7 @@ function SecaoExtrato({
 }) {
   const qc = useQueryClient()
   const fileRef = useRef<HTMLInputElement>(null)
-  const [linhas, setLinhas] = useState<(ParsedExpense & { selecionado: boolean; elegivel: boolean })[]>([])
+  const [linhas, setLinhas] = useState<(ParsedExpense & { selecionado: boolean; elegivel: boolean; reembolso_ids?: string[] })[]>([])
   const [entradas, setEntradas] = useState<(ParsedEntrada & { selecionado: boolean })[]>([])
   const [parsing, setParsing] = useState(false)
   const [parseErr, setParseErr] = useState<string | null>(null)
@@ -612,6 +734,7 @@ function SecaoExtrato({
           data: l.data,  // cada despesa vai para o mês da sua própria data
           tem_nota: false,
           elegivel: l.elegivel,
+          reembolso_ids: l.reembolso_ids && l.reembolso_ids.length ? l.reembolso_ids : undefined,
         })))
       }
       // Entradas selecionadas → fila de sugestões de NF
@@ -691,14 +814,16 @@ function SecaoExtrato({
             {linhas.length} saída(s) detectada(s) — revise e confirme:
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {linhas.map((l, i) => (
+            {linhas.map((l, i) => {
+              const reembolsavel = ehReembolsavel(l.categoria)
+              return (
               <div
                 key={i}
                 style={{
                   display: 'grid', gridTemplateColumns: '24px 1fr 1fr 100px 80px 80px',
                   gap: 8, alignItems: 'center', padding: '8px 12px',
-                  background: l.selecionado ? '#f0fdf4' : '#f9fafb',
-                  borderRadius: 6, border: '1px solid #e5e7eb',
+                  background: l.selecionado ? (reembolsavel ? '#fffbeb' : '#f0fdf4') : '#f9fafb',
+                  borderRadius: 6, border: `1px solid ${reembolsavel && l.selecionado ? '#fde68a' : '#e5e7eb'}`,
                 }}
               >
                 <input
@@ -713,7 +838,11 @@ function SecaoExtrato({
                 />
                 <Combobox
                   value={l.categoria}
-                  onChange={c => setLinhas(prev => prev.map((x, j) => j === i ? { ...x, categoria: c } : x))}
+                  onChange={c => setLinhas(prev => prev.map((x, j) => j === i ? {
+                    ...x, categoria: c,
+                    // reembolsável é pass-through → não elegível por padrão
+                    elegivel: ehReembolsavel(c) ? false : x.elegivel,
+                  } : x))}
                   options={allCats.map(c => ({ value: c, label: c }))}
                   placeholder="Categoria"
                   onCreate={c => setLinhas(prev => prev.map((x, j) => j === i ? { ...x, categoria: c } : x))}
@@ -732,8 +861,14 @@ function SecaoExtrato({
                   />
                   Elegível
                 </label>
+                {reembolsavel && l.selecionado && (
+                  <VincularReembolso
+                    value={l.reembolso_ids ?? []}
+                    onChange={(ids) => setLinhas(prev => prev.map((x, j) => j === i ? { ...x, reembolso_ids: ids } : x))}
+                  />
+                )}
               </div>
-            ))}
+            )})}
           </div>
         </div>
       )}
@@ -1073,6 +1208,16 @@ function LinhaDespesa({
         {d.criado_por_nome && (
           <span style={{ marginLeft: 6, fontSize: 9, background: '#f3f4f6', color: '#6b7280', padding: '1px 6px', borderRadius: 999, fontWeight: 600 }} title="Cadastrado por">
             {d.criado_por_nome.split(' ')[0]}
+          </span>
+        )}
+        {(d.reembolsos_vinculados?.length ?? 0) > 0 && (
+          <span
+            style={{ marginLeft: 6, fontSize: 9, background: '#e0e7ff', color: '#3730a3', padding: '1px 6px', borderRadius: 999, fontWeight: 600 }}
+            title={d.reembolsos_vinculados!.map(r => `${r.cliente_nome ?? '—'} — ${r.titulo}`).join('\n')}
+          >
+            🔗 {d.reembolsos_vinculados!.length === 1
+              ? `${d.reembolsos_vinculados![0].cliente_nome ?? d.reembolsos_vinculados![0].titulo}`
+              : `${d.reembolsos_vinculados!.length} reembolsos`}
           </span>
         )}
       </td>

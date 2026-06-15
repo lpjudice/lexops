@@ -243,6 +243,31 @@ def get_lancamentos(mes: str, _=Depends(get_current_user), db: Session = Depends
         for u in db.query(_U).filter(_U.id.in_(user_ids)).all():
             users_map[u.id] = u.nome
 
+    # Resumo dos reembolsos vinculados (chip "🔗 Reembolso: Cliente X") — N:N informativo
+    from app.models.cliente import Cliente as _Cli
+    vinc_ids = {rid for d in despesas for rid in (d.reembolso_ids or [])}
+    reemb_resumo: dict[str, dict] = {}
+    if vinc_ids:
+        import uuid as _uuid
+        ids_uuid = []
+        for rid in vinc_ids:
+            try:
+                ids_uuid.append(_uuid.UUID(rid))
+            except (ValueError, AttributeError):
+                pass
+        if ids_uuid:
+            rows = (
+                db.query(Reembolso, _Cli.nome)
+                .outerjoin(_Cli, Reembolso.cliente_id == _Cli.id)
+                .filter(Reembolso.id.in_(ids_uuid))
+                .all()
+            )
+            for r, cli_nome in rows:
+                reemb_resumo[str(r.id)] = {"id": str(r.id), "titulo": r.titulo, "cliente_nome": cli_nome}
+
+    def _vinculados(d: FiscalDespesa) -> list[dict]:
+        return [reemb_resumo[rid] for rid in (d.reembolso_ids or []) if rid in reemb_resumo]
+
     despesas_resp = [
         {
             "id": str(d.id),
@@ -266,6 +291,7 @@ def get_lancamentos(mes: str, _=Depends(get_current_user), db: Session = Depends
             "drive_link": d.drive_link,
             "criado_por_nome": users_map.get(d.criado_por_id),
             "reembolso_ids": d.reembolso_ids or [],
+            "reembolsos_vinculados": _vinculados(d),
         }
         for d in despesas
     ]
@@ -744,6 +770,7 @@ class DespesaBatchItem(BaseModel):
     elegivel: bool = False
     base_legal: str = "LC 214/2025"
     status: str = "novo"
+    reembolso_ids: list[str] | None = None  # vínculo N:N informativo
 
 
 @router.post("/despesas/batch/{mes}")
