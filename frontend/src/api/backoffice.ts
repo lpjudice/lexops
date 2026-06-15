@@ -157,10 +157,10 @@ export const backofficeApi = {
   parseExtrato: (file: File) => {
     const fd = new FormData()
     fd.append('file', file)
+    // NÃO setar Content-Type manualmente — o browser gera "multipart/form-data; boundary=…"
+    // automaticamente. Setar manual remove o boundary e quebra o parse no backend.
     return api.post<{ linhas: ParsedExpense[]; total?: number }>('/backoffice/despesas/parse-extrato', fd, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      // Sonnet pode demorar 30-90s em PDFs com várias páginas
-      timeout: 120_000,
+      timeout: 120_000,  // Sonnet pode demorar 30-90s em PDFs multi-página
     }).then(r => r.data)
   },
 
@@ -170,10 +170,11 @@ export const backofficeApi = {
     const form = new FormData()
     form.append('file', file)
     form.append('mes', mes)
+    // Sem Content-Type manual — browser seta com boundary correto
     const r = await api.post<{ link: string; filename: string }>(
       '/backoffice/despesas/upload-comprovante',
       form,
-      { headers: { 'Content-Type': 'multipart/form-data' } },
+      { timeout: 60_000 },
     )
     return r.data
   },
