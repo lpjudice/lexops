@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Enum, ForeignKey, Numeric, String, Text, func
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -31,6 +31,11 @@ class Reembolso(Base):
         nullable=False,
         default="rascunho",
     )
+
+    # Decisão EXPLÍCITA de perda: o adiantamento não será cobrado do cliente e vira
+    # despesa/perda real do escritório (com crédito IBS/CBS se elegível). Marcado a partir
+    # do rascunho. NÃO confundir com status="cancelado" (que é erro de cadastro refeito).
+    tratar_como_perda: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Caminho do PDF gerado (armazenado localmente)
     pdf_path: Mapped[str | None] = mapped_column(String(500))

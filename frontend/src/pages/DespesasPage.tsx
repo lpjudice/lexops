@@ -1140,8 +1140,8 @@ function TabelaDespesas({ mes }: { mes: string }) {
       </div>
       {grupos.length > 0 && (
         <div style={{ padding: '0 18px 8px', fontSize: 11, color: 'var(--gray-mid)' }}>
-          🔗 Reembolsos aparecem agrupados por pasta (1 card de reembolso = 1 grupo). Clique na seta para expandir.
-          <strong> Cancelados</strong> viram despesa real; demais status não geram crédito (apenas referência).
+          🔗 Apenas reembolsos marcados como <strong>PERDA</strong> aparecem aqui (viram despesa real com crédito).
+          Reembolsos normais ficam só na aba Reembolsos — não duplicam com os pagamentos do extrato.
         </div>
       )}
       {linhasManuais.length === 0 && grupos.length === 0 ? (

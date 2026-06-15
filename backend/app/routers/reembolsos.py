@@ -374,7 +374,15 @@ def atualizar_reembolso(
     r = db.query(Reembolso).filter(Reembolso.id == reembolso_id).first()
     if not r:
         raise HTTPException(status_code=404, detail="Reembolso não encontrado")
-    for field, value in data.model_dump(exclude_unset=True).items():
+    campos = data.model_dump(exclude_unset=True)
+    # "Tratar como perda" só pode ser ativado a partir do rascunho (decisão consciente,
+    # antes de cobrar). Status diferente de rascunho não pode virar perda.
+    if campos.get("tratar_como_perda") is True and r.status != "rascunho":
+        raise HTTPException(
+            status_code=400,
+            detail="Só é possível tratar como perda enquanto o reembolso está em rascunho.",
+        )
+    for field, value in campos.items():
         setattr(r, field, value)
     db.commit()
     db.refresh(r)

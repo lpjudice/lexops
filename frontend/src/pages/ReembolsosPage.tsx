@@ -192,6 +192,13 @@ export default function ReembolsosPage() {
     onError: (e: any) => alert(`Erro ao cancelar: ${e?.response?.data?.detail || e?.message}`),
   })
 
+  const togglePerda = useMutation({
+    mutationFn: ({ id, valor }: { id: string; valor: boolean }) =>
+      reembolsosApi.atualizar(id, { tratar_como_perda: valor }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['reembolsos'] }),
+    onError: (e: any) => alert(`Erro: ${e?.response?.data?.detail || e?.message}`),
+  })
+
   const handleCancelarEDuplicar = async (id: string) => {
     if (!confirm('Cancelar esta nota e criar uma cópia em rascunho?')) return
     setCancelDupPending(id)
@@ -371,6 +378,11 @@ export default function ReembolsosPage() {
                   <span className={`${cs.statusBadge} ${cs[`status_${r.status}`]}`}>
                     {STATUS_LABEL[r.status]}
                   </span>
+                  {r.tratar_como_perda && (
+                    <span style={{ fontSize: 10, background: '#fee2e2', color: '#b91c1c', padding: '2px 8px', borderRadius: 999, fontWeight: 700, letterSpacing: '.04em' }}>
+                      PERDA
+                    </span>
+                  )}
                   <button
                     className={cs.btnExpand}
                     onClick={() => setExpandido(expandido === r.id ? null : r.id)}
@@ -620,6 +632,29 @@ export default function ReembolsosPage() {
                   {/* Ações */}
                   <div>
                     <div className={cs.sectionTitle}>Ações</div>
+
+                    {/* Tratar como perda — só no rascunho. Vira despesa/perda real no Backoffice. */}
+                    {r.status === 'rascunho' && (
+                      <div style={{ marginBottom: 12, padding: '10px 12px', background: r.tratar_como_perda ? '#fef2f2' : '#f9fafb', border: `1px solid ${r.tratar_como_perda ? '#fecaca' : '#e5e7eb'}`, borderRadius: 8 }}>
+                        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', cursor: 'pointer', fontSize: 13 }}>
+                          <input
+                            type="checkbox"
+                            checked={!!r.tratar_como_perda}
+                            disabled={togglePerda.isPending}
+                            onChange={(e) => togglePerda.mutate({ id: r.id, valor: e.target.checked })}
+                            style={{ marginTop: 2 }}
+                          />
+                          <span>
+                            <strong>Tratar como perda</strong> — o cliente não vai reembolsar; este adiantamento
+                            vira <strong>despesa/perda do escritório</strong> nos lançamentos do Backoffice (gera crédito IBS/CBS se houver documento).
+                            <span style={{ display: 'block', color: 'var(--gray-mid)', fontSize: 11, marginTop: 2 }}>
+                              Use só quando desistir de cobrar. Enquanto for ajuste ou for cobrar depois, deixe desmarcado.
+                            </span>
+                          </span>
+                        </label>
+                      </div>
+                    )}
+
                     <div className={cs.acoes}>
                       {r.itens.length > 0 && r.status !== 'cancelado' && (
                         <button

@@ -4,7 +4,7 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -98,6 +98,9 @@ class FiscalDespesa(Base):
     regra_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("regra_credito.id"), nullable=True)
     criado_por_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     drive_link: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    # Vínculo informativo N:N: IDs de reembolsos que este pagamento cobre (ex.: 1 PIX ao ONR
+    # cobre certidões de vários clientes). Apenas rastreio — não soma valores.
+    reembolso_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -131,6 +134,28 @@ class FiscalReceita(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     fiscal_mes_rel: Mapped[FiscalMes] = relationship(back_populates="receitas")
+
+
+class NotaFiscalSugestao(Base):
+    """Entrada do extrato bancário sugerida para emissão de NF (fila de trabalho).
+    O usuário emite (vira NotaFiscal) ou ignora (ex.: cliente devolvendo reembolso)."""
+    __tablename__ = "nf_sugestoes"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    data: Mapped[date | None] = mapped_column(Date, nullable=True)
+    competencia: Mapped[str | None] = mapped_column(String(7), nullable=True)  # YYYY-MM
+    pagador: Mapped[str] = mapped_column(String(200), nullable=False)
+    valor: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    descricao: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # receita | reembolso_recebido | outro
+    tipo_sugerido: Mapped[str] = mapped_column(String(30), default="receita")
+    # pendente | emitida | ignorada
+    status: Mapped[str] = mapped_column(String(20), default="pendente")
+    nota_fiscal_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    cliente_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class FiscalFornecedor(Base):

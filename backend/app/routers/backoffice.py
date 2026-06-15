@@ -83,12 +83,13 @@ def _entrada(mes: str, mes_obj: FiscalMes, db: Session) -> EntradaMes:
     despesas_total = sum(float(d.valor) for d in despesas)
     despesas_elegiveis = sum(float(d.valor) for d in despesas if d.tem_nota and d.elegivel)
 
-    # Reembolsos cancelados = perda real = entram como despesa para a decisão tributária
+    # Só reembolsos marcados EXPLICITAMENTE como perda entram como despesa (decisão tributária).
+    # "cancelado" é erro de cadastro refeito, não perda — não conta mais aqui.
     perdas_reemb = (
         db.query(ItemReembolso)
         .join(Reembolso, ItemReembolso.reembolso_id == Reembolso.id)
         .filter(
-            Reembolso.status == "cancelado",
+            Reembolso.tratar_como_perda.is_(True),
             ItemReembolso.data.between(f"{mes}-01", _fim_do_mes(mes)),
         )
         .all()
@@ -264,17 +265,20 @@ def get_lancamentos(mes: str, _=Depends(get_current_user), db: Session = Depends
             "cliente_nome": None,
             "drive_link": d.drive_link,
             "criado_por_nome": users_map.get(d.criado_por_id),
+            "reembolso_ids": d.reembolso_ids or [],
         }
         for d in despesas
     ]
 
-    # Reembolsos: agrupar por reembolso_id (pasta = card de reembolso).
-    # Cancelado = "perda" → entra na linha-pai do grupo com flag de crédito.
-    # Demais status → grupo "em trânsito" só para visualização (sem crédito).
+    # Só reembolsos marcados como PERDA aparecem nas despesas (com crédito). Em-trânsito
+    # (rascunho/enviado/pago) NÃO entram — antes duplicavam com os pagamentos do extrato.
     itens_reemb = (
         db.query(ItemReembolso, Reembolso)
         .join(Reembolso, ItemReembolso.reembolso_id == Reembolso.id)
-        .filter(ItemReembolso.data.between(f"{mes}-01", _fim_do_mes(mes)))
+        .filter(
+            Reembolso.tratar_como_perda.is_(True),
+            ItemReembolso.data.between(f"{mes}-01", _fim_do_mes(mes)),
+        )
         .order_by(Reembolso.id, ItemReembolso.data)
         .all()
     )
@@ -285,20 +289,14 @@ def get_lancamentos(mes: str, _=Depends(get_current_user), db: Session = Depends
 
     grupos: dict[uuid.UUID, dict] = {}
     for item, reemb in itens_reemb:
-        is_perda = reemb.status == "cancelado"
         valor_f = float(item.valor)
-        if is_perda:
-            tem_nota_v = bool(item.documento_comprobatorio or item.comprovante_path)
-            elegivel_v = True
-            ibs = valor_f * premissas.ibs_entrada_pct / 100 * fator_global if elegivel_v and tem_nota_v else 0
-            cbs = valor_f * premissas.cbs_entrada_pct / 100 * fator_global if elegivel_v and tem_nota_v else 0
-            credito = {"ibs": round(ibs, 2), "cbs": round(cbs, 2), "total": round(ibs + cbs, 2)}
-            alq_iva = aliq_efetiva_pct if (elegivel_v and tem_nota_v) else 0
-        else:
-            tem_nota_v = False
-            elegivel_v = False
-            credito = {"ibs": 0.0, "cbs": 0.0, "total": 0.0}
-            alq_iva = 0
+        # Todos aqui são perda (filtro acima) → geram crédito se houver documento
+        tem_nota_v = bool(item.documento_comprobatorio or item.comprovante_path)
+        elegivel_v = True
+        ibs = valor_f * premissas.ibs_entrada_pct / 100 * fator_global if elegivel_v and tem_nota_v else 0
+        cbs = valor_f * premissas.cbs_entrada_pct / 100 * fator_global if elegivel_v and tem_nota_v else 0
+        credito = {"ibs": round(ibs, 2), "cbs": round(cbs, 2), "total": round(ibs + cbs, 2)}
+        alq_iva = aliq_efetiva_pct if (elegivel_v and tem_nota_v) else 0
 
         child = {
             "id": f"reemb:{item.id}",
@@ -309,8 +307,8 @@ def get_lancamentos(mes: str, _=Depends(get_current_user), db: Session = Depends
             "data": item.data.isoformat() if item.data else None,
             "tem_nota": tem_nota_v,
             "elegivel": elegivel_v,
-            "base_legal": "Reembolso cancelado (perda)" if is_perda else "Reembolso em trânsito",
-            "status": "perda" if is_perda else "transito",
+            "base_legal": "Reembolso tratado como perda",
+            "status": "perda",
             "last_check": None,
             "credito": credito,
             "alq_iva_pct": alq_iva,
@@ -449,7 +447,7 @@ def patch_despesa(id: uuid.UUID, body: dict, _=Depends(get_current_user), db: Se
     d = db.get(FiscalDespesa, id)
     if not d:
         raise HTTPException(404, "Despesa não encontrada")
-    allowed = {"categoria", "fornecedor", "descricao", "valor", "data", "tem_nota", "elegivel", "base_legal", "status", "drive_link"}
+    allowed = {"categoria", "fornecedor", "descricao", "valor", "data", "tem_nota", "elegivel", "base_legal", "status", "drive_link", "reembolso_ids"}
     for k, v in body.items():
         if k in allowed:
             # Se a data muda, ajusta o mês

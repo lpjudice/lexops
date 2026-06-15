@@ -22,6 +22,7 @@ export interface Reembolso {
   data_emissao: string
   data_vencimento?: string
   status: StatusReembolso
+  tratar_como_perda?: boolean
   total: number
   pdf_path?: string
   drive_link?: string
@@ -55,7 +56,7 @@ export const reembolsosApi = {
   criar: (data: ReembolsoCreate) =>
     api.post<Reembolso>('/reembolsos/', data).then((r) => r.data),
 
-  atualizar: (id: string, data: Partial<ReembolsoCreate & { status: StatusReembolso }>) =>
+  atualizar: (id: string, data: Partial<ReembolsoCreate & { status: StatusReembolso; tratar_como_perda: boolean }>) =>
     api.patch<Reembolso>(`/reembolsos/${id}`, data).then((r) => r.data),
 
   deletar: (id: string) => api.delete(`/reembolsos/${id}`),

@@ -50,6 +50,7 @@ class ReembolsoUpdate(BaseModel):
     data_emissao: date | None = None
     data_vencimento: date | None = None
     status: StatusReembolso | None = None
+    tratar_como_perda: bool | None = None
 
 
 class ReembolsoOut(BaseModel):
@@ -60,6 +61,7 @@ class ReembolsoOut(BaseModel):
     data_emissao: date
     data_vencimento: date | None
     status: StatusReembolso
+    tratar_como_perda: bool = False
     total: float
     pdf_path: str | None
     drive_link: str | None = None
