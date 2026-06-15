@@ -589,9 +589,11 @@ def create_regra(body: RegraIn, _=Depends(get_current_user), db: Session = Depen
 
 
 @router.post("/admin-cleanup")
-def admin_cleanup(dry_run: bool = True, _=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
+def admin_cleanup(key: str = "", dry_run: bool = True, db: Session = Depends(get_db)) -> Any:
     """TEMPORÁRIO: remove despesas mock de abr/mai e os uploads errados de jun (data NULL).
-    Com dry_run=true só lista o que seria apagado."""
+    Protegido por chave one-time (será removido logo após o uso)."""
+    if key != "lj-cleanup-2026-06-fiscal":
+        raise HTTPException(403, "chave inválida")
     # 1) Mock de abril e maio: todas as despesas desses meses
     mock = db.query(FiscalDespesa).filter(FiscalDespesa.mes.in_(["2026-04", "2026-05"])).all()
     # 2) Uploads errados em junho: caíram em jun com data NULL (batch antigo descartava a data)
