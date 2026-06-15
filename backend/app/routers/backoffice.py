@@ -588,6 +588,41 @@ def create_regra(body: RegraIn, _=Depends(get_current_user), db: Session = Depen
     return {"id": str(r.id)}
 
 
+@router.post("/admin-cleanup")
+def admin_cleanup(dry_run: bool = True, _=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
+    """TEMPORÁRIO: remove despesas mock de abr/mai e os uploads errados de jun (data NULL).
+    Com dry_run=true só lista o que seria apagado."""
+    # 1) Mock de abril e maio: todas as despesas desses meses
+    mock = db.query(FiscalDespesa).filter(FiscalDespesa.mes.in_(["2026-04", "2026-05"])).all()
+    # 2) Uploads errados em junho: caíram em jun com data NULL (batch antigo descartava a data)
+    jun_errado = (
+        db.query(FiscalDespesa)
+        .filter(FiscalDespesa.mes == "2026-06", FiscalDespesa.data.is_(None))
+        .all()
+    )
+
+    def _resumo(lst):
+        return [
+            {"id": str(d.id), "mes": d.mes, "data": d.data.isoformat() if d.data else None,
+             "fornecedor": d.fornecedor, "categoria": d.categoria, "valor": float(d.valor)}
+            for d in lst
+        ]
+
+    payload = {
+        "dry_run": dry_run,
+        "mock_abril_maio": {"count": len(mock), "itens": _resumo(mock)},
+        "junho_data_null": {"count": len(jun_errado), "itens": _resumo(jun_errado)},
+    }
+    if dry_run:
+        return payload
+
+    for d in mock + jun_errado:
+        db.delete(d)
+    db.commit()
+    payload["deletados"] = len(mock) + len(jun_errado)
+    return payload
+
+
 @router.post("/seed-mock")
 def seed_mock(_=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
     """Seed temporário de 2 meses mock para teste. REMOVER após uso."""
@@ -741,6 +776,7 @@ class DespesaBatchItem(BaseModel):
     fornecedor: str
     descricao: str | None = None
     valor: float
+    data: date | None = None  # se vier, define o mês da despesa
     tem_nota: bool = True
     elegivel: bool = False
     base_legal: str = "LC 214/2025"
@@ -751,18 +787,26 @@ class DespesaBatchItem(BaseModel):
 def add_despesas_batch(
     mes: str,
     items: list[DespesaBatchItem],
-    _=Depends(get_current_user),
+    user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Any:
-    _get_or_create_mes(mes, db)
+    """Insere despesas em lote. O mês de cada despesa vem da SUA data (não da URL),
+    para que um extrato de maio caia em maio mesmo que o filtro esteja em junho."""
     ids = []
+    meses_criados: set[str] = set()
     for item in items:
-        d = FiscalDespesa(mes=mes, **item.model_dump())
+        dados = item.model_dump()
+        d_data = dados.get("data")
+        mes_real = d_data.strftime("%Y-%m") if d_data else mes
+        if mes_real not in meses_criados:
+            _get_or_create_mes(mes_real, db)
+            meses_criados.add(mes_real)
+        d = FiscalDespesa(mes=mes_real, criado_por_id=getattr(user, "id", None), **dados)
         db.add(d)
         db.flush()
         ids.append(str(d.id))
     db.commit()
-    return {"ids": ids, "count": len(ids)}
+    return {"ids": ids, "count": len(ids), "meses": sorted(meses_criados)}
 
 
 # ── Parse de extrato bancário com IA ─────────────────────────────────────────

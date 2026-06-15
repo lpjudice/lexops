@@ -603,6 +603,7 @@ function SecaoExtrato({
         fornecedor: l.fornecedor,
         descricao: l.descricao,
         valor: l.valor,
+        data: l.data,  // cada despesa vai para o mês da sua própria data
         tem_nota: false,
         elegivel: l.elegivel,
       })))
