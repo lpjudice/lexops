@@ -815,13 +815,21 @@ from fastapi.responses import JSONResponse  # noqa: E402
 
 @app.exception_handler(RequestValidationError)
 async def _validation_handler(request, exc: RequestValidationError):
+    import logging as _lg
     safe_errors = []
     for err in exc.errors():
         e = dict(err)
         inp = e.get("input")
         if isinstance(inp, (bytes, bytearray)):
             e["input"] = f"<{len(inp)} bytes binários>"
+        # ctx pode conter exceções não serializáveis
+        if "ctx" in e and not isinstance(e["ctx"], (str, int, float, bool, type(None))):
+            e["ctx"] = str(e.get("ctx"))
         safe_errors.append(e)
+    _lg.getLogger("validation").warning(
+        "422 em %s — content-type=%s — erros=%s",
+        request.url.path, request.headers.get("content-type"), safe_errors,
+    )
     # Mensagem amigável quando o campo de arquivo não chegou (multipart malformado)
     faltou_arquivo = any(
         e.get("type") == "missing" and "file" in (e.get("loc") or [])

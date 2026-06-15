@@ -582,9 +582,12 @@ function SecaoExtrato({
     } catch (e: any) {
       const detail = e?.response?.data?.detail
       const status = e?.response?.status
+      const detailStr = typeof detail === 'string'
+        ? detail
+        : detail ? JSON.stringify(detail) : null
       setParseErr(
-        detail
-          ? `Erro ${status ?? ''}: ${detail}`
+        detailStr
+          ? `Erro ${status ?? ''}: ${detailStr}`
           : `Falha ao processar (${e?.message ?? 'erro desconhecido'}). Verifique se o PDF é legível.`
       )
     } finally {
