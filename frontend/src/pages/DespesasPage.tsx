@@ -574,9 +574,19 @@ function SecaoExtrato({
     setParsing(true); setParseErr(null); setLinhas([])
     try {
       const res = await backofficeApi.parseExtrato(file)
+      if (!res.linhas || res.linhas.length === 0) {
+        setParseErr('Nenhuma saída encontrada no extrato. Confira se o arquivo contém débitos/Pix enviados.')
+        return
+      }
       setLinhas(res.linhas.map(l => ({ ...l, selecionado: true, elegivel: false })))
-    } catch {
-      setParseErr('Falha ao processar o arquivo. Verifique se é uma imagem ou PDF legível.')
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail
+      const status = e?.response?.status
+      setParseErr(
+        detail
+          ? `Erro ${status ?? ''}: ${detail}`
+          : `Falha ao processar (${e?.message ?? 'erro desconhecido'}). Verifique se o PDF é legível.`
+      )
     } finally {
       setParsing(false)
     }

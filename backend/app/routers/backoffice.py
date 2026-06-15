@@ -760,17 +760,36 @@ def add_despesas_batch(
 # ── Parse de extrato bancário com IA ─────────────────────────────────────────
 
 _PARSE_PROMPT = """\
-Analise este extrato bancário e extraia as SAÍDAS (débitos/pagamentos efetuados).
-Para cada saída, retorne um JSON array com objetos contendo:
-- fornecedor: nome do destinatário/beneficiário (string, curto e legível)
-- valor: valor em reais (number, positivo)
-- data: data da transação no formato YYYY-MM-DD (string)
-- descricao: breve descrição complementar (string)
-- categoria: categoria sugerida (string — use uma destas: "Software jurídico", "Marketing / publicidade", "Correspondentes", "Aluguel", "Energia elétrica", "Telefonia", "Internet", "Contabilidade", "Despesas com clientes", "Material de escritório", "Outros")
+Você está analisando um extrato bancário de um ESCRITÓRIO DE ADVOCACIA.
+Extraia TODAS as SAÍDAS de dinheiro (débitos, "Pix enviado", "Pagamento efetuado",
+"TED enviada", tarifas relevantes).
 
-Ignore entradas (depósitos/recebimentos) e tarifa bancária que seja ínfima.
-Responda APENAS com o JSON array, sem texto adicional, markdown ou comentários.
-Exemplo: [{"fornecedor":"Vivo SA","valor":890.00,"data":"2026-04-05","descricao":"Fatura telefonia","categoria":"Telefonia"}]"""
+REGRAS:
+- IGNORE entradas (depósitos, "Pix recebido", crédito) — só saídas.
+- IGNORE saldos do dia (linhas "Saldo do dia") — não são transações.
+- IGNORE transferências para o próprio CNPJ/CPF do titular (pro-labore via Pix para o próprio sócio).
+- IGNORE estornos e movimentações puramente internas (saldo bloqueado etc).
+- Limpe o nome do fornecedor: remova "Cp :NNNNNNNN-" no início, remova ":", aspas, e o tipo
+  ("Pix enviado", "Pagamento efetuado"). Exemplo: 'Pix enviado: "Cp :28127603-TRIBUNAL DE JUSTICA..."'
+  vira fornecedor = "TRIBUNAL DE JUSTIÇA DO ES" (limpo, capitalizado, sem números de identificador).
+- O valor deve ser positivo (number), sem sinal de menos.
+- A data está no cabeçalho da seção do dia ("5 de Maio de 2026"). Use YYYY-MM-DD.
+
+Categorias possíveis (escolha a mais provável para um escritório de advocacia):
+"Software jurídico (SaaS)", "Marketing / publicidade", "Correspondentes / parceiros forenses",
+"Honorários periciais", "Honorários de outros advogados", "Aluguel comercial",
+"Condomínio comercial", "Energia elétrica", "Internet", "Telefonia fixa / móvel",
+"Material de escritório", "Contabilidade", "Despesas de clientes (reembolsáveis)",
+"Combustível", "Uber / táxi", "IPTU / IPVA / tributos", "Despesas pessoais",
+"Brindes / presentes", "Doações", "Refeições com clientes", "Outros".
+
+Para PIX a TRIBUNAL DE JUSTIÇA, custas processuais, ONR, SEFAZ, RECEITA FEDERAL, DGFIN →
+categoria "IPTU / IPVA / tributos" ou "Despesas de clientes (reembolsáveis)" conforme contexto.
+
+Retorne APENAS um JSON array. Sem markdown. Sem comentários. Sem texto antes/depois.
+
+Formato de cada item:
+{"fornecedor":"...","valor":NNNN.NN,"data":"YYYY-MM-DD","descricao":"...","categoria":"..."}"""
 
 
 @router.post("/despesas/parse-extrato")
@@ -778,14 +797,19 @@ async def parse_extrato(
     file: UploadFile = File(...),
     _=Depends(get_current_user),
 ) -> Any:
+    import logging
+    logger = logging.getLogger(__name__)
+
     content = await file.read()
-    b64 = base64.b64encode(content).decode()
+    if not content:
+        raise HTTPException(400, "Arquivo vazio")
+    if len(content) > 20 * 1024 * 1024:
+        raise HTTPException(413, "Arquivo muito grande (> 20MB). Divida o PDF em partes menores.")
+
     ct = (file.content_type or "").lower()
     filename = file.filename or ""
-
     is_pdf = ct == "application/pdf" or filename.lower().endswith(".pdf")
-
-    client = anthropic.Anthropic()
+    b64 = base64.b64encode(content).decode()
 
     if is_pdf:
         media_block = {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": b64}}
@@ -793,23 +817,53 @@ async def parse_extrato(
         media_type = ct if ct.startswith("image/") else "image/jpeg"
         media_block = {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}}
 
-    resp = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=2048,
-        messages=[{
-            "role": "user",
-            "content": [media_block, {"type": "text", "text": _PARSE_PROMPT}],
-        }],
-    )
+    client = anthropic.Anthropic()
+    try:
+        resp = client.messages.create(
+            # Sonnet é mais robusto que Haiku para PDFs com várias páginas
+            model="claude-sonnet-4-6",
+            max_tokens=8192,
+            messages=[{
+                "role": "user",
+                "content": [media_block, {"type": "text", "text": _PARSE_PROMPT}],
+            }],
+        )
+    except anthropic.BadRequestError as e:
+        logger.warning("parse_extrato BadRequestError: %s", e)
+        raise HTTPException(400, f"Claude recusou o arquivo: {str(e)[:200]}")
+    except anthropic.APIStatusError as e:
+        logger.warning("parse_extrato APIStatusError: %s", e)
+        raise HTTPException(502, f"Falha na API Claude ({e.status_code}): {str(e)[:200]}")
+    except Exception as e:
+        logger.exception("parse_extrato erro inesperado")
+        raise HTTPException(500, f"Erro inesperado: {type(e).__name__}: {str(e)[:200]}")
 
-    text = resp.content[0].text.strip()
+    text = (resp.content[0].text if resp.content else "").strip()
+    if not text:
+        raise HTTPException(502, "Claude retornou resposta vazia.")
+
     try:
         linhas = json.loads(text)
     except Exception:
         m = re.search(r"\[.*\]", text, re.DOTALL)
-        linhas = json.loads(m.group()) if m else []
+        if not m:
+            logger.warning("parse_extrato: sem JSON na resposta. Resposta: %s", text[:500])
+            raise HTTPException(
+                422,
+                f"Claude não retornou JSON. Possível causa: PDF sem texto extraível, "
+                f"resposta cortada (tokens), ou imagem sem OCR legível. Início da resposta: "
+                f"{text[:200]}"
+            )
+        try:
+            linhas = json.loads(m.group())
+        except Exception as e:
+            logger.warning("parse_extrato: JSON inválido. Erro: %s", e)
+            raise HTTPException(422, f"JSON inválido retornado por Claude: {e}")
 
-    return {"linhas": linhas}
+    if not isinstance(linhas, list):
+        raise HTTPException(422, "Resposta não é uma lista de despesas.")
+
+    return {"linhas": linhas, "total": len(linhas)}
 
 
 # ── Upload de comprovante para Drive ──────────────────────────────────────────

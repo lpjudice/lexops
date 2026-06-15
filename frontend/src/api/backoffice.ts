@@ -157,8 +157,10 @@ export const backofficeApi = {
   parseExtrato: (file: File) => {
     const fd = new FormData()
     fd.append('file', file)
-    return api.post<{ linhas: ParsedExpense[] }>('/backoffice/despesas/parse-extrato', fd, {
+    return api.post<{ linhas: ParsedExpense[]; total?: number }>('/backoffice/despesas/parse-extrato', fd, {
       headers: { 'Content-Type': 'multipart/form-data' },
+      // Sonnet pode demorar 30-90s em PDFs com várias páginas
+      timeout: 120_000,
     }).then(r => r.data)
   },
 
