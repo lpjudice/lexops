@@ -26,7 +26,7 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.backoffice import (
     DespesaRecorrente, FiscalDespesa, FiscalFolha, FiscalFornecedor,
-    FiscalMes, FiscalReceita, RegraCredito,
+    FiscalMes, FiscalReceita, NotaFiscalSugestao, RegraCredito,
 )
 from app.models.config_fiscal import ConfigFiscal
 from app.models.nota_fiscal import NotaFiscal
@@ -776,35 +776,41 @@ def add_despesas_batch(
 
 _PARSE_PROMPT = """\
 Você está analisando um extrato bancário de um ESCRITÓRIO DE ADVOCACIA.
-Extraia TODAS as SAÍDAS de dinheiro (débitos, "Pix enviado", "Pagamento efetuado",
-"TED enviada", tarifas relevantes).
+Extraia TANTO as SAÍDAS (débitos) QUANTO as ENTRADAS (créditos) de dinheiro.
 
-REGRAS:
-- IGNORE entradas (depósitos, "Pix recebido", crédito) — só saídas.
+REGRAS GERAIS:
 - IGNORE saldos do dia (linhas "Saldo do dia") — não são transações.
-- IGNORE transferências para o próprio CNPJ/CPF do titular (pro-labore via Pix para o próprio sócio).
+- IGNORE transferências entre contas do próprio titular (ex.: Pix para o próprio sócio = pro-labore;
+  cite na descrição mas marque categoria "Despesas pessoais" se for saída).
 - IGNORE estornos e movimentações puramente internas (saldo bloqueado etc).
-- Limpe o nome do fornecedor: remova "Cp :NNNNNNNN-" no início, remova ":", aspas, e o tipo
-  ("Pix enviado", "Pagamento efetuado"). Exemplo: 'Pix enviado: "Cp :28127603-TRIBUNAL DE JUSTICA..."'
-  vira fornecedor = "TRIBUNAL DE JUSTIÇA DO ES" (limpo, capitalizado, sem números de identificador).
-- O valor deve ser positivo (number), sem sinal de menos.
+- Limpe o nome: remova "Cp :NNNNNNNN-" no início, remova ":", aspas, e o tipo de transação.
+  Ex.: 'Pix enviado: "Cp :28127603-TRIBUNAL DE JUSTICA..."' → "TRIBUNAL DE JUSTIÇA DO ES".
+- Valores sempre positivos (number), sem sinal.
 - A data está no cabeçalho da seção do dia ("5 de Maio de 2026"). Use YYYY-MM-DD.
 
-Categorias possíveis (escolha a mais provável para um escritório de advocacia):
-"Software jurídico (SaaS)", "Marketing / publicidade", "Correspondentes / parceiros forenses",
-"Honorários periciais", "Honorários de outros advogados", "Aluguel comercial",
-"Condomínio comercial", "Energia elétrica", "Internet", "Telefonia fixa / móvel",
-"Material de escritório", "Contabilidade", "Despesas de clientes (reembolsáveis)",
-"Combustível", "Uber / táxi", "IPTU / IPVA / tributos", "Despesas pessoais",
-"Brindes / presentes", "Doações", "Refeições com clientes", "Outros".
+SAÍDAS (débitos, "Pix enviado", "Pagamento efetuado", "TED enviada", tarifas):
+Categorias possíveis: "Software jurídico (SaaS)", "Marketing / publicidade",
+"Correspondentes / parceiros forenses", "Honorários periciais", "Honorários de outros advogados",
+"Aluguel comercial", "Condomínio comercial", "Energia elétrica", "Internet",
+"Telefonia fixa / móvel", "Material de escritório", "Contabilidade",
+"Despesas de clientes (reembolsáveis)", "Combustível", "Uber / táxi",
+"IPTU / IPVA / tributos", "Despesas pessoais", "Brindes / presentes", "Doações",
+"Refeições com clientes", "Outros".
+PIX a TRIBUNAL, custas, ONR, SEFAZ, RECEITA FEDERAL, DGFIN → "IPTU / IPVA / tributos" ou
+"Despesas de clientes (reembolsáveis)" conforme contexto.
 
-Para PIX a TRIBUNAL DE JUSTIÇA, custas processuais, ONR, SEFAZ, RECEITA FEDERAL, DGFIN →
-categoria "IPTU / IPVA / tributos" ou "Despesas de clientes (reembolsáveis)" conforme contexto.
+ENTRADAS (créditos, "Pix recebido", "TED recebida", depósito):
+Para cada entrada classifique "tipo_sugerido":
+- "receita": parece honorário/pagamento de cliente por serviço → candidato a EMITIR NOTA FISCAL.
+- "reembolso_recebido": cliente devolvendo um adiantamento/custas que o escritório pagou → NÃO emitir NF.
+- "outro": transferência interna, rendimento, estorno, origem desconhecida.
+O "pagador" é quem enviou o dinheiro (nome limpo).
 
-Retorne APENAS um JSON array. Sem markdown. Sem comentários. Sem texto antes/depois.
-
-Formato de cada item:
-{"fornecedor":"...","valor":NNNN.NN,"data":"YYYY-MM-DD","descricao":"...","categoria":"..."}"""
+Retorne APENAS um JSON (sem markdown, sem comentários) no formato:
+{
+  "saidas": [{"fornecedor":"...","valor":NNNN.NN,"data":"YYYY-MM-DD","descricao":"...","categoria":"..."}],
+  "entradas": [{"pagador":"...","valor":NNNN.NN,"data":"YYYY-MM-DD","descricao":"...","tipo_sugerido":"receita|reembolso_recebido|outro"}]
+}"""
 
 
 # NOTA: caminho fora de "/despesas/..." para não colidir com POST /despesas/{mes} (add_despesa),
@@ -860,9 +866,9 @@ async def parse_extrato(
         raise HTTPException(502, "Claude retornou resposta vazia.")
 
     try:
-        linhas = json.loads(text)
+        parsed = json.loads(text)
     except Exception:
-        m = re.search(r"\[.*\]", text, re.DOTALL)
+        m = re.search(r"\{.*\}", text, re.DOTALL)
         if not m:
             logger.warning("parse_extrato: sem JSON na resposta. Resposta: %s", text[:500])
             raise HTTPException(
@@ -872,15 +878,115 @@ async def parse_extrato(
                 f"{text[:200]}"
             )
         try:
-            linhas = json.loads(m.group())
+            parsed = json.loads(m.group())
         except Exception as e:
             logger.warning("parse_extrato: JSON inválido. Erro: %s", e)
             raise HTTPException(422, f"JSON inválido retornado por Claude: {e}")
 
-    if not isinstance(linhas, list):
-        raise HTTPException(422, "Resposta não é uma lista de despesas.")
+    # Aceita tanto o novo formato {saidas, entradas} quanto um array legado de saídas.
+    if isinstance(parsed, list):
+        saidas, entradas = parsed, []
+    elif isinstance(parsed, dict):
+        saidas = parsed.get("saidas") or []
+        entradas = parsed.get("entradas") or []
+    else:
+        raise HTTPException(422, "Formato de resposta inesperado.")
 
-    return {"linhas": linhas, "total": len(linhas)}
+    # `linhas` mantém retrocompat com o front antigo (= saídas)
+    return {
+        "linhas": saidas,
+        "saidas": saidas,
+        "entradas": entradas,
+        "total": len(saidas),
+        "total_entradas": len(entradas),
+    }
+
+
+# ── Sugestões de NF a partir das entradas do extrato ─────────────────────────
+
+class SugestaoNFIn(BaseModel):
+    data: date | None = None
+    pagador: str
+    valor: float
+    descricao: str | None = None
+    tipo_sugerido: str = "receita"
+
+
+@router.post("/sugestoes-nf/batch")
+def criar_sugestoes_nf(items: list[SugestaoNFIn], _=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
+    """Cria sugestões de NF (fila) a partir das entradas selecionadas do extrato.
+    Deduplica contra sugestões pendentes/emitidas e NFs já emitidas na competência."""
+    criadas = 0
+    for it in items:
+        comp = it.data.strftime("%Y-%m") if it.data else None
+        # Dedup: mesma data+valor+pagador já na fila (qualquer status != ignorada)
+        existe = (
+            db.query(NotaFiscalSugestao)
+            .filter(
+                NotaFiscalSugestao.valor == it.valor,
+                NotaFiscalSugestao.pagador == it.pagador,
+                NotaFiscalSugestao.data == it.data,
+                NotaFiscalSugestao.status != "ignorada",
+            )
+            .first()
+        )
+        if existe:
+            continue
+        # Dedup contra NF já emitida na competência com mesmo valor
+        if comp:
+            nf = (
+                db.query(NotaFiscal)
+                .filter(
+                    NotaFiscal.competencia == comp,
+                    NotaFiscal.valor_servicos == it.valor,
+                    NotaFiscal.status.in_(["emitida", "autorizada"]),
+                )
+                .first()
+            )
+            if nf:
+                continue
+        db.add(NotaFiscalSugestao(
+            data=it.data, competencia=comp, pagador=it.pagador, valor=it.valor,
+            descricao=it.descricao, tipo_sugerido=it.tipo_sugerido, status="pendente",
+        ))
+        criadas += 1
+    db.commit()
+    return {"criadas": criadas}
+
+
+@router.get("/sugestoes-nf")
+def listar_sugestoes_nf(status: str = "pendente", _=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
+    q = db.query(NotaFiscalSugestao)
+    if status != "todas":
+        q = q.filter(NotaFiscalSugestao.status == status)
+    rows = q.order_by(NotaFiscalSugestao.data.desc().nullslast(), NotaFiscalSugestao.created_at.desc()).all()
+    return [
+        {
+            "id": str(s.id),
+            "data": s.data.isoformat() if s.data else None,
+            "competencia": s.competencia,
+            "pagador": s.pagador,
+            "valor": float(s.valor),
+            "descricao": s.descricao,
+            "tipo_sugerido": s.tipo_sugerido,
+            "status": s.status,
+            "nota_fiscal_id": str(s.nota_fiscal_id) if s.nota_fiscal_id else None,
+        }
+        for s in rows
+    ]
+
+
+@router.patch("/sugestoes-nf/{id}")
+def patch_sugestao_nf(id: uuid.UUID, body: dict, _=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
+    s = db.get(NotaFiscalSugestao, id)
+    if not s:
+        raise HTTPException(404, "Sugestão não encontrada")
+    if "status" in body and body["status"] in ("pendente", "emitida", "ignorada"):
+        s.status = body["status"]
+    if "nota_fiscal_id" in body:
+        s.nota_fiscal_id = body["nota_fiscal_id"]
+    db.commit()
+    return {"ok": True}
 
 
 # ── Upload de comprovante para Drive ──────────────────────────────────────────

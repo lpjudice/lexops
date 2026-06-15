@@ -102,6 +102,23 @@ export interface ParsedExpense {
   fornecedor: string; valor: number; data: string; descricao: string; categoria: string
 }
 
+export interface ParsedEntrada {
+  pagador: string; valor: number; data: string; descricao: string
+  tipo_sugerido: 'receita' | 'reembolso_recebido' | 'outro'
+}
+
+export interface SugestaoNF {
+  id: string
+  data: string | null
+  competencia: string | null
+  pagador: string
+  valor: number
+  descricao: string | null
+  tipo_sugerido: string
+  status: 'pendente' | 'emitida' | 'ignorada'
+  nota_fiscal_id: string | null
+}
+
 export const backofficeApi = {
   decisao: (mes: string) =>
     api.get<Decisao>(`/backoffice/decisao/${mes}`).then(r => r.data),
@@ -154,7 +171,7 @@ export const backofficeApi = {
     api.post(`/backoffice/despesas/batch/${mes}`, items).then(r => r.data),
 
   // Parse extrato
-  parseExtrato: async (file: File): Promise<{ linhas: ParsedExpense[]; total?: number }> => {
+  parseExtrato: async (file: File): Promise<{ linhas: ParsedExpense[]; saidas?: ParsedExpense[]; entradas?: ParsedEntrada[]; total?: number; total_entradas?: number }> => {
     // Usa fetch nativo: o browser gera "multipart/form-data; boundary=…" corretamente.
     // (axios herdava o Content-Type:application/json default e quebrava o multipart.)
     const fd = new FormData()
@@ -174,6 +191,16 @@ export const backofficeApi = {
     }
     return resp.json()
   },
+
+  // Fila de sugestões de NF (entradas do extrato)
+  criarSugestoesNf: (items: Array<{ data?: string; pagador: string; valor: number; descricao?: string; tipo_sugerido: string }>) =>
+    api.post<{ criadas: number }>('/backoffice/sugestoes-nf/batch', items).then(r => r.data),
+
+  listarSugestoesNf: (status = 'pendente') =>
+    api.get<SugestaoNF[]>('/backoffice/sugestoes-nf', { params: { status } }).then(r => r.data),
+
+  patchSugestaoNf: (id: string, data: { status?: string; nota_fiscal_id?: string }) =>
+    api.patch(`/backoffice/sugestoes-nf/${id}`, data).then(r => r.data),
 
 
   // Upload de comprovante de despesa para Drive

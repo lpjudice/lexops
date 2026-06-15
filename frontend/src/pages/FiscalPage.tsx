@@ -8,6 +8,7 @@ import type { Cliente } from '../api/clientes'
 import { contratosApi } from '../api/contratos'
 import { processosApi } from '../api/processos'
 import { configFiscalApi } from '../api/configFiscal'
+import { backofficeApi, type SugestaoNF } from '../api/backoffice'
 import { mascaraDocumento, validaDocumento, mascaraTelefone, soDigitos, soAlfanum } from '../utils/documentos'
 import styles from './Page.module.css'
 import cs from './FiscalPage.module.css'
@@ -987,6 +988,63 @@ function DetalheModal({ nf, onClose }: { nf: NotaFiscalOut; onClose: () => void 
   )
 }
 
+// ─── Fila "A emitir" (sugestões vindas do extrato bancário) ───────────────────
+
+function SugestoesNFSection({ onEmitir }: { onEmitir: (s: SugestaoNF) => void }) {
+  const qc = useQueryClient()
+  const { data: sugestoes = [] } = useQuery({
+    queryKey: ['sugestoes-nf'],
+    queryFn: () => backofficeApi.listarSugestoesNf('pendente'),
+  })
+  const ignorar = useMutation({
+    mutationFn: (id: string) => backofficeApi.patchSugestaoNf(id, { status: 'ignorada' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['sugestoes-nf'] }),
+  })
+  const [aberto, setAberto] = useState(true)
+
+  if (sugestoes.length === 0) return null
+  const fmt = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+
+  return (
+    <div style={{ background: '#fff', borderRadius: 12, boxShadow: 'var(--shadow-card)', marginBottom: 20, overflow: 'hidden', border: '1px solid #bfdbfe' }}>
+      <div
+        style={{ padding: '12px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', background: '#eff6ff' }}
+        onClick={() => setAberto(a => !a)}
+      >
+        <div style={{ fontWeight: 700, fontSize: 14, color: '#1e3a8a' }}>
+          📥 A emitir — {sugestoes.length} sugestão(ões) do extrato
+        </div>
+        <span style={{ fontSize: 12, color: '#1e3a8a' }}>{aberto ? '▲' : '▼'}</span>
+      </div>
+      {aberto && (
+        <div style={{ padding: '8px 0' }}>
+          {sugestoes.map(s => {
+            const tipo = s.tipo_sugerido === 'reembolso_recebido'
+              ? { txt: 'Reembolso recebido', bg: '#e0e7ff', fg: '#3730a3' }
+              : s.tipo_sugerido === 'outro' ? { txt: 'Outro', bg: '#f3f4f6', fg: '#6b7280' }
+              : { txt: 'Receita', bg: '#dcfce7', fg: '#15803d' }
+            return (
+              <div key={s.id} style={{ display: 'grid', gridTemplateColumns: '90px 1fr 120px 110px auto', gap: 10, alignItems: 'center', padding: '8px 18px', borderTop: '1px solid #f3f4f6' }}>
+                <span style={{ fontSize: 12, color: 'var(--gray-mid)' }}>{s.data ?? '—'}</span>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.pagador}</div>
+                  {s.descricao && <div style={{ fontSize: 11, color: 'var(--gray-mid)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.descricao}</div>}
+                </div>
+                <span style={{ fontSize: 10, background: tipo.bg, color: tipo.fg, padding: '2px 8px', borderRadius: 999, fontWeight: 700, textAlign: 'center', whiteSpace: 'nowrap' }}>{tipo.txt}</span>
+                <span style={{ fontSize: 13, fontWeight: 700, textAlign: 'right' }}>{fmt(s.valor)}</span>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button className={styles.btnPrimary} style={{ padding: '5px 12px', fontSize: 12 }} onClick={() => onEmitir(s)}>Emitir</button>
+                  <button className={styles.btnDanger} style={{ padding: '5px 10px', fontSize: 12 }} disabled={ignorar.isPending} onClick={() => ignorar.mutate(s.id)}>Ignorar</button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Página principal ────────────────────────────────────────────────────────
 
 type Filtro = 'todas' | 'emitida' | 'rascunho' | 'cancelada' | 'erro'
@@ -996,6 +1054,8 @@ export default function FiscalPage() {
   const [filtro, setFiltro] = useState<Filtro>('todas')
   const [emitindo, setEmitindo] = useState(false)
   const [prefill, setPrefill] = useState<Partial<EmitirNFSeIn> | undefined>()
+  // Quando a emissão parte de uma sugestão da fila, guardamos o id para marcá-la depois.
+  const [sugestaoEmitindo, setSugestaoEmitindo] = useState<string | null>(null)
   const [nfDetalhe, setNfDetalhe] = useState<NotaFiscalOut | null>(null)
   const [nfEmitida, setNfEmitida] = useState<NotaFiscalOut | null>(null)
   const [sincronizando, setSincronizando] = useState(false)
@@ -1110,6 +1170,19 @@ export default function FiscalPage() {
       </div>
       {syncMsg && <p className={cs.fieldHint} style={{ marginTop: -12, marginBottom: 12 }}>{syncMsg}</p>}
 
+      {/* Fila de sugestões de NF vindas do extrato bancário */}
+      <SugestoesNFSection onEmitir={(s) => {
+        const comp = s.competencia || (s.data ? s.data.slice(0, 7) : undefined)
+        setPrefill({
+          ...(comp ? { competencia: comp } : {}),
+          tomador_nome: s.pagador,
+          valor_servicos: s.valor as any,
+          descricao_servico: s.descricao || `Honorários advocatícios — ${s.pagador}`,
+        })
+        setSugestaoEmitindo(s.id)
+        setEmitindo(true)
+      }} />
+
       <div className={cs.filtros}>
         {filtros.map((f) => (
           <button key={f.key}
@@ -1196,8 +1269,17 @@ export default function FiscalPage() {
       {emitindo && (
         <EmissaoModal
           inicial={prefill}
-          onClose={() => { setEmitindo(false); setPrefill(undefined) }}
-          onSucesso={(nf) => { setEmitindo(false); setPrefill(undefined); setNfEmitida(nf); qc.invalidateQueries({ queryKey: ['notas-fiscais'] }) }}
+          onClose={() => { setEmitindo(false); setPrefill(undefined); setSugestaoEmitindo(null) }}
+          onSucesso={(nf) => {
+            setEmitindo(false); setPrefill(undefined)
+            setNfEmitida(nf)
+            // Se veio de uma sugestão da fila, marca como emitida e vincula a NF
+            if (sugestaoEmitindo) {
+              backofficeApi.patchSugestaoNf(sugestaoEmitindo, { status: 'emitida', nota_fiscal_id: nf.id })
+                .finally(() => { setSugestaoEmitindo(null); qc.invalidateQueries({ queryKey: ['sugestoes-nf'] }) })
+            }
+            qc.invalidateQueries({ queryKey: ['notas-fiscais'] })
+          }}
         />
       )}
 

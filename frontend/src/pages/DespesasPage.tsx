@@ -7,6 +7,7 @@ import {
   type DespesaRecorrente,
   type Fornecedor,
   type ParsedExpense,
+  type ParsedEntrada,
 } from '../api/backoffice'
 import styles from './Page.module.css'
 
@@ -566,19 +567,23 @@ function SecaoExtrato({
   const qc = useQueryClient()
   const fileRef = useRef<HTMLInputElement>(null)
   const [linhas, setLinhas] = useState<(ParsedExpense & { selecionado: boolean; elegivel: boolean })[]>([])
+  const [entradas, setEntradas] = useState<(ParsedEntrada & { selecionado: boolean })[]>([])
   const [parsing, setParsing] = useState(false)
   const [parseErr, setParseErr] = useState<string | null>(null)
   const allCats = Array.from(new Set([...CATEGORIAS_PADRAO, ...categorias]))
 
   async function handleFile(file: File) {
-    setParsing(true); setParseErr(null); setLinhas([])
+    setParsing(true); setParseErr(null); setLinhas([]); setEntradas([])
     try {
       const res = await backofficeApi.parseExtrato(file)
-      if (!res.linhas || res.linhas.length === 0) {
-        setParseErr('Nenhuma saída encontrada no extrato. Confira se o arquivo contém débitos/Pix enviados.')
+      const saidas = res.saidas ?? res.linhas ?? []
+      // Entradas: "receita" já vem marcada (candidata a NF); reembolso/outro desmarcadas
+      setEntradas((res.entradas ?? []).map(e => ({ ...e, selecionado: e.tipo_sugerido === 'receita' })))
+      if (saidas.length === 0 && (res.entradas ?? []).length === 0) {
+        setParseErr('Nenhuma transação encontrada no extrato. Confira se o arquivo é legível.')
         return
       }
-      setLinhas(res.linhas.map(l => ({ ...l, selecionado: true, elegivel: false })))
+      setLinhas(saidas.map(l => ({ ...l, selecionado: true, elegivel: false })))
     } catch (e: any) {
       const detail = e?.response?.data?.detail
       const status = e?.response?.status
@@ -596,17 +601,30 @@ function SecaoExtrato({
   }
 
   const confirmar = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const selecionadas = linhas.filter(l => l.selecionado)
-      return backofficeApi.addDespesasBatch(mes, selecionadas.map(l => ({
-        categoria: l.categoria,
-        fornecedor: l.fornecedor,
-        descricao: l.descricao,
-        valor: l.valor,
-        data: l.data,  // cada despesa vai para o mês da sua própria data
-        tem_nota: false,
-        elegivel: l.elegivel,
-      })))
+      if (selecionadas.length > 0) {
+        await backofficeApi.addDespesasBatch(mes, selecionadas.map(l => ({
+          categoria: l.categoria,
+          fornecedor: l.fornecedor,
+          descricao: l.descricao,
+          valor: l.valor,
+          data: l.data,  // cada despesa vai para o mês da sua própria data
+          tem_nota: false,
+          elegivel: l.elegivel,
+        })))
+      }
+      // Entradas selecionadas → fila de sugestões de NF
+      const entSel = entradas.filter(e => e.selecionado)
+      if (entSel.length > 0) {
+        await backofficeApi.criarSugestoesNf(entSel.map(e => ({
+          data: e.data,
+          pagador: e.pagador,
+          valor: e.valor,
+          descricao: e.descricao,
+          tipo_sugerido: e.tipo_sugerido,
+        })))
+      }
     },
     onSuccess: async () => {
       // Salva fornecedores novos
@@ -616,7 +634,8 @@ function SecaoExtrato({
       }
       qc.invalidateQueries({ queryKey: ['backoffice-lancamentos', mes] })
       qc.invalidateQueries({ queryKey: ['backoffice-despesas', mes] })
-      setLinhas([])
+      qc.invalidateQueries({ queryKey: ['sugestoes-nf'] })
+      setLinhas([]); setEntradas([])
       onSaved()
     },
   })
@@ -716,16 +735,70 @@ function SecaoExtrato({
               </div>
             ))}
           </div>
-          <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
-            <button
-              className={styles.btnPrimary}
-              disabled={confirmar.isPending || !linhas.some(l => l.selecionado)}
-              onClick={() => confirmar.mutate()}
-            >
-              {confirmar.isPending ? 'Lançando…' : `Lançar ${linhas.filter(l => l.selecionado).length} despesa(s)`}
-            </button>
-            <button className={styles.btnSmall} onClick={() => setLinhas([])}>Cancelar</button>
+        </div>
+      )}
+
+      {/* Entradas → sugestões de NF */}
+      {entradas.length > 0 && (
+        <div style={{ marginTop: 18 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4, color: 'var(--dark)' }}>
+            {entradas.length} entrada(s) detectada(s) — marque as que viram <span style={{ color: 'var(--teal)' }}>sugestão de NF</span>:
           </div>
+          <div style={{ fontSize: 11, color: 'var(--gray-mid)', marginBottom: 8 }}>
+            Recebimentos de cliente por serviço viram fila de emissão (Notas Fiscais). Devolução de reembolso já vem desmarcada.
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {entradas.map((e, i) => {
+              const tipoLabel = e.tipo_sugerido === 'receita' ? { txt: 'Receita → NF', bg: '#dcfce7', fg: '#15803d' }
+                : e.tipo_sugerido === 'reembolso_recebido' ? { txt: 'Reembolso recebido', bg: '#e0e7ff', fg: '#3730a3' }
+                : { txt: 'Outro', bg: '#f3f4f6', fg: '#6b7280' }
+              return (
+                <div
+                  key={i}
+                  style={{
+                    display: 'grid', gridTemplateColumns: '24px 1fr 130px 100px 90px', gap: 8, alignItems: 'center',
+                    padding: '8px 12px', background: e.selecionado ? '#eff6ff' : '#f9fafb',
+                    borderRadius: 6, border: '1px solid #e5e7eb',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={e.selecionado}
+                    onChange={ev => setEntradas(prev => prev.map((x, j) => j === i ? { ...x, selecionado: ev.target.checked } : x))}
+                  />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.pagador}</div>
+                    {e.descricao && <div style={{ fontSize: 10, color: 'var(--gray-mid)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.descricao}</div>}
+                  </div>
+                  <span style={{ fontSize: 9, background: tipoLabel.bg, color: tipoLabel.fg, padding: '2px 6px', borderRadius: 999, fontWeight: 700, textAlign: 'center', whiteSpace: 'nowrap' }}>
+                    {tipoLabel.txt}
+                  </span>
+                  <span style={{ fontSize: 12, fontWeight: 600, textAlign: 'right' }}>{fmtBRL(e.valor)}</span>
+                  <span style={{ fontSize: 11, color: 'var(--gray-mid)', whiteSpace: 'nowrap', textAlign: 'right' }}>{e.data}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {(linhas.length > 0 || entradas.length > 0) && (
+        <div style={{ marginTop: 14, display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button
+            className={styles.btnPrimary}
+            disabled={confirmar.isPending || (!linhas.some(l => l.selecionado) && !entradas.some(e => e.selecionado))}
+            onClick={() => confirmar.mutate()}
+          >
+            {confirmar.isPending ? 'Salvando…' : (() => {
+              const nd = linhas.filter(l => l.selecionado).length
+              const ne = entradas.filter(e => e.selecionado).length
+              const partes = []
+              if (nd) partes.push(`${nd} despesa(s)`)
+              if (ne) partes.push(`${ne} sugestão(ões) de NF`)
+              return `Lançar ${partes.join(' + ')}`
+            })()}
+          </button>
+          <button className={styles.btnSmall} onClick={() => { setLinhas([]); setEntradas([]) }}>Cancelar</button>
         </div>
       )}
     </div>
