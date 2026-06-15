@@ -805,6 +805,35 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# Handler de validação à prova de bytes — o handler default do FastAPI tenta serializar
+# o `input` dos erros, que para uploads é o body binário (PDF), e estoura UnicodeDecodeError
+# virando 500. Aqui sanitizamos qualquer valor não-serializável antes de devolver 422.
+from fastapi.exceptions import RequestValidationError  # noqa: E402
+from fastapi.responses import JSONResponse  # noqa: E402
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_handler(request, exc: RequestValidationError):
+    safe_errors = []
+    for err in exc.errors():
+        e = dict(err)
+        inp = e.get("input")
+        if isinstance(inp, (bytes, bytearray)):
+            e["input"] = f"<{len(inp)} bytes binários>"
+        safe_errors.append(e)
+    # Mensagem amigável quando o campo de arquivo não chegou (multipart malformado)
+    faltou_arquivo = any(
+        e.get("type") == "missing" and "file" in (e.get("loc") or [])
+        for e in safe_errors
+    )
+    detail = (
+        "Arquivo não recebido pelo servidor (multipart inválido). "
+        "Tente reenviar — se persistir, recarregue a página (Cmd+Shift+R)."
+        if faltou_arquivo else safe_errors
+    )
+    return JSONResponse(status_code=422, content={"detail": detail})
+
 app.include_router(auth.router)
 app.include_router(clientes.router)
 app.include_router(anotacoes.router)

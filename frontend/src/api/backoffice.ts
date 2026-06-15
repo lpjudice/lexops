@@ -154,29 +154,45 @@ export const backofficeApi = {
     api.post(`/backoffice/despesas/batch/${mes}`, items).then(r => r.data),
 
   // Parse extrato
-  parseExtrato: (file: File) => {
+  parseExtrato: async (file: File): Promise<{ linhas: ParsedExpense[]; total?: number }> => {
+    // Usa fetch nativo: o browser gera "multipart/form-data; boundary=…" corretamente.
+    // (axios herdava o Content-Type:application/json default e quebrava o multipart.)
     const fd = new FormData()
     fd.append('file', file)
-    // NÃO setar Content-Type manualmente — o browser gera "multipart/form-data; boundary=…"
-    // automaticamente. Setar manual remove o boundary e quebra o parse no backend.
-    return api.post<{ linhas: ParsedExpense[]; total?: number }>('/backoffice/despesas/parse-extrato', fd, {
-      timeout: 120_000,  // Sonnet pode demorar 30-90s em PDFs multi-página
-    }).then(r => r.data)
+    const token = localStorage.getItem('gestor_jwt')
+    const resp = await fetch('/api/backoffice/despesas/parse-extrato', {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: fd,
+    })
+    if (!resp.ok) {
+      let detail = `HTTP ${resp.status}`
+      try { const j = await resp.json(); detail = j.detail || detail } catch { /* ignore */ }
+      const err: any = new Error(detail)
+      err.response = { status: resp.status, data: { detail } }
+      throw err
+    }
+    return resp.json()
   },
 
 
   // Upload de comprovante de despesa para Drive
-  uploadComprovante: async (mes: string, file: File) => {
+  uploadComprovante: async (mes: string, file: File): Promise<{ link: string; filename: string }> => {
     const form = new FormData()
     form.append('file', file)
     form.append('mes', mes)
-    // Sem Content-Type manual — browser seta com boundary correto
-    const r = await api.post<{ link: string; filename: string }>(
-      '/backoffice/despesas/upload-comprovante',
-      form,
-      { timeout: 60_000 },
-    )
-    return r.data
+    const token = localStorage.getItem('gestor_jwt')
+    const resp = await fetch('/api/backoffice/despesas/upload-comprovante', {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    })
+    if (!resp.ok) {
+      let detail = `HTTP ${resp.status}`
+      try { const j = await resp.json(); detail = j.detail || detail } catch { /* ignore */ }
+      throw new Error(detail)
+    }
+    return resp.json()
   },
 
   // Classificar despesa por IA (LC 214/2025)
