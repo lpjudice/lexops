@@ -588,43 +588,6 @@ def create_regra(body: RegraIn, _=Depends(get_current_user), db: Session = Depen
     return {"id": str(r.id)}
 
 
-@router.post("/admin-cleanup")
-def admin_cleanup(key: str = "", dry_run: bool = True, db: Session = Depends(get_db)) -> Any:
-    """TEMPORÁRIO: remove despesas mock de abr/mai e os uploads errados de jun (data NULL).
-    Protegido por chave one-time (será removido logo após o uso)."""
-    if key != "lj-cleanup-2026-06-fiscal":
-        raise HTTPException(403, "chave inválida")
-    # 1) Mock de abril e maio: todas as despesas desses meses
-    mock = db.query(FiscalDespesa).filter(FiscalDespesa.mes.in_(["2026-04", "2026-05"])).all()
-    # 2) Uploads errados em junho: caíram em jun com data NULL (batch antigo descartava a data)
-    jun_errado = (
-        db.query(FiscalDespesa)
-        .filter(FiscalDespesa.mes == "2026-06", FiscalDespesa.data.is_(None))
-        .all()
-    )
-
-    def _resumo(lst):
-        return [
-            {"id": str(d.id), "mes": d.mes, "data": d.data.isoformat() if d.data else None,
-             "fornecedor": d.fornecedor, "categoria": d.categoria, "valor": float(d.valor)}
-            for d in lst
-        ]
-
-    payload = {
-        "dry_run": dry_run,
-        "mock_abril_maio": {"count": len(mock), "itens": _resumo(mock)},
-        "junho_data_null": {"count": len(jun_errado), "itens": _resumo(jun_errado)},
-    }
-    if dry_run:
-        return payload
-
-    for d in mock + jun_errado:
-        db.delete(d)
-    db.commit()
-    payload["deletados"] = len(mock) + len(jun_errado)
-    return payload
-
-
 @router.post("/seed-mock")
 def seed_mock(_=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
     """Seed temporário de 2 meses mock para teste. REMOVER após uso."""
