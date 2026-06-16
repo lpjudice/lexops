@@ -255,9 +255,21 @@ def get_lancamentos(mes: str, _=Depends(get_current_user), db: Session = Depends
         for u in db.query(_U).filter(_U.id.in_(user_ids)).all():
             users_map[u.id] = u.nome
 
-    # Resumo dos reembolsos vinculados (chip "🔗 Reembolso: Cliente X") — N:N informativo
+    # Reembolsos vinculados ao chip "🔗" — junta os IDs manuais (reembolso_ids) com as
+    # pastas das ALOCAÇÕES de adiantamento daquela despesa.
     from app.models.cliente import Cliente as _Cli
-    vinc_ids = {rid for d in despesas for rid in (d.reembolso_ids or [])}
+    desp_ids = [d.id for d in despesas]
+    aloc_por_desp: dict[uuid.UUID, set[str]] = {}
+    if desp_ids:
+        for a in db.query(AdiantamentoAlocacao).filter(AdiantamentoAlocacao.despesa_id.in_(desp_ids)).all():
+            aloc_por_desp.setdefault(a.despesa_id, set()).add(str(a.reembolso_id))
+
+    def _ids_de(d: FiscalDespesa) -> list[str]:
+        ids = list(d.reembolso_ids or [])
+        ids += [rid for rid in aloc_por_desp.get(d.id, set()) if rid not in ids]
+        return ids
+
+    vinc_ids = {rid for d in despesas for rid in _ids_de(d)}
     reemb_resumo: dict[str, dict] = {}
     if vinc_ids:
         import uuid as _uuid
@@ -278,7 +290,7 @@ def get_lancamentos(mes: str, _=Depends(get_current_user), db: Session = Depends
                 reemb_resumo[str(r.id)] = {"id": str(r.id), "titulo": r.titulo, "cliente_nome": cli_nome}
 
     def _vinculados(d: FiscalDespesa) -> list[dict]:
-        return [reemb_resumo[rid] for rid in (d.reembolso_ids or []) if rid in reemb_resumo]
+        return [reemb_resumo[rid] for rid in _ids_de(d) if rid in reemb_resumo]
 
     despesas_resp = [
         {
@@ -1212,6 +1224,7 @@ def listar_sugestoes_nf(status: str = "pendente", _=Depends(get_current_user), d
             "tipo_sugerido": s.tipo_sugerido,
             "status": s.status,
             "nota_fiscal_id": str(s.nota_fiscal_id) if s.nota_fiscal_id else None,
+            "reembolso_ids": s.reembolso_ids or [],
         }
         for s in rows
     ]
@@ -1226,6 +1239,8 @@ def patch_sugestao_nf(id: uuid.UUID, body: dict, _=Depends(get_current_user), db
         s.status = body["status"]
     if "nota_fiscal_id" in body:
         s.nota_fiscal_id = body["nota_fiscal_id"]
+    if "reembolso_ids" in body:
+        s.reembolso_ids = body["reembolso_ids"]
     db.commit()
     return {"ok": True}
 
@@ -1240,26 +1255,31 @@ from fastapi import File, Form, UploadFile
 async def upload_comprovante(
     file: UploadFile = File(...),
     mes: str = Form(...),
+    nome: str = Form(""),  # nome legível da despesa p/ o arquivo (ex.: "2026-05_Vivo_Telefonia")
     _=Depends(get_current_user),
 ):
-    """Salva o arquivo em /Backoffice/Despesas/{mes}/ no Drive e devolve o link."""
+    """Salva o comprovante/NF em /Backoffice/Despesas/{mes}/ no Drive e devolve o link."""
     from app.services.google_drive import upload_arquivo_raiz
     conteudo = await file.read()
     if not conteudo:
         raise HTTPException(400, "Arquivo vazio")
     if len(conteudo) > 25 * 1024 * 1024:
         raise HTTPException(413, "Arquivo > 25MB")
-    nome = file.filename or "comprovante"
+    orig = file.filename or "comprovante"
+    ext = orig.split(".")[-1].lower() if "." in orig else "pdf"
+    # Nome do arquivo representa a despesa, quando informado
+    safe = re.sub(r"[^\w\-]+", "_", (nome or "").strip()).strip("_")
+    nome_final = f"{safe}.{ext}" if safe else orig
     mime = file.content_type or "application/octet-stream"
     link = upload_arquivo_raiz(
         conteudo=conteudo,
-        nome_arquivo=nome,
+        nome_arquivo=nome_final,
         subpath=["Backoffice", "Despesas", mes],
         mimetype=mime,
     )
     if not link:
         raise HTTPException(502, "Falha ao enviar ao Drive — verifique a autenticação Google")
-    return {"link": link, "filename": nome}
+    return {"link": link, "filename": nome_final}
 
 
 # ── Classificação IA de despesa (LC 214/2025) ─────────────────────────────────

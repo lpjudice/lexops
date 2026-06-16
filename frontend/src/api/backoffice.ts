@@ -150,6 +150,7 @@ export interface SugestaoNF {
   tipo_sugerido: string
   status: 'pendente' | 'emitida' | 'ignorada'
   nota_fiscal_id: string | null
+  reembolso_ids?: string[]
 }
 
 export const backofficeApi = {
@@ -242,15 +243,16 @@ export const backofficeApi = {
   listarSugestoesNf: (status = 'pendente') =>
     api.get<SugestaoNF[]>('/backoffice/sugestoes-nf', { params: { status } }).then(r => r.data),
 
-  patchSugestaoNf: (id: string, data: { status?: string; nota_fiscal_id?: string }) =>
+  patchSugestaoNf: (id: string, data: { status?: string; nota_fiscal_id?: string; reembolso_ids?: string[] }) =>
     api.patch(`/backoffice/sugestoes-nf/${id}`, data).then(r => r.data),
 
 
   // Upload de comprovante de despesa para Drive
-  uploadComprovante: async (mes: string, file: File): Promise<{ link: string; filename: string }> => {
+  uploadComprovante: async (mes: string, file: File, nome?: string): Promise<{ link: string; filename: string }> => {
     const form = new FormData()
     form.append('file', file)
     form.append('mes', mes)
+    if (nome) form.append('nome', nome)
     const token = localStorage.getItem('gestor_jwt')
     const resp = await fetch('/api/backoffice/comprovante/upload', {
       method: 'POST',

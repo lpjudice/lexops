@@ -21,6 +21,19 @@ function ehReembolsavel(categoria: string): boolean {
   return c.includes('reembols') || c.includes('cliente')
 }
 
+function fmtDataCurta(iso?: string | null) {
+  if (!iso) return ''
+  const [y, m, d] = iso.slice(0, 10).split('-')
+  return d && m && y ? `${d}/${m}/${y.slice(2)}` : ''
+}
+
+// Rótulo de pasta de reembolso no combobox, com cliente, título e datas
+function labelPasta(r: { titulo: string; data_emissao: string; status: string; updated_at: string }, cliente: string): string {
+  const aberta = fmtDataCurta(r.data_emissao)
+  const pago = r.status === 'pago' ? ` · pago ${fmtDataCurta(r.updated_at)}` : ''
+  return `${cliente} — ${r.titulo} · aberto ${aberta}${pago}`
+}
+
 function fmtBRL(v: number) {
   return (v ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 }
@@ -423,7 +436,8 @@ function FormNovaDespesa({
         setUploading(true)
         try {
           const mesUpload = dataDespesa ? dataDespesa.slice(0, 7) : mes
-          const r = await backofficeApi.uploadComprovante(mesUpload, arquivo)
+          const nomeArq = [dataDespesa, fornecedor, categoria].filter(Boolean).join('_')
+          const r = await backofficeApi.uploadComprovante(mesUpload, arquivo, nomeArq)
           drive_link = r.link
         } finally { setUploading(false) }
       }
@@ -605,10 +619,7 @@ function VincularReembolso({
   // não estão vinculados a esta linha. Exclui só os cancelados.
   const disponiveis = reembolsos
     .filter(r => r.status !== 'cancelado' && !value.includes(r.id))
-    .map(r => ({
-      value: r.id,
-      label: `${cliNome(r.cliente_id)} — ${r.titulo}${r.status === 'pago' ? ' (pago)' : ''}`,
-    }))
+    .map(r => ({ value: r.id, label: labelPasta(r, cliNome(r.cliente_id)) }))
 
   return (
     <div style={{ gridColumn: '1 / -1', padding: '8px 10px 4px 34px', display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1204,6 +1215,7 @@ function LinhaDespesa({
   deleteDespesa: { mutate: (id: string) => void }
 }) {
   const indent = depth * 18
+  const [uploadEdit, setUploadEdit] = useState(false)
   if (editId === d.id) {
     return (
       <tr key={d.id} style={{ background: '#f0fdf4' }}>
@@ -1237,12 +1249,39 @@ function LinhaDespesa({
               <input type="checkbox" checked={editForm.elegivel} onChange={e => setEditForm((f: any) => ({ ...f, elegivel: e.target.checked }))} /> Eleg.
             </label>
             <div style={{ display: 'flex', gap: 6 }}>
-              <button className={styles.btnPrimary} onClick={() => salvarEdit.mutate(d.id)} disabled={salvarEdit.isPending}>
+              <button className={styles.btnPrimary} onClick={() => salvarEdit.mutate(d.id)} disabled={salvarEdit.isPending || uploadEdit}>
                 {salvarEdit.isPending ? '…' : 'Salvar'}
               </button>
               <button className={styles.btnSmall} onClick={() => setEditId(null)}>Cancelar</button>
             </div>
           </div>
+          {/* Upload da NF / comprovante na edição */}
+          {editForm.tem_nota && (
+            <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', fontSize: 11 }}>
+              <span style={{ color: 'var(--gray-mid)' }}>📎 NF / comprovante:</span>
+              <input
+                type="file"
+                accept=".pdf,image/*"
+                disabled={uploadEdit}
+                onChange={async (e) => {
+                  const f = e.target.files?.[0]
+                  if (!f) return
+                  setUploadEdit(true)
+                  try {
+                    const mesUp = (editForm.data || d.data || '').slice(0, 7) || new Date().toISOString().slice(0, 7)
+                    const nomeArq = [editForm.data, editForm.fornecedor, editForm.categoria].filter(Boolean).join('_')
+                    const r = await backofficeApi.uploadComprovante(mesUp, f, nomeArq)
+                    setEditForm((ff: any) => ({ ...ff, drive_link: r.link }))
+                  } catch (err: any) {
+                    alert(`Falha no upload: ${err?.message || err}`)
+                  } finally { setUploadEdit(false) }
+                }}
+                style={{ fontSize: 11 }}
+              />
+              {uploadEdit && <span style={{ color: 'var(--teal)' }}>enviando…</span>}
+              {editForm.drive_link && <a href={editForm.drive_link} target="_blank" rel="noreferrer" style={{ color: 'var(--teal)' }}>✓ anexado</a>}
+            </div>
+          )}
         </td>
       </tr>
     )
@@ -1339,7 +1378,7 @@ function TabelaDespesas({ mes }: { mes: string }) {
   const allCats = Array.from(new Set([...CATEGORIAS_PADRAO, ...categoriasDb]))
 
   const [editId, setEditId] = useState<string | null>(null)
-  const [editForm, setEditForm] = useState<{ fornecedor: string; categoria: string; valor: number; data: string; tem_nota: boolean; elegivel: boolean }>({
+  const [editForm, setEditForm] = useState<{ fornecedor: string; categoria: string; valor: number; data: string; tem_nota: boolean; elegivel: boolean; drive_link?: string }>({
     fornecedor: '', categoria: '', valor: 0, data: '', tem_nota: true, elegivel: false,
   })
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
@@ -1365,6 +1404,7 @@ function TabelaDespesas({ mes }: { mes: string }) {
     setEditForm({
       fornecedor: d.fornecedor, categoria: d.categoria, valor: d.valor,
       data: d.data ?? '', tem_nota: d.tem_nota, elegivel: d.elegivel,
+      drive_link: d.drive_link ?? undefined,
     })
     setEditId(d.id)
   }
@@ -1560,7 +1600,7 @@ function AlocarPanel({ adiantamento, onDone }: { adiantamento: Adiantamento; onD
   const pasta = reembolsos.find(r => r.id === pastaId)
   const pastasOpts = reembolsos
     .filter(r => r.status !== 'cancelado')
-    .map(r => ({ value: r.id, label: `${cliNome(r.cliente_id)} — ${r.titulo}${r.status === 'pago' ? ' (pago)' : ''}` }))
+    .map(r => ({ value: r.id, label: labelPasta(r, cliNome(r.cliente_id)) }))
 
   const somaSelecionada =
     Object.values(selItens).reduce((s, v) => s + v, 0) +
@@ -1613,7 +1653,7 @@ function AlocarPanel({ adiantamento, onDone }: { adiantamento: Adiantamento; onD
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
         <div style={{ minWidth: 280, flex: 1 }}>
           <Combobox
-            value={pasta ? `${cliNome(pasta.cliente_id)} — ${pasta.titulo}` : ''}
+            value={pasta ? labelPasta(pasta, cliNome(pasta.cliente_id)) : ''}
             onChange={(label) => {
               const opt = pastasOpts.find(o => o.label === label)
               setPastaId(opt?.value ?? '')
@@ -1750,10 +1790,17 @@ function AbaAdiantamentos() {
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
             {a.saldo > 0.001 && (
-              <button className={styles.btnPrimary} style={{ padding: '5px 12px', fontSize: 12 }}
-                onClick={() => setAlocando(alocando === a.despesa_id ? null : a.despesa_id)}>
-                {alocando === a.despesa_id ? 'Fechar' : 'Alocar'}
-              </button>
+              <>
+                <button className={styles.btnPrimary} style={{ padding: '5px 12px', fontSize: 12 }}
+                  onClick={() => setAlocando(alocando === a.despesa_id ? null : a.despesa_id)}>
+                  {alocando === a.despesa_id ? 'Fechar' : 'Alocar'}
+                </button>
+                <button className={styles.btnDanger} style={{ padding: '5px 10px', fontSize: 12 }}
+                  title="Marca o saldo não alocado como perda (escritório absorve). Já desconta o que foi alocado."
+                  onClick={() => { if (confirm(`Ignorar/perda do saldo de ${fmtBRL(a.saldo)}? Vira despesa do escritório (crédito IBS/CBS). O que já foi alocado a clientes não é afetado.`)) perda.mutate(a.despesa_id) }}>
+                  Ignorar / perda
+                </button>
+              </>
             )}
             <button className={styles.btnSmall} style={{ fontSize: 12 }} onClick={() => setExpandido(open ? null : a.despesa_id)}>
               {open ? '▲' : `▼ ${a.alocacoes.length}`}

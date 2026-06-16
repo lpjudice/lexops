@@ -9,6 +9,7 @@ import { contratosApi } from '../api/contratos'
 import { processosApi } from '../api/processos'
 import { configFiscalApi } from '../api/configFiscal'
 import { backofficeApi, type SugestaoNF } from '../api/backoffice'
+import { reembolsosApi } from '../api/reembolsos'
 import { mascaraDocumento, validaDocumento, mascaraTelefone, soDigitos, soAlfanum } from '../utils/documentos'
 import styles from './Page.module.css'
 import cs from './FiscalPage.module.css'
@@ -996,14 +997,27 @@ function SugestoesNFSection({ onEmitir }: { onEmitir: (s: SugestaoNF) => void })
     queryKey: ['sugestoes-nf'],
     queryFn: () => backofficeApi.listarSugestoesNf('pendente'),
   })
+  const { data: reembolsos = [] } = useQuery({ queryKey: ['reembolsos'], queryFn: () => reembolsosApi.listar() })
+  const { data: clientes = [] } = useQuery({ queryKey: ['clientes'], queryFn: () => clientesApi.listar() })
+  const cliNome = (id: string) => clientes.find(c => c.id === id)?.nome ?? '—'
+  const reembMap = Object.fromEntries(reembolsos.map(r => [r.id, r]))
+
   const ignorar = useMutation({
     mutationFn: (id: string) => backofficeApi.patchSugestaoNf(id, { status: 'ignorada' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['sugestoes-nf'] }),
   })
+  const vincular = useMutation({
+    mutationFn: ({ id, ids }: { id: string; ids: string[] }) => backofficeApi.patchSugestaoNf(id, { reembolso_ids: ids }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['sugestoes-nf'] }),
+  })
   const [aberto, setAberto] = useState(true)
+  const [vinculando, setVinculando] = useState<string | null>(null)
 
   if (sugestoes.length === 0) return null
   const fmt = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+  const pastasOpts = reembolsos
+    .filter(r => r.status !== 'cancelado')
+    .map(r => ({ value: r.id, label: `${cliNome(r.cliente_id)} — ${r.titulo}${r.status === 'pago' ? ' (pago)' : r.status === 'rascunho' ? ' (rascunho)' : ''}` }))
 
   return (
     <div style={{ background: '#fff', borderRadius: 12, boxShadow: 'var(--shadow-card)', marginBottom: 20, overflow: 'hidden', border: '1px solid #bfdbfe' }}>
@@ -1023,19 +1037,58 @@ function SugestoesNFSection({ onEmitir }: { onEmitir: (s: SugestaoNF) => void })
               ? { txt: 'Reembolso recebido', bg: '#e0e7ff', fg: '#3730a3' }
               : s.tipo_sugerido === 'outro' ? { txt: 'Outro', bg: '#f3f4f6', fg: '#6b7280' }
               : { txt: 'Receita', bg: '#dcfce7', fg: '#15803d' }
+            const vinc = s.reembolso_ids ?? []
             return (
-              <div key={s.id} style={{ display: 'grid', gridTemplateColumns: '90px 1fr 120px 110px auto', gap: 10, alignItems: 'center', padding: '8px 18px', borderTop: '1px solid #f3f4f6' }}>
-                <span style={{ fontSize: 12, color: 'var(--gray-mid)' }}>{s.data ?? '—'}</span>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.pagador}</div>
-                  {s.descricao && <div style={{ fontSize: 11, color: 'var(--gray-mid)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.descricao}</div>}
+              <div key={s.id} style={{ borderTop: '1px solid #f3f4f6' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr 120px 110px auto', gap: 10, alignItems: 'center', padding: '8px 18px' }}>
+                  <span style={{ fontSize: 12, color: 'var(--gray-mid)' }}>{s.data ?? '—'}</span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {s.pagador}
+                      {vinc.length > 0 && (
+                        <span style={{ marginLeft: 6, fontSize: 9, background: '#e0e7ff', color: '#3730a3', padding: '1px 6px', borderRadius: 999, fontWeight: 700 }}
+                          title={vinc.map(id => reembMap[id] ? `${cliNome(reembMap[id].cliente_id)} — ${reembMap[id].titulo}` : id).join('\n')}>
+                          🔗 {vinc.length === 1 && reembMap[vinc[0]] ? cliNome(reembMap[vinc[0]].cliente_id) : `${vinc.length} reemb.`}
+                        </span>
+                      )}
+                    </div>
+                    {s.descricao && <div style={{ fontSize: 11, color: 'var(--gray-mid)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.descricao}</div>}
+                  </div>
+                  <span style={{ fontSize: 10, background: tipo.bg, color: tipo.fg, padding: '2px 8px', borderRadius: 999, fontWeight: 700, textAlign: 'center', whiteSpace: 'nowrap' }}>{tipo.txt}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, textAlign: 'right' }}>{fmt(s.valor)}</span>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button className={styles.btnPrimary} style={{ padding: '5px 12px', fontSize: 12 }} onClick={() => onEmitir(s)}>Emitir</button>
+                    <button className={cs.btnSecondary} style={{ padding: '5px 10px', fontSize: 12 }} onClick={() => setVinculando(vinculando === s.id ? null : s.id)}>🔗 Reembolso</button>
+                    <button className={styles.btnDanger} style={{ padding: '5px 10px', fontSize: 12 }} disabled={ignorar.isPending} onClick={() => ignorar.mutate(s.id)}>Ignorar</button>
+                  </div>
                 </div>
-                <span style={{ fontSize: 10, background: tipo.bg, color: tipo.fg, padding: '2px 8px', borderRadius: 999, fontWeight: 700, textAlign: 'center', whiteSpace: 'nowrap' }}>{tipo.txt}</span>
-                <span style={{ fontSize: 13, fontWeight: 700, textAlign: 'right' }}>{fmt(s.valor)}</span>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button className={styles.btnPrimary} style={{ padding: '5px 12px', fontSize: 12 }} onClick={() => onEmitir(s)}>Emitir</button>
-                  <button className={styles.btnDanger} style={{ padding: '5px 10px', fontSize: 12 }} disabled={ignorar.isPending} onClick={() => ignorar.mutate(s.id)}>Ignorar</button>
-                </div>
+                {vinculando === s.id && (
+                  <div style={{ padding: '4px 18px 12px', background: '#f8fafc' }}>
+                    <div style={{ fontSize: 11, color: 'var(--gray-mid)', marginBottom: 6 }}>
+                      Vincular este crédito a pasta(s) de reembolso (abertas, rascunho ou pagas):
+                    </div>
+                    {vinc.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
+                        {vinc.map(id => (
+                          <span key={id} style={{ fontSize: 11, background: '#e0e7ff', color: '#3730a3', padding: '2px 8px', borderRadius: 999, fontWeight: 600, display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                            {reembMap[id] ? `${cliNome(reembMap[id].cliente_id)} — ${reembMap[id].titulo}` : id.slice(0, 8)}
+                            <span style={{ cursor: 'pointer' }} onClick={() => vincular.mutate({ id: s.id, ids: vinc.filter(x => x !== id) })}>×</span>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <select
+                      value=""
+                      onChange={(e) => { if (e.target.value && !vinc.includes(e.target.value)) vincular.mutate({ id: s.id, ids: [...vinc, e.target.value] }) }}
+                      style={{ padding: '7px 10px', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 12, maxWidth: 360, width: '100%', fontFamily: 'Archivo, sans-serif' }}
+                    >
+                      <option value="">+ vincular pasta de reembolso…</option>
+                      {pastasOpts.filter(o => !vinc.includes(o.value)).map(o => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
             )
           })}
