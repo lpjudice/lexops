@@ -612,6 +612,16 @@ def create_regra(body: RegraIn, _=Depends(get_current_user), db: Session = Depen
     return {"id": str(r.id)}
 
 
+@router.post("/admin-zerar-despesas")
+def admin_zerar_despesas(key: str = "", db: Session = Depends(get_db)) -> Any:
+    """TEMPORÁRIO: apaga TODAS as despesas (todos os meses) para re-teste. Chave one-time."""
+    if key != "lj-zerar-2026-06":
+        raise HTTPException(403, "chave inválida")
+    n = db.query(FiscalDespesa).delete()
+    db.commit()
+    return {"deletadas": n}
+
+
 @router.post("/seed-mock")
 def seed_mock(_=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
     """Seed temporário de 2 meses mock para teste. REMOVER após uso."""
@@ -784,6 +794,7 @@ def add_despesas_batch(
     para que um extrato de maio caia em maio mesmo que o filtro esteja em junho."""
     ids = []
     meses_criados: set[str] = set()
+    pulados = 0
     for item in items:
         dados = item.model_dump()
         d_data = dados.get("data")
@@ -791,12 +802,27 @@ def add_despesas_batch(
         if mes_real not in meses_criados:
             _get_or_create_mes(mes_real, db)
             meses_criados.add(mes_real)
+        # Dedup: pula se já existe despesa idêntica (mês+data+valor+fornecedor) — evita
+        # duplicar ao reenviar o mesmo extrato
+        dup = (
+            db.query(FiscalDespesa)
+            .filter(
+                FiscalDespesa.mes == mes_real,
+                FiscalDespesa.data == d_data,
+                FiscalDespesa.valor == dados.get("valor"),
+                FiscalDespesa.fornecedor == dados.get("fornecedor"),
+            )
+            .first()
+        )
+        if dup:
+            pulados += 1
+            continue
         d = FiscalDespesa(mes=mes_real, criado_por_id=getattr(user, "id", None), **dados)
         db.add(d)
         db.flush()
         ids.append(str(d.id))
     db.commit()
-    return {"ids": ids, "count": len(ids), "meses": sorted(meses_criados)}
+    return {"ids": ids, "count": len(ids), "pulados": pulados, "meses": sorted(meses_criados)}
 
 
 # ── Parse de extrato bancário com IA ─────────────────────────────────────────
@@ -833,8 +859,12 @@ Para cada entrada classifique "tipo_sugerido":
 - "outro": transferência interna, rendimento, estorno, origem desconhecida.
 O "pagador" é quem enviou o dinheiro (nome limpo).
 
+Identifique também o nome do BANCO emissor do extrato (ex.: "Banco Inter", "Itaú",
+"Nubank", "Bradesco", "Santander", "Caixa", "Banco do Brasil"). Se não achar, use "Banco".
+
 Retorne APENAS um JSON (sem markdown, sem comentários) no formato:
 {
+  "banco": "Banco Inter",
   "saidas": [{"fornecedor":"...","valor":NNNN.NN,"data":"YYYY-MM-DD","descricao":"...","categoria":"..."}],
   "entradas": [{"pagador":"...","valor":NNNN.NN,"data":"YYYY-MM-DD","descricao":"...","tipo_sugerido":"receita|reembolso_recebido|outro"}]
 }"""
@@ -910,20 +940,49 @@ async def parse_extrato(
             logger.warning("parse_extrato: JSON inválido. Erro: %s", e)
             raise HTTPException(422, f"JSON inválido retornado por Claude: {e}")
 
-    # Aceita tanto o novo formato {saidas, entradas} quanto um array legado de saídas.
+    # Aceita tanto o novo formato {banco, saidas, entradas} quanto um array legado de saídas.
+    banco = "Banco"
     if isinstance(parsed, list):
         saidas, entradas = parsed, []
     elif isinstance(parsed, dict):
         saidas = parsed.get("saidas") or []
         entradas = parsed.get("entradas") or []
+        banco = (parsed.get("banco") or "Banco").strip() or "Banco"
     else:
         raise HTTPException(422, "Formato de resposta inesperado.")
+
+    # Meses contidos no extrato (das datas de saídas + entradas)
+    meses = sorted({
+        (x.get("data") or "")[:7]
+        for x in (saidas + entradas)
+        if (x.get("data") or "")[:7]
+    })
+
+    # Salva o arquivo no Drive: /Backoffice/Extratos/{banco}/{mes}/Extrato_{meses}.{ext}
+    drive_link = None
+    try:
+        from app.services.google_drive import upload_arquivo_raiz
+        ext = "pdf" if is_pdf else (filename.split(".")[-1] if "." in filename else "jpg")
+        meses_str = "-a-".join(meses) if meses else datetime.now(BRT).strftime("%Y-%m")
+        # Pasta por banco; se o extrato é de um único mês, subpasta do mês
+        subpath = ["Backoffice", "Extratos", banco] + ([meses[0]] if len(meses) == 1 else [])
+        drive_link = upload_arquivo_raiz(
+            conteudo=content,
+            nome_arquivo=f"Extrato_{meses_str}.{ext}",
+            subpath=subpath,
+            mimetype=("application/pdf" if is_pdf else (ct or "image/jpeg")),
+        )
+    except Exception as e:
+        logger.warning("parse_extrato: falha ao salvar no Drive: %s", e)
 
     # `linhas` mantém retrocompat com o front antigo (= saídas)
     return {
         "linhas": saidas,
         "saidas": saidas,
         "entradas": entradas,
+        "banco": banco,
+        "meses": meses,
+        "drive_link": drive_link,
         "total": len(saidas),
         "total_entradas": len(entradas),
     }

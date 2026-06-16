@@ -599,10 +599,14 @@ function VincularReembolso({
     onError: (e: any) => alert(`Erro ao criar reembolso: ${e?.response?.data?.detail || e?.message}`),
   })
 
-  // Reembolsos disponíveis (abertos) que ainda não estão vinculados a esta linha
+  // Reembolsos disponíveis (inclui pagos — adiantamento pode ter sido quitado) que ainda
+  // não estão vinculados a esta linha. Exclui só os cancelados.
   const disponiveis = reembolsos
-    .filter(r => r.status !== 'pago' && r.status !== 'cancelado' && !value.includes(r.id))
-    .map(r => ({ value: r.id, label: `${cliNome(r.cliente_id)} — ${r.titulo}` }))
+    .filter(r => r.status !== 'cancelado' && !value.includes(r.id))
+    .map(r => ({
+      value: r.id,
+      label: `${cliNome(r.cliente_id)} — ${r.titulo}${r.status === 'pago' ? ' (pago)' : ''}`,
+    }))
 
   return (
     <div style={{ gridColumn: '1 / -1', padding: '8px 10px 4px 34px', display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -692,10 +696,17 @@ function SecaoExtrato({
   const [entradas, setEntradas] = useState<(ParsedEntrada & { selecionado: boolean })[]>([])
   const [parsing, setParsing] = useState(false)
   const [parseErr, setParseErr] = useState<string | null>(null)
+  const [progresso, setProgresso] = useState(0)
+  const [salvoInfo, setSalvoInfo] = useState<string | null>(null)
   const allCats = Array.from(new Set([...CATEGORIAS_PADRAO, ...categorias]))
 
   async function handleFile(file: File) {
-    setParsing(true); setParseErr(null); setLinhas([]); setEntradas([])
+    setParsing(true); setParseErr(null); setLinhas([]); setEntradas([]); setSalvoInfo(null)
+    // Progresso "fake" crescente (não há stream do fetch) — vai até 90% e completa no fim
+    setProgresso(8)
+    const timer = setInterval(() => {
+      setProgresso(p => (p < 90 ? p + Math.max(1, Math.round((92 - p) / 12)) : p))
+    }, 400)
     try {
       const res = await backofficeApi.parseExtrato(file)
       const saidas = res.saidas ?? res.linhas ?? []
@@ -706,6 +717,9 @@ function SecaoExtrato({
         return
       }
       setLinhas(saidas.map(l => ({ ...l, selecionado: true, elegivel: false })))
+      if (res.drive_link) {
+        setSalvoInfo(`💾 ${res.banco ?? 'Extrato'} salvo no Drive (${(res.meses ?? []).join(', ') || 'mês atual'}).`)
+      }
     } catch (e: any) {
       const detail = e?.response?.data?.detail
       const status = e?.response?.status
@@ -718,6 +732,9 @@ function SecaoExtrato({
           : `Falha ao processar (${e?.message ?? 'erro desconhecido'}). Verifique se o PDF é legível.`
       )
     } finally {
+      clearInterval(timer)
+      setProgresso(100)
+      setTimeout(() => setProgresso(0), 600)
       setParsing(false)
     }
   }
@@ -788,7 +805,17 @@ function SecaoExtrato({
           onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f) }}
         />
         {parsing ? (
-          <span style={{ color: 'var(--teal)', fontSize: 13 }}>⏳ Analisando com IA…</span>
+          <div style={{ width: '100%', maxWidth: 360, margin: '0 auto' }}>
+            <div style={{ color: 'var(--teal)', fontSize: 13, marginBottom: 8 }}>
+              ⏳ Lendo o extrato com IA… {progresso}%
+            </div>
+            <div style={{ height: 8, background: '#e5e7eb', borderRadius: 999, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${progresso}%`, background: 'var(--teal)', borderRadius: 999, transition: 'width .4s ease' }} />
+            </div>
+            <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 6 }}>
+              Extraindo saídas, entradas e identificando o banco…
+            </div>
+          </div>
         ) : (
           <>
             <div style={{ fontSize: 22, marginBottom: 6 }}>📄</div>
@@ -796,11 +823,17 @@ function SecaoExtrato({
               Arraste ou clique para enviar extrato bancário (imagem ou PDF)
             </div>
             <div style={{ fontSize: 11, color: '#c0c5c5', marginTop: 4 }}>
-              A IA extrai as saídas automaticamente para você revisar
+              A IA extrai saídas e entradas, salva o arquivo no Drive e identifica o banco
             </div>
           </>
         )}
       </div>
+
+      {salvoInfo && (
+        <div style={{ marginTop: 8, padding: '6px 12px', background: '#f0fdf4', borderRadius: 6, fontSize: 12, color: '#15803d' }}>
+          {salvoInfo}
+        </div>
+      )}
 
       {parseErr && (
         <div style={{ marginTop: 8, padding: '8px 12px', background: '#fee2e2', borderRadius: 6, fontSize: 12, color: '#b91c1c' }}>
@@ -810,8 +843,25 @@ function SecaoExtrato({
 
       {linhas.length > 0 && (
         <div style={{ marginTop: 14 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8, color: 'var(--dark)' }}>
-            {linhas.length} saída(s) detectada(s) — revise e confirme:
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--dark)' }}>
+              {linhas.length} saída(s) detectada(s) — revise e confirme:
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {(() => {
+                const todosEleg = linhas.every(l => l.elegivel)
+                return (
+                  <button
+                    type="button"
+                    className={styles.btnSmall}
+                    style={{ fontSize: 11, padding: '4px 10px' }}
+                    onClick={() => setLinhas(prev => prev.map(x => ({ ...x, elegivel: !todosEleg })))}
+                  >
+                    {todosEleg ? 'Desmarcar elegível de todas' : '✓ Marcar elegível em todas'}
+                  </button>
+                )
+              })()}
+            </div>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {linhas.map((l, i) => {
@@ -1378,6 +1428,17 @@ function TabelaDespesas({ mes }: { mes: string }) {
               </tr>
             </thead>
             <tbody>
+              {/* Linha de soma (total geral) — destacada */}
+              <tr style={{ background: '#f0fdf4', fontWeight: 700 }}>
+                <td style={{ fontSize: 11, color: 'var(--gray-mid)' }}>TOTAL</td>
+                <td colSpan={2} style={{ fontSize: 11, color: 'var(--gray-mid)' }}>
+                  {despesasManuais.length + grupos.reduce((s, g) => s + g.itens.length, 0)} itens
+                </td>
+                <td style={{ textAlign: 'right', color: 'var(--dark)' }}>{fmtBRL(total)}</td>
+                <td colSpan={3}></td>
+                <td style={{ textAlign: 'right', color: totalCredito > 0 ? 'var(--teal)' : 'var(--gray-mid)' }}>{fmtBRL(totalCredito)}</td>
+                <td></td>
+              </tr>
               {/* Grupos de reembolso */}
               {grupos.map(g => {
                 const open = expanded[g.id]

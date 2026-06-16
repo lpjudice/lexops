@@ -173,7 +173,7 @@ export const backofficeApi = {
     api.post(`/backoffice/despesas/batch/${mes}`, items).then(r => r.data),
 
   // Parse extrato
-  parseExtrato: async (file: File): Promise<{ linhas: ParsedExpense[]; saidas?: ParsedExpense[]; entradas?: ParsedEntrada[]; total?: number; total_entradas?: number }> => {
+  parseExtrato: async (file: File): Promise<{ linhas: ParsedExpense[]; saidas?: ParsedExpense[]; entradas?: ParsedEntrada[]; banco?: string; meses?: string[]; drive_link?: string | null; total?: number; total_entradas?: number }> => {
     // Usa fetch nativo: o browser gera "multipart/form-data; boundary=…" corretamente.
     // (axios herdava o Content-Type:application/json default e quebrava o multipart.)
     const fd = new FormData()
