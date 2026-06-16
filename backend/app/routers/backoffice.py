@@ -612,16 +612,6 @@ def create_regra(body: RegraIn, _=Depends(get_current_user), db: Session = Depen
     return {"id": str(r.id)}
 
 
-@router.post("/admin-zerar-despesas")
-def admin_zerar_despesas(key: str = "", db: Session = Depends(get_db)) -> Any:
-    """TEMPORÁRIO: apaga TODAS as despesas (todos os meses) para re-teste. Chave one-time."""
-    if key != "lj-zerar-2026-06":
-        raise HTTPException(403, "chave inválida")
-    n = db.query(FiscalDespesa).delete()
-    db.commit()
-    return {"deletadas": n}
-
-
 @router.post("/seed-mock")
 def seed_mock(_=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
     """Seed temporário de 2 meses mock para teste. REMOVER após uso."""
