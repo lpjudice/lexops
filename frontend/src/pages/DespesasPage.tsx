@@ -8,6 +8,8 @@ import {
   type Fornecedor,
   type ParsedExpense,
   type ParsedEntrada,
+  type Adiantamento,
+  type AlocarItem,
 } from '../api/backoffice'
 import { reembolsosApi } from '../api/reembolsos'
 import { clientesApi } from '../api/clientes'
@@ -1537,6 +1539,292 @@ function TabelaDespesas({ mes }: { mes: string }) {
 
 // ─── Aba Fornecedores ─────────────────────────────────────────────────────────
 
+// ─── Aba Adiantamentos (ledger de saldo + alocação por item de reembolso) ──────
+
+function AlocarPanel({ adiantamento, onDone }: { adiantamento: Adiantamento; onDone: () => void }) {
+  const qc = useQueryClient()
+  const { data: reembolsos = [] } = useQuery({ queryKey: ['reembolsos'], queryFn: () => reembolsosApi.listar() })
+  const { data: clientes = [] } = useQuery({ queryKey: ['clientes'], queryFn: () => clientesApi.listar() })
+  const cliNome = (id: string) => clientes.find(c => c.id === id)?.nome ?? '—'
+
+  const [pastaId, setPastaId] = useState('')
+  // item_id -> valor alocado (selecionados)
+  const [selItens, setSelItens] = useState<Record<string, number>>({})
+  const [novoItemDesc, setNovoItemDesc] = useState('')
+  const [novoItemValor, setNovoItemValor] = useState(0)
+  const [criandoPasta, setCriandoPasta] = useState(false)
+  const [novaPastaCliente, setNovaPastaCliente] = useState('')
+  const [novaPastaClienteId, setNovaPastaClienteId] = useState('')
+  const [novaPastaTitulo, setNovaPastaTitulo] = useState('')
+
+  const pasta = reembolsos.find(r => r.id === pastaId)
+  const pastasOpts = reembolsos
+    .filter(r => r.status !== 'cancelado')
+    .map(r => ({ value: r.id, label: `${cliNome(r.cliente_id)} — ${r.titulo}${r.status === 'pago' ? ' (pago)' : ''}` }))
+
+  const somaSelecionada =
+    Object.values(selItens).reduce((s, v) => s + v, 0) +
+    (novoItemDesc && novoItemValor ? novoItemValor : 0)
+  const excede = somaSelecionada - adiantamento.saldo > 0.001
+
+  const alocar = useMutation({
+    mutationFn: () => {
+      const itens: AlocarItem[] = []
+      for (const [itemId, valor] of Object.entries(selItens)) {
+        if (valor > 0) itens.push({ reembolso_id: pastaId, item_reembolso_id: itemId, valor })
+      }
+      if (novoItemDesc && novoItemValor > 0 && pastaId) {
+        itens.push({ reembolso_id: pastaId, novo_item: { descricao: novoItemDesc, valor: novoItemValor }, valor: novoItemValor })
+      }
+      return backofficeApi.alocarAdiantamento(adiantamento.despesa_id, itens)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['adiantamentos'] })
+      qc.invalidateQueries({ queryKey: ['reembolsos'] })
+      onDone()
+    },
+    onError: (e: any) => alert(`Erro ao alocar: ${e?.response?.data?.detail || e?.message}`),
+  })
+
+  const criarPasta = useMutation({
+    mutationFn: async () => {
+      const novo = await reembolsosApi.criar({
+        cliente_id: novaPastaClienteId,
+        titulo: novaPastaTitulo.trim(),
+        data_emissao: new Date().toISOString().slice(0, 10),
+      })
+      return novo
+    },
+    onSuccess: (novo) => {
+      qc.invalidateQueries({ queryKey: ['reembolsos'] })
+      setPastaId(novo.id); setCriandoPasta(false)
+      setNovaPastaCliente(''); setNovaPastaClienteId(''); setNovaPastaTitulo('')
+    },
+    onError: (e: any) => alert(`Erro ao criar pasta: ${e?.response?.data?.detail || e?.message}`),
+  })
+
+  return (
+    <div style={{ padding: '12px 14px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, marginTop: 8 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8, color: '#92400e' }}>
+        Alocar saldo ({fmtBRL(adiantamento.saldo)}) a itens de reembolso
+      </div>
+
+      {/* Escolher pasta */}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+        <div style={{ minWidth: 280, flex: 1 }}>
+          <Combobox
+            value={pasta ? `${cliNome(pasta.cliente_id)} — ${pasta.titulo}` : ''}
+            onChange={(label) => {
+              const opt = pastasOpts.find(o => o.label === label)
+              setPastaId(opt?.value ?? '')
+              setSelItens({})
+            }}
+            options={pastasOpts}
+            placeholder="Pasta de reembolso (ativas e pagas)…"
+          />
+        </div>
+        <button type="button" className={styles.btnSmall} onClick={() => setCriandoPasta(v => !v)}>
+          {criandoPasta ? 'Cancelar' : '+ Nova pasta'}
+        </button>
+      </div>
+
+      {/* Criar pasta nova */}
+      {criandoPasta && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 6, marginBottom: 10, alignItems: 'center' }}>
+          <Combobox
+            value={novaPastaCliente}
+            onChange={(nome) => { setNovaPastaCliente(nome); setNovaPastaClienteId(clientes.find(c => c.nome === nome)?.id ?? '') }}
+            options={clientes.map(c => ({ value: c.id, label: c.nome }))}
+            placeholder="Cliente"
+          />
+          <input value={novaPastaTitulo} onChange={e => setNovaPastaTitulo(e.target.value)} placeholder="Título da pasta"
+            style={{ padding: '7px 10px', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 12, fontFamily: 'Archivo, sans-serif' }} />
+          <button type="button" className={styles.btnPrimary} style={{ padding: '5px 12px', fontSize: 12 }}
+            disabled={!novaPastaClienteId || !novaPastaTitulo.trim() || criarPasta.isPending}
+            onClick={() => criarPasta.mutate()}>Criar pasta</button>
+        </div>
+      )}
+
+      {/* Itens da pasta */}
+      {pasta && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ fontSize: 11, color: 'var(--gray-mid)', marginBottom: 4 }}>
+            Itens em <strong>{pasta.titulo}</strong> — marque os que este pagamento cobre:
+          </div>
+          {pasta.itens.length === 0 && <div style={{ fontSize: 11, color: 'var(--gray-mid)' }}>Pasta sem itens. Crie um abaixo.</div>}
+          {pasta.itens.map(it => {
+            const sel = selItens[it.id] != null
+            return (
+              <div key={it.id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '4px 0' }}>
+                <input type="checkbox" checked={sel} onChange={e => {
+                  setSelItens(prev => {
+                    const next = { ...prev }
+                    if (e.target.checked) next[it.id] = it.valor
+                    else delete next[it.id]
+                    return next
+                  })
+                }} />
+                <span style={{ fontSize: 12, flex: 1 }}>{it.descricao} <span style={{ color: 'var(--gray-mid)' }}>· {it.natureza}</span></span>
+                {sel ? (
+                  <MoneyInput value={selItens[it.id]} onValue={v => setSelItens(prev => ({ ...prev, [it.id]: v }))} style={{ fontSize: 12, padding: '3px 6px', width: 90 }} />
+                ) : (
+                  <span style={{ fontSize: 12, color: 'var(--gray-mid)' }}>{fmtBRL(it.valor)}</span>
+                )}
+              </div>
+            )
+          })}
+
+          {/* Criar item novo na pasta */}
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6 }}>
+            <span style={{ fontSize: 11, color: 'var(--gray-mid)' }}>+ novo item:</span>
+            <input value={novoItemDesc} onChange={e => setNovoItemDesc(e.target.value)} placeholder="descrição (ex.: busca certidão)"
+              style={{ padding: '5px 8px', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 12, fontFamily: 'Archivo, sans-serif', flex: 1 }} />
+            <MoneyInput value={novoItemValor} onValue={setNovoItemValor} style={{ fontSize: 12, padding: '3px 6px', width: 90 }} />
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
+        <span style={{ fontSize: 12, color: excede ? '#b91c1c' : 'var(--gray-mid)' }}>
+          Selecionado: <strong>{fmtBRL(somaSelecionada)}</strong> de {fmtBRL(adiantamento.saldo)}
+          {excede && ' — excede o saldo!'}
+        </span>
+        <button className={styles.btnPrimary} disabled={somaSelecionada <= 0 || excede || alocar.isPending} onClick={() => alocar.mutate()}>
+          {alocar.isPending ? 'Alocando…' : 'Alocar'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function AbaAdiantamentos() {
+  const qc = useQueryClient()
+  const { data: adiantamentos = [], isLoading } = useQuery({
+    queryKey: ['adiantamentos'],
+    queryFn: () => backofficeApi.listarAdiantamentos(),
+  })
+  const [expandido, setExpandido] = useState<string | null>(null)
+  const [alocando, setAlocando] = useState<string | null>(null)
+
+  const removerAloc = useMutation({
+    mutationFn: (id: string) => backofficeApi.removerAlocacao(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['adiantamentos'] }),
+  })
+  const perda = useMutation({
+    mutationFn: (despesaId: string) => backofficeApi.perdaSaldoAdiantamento(despesaId),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['adiantamentos'] }); qc.invalidateQueries({ queryKey: ['backoffice-lancamentos'] }) },
+    onError: (e: any) => alert(`Erro: ${e?.response?.data?.detail || e?.message}`),
+  })
+
+  if (isLoading) return <div className={styles.empty}>Carregando…</div>
+
+  const comSaldo = adiantamentos.filter(a => a.saldo > 0.001)
+  const zerados = adiantamentos.filter(a => a.saldo <= 0.001)
+
+  function Card({ a }: { a: Adiantamento }) {
+    const pct = a.valor > 0 ? Math.min(100, (a.total_alocado / a.valor) * 100) : 0
+    const pctPerda = a.valor > 0 ? Math.min(100, (a.perda_valor / a.valor) * 100) : 0
+    const open = expandido === a.despesa_id
+    return (
+      <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, marginBottom: 10, overflow: 'hidden', background: '#fff' }}>
+        <div style={{ padding: '12px 14px', display: 'grid', gridTemplateColumns: '1fr 130px 200px auto', gap: 12, alignItems: 'center' }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 13 }}>{a.fornecedor}</div>
+            <div style={{ fontSize: 11, color: 'var(--gray-mid)' }}>{a.categoria} · {fmtData(a.data)} · {mesLabel(a.mes)}</div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: 11, color: 'var(--gray-mid)' }}>Total</div>
+            <div style={{ fontWeight: 700, fontSize: 13 }}>{fmtBRL(a.valor)}</div>
+          </div>
+          <div>
+            <div style={{ height: 8, background: '#f3f4f6', borderRadius: 999, overflow: 'hidden', display: 'flex' }}>
+              <div style={{ width: `${pct}%`, background: 'var(--teal)' }} />
+              <div style={{ width: `${pctPerda}%`, background: '#ef4444' }} />
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--gray-mid)', marginTop: 3 }}>
+              Alocado {fmtBRL(a.total_alocado)}{a.perda_valor > 0 ? ` · Perda ${fmtBRL(a.perda_valor)}` : ''}
+              {a.saldo > 0.001
+                ? <strong style={{ color: '#b45309' }}> · Saldo {fmtBRL(a.saldo)}</strong>
+                : <strong style={{ color: '#15803d' }}> · zerado</strong>}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {a.saldo > 0.001 && (
+              <button className={styles.btnPrimary} style={{ padding: '5px 12px', fontSize: 12 }}
+                onClick={() => setAlocando(alocando === a.despesa_id ? null : a.despesa_id)}>
+                {alocando === a.despesa_id ? 'Fechar' : 'Alocar'}
+              </button>
+            )}
+            <button className={styles.btnSmall} style={{ fontSize: 12 }} onClick={() => setExpandido(open ? null : a.despesa_id)}>
+              {open ? '▲' : `▼ ${a.alocacoes.length}`}
+            </button>
+          </div>
+        </div>
+
+        {alocando === a.despesa_id && (
+          <div style={{ padding: '0 14px 12px' }}>
+            <AlocarPanel adiantamento={a} onDone={() => setAlocando(null)} />
+          </div>
+        )}
+
+        {open && (
+          <div style={{ padding: '0 14px 12px', borderTop: '1px solid #f3f4f6' }}>
+            {a.alocacoes.length === 0 ? (
+              <div style={{ fontSize: 12, color: 'var(--gray-mid)', padding: '8px 0' }}>Nenhuma alocação ainda.</div>
+            ) : (
+              a.alocacoes.map(al => (
+                <div key={al.id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #f9fafb', fontSize: 12 }}>
+                  <span style={{ flex: 1 }}>
+                    <strong>{al.cliente_nome ?? '—'}</strong> · {al.reembolso_titulo ?? '—'}
+                    {al.item_descricao && <span style={{ color: 'var(--gray-mid)' }}> · {al.item_descricao}</span>}
+                  </span>
+                  <span style={{ fontWeight: 600 }}>{fmtBRL(al.valor)}</span>
+                  <button style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer' }} onClick={() => removerAloc.mutate(al.id)}>×</button>
+                </div>
+              ))
+            )}
+            {a.saldo > 0.001 && (
+              <div style={{ marginTop: 8 }}>
+                <button className={styles.btnDanger} style={{ fontSize: 12 }}
+                  onClick={() => { if (confirm(`Tratar o saldo de ${fmtBRL(a.saldo)} como PERDA? Vira despesa elegível a crédito.`)) perda.mutate(a.despesa_id) }}>
+                  Tratar saldo ({fmtBRL(a.saldo)}) como perda
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <div style={{ fontSize: 12, color: 'var(--gray-mid)', marginBottom: 12 }}>
+        Adiantamentos são pagamentos reembolsáveis (ex.: ONR) consumidos por itens de reembolso ao longo dos meses.
+        O saldo não alocado permanece aqui até você alocar ou tratar como perda.
+      </div>
+
+      {comSaldo.length > 0 && (
+        <>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#b45309', marginBottom: 6 }}>⏳ Com saldo a alocar ({comSaldo.length})</div>
+          {comSaldo.map(a => <Card key={a.despesa_id} a={a} />)}
+        </>
+      )}
+
+      {zerados.length > 0 && (
+        <>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#15803d', margin: '12px 0 6px' }}>✓ Zerados / em perda ({zerados.length})</div>
+          {zerados.map(a => <Card key={a.despesa_id} a={a} />)}
+        </>
+      )}
+
+      {adiantamentos.length === 0 && (
+        <div className={styles.empty}>Nenhum adiantamento. Categorize uma despesa do extrato como reembolsável para ela aparecer aqui.</div>
+      )}
+    </div>
+  )
+}
+
 function AbaFornecedores() {
   const qc = useQueryClient()
   const { data: fornecedores = [] } = useQuery({
@@ -1662,7 +1950,7 @@ function AbaFornecedores() {
 
 // ─── Página principal ─────────────────────────────────────────────────────────
 
-type Aba = 'lancamentos' | 'fornecedores'
+type Aba = 'lancamentos' | 'adiantamentos' | 'fornecedores'
 type SecaoAberta = 'nova' | 'extrato' | 'recorrentes' | null
 
 export default function DespesasPage() {
@@ -1720,6 +2008,7 @@ export default function DespesasPage() {
       <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid #e5e7eb' }}>
         {([
           { id: 'lancamentos' as Aba, label: 'Lançamentos' },
+          { id: 'adiantamentos' as Aba, label: 'Adiantamentos' },
           { id: 'fornecedores' as Aba, label: 'Fornecedores' },
         ]).map(t => (
           <button
@@ -1740,6 +2029,7 @@ export default function DespesasPage() {
         ))}
       </div>
 
+      {aba === 'adiantamentos' && <AbaAdiantamentos />}
       {aba === 'fornecedores' && <AbaFornecedores />}
 
       {aba === 'lancamentos' && <>

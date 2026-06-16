@@ -25,8 +25,8 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.backoffice import (
-    DespesaRecorrente, FiscalDespesa, FiscalFolha, FiscalFornecedor,
-    FiscalMes, FiscalReceita, NotaFiscalSugestao, RegraCredito,
+    AdiantamentoAlocacao, DespesaRecorrente, FiscalDespesa, FiscalFolha,
+    FiscalFornecedor, FiscalMes, FiscalReceita, NotaFiscalSugestao, RegraCredito,
 )
 from app.models.config_fiscal import ConfigFiscal
 from app.models.nota_fiscal import NotaFiscal
@@ -81,7 +81,14 @@ def _entrada(mes: str, mes_obj: FiscalMes, db: Session) -> EntradaMes:
     receita_pj_regular = sum(float(r.valor) for r in receitas if r.tipo_cliente == "pj_regular" and r.credito_interesse)
     retencoes = sum(float(r.retencoes) for r in receitas)
     despesas_total = sum(float(d.valor) for d in despesas)
-    despesas_elegiveis = sum(float(d.valor) for d in despesas if d.tem_nota and d.elegivel)
+    # Elegível: despesa com nota+flag elegível. Para adiantamento, só a porção de PERDA
+    # (perda_valor) é elegível — o restante é pass-through (reembolsável).
+    despesas_elegiveis = 0.0
+    for d in despesas:
+        if d.perda_valor:
+            despesas_elegiveis += float(d.perda_valor)
+        elif d.tem_nota and d.elegivel:
+            despesas_elegiveis += float(d.valor)
 
     # Só reembolsos marcados EXPLICITAMENTE como perda entram como despesa (decisão tributária).
     # "cancelado" é erro de cadastro refeito, não perda — não conta mais aqui.
@@ -230,10 +237,15 @@ def get_lancamentos(mes: str, _=Depends(get_current_user), db: Session = Depends
     aliq_efetiva_pct = round(aliq_total_pct * fator_global, 3)
 
     def _credito_despesa(d: FiscalDespesa) -> dict:
-        if not d.tem_nota or not d.elegivel:
+        # Adiantamento com perda: crédito sobre a porção de perda. Senão, regra normal.
+        if d.perda_valor:
+            base = float(d.perda_valor)
+        elif d.tem_nota and d.elegivel:
+            base = float(d.valor)
+        else:
             return {"ibs": 0.0, "cbs": 0.0, "total": 0.0}
-        ibs = float(d.valor) * premissas.ibs_entrada_pct / 100 * fator_global
-        cbs = float(d.valor) * premissas.cbs_entrada_pct / 100 * fator_global
+        ibs = base * premissas.ibs_entrada_pct / 100 * fator_global
+        cbs = base * premissas.cbs_entrada_pct / 100 * fator_global
         return {"ibs": round(ibs, 2), "cbs": round(cbs, 2), "total": round(ibs + cbs, 2)}
 
     # Cache de nomes de usuários para o chip "cadastrado por"
@@ -813,6 +825,159 @@ def add_despesas_batch(
         ids.append(str(d.id))
     db.commit()
     return {"ids": ids, "count": len(ids), "pulados": pulados, "meses": sorted(meses_criados)}
+
+
+# ── Adiantamentos: alocação por item de reembolso + saldo + perda ────────────
+
+def _is_reembolsavel(cat: str) -> bool:
+    c = (cat or "").lower()
+    return "reembols" in c or "cliente" in c
+
+
+@router.get("/adiantamentos")
+def listar_adiantamentos(_=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
+    """Lista despesas-adiantamento (reembolsáveis ou já com alocação) + saldo e alocações.
+    Adiantamentos com saldo>0 permanecem listados (roll-forward) independentemente do mês."""
+    from app.models.cliente import Cliente as _Cli
+
+    # Candidatos: despesas reembolsáveis OU que já tenham alocação
+    desp = db.query(FiscalDespesa).all()
+    aloc_all = db.query(AdiantamentoAlocacao).all()
+    aloc_por_desp: dict[uuid.UUID, list] = {}
+    for a in aloc_all:
+        aloc_por_desp.setdefault(a.despesa_id, []).append(a)
+
+    candidatos = [d for d in desp if _is_reembolsavel(d.categoria) or d.id in aloc_por_desp]
+
+    # Lookups de cliente, reembolso, item
+    reemb_ids = {a.reembolso_id for a in aloc_all}
+    item_ids = {a.item_reembolso_id for a in aloc_all if a.item_reembolso_id}
+    reemb_map = {r.id: r for r in db.query(Reembolso).filter(Reembolso.id.in_(reemb_ids)).all()} if reemb_ids else {}
+    item_map = {i.id: i for i in db.query(ItemReembolso).filter(ItemReembolso.id.in_(item_ids)).all()} if item_ids else {}
+    cli_ids = {r.cliente_id for r in reemb_map.values()}
+    cli_map = {c.id: c.nome for c in db.query(_Cli).filter(_Cli.id.in_(cli_ids)).all()} if cli_ids else {}
+
+    out = []
+    for d in candidatos:
+        alocs = aloc_por_desp.get(d.id, [])
+        total_alocado = sum(float(a.valor) for a in alocs)
+        saldo = round(float(d.valor) - total_alocado - float(d.perda_valor or 0), 2)
+        out.append({
+            "despesa_id": str(d.id),
+            "mes": d.mes,
+            "data": d.data.isoformat() if d.data else None,
+            "fornecedor": d.fornecedor,
+            "categoria": d.categoria,
+            "valor": float(d.valor),
+            "total_alocado": round(total_alocado, 2),
+            "perda_valor": float(d.perda_valor) if d.perda_valor else 0,
+            "saldo": saldo,
+            "alocacoes": [
+                {
+                    "id": str(a.id),
+                    "reembolso_id": str(a.reembolso_id),
+                    "reembolso_titulo": (reemb_map.get(a.reembolso_id).titulo if reemb_map.get(a.reembolso_id) else None),
+                    "cliente_nome": (cli_map.get(reemb_map[a.reembolso_id].cliente_id) if reemb_map.get(a.reembolso_id) else None),
+                    "item_id": str(a.item_reembolso_id) if a.item_reembolso_id else None,
+                    "item_descricao": (item_map.get(a.item_reembolso_id).descricao if a.item_reembolso_id and item_map.get(a.item_reembolso_id) else None),
+                    "valor": float(a.valor),
+                }
+                for a in alocs
+            ],
+        })
+    # Ordena: com saldo>0 primeiro (pendências), depois por data desc
+    out.sort(key=lambda x: (x["saldo"] <= 0, x["data"] or ""), reverse=False)
+    return out
+
+
+class AlocarItemIn(BaseModel):
+    item_reembolso_id: str | None = None
+    reembolso_id: str | None = None
+    # Para criar item novo numa pasta existente:
+    novo_item: dict | None = None  # {data, descricao, natureza, valor}
+    # Para criar pasta nova (+ 1º item):
+    novo_reembolso: dict | None = None  # {cliente_id, titulo}
+    valor: float
+
+
+@router.post("/adiantamentos/{despesa_id}/alocar")
+def alocar_adiantamento(despesa_id: uuid.UUID, itens: list[AlocarItemIn], _=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
+    d = db.get(FiscalDespesa, despesa_id)
+    if not d:
+        raise HTTPException(404, "Adiantamento não encontrado")
+    ja_alocado = sum(float(a.valor) for a in db.query(AdiantamentoAlocacao).filter_by(despesa_id=despesa_id).all())
+    saldo = float(d.valor) - ja_alocado - float(d.perda_valor or 0)
+    soma_nova = sum(float(i.valor) for i in itens)
+    if soma_nova - saldo > 0.001:
+        raise HTTPException(400, f"Alocação ({soma_nova:.2f}) excede o saldo disponível ({saldo:.2f}).")
+
+    criadas = 0
+    for it in itens:
+        reembolso_id = it.reembolso_id
+        item_id = it.item_reembolso_id
+
+        # Criar pasta nova (+ 1º item)
+        if it.novo_reembolso:
+            nr = Reembolso(
+                cliente_id=uuid.UUID(it.novo_reembolso["cliente_id"]),
+                titulo=it.novo_reembolso["titulo"],
+                data_emissao=d.data or date.today(),
+            )
+            db.add(nr)
+            db.flush()
+            reembolso_id = str(nr.id)
+
+        # Criar item novo numa pasta
+        if it.novo_item and reembolso_id:
+            ni = ItemReembolso(
+                reembolso_id=uuid.UUID(reembolso_id),
+                data=date.fromisoformat(it.novo_item["data"]) if it.novo_item.get("data") else (d.data or date.today()),
+                descricao=it.novo_item.get("descricao") or d.fornecedor,
+                natureza=it.novo_item.get("natureza") or "Reembolso",
+                valor=it.novo_item.get("valor") or it.valor,
+            )
+            db.add(ni)
+            db.flush()
+            item_id = str(ni.id)
+
+        if not reembolso_id:
+            raise HTTPException(400, "Alocação sem reembolso/pasta de destino.")
+
+        db.add(AdiantamentoAlocacao(
+            despesa_id=despesa_id,
+            reembolso_id=uuid.UUID(reembolso_id),
+            item_reembolso_id=uuid.UUID(item_id) if item_id else None,
+            valor=it.valor,
+        ))
+        criadas += 1
+
+    db.commit()
+    return {"criadas": criadas}
+
+
+@router.delete("/adiantamentos/alocacao/{id}")
+def remover_alocacao(id: uuid.UUID, _=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
+    a = db.get(AdiantamentoAlocacao, id)
+    if not a:
+        raise HTTPException(404)
+    db.delete(a)
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/adiantamentos/{despesa_id}/perda-saldo")
+def perda_saldo_adiantamento(despesa_id: uuid.UUID, _=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
+    """Trata o saldo remanescente do adiantamento como perda (elegível a crédito)."""
+    d = db.get(FiscalDespesa, despesa_id)
+    if not d:
+        raise HTTPException(404)
+    ja_alocado = sum(float(a.valor) for a in db.query(AdiantamentoAlocacao).filter_by(despesa_id=despesa_id).all())
+    saldo = round(float(d.valor) - ja_alocado - float(d.perda_valor or 0), 2)
+    if saldo <= 0:
+        raise HTTPException(400, "Sem saldo para tratar como perda.")
+    d.perda_valor = float(d.perda_valor or 0) + saldo
+    db.commit()
+    return {"perda_valor": float(d.perda_valor), "saldo": 0}
 
 
 # ── Parse de extrato bancário com IA ─────────────────────────────────────────

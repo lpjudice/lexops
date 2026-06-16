@@ -711,6 +711,17 @@ def _run_migrations() -> None:
         conn.execute(text("ALTER TABLE fiscal_despesa ADD COLUMN IF NOT EXISTS reembolso_ids JSONB"))
         conn.execute(text("ALTER TABLE config_fiscal ADD COLUMN IF NOT EXISTS estagio_reforma VARCHAR(20) NOT NULL DEFAULT 'pre_reforma'"))
         conn.execute(text("ALTER TABLE reembolsos ADD COLUMN IF NOT EXISTS tratar_como_perda BOOLEAN NOT NULL DEFAULT false"))
+        conn.execute(text("ALTER TABLE fiscal_despesa ADD COLUMN IF NOT EXISTS perda_valor NUMERIC(14,2)"))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS adiantamento_alocacao (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                despesa_id UUID NOT NULL REFERENCES fiscal_despesa(id) ON DELETE CASCADE,
+                reembolso_id UUID NOT NULL,
+                item_reembolso_id UUID,
+                valor NUMERIC(14,2) NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS nf_sugestoes (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

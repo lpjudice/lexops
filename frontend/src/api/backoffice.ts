@@ -109,6 +109,37 @@ export interface ParsedEntrada {
   tipo_sugerido: 'receita' | 'reembolso_recebido' | 'outro'
 }
 
+export interface AdiantamentoAlocacao {
+  id: string
+  reembolso_id: string
+  reembolso_titulo: string | null
+  cliente_nome: string | null
+  item_id: string | null
+  item_descricao: string | null
+  valor: number
+}
+
+export interface Adiantamento {
+  despesa_id: string
+  mes: string
+  data: string | null
+  fornecedor: string
+  categoria: string
+  valor: number
+  total_alocado: number
+  perda_valor: number
+  saldo: number
+  alocacoes: AdiantamentoAlocacao[]
+}
+
+export interface AlocarItem {
+  item_reembolso_id?: string
+  reembolso_id?: string
+  novo_item?: { data?: string; descricao?: string; natureza?: string; valor?: number }
+  novo_reembolso?: { cliente_id: string; titulo: string }
+  valor: number
+}
+
 export interface SugestaoNF {
   id: string
   data: string | null
@@ -193,6 +224,16 @@ export const backofficeApi = {
     }
     return resp.json()
   },
+
+  // Adiantamentos (ledger de saldo + alocação por item de reembolso)
+  listarAdiantamentos: () =>
+    api.get<Adiantamento[]>('/backoffice/adiantamentos').then(r => r.data),
+  alocarAdiantamento: (despesaId: string, itens: AlocarItem[]) =>
+    api.post<{ criadas: number }>(`/backoffice/adiantamentos/${despesaId}/alocar`, itens).then(r => r.data),
+  removerAlocacao: (id: string) =>
+    api.delete(`/backoffice/adiantamentos/alocacao/${id}`).then(r => r.data),
+  perdaSaldoAdiantamento: (despesaId: string) =>
+    api.post(`/backoffice/adiantamentos/${despesaId}/perda-saldo`).then(r => r.data),
 
   // Fila de sugestões de NF (entradas do extrato)
   criarSugestoesNf: (items: Array<{ data?: string; pagador: string; valor: number; descricao?: string; tipo_sugerido: string }>) =>

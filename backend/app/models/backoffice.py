@@ -101,6 +101,9 @@ class FiscalDespesa(Base):
     # Vínculo informativo N:N: IDs de reembolsos que este pagamento cobre (ex.: 1 PIX ao ONR
     # cobre certidões de vários clientes). Apenas rastreio — não soma valores.
     reembolso_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # Adiantamento: porção do valor tratada como PERDA (não reembolsada) → elegível a IBS/CBS.
+    # saldo = valor − Σ alocações; a perda atua sobre o saldo remanescente.
+    perda_valor: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -134,6 +137,21 @@ class FiscalReceita(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     fiscal_mes_rel: Mapped[FiscalMes] = relationship(back_populates="receitas")
+
+
+class AdiantamentoAlocacao(Base):
+    """Alocação de parte de um adiantamento (FiscalDespesa reembolsável) a um item de
+    reembolso de um cliente. O saldo do adiantamento = valor − Σ alocações."""
+    __tablename__ = "adiantamento_alocacao"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    despesa_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("fiscal_despesa.id", ondelete="CASCADE"), nullable=False
+    )
+    reembolso_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    item_reembolso_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    valor: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class NotaFiscalSugestao(Base):
