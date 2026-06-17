@@ -45,23 +45,25 @@ def _estilos() -> dict[str, ParagraphStyle]:
             "resumo", parent=base["Normal"], fontName="Helvetica",
             fontSize=10, textColor=CINZA, spaceAfter=10,
         ),
-        "processo": ParagraphStyle(
-            "processo", parent=base["Heading2"], fontName="Helvetica-Bold",
-            fontSize=12, textColor=ESCURO, spaceBefore=12, spaceAfter=1,
+        # Banda de título do processo: nº + cliente em destaque, fundo cinza neutro
+        # (verde fica reservado só para "NOVO", evitando confusão visual).
+        "procBanner": ParagraphStyle(
+            "procBanner", parent=base["Normal"], fontName="Helvetica-Bold",
+            fontSize=12, textColor=ESCURO, backColor=colors.HexColor("#eef1f5"),
+            borderPadding=(5, 7, 5, 7), spaceBefore=0, spaceAfter=4, leading=15,
         ),
-        "processoSub": ParagraphStyle(
-            "processoSub", parent=base["Normal"], fontName="Helvetica",
-            fontSize=8.5, textColor=CINZA, spaceAfter=2,
+        # Linha de identificação: TJ · Vara · Matéria (legível, não apagada).
+        "procMeta": ParagraphStyle(
+            "procMeta", parent=base["Normal"], fontName="Helvetica",
+            fontSize=9.5, textColor=colors.HexColor("#374151"), spaceAfter=2, leading=13,
         ),
-        "processoMeta": ParagraphStyle(
-            "processoMeta", parent=base["Normal"], fontName="Helvetica",
-            fontSize=8.5, textColor=colors.HexColor("#374151"), spaceAfter=2,
-            leading=11,
+        "procPartes": ParagraphStyle(
+            "procPartes", parent=base["Normal"], fontName="Helvetica",
+            fontSize=8.5, textColor=CINZA, spaceAfter=2, leading=11,
         ),
-        "processoResumo": ParagraphStyle(
-            "processoResumo", parent=base["Normal"], fontName="Helvetica-Oblique",
-            fontSize=8.5, textColor=colors.HexColor("#374151"), spaceAfter=6,
-            leading=11,
+        "procCount": ParagraphStyle(
+            "procCount", parent=base["Normal"], fontName="Helvetica-Oblique",
+            fontSize=8, textColor=colors.HexColor("#9ca3af"), spaceAfter=6,
         ),
         "andHeader": ParagraphStyle(
             "andHeader", parent=base["Normal"], fontName="Helvetica-Bold",
@@ -113,7 +115,7 @@ def gerar_relatorio_lote(processos: list[dict[str, Any]], gerado_em: datetime | 
     `processos`: lista de
       {
         "cnj": str, "cliente": str, "tribunal": str | None,
-        "vara": str | None, "objeto": str | None,
+        "vara": str | None, "materia": str | None,
         "autores": [str], "reus": [str],
         "andamentos": [
           {"data": date|None, "tipo": str|None, "descricao": str,
@@ -145,20 +147,33 @@ def gerar_relatorio_lote(processos: list[dict[str, Any]], gerado_em: datetime | 
     ))
     flow.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#e5e7eb")))
 
-    for p in processos:
-        bloco: list[Any] = []
-        cabecalho: list[Any] = []
-        sub = " · ".join(
-            [x for x in [p.get("tribunal"), p.get("vara"),
-                         f"{len(p['andamentos'])} andamento(s) listado(s)"] if x]
-        )
-        cabecalho.append(Paragraph(
-            f"{escape(p['cnj'])} &nbsp;—&nbsp; {escape(p.get('cliente') or 'Cliente não informado')}",
-            st["processo"],
-        ))
-        if sub:
-            cabecalho.append(Paragraph(escape(sub), st["processoSub"]))
+    for idx, p in enumerate(processos):
+        cab: list[Any] = []
+        # Corte claro entre processos (a partir do 2º; o 1º já vem após o HR do topo).
+        if idx > 0:
+            cab.append(Spacer(1, 10))
+            cab.append(HRFlowable(width="100%", thickness=1.2, color=colors.HexColor("#cbd5e1")))
+            cab.append(Spacer(1, 8))
 
+        # Banda de título: nº do processo + cliente, em destaque.
+        cab.append(Paragraph(
+            f"{escape(p['cnj'])} &nbsp;—&nbsp; {escape(p.get('cliente') or 'Cliente não informado')}",
+            st["procBanner"],
+        ))
+
+        # Identificação clara: TJ · Vara · Matéria.
+        meta_parts = []
+        if p.get("tribunal"):
+            meta_parts.append(f'<b><font color="#00875a">{escape(p["tribunal"])}</font></b>')
+        if p.get("vara"):
+            meta_parts.append(f'<b>Vara:</b> {escape(p["vara"])}')
+        materia = (p.get("materia") or "").strip()
+        if materia:
+            meta_parts.append(f'<b>Matéria:</b> {escape(materia)}')
+        if meta_parts:
+            cab.append(Paragraph(" &nbsp;·&nbsp; ".join(meta_parts), st["procMeta"]))
+
+        # Partes (autor / réu).
         autores = _fmt_partes(p.get("autores"))
         reus = _fmt_partes(p.get("reus"))
         if autores or reus:
@@ -168,20 +183,17 @@ def gerar_relatorio_lote(processos: list[dict[str, Any]], gerado_em: datetime | 
                     f"<b>Réu:</b> {escape(reus)}" if reus else "",
                 ] if x
             )
-            cabecalho.append(Paragraph(partes_txt, st["processoMeta"]))
+            cab.append(Paragraph(partes_txt, st["procPartes"]))
 
-        objeto = (p.get("objeto") or "").strip()
-        if objeto:
-            cabecalho.append(Paragraph(f"<b>Resumo:</b> {escape(objeto)}", st["processoResumo"]))
+        cab.append(Paragraph(f"{len(p['andamentos'])} andamento(s) listado(s)", st["procCount"]))
 
-        bloco.extend(cabecalho)
-
+        ands: list[Any] = []
         for a in p["andamentos"]:
             novo = bool(a.get("novo"))
             tag = '<font color="#00875a"><b>● NOVO</b></font> &nbsp;' if novo else ""
             tipo = f" &nbsp;·&nbsp; {escape(a['tipo'])}" if a.get("tipo") else ""
             cabec = f"{tag}{escape(_fmt_data(a.get('data')))}{tipo}"
-            bloco.append(Paragraph(cabec, st["andHeaderNovo"] if novo else st["andHeader"]))
+            ands.append(Paragraph(cabec, st["andHeaderNovo"] if novo else st["andHeader"]))
 
             desc = escape((a.get("descricao") or "").strip()) or "—"
             link = a.get("arquivo_drive_link")
@@ -193,16 +205,15 @@ def gerar_relatorio_lote(processos: list[dict[str, Any]], gerado_em: datetime | 
                 )
             elif nome:
                 desc += f"<br/><font color='#6b7280'>&#8595; {escape(nome)}</font>"
-            bloco.append(Paragraph(desc, st["andCorpo"]))
+            ands.append(Paragraph(desc, st["andCorpo"]))
 
         if not p["andamentos"]:
-            bloco.append(Paragraph("Sem andamentos registrados.", st["andCorpo"]))
+            ands.append(Paragraph("Sem andamentos registrados.", st["andCorpo"]))
 
-        # Mantém o cabeçalho do processo (CNJ, partes, vara, resumo) junto.
-        n_cab = len(cabecalho)
-        flow.append(KeepTogether(bloco[:n_cab]))
-        flow.extend(bloco[n_cab:])
-        flow.append(Spacer(1, 4))
+        # Mantém o cabeçalho junto do 1º andamento (não deixa o cabeçalho órfão).
+        flow.append(KeepTogether(cab + ands[:1]))
+        flow.extend(ands[1:])
+        flow.append(Spacer(1, 2))
 
     flow.append(Spacer(1, 10))
     flow.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#e5e7eb")))

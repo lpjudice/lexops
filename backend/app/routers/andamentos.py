@@ -569,7 +569,7 @@ def gerar_relatorio_lote_endpoint(body: RelatorioLoteBody, db: Session = Depends
             "cliente": proc.cliente.nome if proc.cliente else None,
             "tribunal": proc.tribunal,
             "vara": proc.vara,
-            "objeto": proc.objeto,
+            "materia": proc.materia,
             "autores": autores,
             "reus": reus,
             "andamentos": [
