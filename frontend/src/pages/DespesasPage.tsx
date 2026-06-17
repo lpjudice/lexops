@@ -1216,6 +1216,7 @@ function LinhaDespesa({
 }) {
   const indent = depth * 18
   const [uploadEdit, setUploadEdit] = useState(false)
+  const [showVinc, setShowVinc] = useState(false)
   if (editId === d.id) {
     return (
       <tr key={d.id} style={{ background: '#f0fdf4' }}>
@@ -1302,13 +1303,30 @@ function LinhaDespesa({
           </span>
         )}
         {(d.reembolsos_vinculados?.length ?? 0) > 0 && (
-          <span
-            style={{ marginLeft: 6, fontSize: 9, background: '#e0e7ff', color: '#3730a3', padding: '1px 6px', borderRadius: 999, fontWeight: 600 }}
-            title={d.reembolsos_vinculados!.map(r => `${r.cliente_nome ?? '—'} — ${r.titulo}`).join('\n')}
-          >
-            🔗 {d.reembolsos_vinculados!.length === 1
-              ? `${d.reembolsos_vinculados![0].cliente_nome ?? d.reembolsos_vinculados![0].titulo}`
-              : `${d.reembolsos_vinculados!.length} reembolsos`}
+          <span style={{ position: 'relative', display: 'inline-block' }}>
+            <span
+              onClick={(e) => { e.stopPropagation(); setShowVinc(v => !v) }}
+              style={{ marginLeft: 6, fontSize: 9, background: '#e0e7ff', color: '#3730a3', padding: '1px 6px', borderRadius: 999, fontWeight: 600, cursor: 'pointer' }}
+              title="Clique para ver os reembolsos/clientes"
+            >
+              🔗 {d.reembolsos_vinculados!.length === 1
+                ? `${d.reembolsos_vinculados![0].cliente_nome ?? d.reembolsos_vinculados![0].titulo}`
+                : `${d.reembolsos_vinculados!.length} reembolsos`}
+            </span>
+            {showVinc && (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{ position: 'absolute', top: '100%', left: 0, zIndex: 50, marginTop: 4, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, boxShadow: '0 6px 20px rgba(0,0,0,.12)', padding: '8px 10px', minWidth: 200 }}
+              >
+                <div style={{ fontSize: 10, color: 'var(--gray-mid)', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase' }}>Reembolsos vinculados</div>
+                {d.reembolsos_vinculados!.map(r => (
+                  <div key={r.id} style={{ fontSize: 12, padding: '2px 0' }}>
+                    <strong>{r.cliente_nome ?? '—'}</strong>
+                    <span style={{ color: 'var(--gray-mid)' }}> · {r.titulo}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </span>
         )}
       </td>
@@ -1745,6 +1763,8 @@ function AbaAdiantamentos() {
   })
   const [expandido, setExpandido] = useState<string | null>(null)
   const [alocando, setAlocando] = useState<string | null>(null)
+  const [dtIni, setDtIni] = useState('')  // YYYY-MM
+  const [dtFim, setDtFim] = useState('')  // YYYY-MM
 
   const removerAloc = useMutation({
     mutationFn: (id: string) => backofficeApi.removerAlocacao(id),
@@ -1755,11 +1775,24 @@ function AbaAdiantamentos() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['adiantamentos'] }); qc.invalidateQueries({ queryKey: ['backoffice-lancamentos'] }) },
     onError: (e: any) => alert(`Erro: ${e?.response?.data?.detail || e?.message}`),
   })
+  const desfazerPerda = useMutation({
+    mutationFn: (despesaId: string) => backofficeApi.desfazerPerdaAdiantamento(despesaId),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['adiantamentos'] }); qc.invalidateQueries({ queryKey: ['backoffice-lancamentos'] }) },
+    onError: (e: any) => alert(`Erro: ${e?.response?.data?.detail || e?.message}`),
+  })
 
   if (isLoading) return <div className={styles.empty}>Carregando…</div>
 
-  const comSaldo = adiantamentos.filter(a => a.saldo > 0.001)
-  const zerados = adiantamentos.filter(a => a.saldo <= 0.001)
+  // Filtro por data do lançamento (mês). Usa data quando houver; senão o mês fiscal.
+  const refMes = (a: Adiantamento) => (a.data ? a.data.slice(0, 7) : a.mes)
+  const filtrados = adiantamentos.filter(a => {
+    const m = refMes(a)
+    if (dtIni && m < dtIni) return false
+    if (dtFim && m > dtFim) return false
+    return true
+  })
+  const comSaldo = filtrados.filter(a => a.saldo > 0.001)
+  const zerados = filtrados.filter(a => a.saldo <= 0.001)
 
   function Card({ a }: { a: Adiantamento }) {
     const pct = a.valor > 0 ? Math.min(100, (a.total_alocado / a.valor) * 100) : 0
@@ -1801,6 +1834,13 @@ function AbaAdiantamentos() {
                   Ignorar / perda
                 </button>
               </>
+            )}
+            {a.perda_valor > 0 && (
+              <button className={styles.btnSmall} style={{ padding: '5px 10px', fontSize: 12 }}
+                title="Reverte a perda — o valor volta a ser saldo a alocar e deixa de gerar crédito."
+                onClick={() => { if (confirm(`Desfazer a perda de ${fmtBRL(a.perda_valor)}? Volta a ser saldo a alocar.`)) desfazerPerda.mutate(a.despesa_id) }}>
+                ↩ Desfazer perda
+              </button>
             )}
             <button className={styles.btnSmall} style={{ fontSize: 12 }} onClick={() => setExpandido(open ? null : a.despesa_id)}>
               {open ? '▲' : `▼ ${a.alocacoes.length}`}
@@ -1851,6 +1891,18 @@ function AbaAdiantamentos() {
         O saldo não alocado permanece aqui até você alocar ou tratar como perda.
       </div>
 
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 12, color: 'var(--gray-mid)' }}>Lançamento de</span>
+        <input type="month" value={dtIni} onChange={e => setDtIni(e.target.value)}
+          style={{ padding: '6px 10px', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 13 }} />
+        <span style={{ fontSize: 12, color: 'var(--gray-mid)' }}>até</span>
+        <input type="month" value={dtFim} onChange={e => setDtFim(e.target.value)}
+          style={{ padding: '6px 10px', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 13 }} />
+        {(dtIni || dtFim) && (
+          <button className={styles.btnSmall} style={{ fontSize: 12 }} onClick={() => { setDtIni(''); setDtFim('') }}>limpar</button>
+        )}
+      </div>
+
       {comSaldo.length > 0 && (
         <>
           <div style={{ fontSize: 12, fontWeight: 700, color: '#b45309', marginBottom: 6 }}>⏳ Com saldo a alocar ({comSaldo.length})</div>
@@ -1890,17 +1942,47 @@ function AbaFornecedores() {
   const [novoCnpj, setNovoCnpj] = useState('')
   const [novaCat, setNovaCat] = useState('')
 
+  const [editId, setEditId] = useState<string | null>(null)
+  const [edNome, setEdNome] = useState('')
+  const [edCnpj, setEdCnpj] = useState('')
+  const [edCat, setEdCat] = useState('')
+  const [nfsDe, setNfsDe] = useState<Fornecedor | null>(null)
+
   const save = useMutation({
     mutationFn: () => backofficeApi.upsertFornecedor({
       nome: novoNome.trim(),
       cnpj: novoCnpj.replace(/\D/g, '') || undefined,
       categoria_padrao: novaCat || undefined,
     }),
-    onSuccess: () => {
+    onSuccess: (r) => {
+      if (r?.conflito && r.existente) {
+        alert(`Já existe um fornecedor com este CNPJ: "${r.existente.nome}".\nUse esse mesmo nome (para unificar) ou ajuste o CNPJ.`)
+        setNovoNome(r.existente.nome)
+        return
+      }
       qc.invalidateQueries({ queryKey: ['backoffice-fornecedores'] })
       setNovoNome(''); setNovoCnpj(''); setNovaCat(''); setShowForm(false)
     },
   })
+
+  const editar = useMutation({
+    mutationFn: () => backofficeApi.editarFornecedor(editId!, {
+      nome: edNome.trim(), cnpj: edCnpj.replace(/\D/g, '') || undefined, categoria_padrao: edCat || undefined,
+    }),
+    onSuccess: (r) => {
+      if (r?.conflito && r.existente) {
+        alert(`Já existe um fornecedor com este CNPJ: "${r.existente.nome}".\nUnifique usando esse nome ou ajuste o CNPJ.`)
+        setEdNome(r.existente.nome)
+        return
+      }
+      qc.invalidateQueries({ queryKey: ['backoffice-fornecedores'] })
+      setEditId(null)
+    },
+  })
+
+  function iniciarEdit(f: Fornecedor) {
+    setEditId(f.id); setEdNome(f.nome); setEdCnpj(f.cnpj ? fmtCNPJ(f.cnpj) : ''); setEdCat(f.categoria_padrao ?? '')
+  }
 
   const filtered = fornecedores.filter(f =>
     f.nome.toLowerCase().includes(busca.toLowerCase()) ||
@@ -1973,24 +2055,103 @@ function AbaFornecedores() {
         <table className={styles.table}>
           <thead>
             <tr>
-              <th>Nome</th><th>CNPJ</th><th>Categoria padrão</th>
+              <th>Nome</th><th>CNPJ</th><th>Categoria padrão</th><th></th>
             </tr>
           </thead>
           <tbody>
             {filtered.map(f => (
-              <tr key={f.id}>
-                <td style={{ fontWeight: 600 }}>{f.nome}</td>
-                <td style={{ color: 'var(--gray-mid)', fontFamily: 'monospace', fontSize: 12 }}>
-                  {f.cnpj ? fmtCNPJ(f.cnpj) : <span style={{ color: '#d1d5db' }}>—</span>}
-                </td>
-                <td style={{ color: 'var(--gray-mid)', fontSize: 12 }}>
-                  {f.categoria_padrao ?? <span style={{ color: '#d1d5db' }}>—</span>}
-                </td>
-              </tr>
+              editId === f.id ? (
+                <tr key={f.id} style={{ background: '#f0fdf4' }}>
+                  <td><input value={edNome} onChange={e => setEdNome(e.target.value)}
+                    style={{ padding: '6px 8px', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 13, fontFamily: 'Archivo, sans-serif', width: '100%' }} /></td>
+                  <td><input value={edCnpj} onChange={e => setEdCnpj(fmtCNPJ(e.target.value))} placeholder="00.000.000/0000-00"
+                    style={{ padding: '6px 8px', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 12, fontFamily: 'Archivo, sans-serif', width: '100%' }} /></td>
+                  <td>
+                    <Combobox value={edCat} onChange={setEdCat} options={allCats.map(c => ({ value: c, label: c }))} placeholder="—" onCreate={setEdCat} />
+                  </td>
+                  <td style={{ display: 'flex', gap: 6 }}>
+                    <button className={styles.btnPrimary} style={{ padding: '4px 10px', fontSize: 12 }} disabled={!edNome.trim() || editar.isPending} onClick={() => editar.mutate()}>{editar.isPending ? '…' : 'Salvar'}</button>
+                    <button className={styles.btnSmall} style={{ fontSize: 12 }} onClick={() => setEditId(null)}>Cancelar</button>
+                  </td>
+                </tr>
+              ) : (
+                <tr key={f.id}>
+                  <td style={{ fontWeight: 600 }}>{f.nome}</td>
+                  <td style={{ color: 'var(--gray-mid)', fontFamily: 'monospace', fontSize: 12 }}>
+                    {f.cnpj ? fmtCNPJ(f.cnpj) : <span style={{ color: '#d1d5db' }}>—</span>}
+                  </td>
+                  <td style={{ color: 'var(--gray-mid)', fontSize: 12 }}>
+                    {f.categoria_padrao ?? <span style={{ color: '#d1d5db' }}>—</span>}
+                  </td>
+                  <td style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                    <button className={styles.btnSmall} style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => setNfsDe(f)}>📄 NFs</button>
+                    <button title="Editar" style={{ background: 'none', border: 'none', color: 'var(--gray-mid)', cursor: 'pointer', fontSize: 13 }} onClick={() => iniciarEdit(f)}>✎</button>
+                  </td>
+                </tr>
+              )
             ))}
           </tbody>
         </table>
       )}
+
+      {nfsDe && <ModalNfsFornecedor fornecedor={nfsDe} onClose={() => setNfsDe(null)} />}
+    </div>
+  )
+}
+
+// ─── Modal: NFs/despesas de um fornecedor ───────────────────────────────────────
+
+function ModalNfsFornecedor({ fornecedor, onClose }: { fornecedor: Fornecedor; onClose: () => void }) {
+  const [meses, setMeses] = useState(12)
+  const { data: nfs = [], isLoading } = useQuery({
+    queryKey: ['fornecedor-nfs', fornecedor.id, meses],
+    queryFn: () => backofficeApi.nfsDoFornecedor(fornecedor.id, meses),
+  })
+  const total = nfs.reduce((s, n) => s + n.valor, 0)
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{ background: '#fff', borderRadius: 12, width: '100%', maxWidth: 680, maxHeight: '88vh', overflow: 'auto', padding: 24, position: 'relative' }}>
+        <button onClick={onClose} style={{ position: 'absolute', top: 14, right: 14, background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--gray-mid)' }}>✕</button>
+        <h2 style={{ fontFamily: 'Archivo, sans-serif', fontSize: 16, fontWeight: 800, marginBottom: 2 }}>NFs / despesas — {fornecedor.nome}</h2>
+        <div style={{ fontSize: 12, color: 'var(--gray-mid)', marginBottom: 14, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span>Período:</span>
+          {[3, 6, 12, 24, 0].map(m => (
+            <button key={m} onClick={() => setMeses(m)}
+              style={{ padding: '3px 10px', borderRadius: 999, fontSize: 11, cursor: 'pointer',
+                border: meses === m ? '1px solid var(--teal)' : '1px solid #e5e7eb',
+                background: meses === m ? 'var(--teal-light)' : '#fff', color: meses === m ? 'var(--teal)' : 'var(--dark)', fontWeight: 600 }}>
+              {m === 0 ? 'Tudo' : `${m} meses`}
+            </button>
+          ))}
+        </div>
+        {isLoading ? (
+          <div className={styles.empty}>Carregando…</div>
+        ) : nfs.length === 0 ? (
+          <div className={styles.empty}>Nenhuma despesa neste período.</div>
+        ) : (
+          <table className={styles.table}>
+            <thead><tr><th>Data</th><th>Categoria</th><th style={{ textAlign: 'right' }}>Valor</th><th>NF</th><th>Anexo</th></tr></thead>
+            <tbody>
+              <tr style={{ background: '#f0fdf4', fontWeight: 700 }}>
+                <td colSpan={2} style={{ fontSize: 11, color: 'var(--gray-mid)' }}>{nfs.length} despesa(s)</td>
+                <td style={{ textAlign: 'right' }}>{fmtBRL(total)}</td>
+                <td colSpan={2}></td>
+              </tr>
+              {nfs.map(n => (
+                <tr key={n.id}>
+                  <td style={{ fontSize: 12, color: 'var(--gray-mid)' }}>{fmtData(n.data)}</td>
+                  <td style={{ fontSize: 12 }}>{n.categoria}</td>
+                  <td style={{ textAlign: 'right' }}>{fmtBRL(n.valor)}</td>
+                  <td>{n.tem_nota ? <span style={{ fontSize: 10, background: '#dcfce7', color: '#15803d', padding: '2px 6px', borderRadius: 999 }}>sim</span> : <span style={{ fontSize: 10, color: '#ef4444' }}>não</span>}</td>
+                  <td>{n.drive_link ? <a href={n.drive_link} target="_blank" rel="noreferrer" style={{ color: 'var(--teal)' }}>📎</a> : <span style={{ color: '#d1d5db' }}>—</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
     </div>
   )
 }

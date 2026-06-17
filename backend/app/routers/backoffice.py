@@ -706,8 +706,18 @@ class FornecedorIn(BaseModel):
     categoria_padrao: str | None = None
 
 
+def _cnpj_digits(s: str | None) -> str:
+    return "".join(ch for ch in (s or "") if ch.isdigit())
+
+
 @router.post("/fornecedores")
 def upsert_fornecedor(body: FornecedorIn, _=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
+    cnpj_norm = _cnpj_digits(body.cnpj)
+    # Mesmo CNPJ com nome diferente → conflito (deixa o front decidir qual nome manter)
+    if cnpj_norm:
+        for outro in db.query(FiscalFornecedor).all():
+            if _cnpj_digits(outro.cnpj) == cnpj_norm and outro.nome != body.nome:
+                return {"conflito": True, "existente": {"id": str(outro.id), "nome": outro.nome, "cnpj": outro.cnpj}}
     existing = db.query(FiscalFornecedor).filter_by(nome=body.nome).first()
     if existing:
         existing.cnpj = body.cnpj or existing.cnpj
@@ -718,6 +728,55 @@ def upsert_fornecedor(body: FornecedorIn, _=Depends(get_current_user), db: Sessi
     db.add(f)
     db.commit()
     return {"id": str(f.id), "updated": False}
+
+
+class FornecedorPatch(BaseModel):
+    nome: str | None = None
+    cnpj: str | None = None
+    categoria_padrao: str | None = None
+
+
+@router.patch("/fornecedores/{id}")
+def editar_fornecedor(id: uuid.UUID, body: FornecedorPatch, _=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
+    f = db.get(FiscalFornecedor, id)
+    if not f:
+        raise HTTPException(404, "Fornecedor não encontrado")
+    novo_cnpj = _cnpj_digits(body.cnpj) if body.cnpj is not None else _cnpj_digits(f.cnpj)
+    novo_nome = body.nome if body.nome is not None else f.nome
+    if novo_cnpj:
+        for outro in db.query(FiscalFornecedor).filter(FiscalFornecedor.id != id).all():
+            if _cnpj_digits(outro.cnpj) == novo_cnpj and outro.nome != novo_nome:
+                return {"conflito": True, "existente": {"id": str(outro.id), "nome": outro.nome, "cnpj": outro.cnpj}}
+    data = body.model_dump(exclude_unset=True)
+    for k, v in data.items():
+        setattr(f, k, v)
+    db.commit()
+    return {"id": str(f.id), "ok": True}
+
+
+@router.get("/fornecedores/{id}/nfs")
+def nfs_do_fornecedor(id: uuid.UUID, meses: int = 12, _=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
+    """Despesas (com NF/comprovante) lançadas para este fornecedor nos últimos N meses.
+    meses=0 → histórico completo."""
+    f = db.get(FiscalFornecedor, id)
+    if not f:
+        raise HTTPException(404, "Fornecedor não encontrado")
+    q = db.query(FiscalDespesa).filter(FiscalDespesa.fornecedor == f.nome)
+    if meses and meses > 0:
+        hoje = datetime.now(BRT).date()
+        total = (hoje.year * 12 + (hoje.month - 1)) - meses
+        ano_l, mes_l = divmod(total, 12)
+        limite = date(ano_l, mes_l + 1, 1)
+        q = q.filter((FiscalDespesa.data == None) | (FiscalDespesa.data >= limite))  # noqa: E711
+    despesas = q.order_by(FiscalDespesa.data.desc().nullslast(), FiscalDespesa.created_at.desc()).all()
+    return [
+        {
+            "id": str(d.id), "data": d.data.isoformat() if d.data else None, "mes": d.mes,
+            "categoria": d.categoria, "valor": float(d.valor), "tem_nota": d.tem_nota,
+            "drive_link": d.drive_link,
+        }
+        for d in despesas
+    ]
 
 
 @router.get("/categorias")
@@ -990,6 +1049,17 @@ def perda_saldo_adiantamento(despesa_id: uuid.UUID, _=Depends(get_current_user),
     d.perda_valor = float(d.perda_valor or 0) + saldo
     db.commit()
     return {"perda_valor": float(d.perda_valor), "saldo": 0}
+
+
+@router.post("/adiantamentos/{despesa_id}/desfazer-perda")
+def desfazer_perda_adiantamento(despesa_id: uuid.UUID, _=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
+    """Reverte a perda: o valor volta a ser saldo a alocar (deixa de gerar crédito)."""
+    d = db.get(FiscalDespesa, despesa_id)
+    if not d:
+        raise HTTPException(404)
+    d.perda_valor = None
+    db.commit()
+    return {"ok": True}
 
 
 # ── Parse de extrato bancário com IA ─────────────────────────────────────────

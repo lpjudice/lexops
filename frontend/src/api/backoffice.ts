@@ -186,7 +186,11 @@ export const backofficeApi = {
   fornecedores: () =>
     api.get<Fornecedor[]>('/backoffice/fornecedores').then(r => r.data),
   upsertFornecedor: (data: { nome: string; cnpj?: string; categoria_padrao?: string }) =>
-    api.post('/backoffice/fornecedores', data).then(r => r.data),
+    api.post<{ id?: string; updated?: boolean; conflito?: boolean; existente?: { id: string; nome: string; cnpj: string } }>('/backoffice/fornecedores', data).then(r => r.data),
+  editarFornecedor: (id: string, data: { nome?: string; cnpj?: string; categoria_padrao?: string }) =>
+    api.patch<{ ok?: boolean; conflito?: boolean; existente?: { id: string; nome: string; cnpj: string } }>(`/backoffice/fornecedores/${id}`, data).then(r => r.data),
+  nfsDoFornecedor: (id: string, meses: number) =>
+    api.get<{ id: string; data: string | null; mes: string; categoria: string; valor: number; tem_nota: boolean; drive_link: string | null }[]>(`/backoffice/fornecedores/${id}/nfs`, { params: { meses } }).then(r => r.data),
   categorias: () =>
     api.get<string[]>('/backoffice/categorias').then(r => r.data),
 
@@ -235,6 +239,8 @@ export const backofficeApi = {
     api.delete(`/backoffice/adiantamentos/alocacao/${id}`).then(r => r.data),
   perdaSaldoAdiantamento: (despesaId: string) =>
     api.post(`/backoffice/adiantamentos/${despesaId}/perda-saldo`).then(r => r.data),
+  desfazerPerdaAdiantamento: (despesaId: string) =>
+    api.post(`/backoffice/adiantamentos/${despesaId}/desfazer-perda`).then(r => r.data),
 
   // Fila de sugestões de NF (entradas do extrato)
   criarSugestoesNf: (items: Array<{ data?: string; pagador: string; valor: number; descricao?: string; tipo_sugerido: string }>) =>
