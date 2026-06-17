@@ -1768,7 +1768,10 @@ function AbaAdiantamentos() {
 
   const removerAloc = useMutation({
     mutationFn: (id: string) => backofficeApi.removerAlocacao(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['adiantamentos'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['adiantamentos'] })
+      qc.invalidateQueries({ queryKey: ['backoffice-lancamentos'] })
+    },
   })
   const perda = useMutation({
     mutationFn: (despesaId: string) => backofficeApi.perdaSaldoAdiantamento(despesaId),
@@ -1866,7 +1869,13 @@ function AbaAdiantamentos() {
                     {al.item_descricao && <span style={{ color: 'var(--gray-mid)' }}> · {al.item_descricao}</span>}
                   </span>
                   <span style={{ fontWeight: 600 }}>{fmtBRL(al.valor)}</span>
-                  <button style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer' }} onClick={() => removerAloc.mutate(al.id)}>×</button>
+                  <button
+                    className={styles.btnSmall}
+                    style={{ fontSize: 11, padding: '3px 8px' }}
+                    disabled={removerAloc.isPending}
+                    title="Reverte esta alocação — o valor volta a ser saldo a alocar"
+                    onClick={() => { if (confirm(`Reverter a alocação de ${fmtBRL(al.valor)} para ${al.cliente_nome ?? 'cliente'}? O valor volta a ser saldo.`)) removerAloc.mutate(al.id) }}
+                  >↩ Reverter</button>
                 </div>
               ))
             )}
