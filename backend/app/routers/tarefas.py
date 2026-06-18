@@ -209,6 +209,22 @@ def atualizar_tarefa(
     return _enrich(t, db, usuario)
 
 
+@router.post("/reordenar", status_code=status.HTTP_204_NO_CONTENT)
+def reordenar_tarefas(
+    ids: list[str],
+    db: Session = Depends(get_db),
+    _usuario: Usuario | None = Depends(get_optional_user),
+):
+    """Recebe lista ordenada de IDs e persiste a nova ordem (campo `ordem`)."""
+    for idx, id_str in enumerate(ids):
+        try:
+            tid = uuid.UUID(id_str)
+        except ValueError:
+            continue
+        db.query(Tarefa).filter(Tarefa.id == tid).update({"ordem": idx})
+    db.commit()
+
+
 @router.delete("/{tarefa_id}", status_code=status.HTTP_204_NO_CONTENT)
 def deletar_tarefa(
     tarefa_id: uuid.UUID,

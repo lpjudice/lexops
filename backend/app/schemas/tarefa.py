@@ -22,6 +22,7 @@ class TarefaCreate(BaseModel):
     status: StatusTarefa = "pendente"
     resumo_ia: str | None = None
     confidencial: bool = False
+    ordem: int | None = None
 
 
 class TarefaUpdate(BaseModel):
@@ -38,6 +39,7 @@ class TarefaUpdate(BaseModel):
     status: StatusTarefa | None = None
     resumo_ia: str | None = None
     confidencial: bool | None = None
+    ordem: int | None = None
 
 
 class PedidoAcessoTarefa(BaseModel):
@@ -62,6 +64,7 @@ class TarefaOut(BaseModel):
     status: str
     resumo_ia: str | None
     google_event_id: str | None = None
+    ordem: int | None = None
     confidencial: bool = False
     usuarios_com_acesso: list[str] | None = None
     created_at: datetime

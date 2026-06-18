@@ -1,5 +1,21 @@
-import { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import {
+  DndContext,
+  PointerSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  useSortable,
+  arrayMove,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { tarefasApi } from '../api/tarefas'
 import type { StatusTarefa, Tarefa } from '../api/tarefas'
 import { clientesApi } from '../api/clientes'
@@ -12,6 +28,33 @@ import ClienteCombobox from '../components/ClienteCombobox'
 import ResponsavelComboBox from '../components/ResponsavelComboBox'
 import styles from './Page.module.css'
 import t from './TarefasPage.module.css'
+
+function SortableCardWrapper({ id, isManual, children }: { id: string; isManual: boolean; children: React.ReactNode }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    position: 'relative',
+  }
+  return (
+    <div ref={setNodeRef} style={style}>
+      {isManual && (
+        <span
+          {...attributes}
+          {...listeners}
+          style={{
+            position: 'absolute', left: -20, top: '50%', transform: 'translateY(-50%)',
+            cursor: 'grab', color: '#9ca3af', fontSize: 18, lineHeight: 1,
+            touchAction: 'none', userSelect: 'none', zIndex: 1,
+          }}
+          title="Arrastar para reordenar"
+        >⠿</span>
+      )}
+      {children}
+    </div>
+  )
+}
 
 const STATUS_LABEL: Record<StatusTarefa, string> = {
   pendente: 'Pendente',
@@ -73,7 +116,8 @@ export default function TarefasPage() {
   const [filtroCliente, setFiltroCliente] = useState('')
   const [filtroResponsavel, setFiltroResponsavel] = useState('')
   const [filtroMes, setFiltroMes] = useState('') // 'YYYY-MM' — só para concluídos
-  const [sortBy, setSortBy] = useState<'recente' | 'prazo_asc' | 'prazo_desc' | 'titulo_az' | 'cliente_az' | 'responsavel_az'>('recente')
+  const [sortBy, setSortBy] = useState<'manual' | 'recente' | 'prazo_asc' | 'prazo_desc' | 'titulo_az' | 'cliente_az' | 'responsavel_az'>('recente')
+  const [orderedIds, setOrderedIds] = useState<string[]>([])
 
   // ── Status quick-menu ─────────────────────────────────────────────────
   const [statusMenuId, setStatusMenuId] = useState<string | null>(null)
@@ -195,7 +239,15 @@ export default function TarefasPage() {
       arr = arr.filter((t) => t.updated_at?.startsWith(filtroMes) || t.created_at?.startsWith(filtroMes))
     }
 
-    if (sortBy === 'recente') {
+    if (sortBy === 'manual') {
+      if (orderedIds.length > 0) {
+        const idxMap = new Map(orderedIds.map((id, i) => [id, i]))
+        arr.sort((a, b) => (idxMap.get(a.id) ?? 9999) - (idxMap.get(b.id) ?? 9999))
+      } else {
+        arr.sort((a, b) => (a.ordem ?? 9999) - (b.ordem ?? 9999))
+      }
+      return arr
+    } else if (sortBy === 'recente') {
       arr.sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))
     } else if (sortBy === 'prazo_asc') {
       arr.sort((a, b) => {
@@ -223,7 +275,7 @@ export default function TarefasPage() {
       arr.sort((a, b) => (a.responsavel ?? '').localeCompare(b.responsavel ?? '', 'pt-BR'))
     }
     return arr
-  }, [tarefas, filtroCliente, filtroResponsavel, filtroMes, filtroStatus, sortBy, clientes]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tarefas, filtroCliente, filtroResponsavel, filtroMes, filtroStatus, sortBy, orderedIds, clientes]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const processoOptions = processos.map((p) => {
     const cliente = clientes.find((c) => c.id === p.cliente_id)
@@ -315,6 +367,51 @@ export default function TarefasPage() {
       qc.invalidateQueries({ queryKey: ['tarefas-todas'] })
     },
   })
+
+  // ── Drag-to-reorder (modo manual) ─────────────────────────────────────
+  const reordenar = useMutation({
+    mutationFn: (ids: string[]) => tarefasApi.reordenar(ids),
+  })
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+  )
+
+  // Inicializa/sincroniza orderedIds quando as tarefas chegam do servidor
+  useEffect(() => {
+    if (tarefas.length > 0 && orderedIds.length === 0) {
+      const sorted = [...tarefas].sort((a, b) => (a.ordem ?? 9999) - (b.ordem ?? 9999))
+      setOrderedIds(sorted.map((t) => t.id))
+    }
+  }, [tarefas]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const oldIndex = orderedIds.indexOf(String(active.id))
+    const newIndex = orderedIds.indexOf(String(over.id))
+    if (oldIndex === -1 || newIndex === -1) return
+    const newIds = arrayMove(orderedIds, oldIndex, newIndex)
+    setOrderedIds(newIds)
+    reordenar.mutate(newIds)
+  }
+
+  function moverParaCima(id: string) {
+    const idx = orderedIds.indexOf(id)
+    if (idx <= 0) return
+    const newIds = arrayMove(orderedIds, idx, idx - 1)
+    setOrderedIds(newIds)
+    reordenar.mutate(newIds)
+  }
+
+  function moverParaBaixo(id: string) {
+    const idx = orderedIds.indexOf(id)
+    if (idx === -1 || idx >= orderedIds.length - 1) return
+    const newIds = arrayMove(orderedIds, idx, idx + 1)
+    setOrderedIds(newIds)
+    reordenar.mutate(newIds)
+  }
 
   // Calendar helpers
   const MESES_PT = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
@@ -467,6 +564,7 @@ export default function TarefasPage() {
                 background: '#fff', color: '#6b7280', cursor: 'pointer', fontFamily: 'inherit', marginLeft: 'auto',
               }}
             >
+              <option value="manual">⠿ Ordem manual</option>
               <option value="recente">Mais recentes primeiro</option>
               <option value="prazo_asc">Prazo ↑ (mais próximo)</option>
               <option value="prazo_desc">Prazo ↓ (mais distante)</option>
@@ -582,6 +680,8 @@ export default function TarefasPage() {
       ) : tarefasFiltradas.length === 0 ? (
         <p className={styles.empty}>Nenhuma tarefa{filtroStatus ? ` com status "${STATUS_LABEL[filtroStatus as StatusTarefa]}"` : ''}.</p>
       ) : (
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={tarefasFiltradas.map((t) => t.id)} strategy={verticalListSortingStrategy}>
         <div className={t.lista}>
           {tarefasFiltradas.map((tarefa) => {
             const dias = diasRestantes(tarefa.data_limite)
@@ -598,7 +698,8 @@ export default function TarefasPage() {
             const pedidos = tarefa.pedidos_acesso ?? []
 
             return (
-              <div key={tarefa.id}
+              <SortableCardWrapper key={tarefa.id} id={tarefa.id} isManual={sortBy === 'manual'}>
+              <div
                 className={`${t.card} ${atrasada ? t.atrasada : ''} ${tarefa.status === 'concluido' ? t.concluida : ''}`}
                 style={tarefa.confidencial ? { borderLeft: '3px solid #a855f7' } : undefined}>
 
@@ -855,6 +956,20 @@ export default function TarefasPage() {
                       </div>
 
                       <div className={t.cardActions}>
+                        {sortBy === 'manual' && (
+                          <>
+                            <button
+                              className={t.btnReorder}
+                              title="Mover para cima"
+                              onClick={() => moverParaCima(tarefa.id)}
+                            >↑</button>
+                            <button
+                              className={t.btnReorder}
+                              title="Mover para baixo"
+                              onClick={() => moverParaBaixo(tarefa.id)}
+                            >↓</button>
+                          </>
+                        )}
                         {tarefa.descricao && (
                           <button
                             className={t.btnCollapse}
@@ -880,9 +995,12 @@ export default function TarefasPage() {
                   </>
                 )}
               </div>
+              </SortableCardWrapper>
             )
           })}
         </div>
+          </SortableContext>
+        </DndContext>
       ))}
     </div>
   )

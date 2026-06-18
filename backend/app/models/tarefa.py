@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String, Text, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -28,6 +28,8 @@ class Tarefa(Base):
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="pendente")
     resumo_ia: Mapped[str | None] = mapped_column(Text)
     google_event_id: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    ordem: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     confidencial: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # List of usuario UUID strings with explicit access (same "req:" prefix for pending requests)

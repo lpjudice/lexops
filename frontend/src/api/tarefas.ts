@@ -24,6 +24,7 @@ export interface Tarefa {
   status: StatusTarefa
   resumo_ia: string | null
   google_event_id: string | null
+  ordem: number | null
   confidencial: boolean
   usuarios_com_acesso: string[] | null
   acesso_restrito: boolean
@@ -71,4 +72,7 @@ export const tarefasApi = {
 
   revogarAcesso: (tarefaId: string, usuarioId: string) =>
     api.post<Tarefa>(`/tarefas/${tarefaId}/revogar-acesso/${usuarioId}`).then((r) => r.data),
+
+  reordenar: (ids: string[]) =>
+    api.post('/tarefas/reordenar', ids),
 }

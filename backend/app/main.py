@@ -787,6 +787,20 @@ def _run_migrations() -> None:
             "ALTER TABLE precedentcheck_analises ADD COLUMN IF NOT EXISTS custo_usd DOUBLE PRECISION NOT NULL DEFAULT 0"
         ))
 
+        # Tarefas: campo de ordenação manual
+        conn.execute(text(
+            "ALTER TABLE tarefas ADD COLUMN IF NOT EXISTS ordem INTEGER"
+        ))
+        # Inicializa ordem = row_number por created_at para tarefas existentes sem valor
+        conn.execute(text("""
+            UPDATE tarefas SET ordem = sub.rn
+            FROM (
+                SELECT id, ROW_NUMBER() OVER (ORDER BY created_at ASC) AS rn
+                FROM tarefas WHERE ordem IS NULL
+            ) sub
+            WHERE tarefas.id = sub.id
+        """))
+
         conn.commit()
 
 
