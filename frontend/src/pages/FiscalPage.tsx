@@ -245,6 +245,9 @@ const EMPTY: EmitirNFSeIn = {
   retencao_cofins: 0,
   retencao_pis: 0,
   iss_retido: false,
+  cliente_compensacao_id: undefined,
+  contrato_compensacao_id: undefined,
+  valor_compensacao: undefined,
 }
 
 function EmissaoModal({
@@ -472,6 +475,50 @@ function EmissaoModal({
                     }}
                   />
                 </div>
+              )}
+            </div>
+
+            {/* ── COMPENSAÇÃO: pagamento por terceiro ─────────────────── */}
+            {/* Caso: Ana Maria paga parte de recebível da Mangrove
+                A NF é emitida contra Ana Maria (tomadora), mas o recebimento
+                é creditado ao contrato da Mangrove. Cross-menu: Financeiro, Reembolsos, Lançamentos */}
+            <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #e5e7eb' }}>
+              <label className={cs.checkboxLabel} style={{ marginBottom: 12 }}>
+                <input type="checkbox"
+                  checked={!!form.cliente_compensacao_id}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      // Apenas marca o checkbox, user seleciona o cliente
+                    } else {
+                      set('cliente_compensacao_id', undefined)
+                      set('contrato_compensacao_id', undefined)
+                      set('valor_compensacao', undefined)
+                    }
+                  }} />
+                Esta NF compensa recebível de outro cliente
+              </label>
+              {form.cliente_compensacao_id && (
+                <div className={cs.fieldHint} style={{ background: '#f0fdf4', padding: 10, borderRadius: 6, marginBottom: 10 }}>
+                  💡 A NF será emitida contra <b>{form.tomador_nome}</b> (tomadora), mas o recebimento
+                  creditará o cliente/contrato principal. Aparece em: Financeiro, Reembolsos, Lançamentos.
+                </div>
+              )}
+              {!!form.cliente_compensacao_id && (
+                <>
+                  <ClienteSearch
+                    label="Cliente/contrato principal que receberá o crédito"
+                    value=""
+                    placeholder="Buscar cliente Mangrove ou similar…"
+                    onSelect={(c) => {
+                      if (c) set('cliente_compensacao_id', c.id)
+                    }}
+                  />
+                  {/* TODO: buscar contratos de cliente_compensacao e oferecer dropdown */}
+                  {/* Por enquanto, deixa o usuário linkar depois no detalhe da NF */}
+                  <p className={cs.fieldHint} style={{ marginTop: 8 }}>
+                    Selecione o contrato específico na tela de detalhe da NF após emitir.
+                  </p>
+                </>
               )}
             </div>
           </div>

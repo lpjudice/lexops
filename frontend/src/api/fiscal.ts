@@ -43,6 +43,10 @@ export interface EmitirNFSeIn {
   honorario_id?: string
   recebimento_id?: string
   serie?: string
+  // Compensação de recebível (pagamento por terceiro)
+  cliente_compensacao_id?: string
+  contrato_compensacao_id?: string
+  valor_compensacao?: number
 }
 
 export interface NotaFiscalResumo {
@@ -94,7 +98,13 @@ export interface NotaFiscalOut {
   contrato_id?: string
   honorario_id?: string
   recebimento_id?: string
+  cliente_compensacao_id?: string
+  contrato_compensacao_id?: string
+  valor_compensacao?: number
   retroativa?: boolean
+  pago?: boolean
+  data_pagamento?: string
+  origem?: string
   created_at: string
   updated_at: string
 }

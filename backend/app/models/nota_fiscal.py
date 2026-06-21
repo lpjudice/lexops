@@ -84,12 +84,27 @@ class NotaFiscal(Base):
     xml_nfse: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # ── Vínculo com Financeiro ────────────────────────────────────────────
+    # NF emitida contra cliente_id (tomador). Pode refletir em:
+    # (a) honorario_id direto do tomador (caso padrão)
+    # (b) cliente_compensacao_id/contrato_compensacao_id (pagto por terceiro)
+    #
+    # INTEGRAÇÃO CROSS-MENU: ao marcar pago, o sistema detecta cliente_compensacao_id
+    # e cria Recebimento no Financeiro contra o contrato_compensacao_id (não do tomador).
+    # Aparece em: Financeiro (recebíveis), Reembolsos (se há caixa), Lançamentos.
     honorario_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("honorarios.id"), nullable=True
     )
     recebimento_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("recebimentos.id"), nullable=True
     )
+
+    # ── Compensação de recebível (pagamento por terceiro) ──────────────────
+    # Opcional: se preenchido, a NF é emitida contra cliente_id (tomador),
+    # mas o recebimento é creditado a cliente_compensacao_id/contrato_compensacao_id.
+    # Caso de uso: holding where Ana Maria paga parte de recebível da Mangrove.
+    cliente_compensacao_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    contrato_compensacao_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    valor_compensacao: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

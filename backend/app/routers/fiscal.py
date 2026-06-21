@@ -299,6 +299,9 @@ def emitir_nota(
         contrato_id=body.contrato_id,
         cliente_id=body.cliente_id,
         processo_id=body.processo_id,
+        cliente_compensacao_id=body.cliente_compensacao_id,
+        contrato_compensacao_id=body.contrato_compensacao_id,
+        valor_compensacao=float(body.valor_compensacao) if body.valor_compensacao else None,
         ambiente=ambiente,
         retroativa=retroativa,
     )
@@ -747,29 +750,53 @@ def marcar_pago(
     nf.pago = pago
     nf.data_pagamento = _date.today() if pago else None
 
-    # Reflete no Financeiro: se vinculada a honorário, cria/remove Recebimento
-    if nf.honorario_id:
-        from app.models.financeiro import Recebimento, Honorario
+    # Reflete no Financeiro — INTEGRAÇÃO CROSS-MENU
+    # (a) NF direta ao cliente: cria recebimento no honorario_id
+    # (b) NF com compensação: cria recebimento no contrato_compensacao_id (cliente pagou por terceiro)
+    # Aparece em: Financeiro (recebíveis), Reembolsos (se há caixa), Lançamentos
+    if nf.honorario_id or nf.cliente_compensacao_id:
+        from app.models.financeiro import Recebimento, Honorario, Contrato
         marca = f"[NF {nf.numero_nfse or nf.chave_acesso}]"
-        existente = (db.query(Recebimento)
-                     .filter(Recebimento.honorario_id == nf.honorario_id,
-                             Recebimento.observacao.like(f"%{marca}%")).first())
-        if pago and not existente:
-            db.add(Recebimento(
-                honorario_id=nf.honorario_id, valor=float(nf.valor_servicos),
-                data_recebimento=_date.today(), forma_pagamento="pix",
-                observacao=f"Pagamento da NFS-e {marca}",
-            ))
-        elif not pago and existente:
-            db.delete(existente)
-        # Atualiza status do honorário (pago/parcial)
-        hon = db.query(Honorario).filter(Honorario.id == nf.honorario_id).first()
-        if hon:
-            db.flush()
-            if hon.saldo_pendente <= 0:
-                hon.status = "pago"
-            elif hon.total_recebido > 0:
-                hon.status = "parcial"
+        valor_rec = float(nf.valor_compensacao or nf.valor_servicos)
+
+        # Detecta qual honorário recebe o crédito
+        if nf.cliente_compensacao_id and nf.contrato_compensacao_id:
+            # Caso: pagamento por terceiro → recebimento vai para o cliente_compensacao
+            # (ex.: Ana Maria paga recebível da Mangrove)
+            contrato_alvo = db.query(Contrato).filter(Contrato.id == nf.contrato_compensacao_id).first()
+            if contrato_alvo and contrato_alvo.honorario_id:
+                hon_id = contrato_alvo.honorario_id
+                obs = f"Pagamento via NFS-e {marca} (tomador: {nf.tomador_nome})"
+            else:
+                hon_id = None
+                obs = None
+        else:
+            # Caso padrão: recebimento vai para o honorario_id da NF
+            hon_id = nf.honorario_id
+            obs = f"Pagamento da NFS-e {marca}"
+
+        if hon_id:
+            existente = (db.query(Recebimento)
+                         .filter(Recebimento.honorario_id == hon_id,
+                                 Recebimento.observacao.like(f"%{marca}%")).first())
+            if pago and not existente:
+                db.add(Recebimento(
+                    honorario_id=hon_id, valor=valor_rec,
+                    data_recebimento=_date.today(), forma_pagamento="pix",
+                    observacao=obs,
+                ))
+            elif not pago and existente:
+                db.delete(existente)
+            # Atualiza status do honorário (pago/parcial/pendente)
+            hon = db.query(Honorario).filter(Honorario.id == hon_id).first()
+            if hon:
+                db.flush()
+                if hon.saldo_pendente <= 0:
+                    hon.status = "pago"
+                elif hon.total_recebido > 0:
+                    hon.status = "parcial"
+                else:
+                    hon.status = "pendente"
 
     db.commit()
     db.refresh(nf)

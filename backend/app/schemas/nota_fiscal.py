@@ -68,6 +68,12 @@ class EmitirNFSeIn(BaseModel):
     cliente_id: Optional[uuid.UUID] = None
     processo_id: Optional[uuid.UUID] = None
 
+    # Compensação de recebível (pagamento por terceiro)
+    # Caso de uso: NF emitida contra tomador_cpf_cnpj, mas recebimento crédita a cliente_compensacao
+    cliente_compensacao_id: Optional[uuid.UUID] = None
+    contrato_compensacao_id: Optional[uuid.UUID] = None
+    valor_compensacao: Optional[Decimal] = None
+
     # Série (padrão "1")
     serie: str = "1"
 
@@ -120,6 +126,12 @@ class NotaFiscalOut(BaseModel):
     cliente_id: Optional[uuid.UUID]
     processo_id: Optional[uuid.UUID]
     processos_ids: list[str] = []
+
+    # Compensação de recebível (para validação contábil cross-menu)
+    cliente_compensacao_id: Optional[uuid.UUID] = None
+    contrato_compensacao_id: Optional[uuid.UUID] = None
+    valor_compensacao: Optional[float] = None
+
     tem_pdf: bool = False
     consulta_publica_url: Optional[str] = None
 
