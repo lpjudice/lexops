@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.dependencies import get_current_user
 from app.models.cliente import Cliente
 from app.models.financeiro import Honorario, Recebimento
 from app.schemas.financeiro import (
@@ -14,7 +15,9 @@ from app.schemas.financeiro import (
     ResumoCliente, ResumoFinanceiro, ResumoMensal,
 )
 
-router = APIRouter(prefix="/financeiro", tags=["financeiro"])
+# Auth obrigatória em todo o módulo financeiro (antes os endpoints estavam abertos).
+router = APIRouter(prefix="/financeiro", tags=["financeiro"],
+                   dependencies=[Depends(get_current_user)])
 
 
 # ── Honorários ────────────────────────────────────────────────────────────────
