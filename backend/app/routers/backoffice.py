@@ -1305,7 +1305,7 @@ def patch_sugestao_nf(id: uuid.UUID, body: dict, _=Depends(get_current_user), db
     s = db.get(NotaFiscalSugestao, id)
     if not s:
         raise HTTPException(404, "Sugestão não encontrada")
-    if "status" in body and body["status"] in ("pendente", "emitida", "ignorada"):
+    if "status" in body and body["status"] in ("pendente", "emitida", "ignorada", "vinculada"):
         s.status = body["status"]
     if "nota_fiscal_id" in body:
         s.nota_fiscal_id = body["nota_fiscal_id"]

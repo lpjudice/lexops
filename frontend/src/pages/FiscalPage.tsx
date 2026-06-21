@@ -1259,8 +1259,24 @@ function SugestoesNFSection({ onEmitir }: { onEmitir: (s: SugestaoNF) => void })
     mutationFn: ({ id, ids }: { id: string; ids: string[] }) => backofficeApi.patchSugestaoNf(id, { reembolso_ids: ids }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['sugestoes-nf'] }),
   })
+  // Item 4: concluir o vínculo a reembolso → sai da fila (status 'vinculada')
+  const concluirVinculo = useMutation({
+    mutationFn: (id: string) => backofficeApi.patchSugestaoNf(id, { status: 'vinculada' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['sugestoes-nf'] }),
+  })
+  // Item 5: vincular a entrada a uma NF já emitida → sai da fila
+  const vincularNf = useMutation({
+    mutationFn: ({ id, nfId }: { id: string; nfId: string }) =>
+      backofficeApi.patchSugestaoNf(id, { nota_fiscal_id: nfId, status: 'emitida' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['sugestoes-nf'] }),
+  })
+  const { data: nfsEmitidas = [] } = useQuery({
+    queryKey: ['notas-fiscais', 'emitida'],
+    queryFn: () => fiscalApi.listar({ status: 'emitida' }),
+  })
   const [aberto, setAberto] = useState(true)
   const [vinculando, setVinculando] = useState<string | null>(null)
+  const [linkandoNf, setLinkandoNf] = useState<string | null>(null)
 
   if (sugestoes.length === 0) return null
   const fmt = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -1307,10 +1323,30 @@ function SugestoesNFSection({ onEmitir }: { onEmitir: (s: SugestaoNF) => void })
                   <span style={{ fontSize: 13, fontWeight: 700, textAlign: 'right' }}>{fmt(s.valor)}</span>
                   <div style={{ display: 'flex', gap: 6 }}>
                     <button className={styles.btnPrimary} style={{ padding: '5px 12px', fontSize: 12 }} onClick={() => onEmitir(s)}>Emitir</button>
-                    <button className={cs.btnSecondary} style={{ padding: '5px 10px', fontSize: 12 }} onClick={() => setVinculando(vinculando === s.id ? null : s.id)}>🔗 Reembolso</button>
+                    <button className={cs.btnSecondary} style={{ padding: '5px 10px', fontSize: 12 }} onClick={() => { setLinkandoNf(linkandoNf === s.id ? null : s.id); setVinculando(null) }}>🧾 NF existente</button>
+                    <button className={cs.btnSecondary} style={{ padding: '5px 10px', fontSize: 12 }} onClick={() => { setVinculando(vinculando === s.id ? null : s.id); setLinkandoNf(null) }}>🔗 Reembolso</button>
                     <button className={styles.btnDanger} style={{ padding: '5px 10px', fontSize: 12 }} disabled={ignorar.isPending} onClick={() => ignorar.mutate(s.id)}>Ignorar</button>
                   </div>
                 </div>
+                {linkandoNf === s.id && (
+                  <div style={{ padding: '4px 18px 12px', background: '#f8fafc' }}>
+                    <div style={{ fontSize: 11, color: 'var(--gray-mid)', marginBottom: 6 }}>
+                      Vincular este crédito a uma NFS-e já emitida (sai da fila):
+                    </div>
+                    <select
+                      value=""
+                      onChange={(e) => { if (e.target.value) vincularNf.mutate({ id: s.id, nfId: e.target.value }) }}
+                      style={{ padding: '7px 10px', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 12, maxWidth: 420, width: '100%', fontFamily: 'Archivo, sans-serif' }}
+                    >
+                      <option value="">+ escolher NFS-e emitida…</option>
+                      {nfsEmitidas.map(n => (
+                        <option key={n.id} value={n.id}>
+                          {(n.numero_nfse ? `#${n.numero_nfse} · ` : '')}{n.tomador_nome} · {fmt(n.valor_servicos)} · {n.competencia}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 {vinculando === s.id && (
                   <div style={{ padding: '4px 18px 12px', background: '#f8fafc' }}>
                     <div style={{ fontSize: 11, color: 'var(--gray-mid)', marginBottom: 6 }}>
@@ -1336,6 +1372,13 @@ function SugestoesNFSection({ onEmitir }: { onEmitir: (s: SugestaoNF) => void })
                         <option key={o.value} value={o.value}>{o.label}</option>
                       ))}
                     </select>
+                    {vinc.length > 0 && (
+                      <button className={styles.btnPrimary} style={{ marginTop: 10, padding: '6px 14px', fontSize: 12 }}
+                        disabled={concluirVinculo.isPending}
+                        onClick={() => concluirVinculo.mutate(s.id)}>
+                        {concluirVinculo.isPending ? 'Concluindo…' : '✓ Concluir vínculo (sair da fila)'}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
