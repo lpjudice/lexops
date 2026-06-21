@@ -505,6 +505,9 @@ def cancelar_nota(
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
+    import logging
+    log = logging.getLogger(__name__)
+
     nf = db.query(NotaFiscal).filter(NotaFiscal.id == nf_id).first()
     if not nf:
         raise HTTPException(404, "Nota fiscal não encontrada")
@@ -513,10 +516,13 @@ def cancelar_nota(
     if not nf.chave_acesso:
         raise HTTPException(400, "NFS-e sem chave de acesso")
 
+    log.info(f"Cancelando NF {nf.numero_nfse} (chave={nf.chave_acesso}, motivo={body.motivo[:50]}...)")
     resultado = cancelar_nfse(nf.chave_acesso, body.motivo)
     if not resultado.sucesso:
+        log.error(f"Falha cancelamento: {resultado.erro_mensagem}")
         raise HTTPException(422, detail=resultado.erro_mensagem)
 
+    log.info(f"Cancelamento bem-sucedido para NF {nf.numero_nfse}")
     nf.status = "cancelada"
     # Estorna o recebimento no Financeiro, se a NF estava marcada como paga
     if nf.pago and nf.honorario_id:
@@ -527,6 +533,7 @@ def cancelar_nota(
                        Recebimento.observacao.like(f"%{marca}%")).first())
         if rec:
             db.delete(rec)
+            log.info(f"Recebimento estornado: {rec.id}")
         hon = db.query(Honorario).filter(Honorario.id == nf.honorario_id).first()
         if hon:
             db.flush()

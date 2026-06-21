@@ -188,25 +188,33 @@ def consultar_nfse(chave_acesso: str) -> Optional[str]:
 # ─── Cancelamento ────────────────────────────────────────────────────────────
 
 def cancelar_nfse(chave_acesso: str, motivo: str) -> ResultadoCancelamento:
+    log.info(f"Iniciando cancelamento de NF com chave {chave_acesso}")
     xml_evento = _montar_xml_cancelamento(chave_acesso, motivo)
+    log.debug(f"XML evento (primeiros 500 bytes): {xml_evento[:500]}")
     try:
         xml_assinado = assinar_evento(xml_evento)
+        log.info(f"Evento assinado com sucesso ({len(xml_assinado)} bytes)")
     except Exception as exc:
+        log.error(f"Erro ao assinar evento: {exc}", exc_info=True)
         return ResultadoCancelamento(sucesso=False, erro_mensagem=f"Erro ao assinar evento: {exc}")
 
     payload = {"pedidoRegistroEventoXmlGZipB64": _gzip_b64(xml_assinado)}
     try:
+        log.info(f"Enviando cancelamento para Sefin (payload size={len(payload['pedidoRegistroEventoXmlGZipB64'])})")
         resp = _request_retry("POST", "sefin", f"nfse/{chave_acesso}/eventos", json=payload)
     except httpx.RequestError as exc:
+        log.error(f"Erro de conexão ao Sefin: {exc}", exc_info=True)
         return ResultadoCancelamento(sucesso=False, erro_mensagem=str(exc))
 
     log.warning("SEFIN POST evento status=%s body=%s", resp.status_code, resp.text[:800])
     if resp.status_code in (200, 201):
+        log.info(f"Cancelamento aceito pelo Sefin")
         return ResultadoCancelamento(sucesso=True)
     try:
         _, msg = _fmt_erros(resp.json())
     except Exception:
         msg = f"HTTP {resp.status_code}: {resp.text[:300]}"
+    log.error(f"Sefin rejeitou cancelamento: {msg}")
     return ResultadoCancelamento(sucesso=False, erro_mensagem=msg)
 
 

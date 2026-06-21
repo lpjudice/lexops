@@ -866,11 +866,20 @@ function DetalheModal({ nf, onClose }: { nf: NotaFiscalOut; onClose: () => void 
   const [procIds, setProcIds] = useState<string[]>(nf.processos_ids ?? (nf.processo_id ? [nf.processo_id] : []))
   const [contrSel, setContrSel] = useState(nf.contrato_id ?? '')
   const [vincMsg, setVincMsg] = useState<string | null>(null)
+  const [erroCancelamento, setErroCancelamento] = useState<string | null>(null)
   const qc = useQueryClient()
   const [deletando, setDeletando] = useState(false)
   const cancelMut = useMutation({
     mutationFn: (m: string) => fiscalApi.cancelar(nf.id, m),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['notas-fiscais'] }); onClose() },
+    onSuccess: () => {
+      setErroCancelamento(null)
+      qc.invalidateQueries({ queryKey: ['notas-fiscais'] })
+      onClose()
+    },
+    onError: (err: any) => {
+      const msg = err.response?.data?.detail || err.message || 'Falha ao cancelar NF-e'
+      setErroCancelamento(msg)
+    },
   })
   const deleteMut = useMutation({
     mutationFn: () => fiscalApi.deletar(nf.id),
@@ -1051,6 +1060,14 @@ function DetalheModal({ nf, onClose }: { nf: NotaFiscalOut; onClose: () => void 
                     </div>
                   )
                 })}
+                {erroCancelamento && (
+                  <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px', marginTop: 8 }}>
+                    <div style={{ fontWeight: 700, fontSize: 12, color: '#b91c1c' }}>⚠️ Erro ao cancelar</div>
+                    <div style={{ fontSize: 12, color: '#374151', marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                      {erroCancelamento}
+                    </div>
+                  </div>
+                )}
                 <label className={cs.formLabel}>Motivo *</label>
                 <input className={cs.input} placeholder="Mínimo 10 caracteres"
                   value={motivo} onChange={(e) => setMotivo(e.target.value)} />
@@ -1060,7 +1077,7 @@ function DetalheModal({ nf, onClose }: { nf: NotaFiscalOut; onClose: () => void 
                     onClick={() => cancelMut.mutate(motivo)}>
                     {cancelMut.isPending ? 'Cancelando…' : 'Confirmar cancelamento'}
                   </button>
-                  <button className={cs.btnSecondary} onClick={() => setConfirmando(false)}>Voltar</button>
+                  <button className={cs.btnSecondary} onClick={() => { setConfirmando(false); setErroCancelamento(null) }}>Voltar</button>
                 </div>
               </div>
             ) : deletando ? (
