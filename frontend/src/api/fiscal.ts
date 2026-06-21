@@ -2,7 +2,7 @@ import api from './client'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type StatusNF = 'rascunho' | 'emitida' | 'cancelada' | 'erro'
+export type StatusNF = 'rascunho' | 'emitida' | 'cancelada' | 'erro' | 'substituida'
 
 export interface EnderecoIn {
   logradouro: string
@@ -47,6 +47,10 @@ export interface EmitirNFSeIn {
   cliente_compensacao_id?: string
   contrato_compensacao_id?: string
   valor_compensacao?: number
+  // Substituição (corrige NF anterior sem cancelar)
+  substitui_chave?: string
+  substitui_nf_id?: string
+  motivo_substituicao?: string
 }
 
 export interface NotaFiscalResumo {
@@ -87,6 +91,8 @@ export interface NotaFiscalOut {
   cbs_valor?: number
   valor_liquido: number
   status: StatusNF
+  substituida_por?: string
+  substitui_chave?: string
   ambiente?: number
   erro_mensagem?: string
   xml_nfse?: string

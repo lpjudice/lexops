@@ -315,6 +315,8 @@ def emitir_nota(
         cbs_valor=cbs_v,
         ambiente=ambiente,
         data_emissao=datetime.now(tz=BRT),
+        chave_substituida=body.substitui_chave,
+        motivo_substituicao=body.motivo_substituicao,
     )
     # pTotTribSN e alíquota ISS vêm do Config Fiscal (se configurado)
     if cfg:
@@ -370,10 +372,24 @@ def emitir_nota(
         valor_compensacao=float(body.valor_compensacao) if body.valor_compensacao else None,
         ambiente=ambiente,
         retroativa=retroativa,
+        substitui_chave=body.substitui_chave,
     )
     db.add(nf)
     db.commit()
     db.refresh(nf)
+
+    # Substituição: marca a NF antiga como substituída pela nova
+    if resultado.sucesso and body.substitui_chave:
+        try:
+            antiga = (db.query(NotaFiscal)
+                      .filter(NotaFiscal.chave_acesso == body.substitui_chave).first())
+            if antiga:
+                antiga.status = "substituida"
+                antiga.substituida_por = nf.chave_acesso
+                db.commit()
+                log.info(f"NF {antiga.numero_nfse} marcada como substituída por {nf.numero_nfse}")
+        except Exception as exc:
+            log.warning("Falha ao marcar NF substituída: %s", exc)
 
     # Upsert do pagante (tomador vira/atualiza um registro persistente de Pagante)
     if resultado.sucesso:

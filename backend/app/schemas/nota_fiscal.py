@@ -80,6 +80,11 @@ class EmitirNFSeIn(BaseModel):
     # Ambiente: 1=Produção (real, com imposto), 2=Homologação (teste, sem valor fiscal)
     ambiente: Optional[int] = None  # None → usa o padrão do servidor
 
+    # Substituição: quando esta NF substitui uma anterior (corrige erro sem cancelar)
+    substitui_chave: Optional[str] = None     # chave da NFS-e que está sendo substituída
+    substitui_nf_id: Optional[uuid.UUID] = None  # id interno da NF substituída
+    motivo_substituicao: Optional[str] = None
+
 
 class NotaFiscalOut(BaseModel):
     id: uuid.UUID
@@ -113,6 +118,8 @@ class NotaFiscalOut(BaseModel):
     valor_liquido: float
 
     status: str
+    substituida_por: Optional[str] = None
+    substitui_chave: Optional[str] = None
     ambiente: Optional[int] = 1
     retroativa: Optional[bool] = False
     pago: Optional[bool] = False

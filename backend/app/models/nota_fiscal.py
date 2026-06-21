@@ -76,9 +76,15 @@ class NotaFiscal(Base):
     origem: Mapped[str] = mapped_column(String(20), nullable=False, default="sistema", server_default="sistema")  # sistema|dfe
 
     # ── Status ────────────────────────────────────────────────────────────
-    # rascunho | emitida | cancelada | erro
+    # rascunho | emitida | cancelada | erro | substituida
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="rascunho")
     erro_mensagem: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # ── Substituição ──────────────────────────────────────────────────────
+    # Quando esta NF foi substituída por outra: guarda a chave da NF substituta.
+    substituida_por: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Quando esta NF substitui outra: guarda a chave da NF substituída.
+    substitui_chave: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
     # ── XML armazenado ────────────────────────────────────────────────────
     xml_nfse: Mapped[str | None] = mapped_column(Text, nullable=True)

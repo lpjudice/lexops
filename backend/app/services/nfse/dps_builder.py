@@ -147,6 +147,11 @@ class DadosDPS:
     ambiente: int = 1
     data_emissao: Optional[datetime] = None
 
+    # Substituição: quando esta DPS substitui uma NFS-e anterior (grupo subst)
+    chave_substituida: Optional[str] = None   # chave de acesso (50 dígitos) da NFS-e substituída
+    motivo_substituicao: Optional[str] = None # texto do motivo
+    cod_motivo_subst: str = "1"               # 1=erro na emissão (padrão)
+
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -202,6 +207,14 @@ def montar_dps(dados: DadosDPS) -> bytes:
     _sub(inf, "tpEmit", "1")
     # cLocEmi: município emissor (Vitória)
     _sub(inf, "cLocEmi", MUNICIPIO_VITORIA_IBGE)
+
+    # ── Substituição (grupo subst, opcional) ───────────────────────────
+    # Vem após cLocEmi e antes de prest no layout DPS v1.00.
+    if dados.chave_substituida:
+        subst = _sub(inf, "subst")
+        _sub(subst, "chSubstda", _apenas_digitos(dados.chave_substituida)[:50])
+        _sub(subst, "cMotivo", dados.cod_motivo_subst or "1")
+        _sub(subst, "xMotivo", (dados.motivo_substituicao or "Substituicao por erro na emissao")[:255])
 
     # ── Prestador (TCInfoPrestador) ────────────────────────────────────
     prest = _sub(inf, "prest")

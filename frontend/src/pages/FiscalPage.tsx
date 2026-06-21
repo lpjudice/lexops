@@ -88,10 +88,12 @@ function mesAtual() {
 
 const STATUS_LABEL: Record<StatusNF, string> = {
   rascunho: 'Rascunho', emitida: 'Emitida', cancelada: 'Cancelada', erro: 'Erro',
+  substituida: 'Substituída',
 }
 const STATUS_CLASS: Record<StatusNF, string> = {
   emitida: cs.badgeEmitida, rascunho: cs.badgeRascunho,
   cancelada: cs.badgeCancelada, erro: cs.badgeErro,
+  substituida: cs.badgeCancelada,
 }
 
 // ─── Input R$ formatado ───────────────────────────────────────────────────────
@@ -474,9 +476,21 @@ function EmissaoModal({
     <div className={cs.overlay} onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className={cs.modal}>
         <button className={cs.closeBtn} onClick={onClose}>✕</button>
-        <div className={cs.modalTitle}>🧾 Emitir NFS-e</div>
+        <div className={cs.modalTitle}>
+          {form.substitui_chave ? '📝 Emitir NFS-e de Substituição' : '🧾 Emitir NFS-e'}
+        </div>
 
-        {temPrefill && (
+        {form.substitui_chave && (
+          <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '10px 12px', marginBottom: 12 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, color: '#1d4ed8' }}>Nota de substituição</div>
+            <div style={{ fontSize: 12, color: '#374151', marginTop: 2 }}>
+              Esta NF substituirá a anterior (chave …{form.substitui_chave.slice(-8)}). Corrija os dados
+              que estavam errados e emita. A nota antiga será marcada como <b>substituída</b> automaticamente.
+            </div>
+          </div>
+        )}
+
+        {temPrefill && !form.substitui_chave && (
           <div className={cs.prefillBanner}>
             ✅ Dados pré-preenchidos do honorário. Revise e confirme antes de emitir.
           </div>
@@ -921,7 +935,7 @@ function EmissaoModal({
 
 // ─── Modal de detalhe / cancelamento ────────────────────────────────────────
 
-function DetalheModal({ nf, onClose }: { nf: NotaFiscalOut; onClose: () => void }) {
+function DetalheModal({ nf, onClose, onSubstituir }: { nf: NotaFiscalOut; onClose: () => void; onSubstituir?: (nf: NotaFiscalOut) => void }) {
   const [motivo, setMotivo] = useState('')
   const [confirmando, setConfirmando] = useState(false)
   const [erroPdf, setErroPdf] = useState<string | null>(null)
@@ -1125,6 +1139,22 @@ function DetalheModal({ nf, onClose }: { nf: NotaFiscalOut; onClose: () => void 
                     </div>
                   )
                 })}
+                {/* Opção de substituição: corrigir sem cancelar */}
+                {onSubstituir && nf.chave_acesso && (
+                  <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '10px 12px' }}>
+                    <div style={{ fontWeight: 700, fontSize: 12, color: '#1d4ed8' }}>
+                      💡 Prefere corrigir em vez de cancelar?
+                    </div>
+                    <div style={{ fontSize: 12, color: '#374151', marginTop: 2, marginBottom: 8 }}>
+                      Emita uma <b>nota de substituição</b>: o sistema gera uma NF nova já corrigida que
+                      substitui esta. Evita a retificação do DAS de um simples cancelamento.
+                    </div>
+                    <button className={styles.btnPrimary} style={{ fontSize: 12 }}
+                      onClick={() => onSubstituir(nf)}>
+                      📝 Emitir nota de substituição
+                    </button>
+                  </div>
+                )}
                 {erroCancelamento && (
                   <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px', marginTop: 8 }}>
                     <div style={{ fontWeight: 700, fontSize: 12, color: '#b91c1c' }}>⚠️ Erro ao cancelar</div>
@@ -1400,6 +1430,29 @@ export default function FiscalPage() {
     { key: 'cancelada', label: 'Canceladas' },
   ]
 
+  // Abre a emissão pré-preenchida com os dados da NF antiga, marcada como substituição.
+  // O usuário corrige o que estava errado e emite; a antiga vira "substituída".
+  function abrirSubstituicao(nf: NotaFiscalOut) {
+    setNfDetalhe(null); setNfEmitida(null)
+    setPrefill({
+      competencia: nf.competencia,
+      tomador_cpf_cnpj: nf.tomador_cpf_cnpj,
+      tomador_nome: nf.tomador_nome,
+      tomador_email: nf.tomador_email || '',
+      descricao_servico: nf.descricao_servico,
+      valor_servicos: nf.valor_servicos,
+      cod_tributacao_nacional: nf.cod_tributacao_nacional,
+      cliente_id: nf.cliente_id,
+      contrato_id: nf.contrato_id,
+      honorario_id: nf.honorario_id,
+      // Marca como substituição da NF antiga
+      substitui_chave: nf.chave_acesso,
+      substitui_nf_id: nf.id,
+      motivo_substituicao: 'Substituicao por correcao de dados',
+    })
+    setEmitindo(true)
+  }
+
   return (
     <div>
       <div className={styles.pageHeader}>
@@ -1537,8 +1590,8 @@ export default function FiscalPage() {
         />
       )}
 
-      {nfEmitida && <DetalheModal nf={nfEmitida} onClose={() => setNfEmitida(null)} />}
-      {nfDetalhe && !nfEmitida && <DetalheModal nf={nfDetalhe} onClose={() => setNfDetalhe(null)} />}
+      {nfEmitida && <DetalheModal nf={nfEmitida} onClose={() => setNfEmitida(null)} onSubstituir={abrirSubstituicao} />}
+      {nfDetalhe && !nfEmitida && <DetalheModal nf={nfDetalhe} onClose={() => setNfDetalhe(null)} onSubstituir={abrirSubstituicao} />}
     </div>
   )
 }

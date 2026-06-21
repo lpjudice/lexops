@@ -500,6 +500,8 @@ def _run_migrations() -> None:
             "ALTER TABLE notas_fiscais ADD COLUMN IF NOT EXISTS cliente_compensacao_id UUID",
             "ALTER TABLE notas_fiscais ADD COLUMN IF NOT EXISTS contrato_compensacao_id UUID",
             "ALTER TABLE notas_fiscais ADD COLUMN IF NOT EXISTS valor_compensacao NUMERIC(14,2)",
+            "ALTER TABLE notas_fiscais ADD COLUMN IF NOT EXISTS substituida_por VARCHAR(200)",
+            "ALTER TABLE notas_fiscais ADD COLUMN IF NOT EXISTS substitui_chave VARCHAR(200)",
         ]:
             conn.execute(text(_col))
 
