@@ -250,6 +250,19 @@ const EMPTY: EmitirNFSeIn = {
   valor_compensacao: undefined,
 }
 
+// Cache de CPF/email de pagadores (localStorage: "pagador:{nome}" → {cpf, email})
+function getCachePagador(nome: string) {
+  try {
+    const cached = localStorage.getItem(`pagador:${nome}`)
+    return cached ? JSON.parse(cached) : null
+  } catch { return null }
+}
+function setCachePagador(nome: string, cpf: string, email?: string) {
+  try {
+    localStorage.setItem(`pagador:${nome}`, JSON.stringify({ cpf, email }))
+  } catch {}
+}
+
 function EmissaoModal({
   inicial,
   onClose,
@@ -267,6 +280,17 @@ function EmissaoModal({
   const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(null)
   const [vincularOutro, setVincularOutro] = useState(false)
   const [clienteVinculadoNome, setClienteVinculadoNome] = useState<string>('')
+
+  // Ao mudar tomador_nome, prefill com cache
+  useEffect(() => {
+    if (form.tomador_nome && !form.tomador_cpf_cnpj) {
+      const cached = getCachePagador(form.tomador_nome)
+      if (cached) {
+        set('tomador_cpf_cnpj', cached.cpf)
+        if (cached.email) set('tomador_email', cached.email)
+      }
+    }
+  }, [form.tomador_nome])
 
   const { data: codigosBackend = [] } = useQuery({
     queryKey: ['fiscal-codigos-trib'],
@@ -314,7 +338,12 @@ function EmissaoModal({
   const qc = useQueryClient()
   const mutation = useMutation({
     mutationFn: fiscalApi.emitir,
-    onSuccess: (nf) => { qc.invalidateQueries({ queryKey: ['notas-fiscais'] }); onSucesso(nf) },
+    onSuccess: (nf) => {
+      // Cache CPF/email do pagador para próximas emissões
+      setCachePagador(form.tomador_nome, form.tomador_cpf_cnpj, form.tomador_email)
+      qc.invalidateQueries({ queryKey: ['notas-fiscais'] })
+      onSucesso(nf)
+    },
     onError: (err: any) => {
       const d = err?.response?.data?.detail
       if (typeof d === 'object') setErro(`[${d.codigo ?? '?'}] ${d.detalhe ?? d.message}`)

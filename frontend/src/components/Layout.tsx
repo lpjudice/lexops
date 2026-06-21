@@ -94,6 +94,7 @@ const navGroups: NavGroup[] = [
     label: 'BACKOFFICE & FINANCEIRO',
     items: [
       { to: '/financeiro', label: 'Financeiro', Icon: TrendingUp },
+      { to: '/pagantes', label: 'Pagantes', Icon: Users },
       { to: '/reembolsos', label: 'Reembolsos', Icon: Receipt },
       { to: '/fiscal', label: 'Notas Fiscais', Icon: ScrollText },
       { to: '/backoffice/despesas', label: 'Despesas', Icon: Receipt },
@@ -134,6 +135,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/organizador': 'Folder Organizer',
   '/reembolsos': 'Reembolsos',
   '/financeiro': 'Financeiro',
+  '/pagantes': 'Pagantes',
   '/fiscal': 'Notas Fiscais',
   '/fiscal/visao': 'Visão Fiscal',
   '/fiscal/decisao': 'Decisão Tributária',

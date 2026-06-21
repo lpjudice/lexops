@@ -14,6 +14,7 @@ import ContratosPage from './pages/ContratosPage'
 import TesesPage from './pages/TesesPage'
 import ReembolsosPage from './pages/ReembolsosPage'
 import FinanceiroPage from './pages/FinanceiroPage'
+import PagantesPage from './pages/PagantesPage'
 import AtendimentosPage from './pages/AtendimentosPage'
 import ConfiguracoesPage from './pages/ConfiguracoesPage'
 import OrganizadorPage from './pages/OrganizadorPage'
@@ -64,6 +65,7 @@ function AppRoutes() {
         <Route path="teses" element={<TesesPage />} />
         <Route path="reembolsos" element={<ReembolsosPage />} />
         <Route path="financeiro" element={<FinanceiroPage />} />
+        <Route path="pagantes" element={<PagantesPage />} />
         <Route path="atendimentos" element={<AtendimentosPage />} />
         <Route path="configuracoes" element={<ConfiguracoesPage />} />
         <Route path="organizador" element={<OrganizadorPage />} />
