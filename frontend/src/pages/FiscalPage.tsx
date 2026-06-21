@@ -1068,16 +1068,28 @@ function DetalheModal({ nf, onClose }: { nf: NotaFiscalOut; onClose: () => void 
                     </div>
                   </div>
                 )}
+                {cancelMut.isPending && (
+                  <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, padding: '10px', marginTop: 8 }}>
+                    <div style={{ fontSize: 12, color: '#0369a1', fontWeight: 600 }}>⏳ Aguardando resposta da API Sefin...</div>
+                    <div style={{ fontSize: 11, color: '#0c4a6e', marginTop: 4 }}>
+                      Pode levar até 60 segundos. Não feche esta tela.
+                    </div>
+                  </div>
+                )}
                 <label className={cs.formLabel}>Motivo *</label>
                 <input className={cs.input} placeholder="Mínimo 10 caracteres"
-                  value={motivo} onChange={(e) => setMotivo(e.target.value)} />
+                  value={motivo} onChange={(e) => setMotivo(e.target.value)}
+                  disabled={cancelMut.isPending} />
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button className={styles.btnDanger}
                     disabled={motivo.length < 10 || cancelMut.isPending}
                     onClick={() => cancelMut.mutate(motivo)}>
-                    {cancelMut.isPending ? 'Cancelando…' : 'Confirmar cancelamento'}
+                    {cancelMut.isPending ? 'Conectando ao Sefin…' : 'Confirmar cancelamento'}
                   </button>
-                  <button className={cs.btnSecondary} onClick={() => { setConfirmando(false); setErroCancelamento(null) }}>Voltar</button>
+                  <button className={cs.btnSecondary} onClick={() => { setConfirmando(false); setErroCancelamento(null) }}
+                    disabled={cancelMut.isPending}>
+                    Voltar
+                  </button>
                 </div>
               </div>
             ) : deletando ? (
