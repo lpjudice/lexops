@@ -867,8 +867,13 @@ function DetalheModal({ nf, onClose }: { nf: NotaFiscalOut; onClose: () => void 
   const [contrSel, setContrSel] = useState(nf.contrato_id ?? '')
   const [vincMsg, setVincMsg] = useState<string | null>(null)
   const qc = useQueryClient()
+  const [deletando, setDeletando] = useState(false)
   const cancelMut = useMutation({
     mutationFn: (m: string) => fiscalApi.cancelar(nf.id, m),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['notas-fiscais'] }); onClose() },
+  })
+  const deleteMut = useMutation({
+    mutationFn: () => fiscalApi.deletar(nf.id),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['notas-fiscais'] }); onClose() },
   })
   const { data: analise } = useQuery({
@@ -1023,11 +1028,16 @@ function DetalheModal({ nf, onClose }: { nf: NotaFiscalOut; onClose: () => void 
 
         {nf.status === 'emitida' && (
           <div style={{ marginTop: 16 }}>
-            {!confirmando ? (
-              <button className={styles.btnDanger} onClick={() => setConfirmando(true)}>
-                Cancelar NFS-e
-              </button>
-            ) : (
+            {!confirmando && !deletando ? (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className={styles.btnDanger} onClick={() => setConfirmando(true)}>
+                  Cancelar NFS-e
+                </button>
+                <button className={styles.btnDanger} onClick={() => setDeletando(true)} style={{ background: '#7c2d12' }}>
+                  Deletar NFS-e
+                </button>
+              </div>
+            ) : confirmando && !deletando ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {analise && analise.alertas.map((a, i) => {
                   const cor = a.nivel === 'alerta' ? { bg: '#fef2f2', br: '#fecaca', fg: '#b91c1c' }
@@ -1053,7 +1063,28 @@ function DetalheModal({ nf, onClose }: { nf: NotaFiscalOut; onClose: () => void 
                   <button className={cs.btnSecondary} onClick={() => setConfirmando(false)}>Voltar</button>
                 </div>
               </div>
-            )}
+            ) : deletando ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: 12 }}>
+                <div style={{ fontWeight: 700, color: '#991b1b' }}>Deletar NFS-e {nf.numero_nfse}</div>
+                <div style={{ fontSize: 13, color: '#374151' }}>
+                  ⚠️ Esta ação é irreversível. A NFS-e será deletada do sistema, junto com:
+                </div>
+                <ul style={{ margin: '0 0 0 20px', fontSize: 13, color: '#374151' }}>
+                  <li>Registro na API Sefin (chave: {nf.chave_acesso})</li>
+                  {nf.pago && <li>Recebimento de R$ {nf.valor_servicos?.toLocaleString('pt-BR')} vinculado</li>}
+                  <li>Status do honorário será atualizado</li>
+                </ul>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className={styles.btnDanger}
+                    disabled={deleteMut.isPending}
+                    onClick={() => deleteMut.mutate()}
+                    style={{ background: '#7c2d12' }}>
+                    {deleteMut.isPending ? 'Deletando…' : 'Confirmar exclusão'}
+                  </button>
+                  <button className={cs.btnSecondary} onClick={() => setDeletando(false)}>Cancelar</button>
+                </div>
+              </div>
+            ) : null}
           </div>
         )}
 
