@@ -72,6 +72,7 @@ class EmitirNFSeIn(BaseModel):
     # Caso de uso: NF emitida contra tomador_cpf_cnpj, mas recebimento crédita a cliente_compensacao
     cliente_compensacao_id: Optional[uuid.UUID] = None
     contrato_compensacao_id: Optional[uuid.UUID] = None
+    honorario_compensacao_id: Optional[uuid.UUID] = None
     valor_compensacao: Optional[Decimal] = None
 
     # Série (padrão "1")
@@ -138,6 +139,7 @@ class NotaFiscalOut(BaseModel):
     # Compensação de recebível (para validação contábil cross-menu)
     cliente_compensacao_id: Optional[uuid.UUID] = None
     contrato_compensacao_id: Optional[uuid.UUID] = None
+    honorario_compensacao_id: Optional[uuid.UUID] = None
     valor_compensacao: Optional[float] = None
 
     tem_pdf: bool = False

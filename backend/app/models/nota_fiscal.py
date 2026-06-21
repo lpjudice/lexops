@@ -110,6 +110,9 @@ class NotaFiscal(Base):
     # Caso de uso: holding where Ana Maria paga parte de recebível da Mangrove.
     cliente_compensacao_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     contrato_compensacao_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # Honorário (recebível) do beneficiário que será quitado ao marcar a NF como paga.
+    # É o alvo direto do crédito — reduz o saldo devedor do beneficiário.
+    honorario_compensacao_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     valor_compensacao: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(

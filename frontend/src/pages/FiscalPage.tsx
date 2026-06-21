@@ -11,6 +11,7 @@ import { contratosApi } from '../api/contratos'
 import { processosApi } from '../api/processos'
 import { configFiscalApi } from '../api/configFiscal'
 import { backofficeApi, type SugestaoNF } from '../api/backoffice'
+import { financeiroApi } from '../api/financeiro'
 import { reembolsosApi } from '../api/reembolsos'
 import { mascaraDocumento, validaDocumento, mascaraTelefone, soDigitos, soAlfanum } from '../utils/documentos'
 import styles from './Page.module.css'
@@ -333,6 +334,13 @@ function EmissaoModal({
     }
   }, [form.tomador_nome])
 
+  // Honorários em aberto do beneficiário (para compensação)
+  const { data: honorariosBenef = [] } = useQuery({
+    queryKey: ['honorarios-benef', form.cliente_compensacao_id],
+    queryFn: () => financeiroApi.listarHonorarios({ cliente_id: form.cliente_compensacao_id! }),
+    enabled: !!form.cliente_compensacao_id,
+  })
+
   const { data: codigosBackend = [] } = useQuery({
     queryKey: ['fiscal-codigos-trib'],
     queryFn: fiscalApi.listarCodigosTributacao,
@@ -596,6 +604,7 @@ function EmissaoModal({
                     if (!e.target.checked) {
                       set('cliente_compensacao_id', undefined)
                       set('contrato_compensacao_id', undefined)
+                      set('honorario_compensacao_id', undefined)
                       set('valor_compensacao', undefined)
                       setNomeClienteCompensacao('')
                     }
@@ -606,24 +615,63 @@ function EmissaoModal({
               {temCompensacao && (
                 <>
                   <div className={cs.fieldHint} style={{ background: '#f0fdf4', padding: 10, borderRadius: 6, marginBottom: 12 }}>
-                    💡 <b>Cenário de compensação:</b> A NF será emitida contra <b>{form.tomador_nome}</b> (pagante direto),
-                    mas o recebimento creditará a outro cliente/contrato (beneficiário). <br/>Ex: Ana Maria paga dívida de Mangrove.
+                    💡 <b>Cenário de compensação:</b> A NF é emitida contra <b>{form.tomador_nome || 'o pagante'}</b> (quem paga),
+                    mas o crédito quita um recebível do <b>beneficiário</b>. <br/>Ex: Lucas paga e quita a dívida da Mangrove.
+                    Ao marcar a NF como <b>paga</b>, o saldo devedor do recebível abaixo é reduzido.
                   </div>
 
                   <ClienteSearch
-                    label="Cliente/contrato que receberá o crédito (beneficiário) *"
+                    label="1) Cliente beneficiário (dono do recebível) *"
                     value={nomeClienteCompensacao}
                     placeholder="Buscar cliente Mangrove ou similar…"
                     onSelect={(c, nome) => {
                       setNomeClienteCompensacao(nome)
-                      if (c) {
-                        set('cliente_compensacao_id', c.id)
-                      }
+                      set('cliente_compensacao_id', c ? c.id : undefined)
+                      set('honorario_compensacao_id', undefined)
                     }}
                   />
-                  <p className={cs.fieldHint} style={{ marginTop: 8, fontSize: 12 }}>
-                    Selecione o contrato específico do beneficiário na tela de detalhe da NF após emitir, ou deixe em branco.
-                  </p>
+
+                  {form.cliente_compensacao_id && (
+                    <div style={{ marginTop: 10 }}>
+                      <label className={cs.formLabel}>2) Recebível (honorário) que será quitado *</label>
+                      {honorariosBenef.filter(h => h.status !== 'pago' && h.status !== 'cancelado').length === 0 ? (
+                        <p className={cs.fieldHint} style={{ color: '#b45309' }}>
+                          Este cliente não tem honorários em aberto. Cadastre um no Financeiro primeiro.
+                        </p>
+                      ) : (
+                        <select className={cs.input}
+                          value={form.honorario_compensacao_id || ''}
+                          onChange={(e) => {
+                            const h = honorariosBenef.find(x => x.id === e.target.value)
+                            set('honorario_compensacao_id', e.target.value || undefined)
+                            // sugere o valor da compensação = menor entre valor da NF e saldo do recebível
+                            if (h) set('valor_compensacao', Math.min(Number(form.valor_servicos) || h.saldo_pendente, h.saldo_pendente))
+                          }}>
+                          <option value="">— escolha o recebível —</option>
+                          {honorariosBenef
+                            .filter(h => h.status !== 'pago' && h.status !== 'cancelado')
+                            .map(h => (
+                              <option key={h.id} value={h.id}>
+                                {h.descricao} — saldo {fmtBRL(h.saldo_pendente)}
+                              </option>
+                            ))}
+                        </select>
+                      )}
+                    </div>
+                  )}
+
+                  {form.honorario_compensacao_id && (
+                    <div style={{ marginTop: 10 }}>
+                      <CurrencyField
+                        label="Valor a compensar (quanto desta NF abate o recebível)"
+                        value={Number(form.valor_compensacao) || 0}
+                        onChange={(v) => set('valor_compensacao', v)} />
+                      <p className={cs.fieldHint} style={{ marginTop: 6, fontSize: 12 }}>
+                        Ao marcar esta NF como paga, será lançado um recebimento de {fmtBRL(Number(form.valor_compensacao) || 0)}{' '}
+                        no recebível do beneficiário (aparece no Financeiro e no cadastro do cliente).
+                      </p>
+                    </div>
+                  )}
                 </>
               )}
             </div>

@@ -369,6 +369,7 @@ def emitir_nota(
         processo_id=body.processo_id,
         cliente_compensacao_id=body.cliente_compensacao_id,
         contrato_compensacao_id=body.contrato_compensacao_id,
+        honorario_compensacao_id=body.honorario_compensacao_id,
         valor_compensacao=float(body.valor_compensacao) if body.valor_compensacao else None,
         ambiente=ambiente,
         retroativa=retroativa,
@@ -473,7 +474,11 @@ def historico_nfs_cliente(
         raise HTTPException(404, "Cliente não encontrado")
     from sqlalchemy import or_
     cpf_cnpj = _apenas_digitos(cliente.cpf_cnpj or "")
-    filtros = [NotaFiscal.cliente_id == cliente_id]
+    filtros = [
+        NotaFiscal.cliente_id == cliente_id,
+        # Compensação: NF emitida contra terceiro, mas crédito é deste cliente (beneficiário)
+        NotaFiscal.cliente_compensacao_id == cliente_id,
+    ]
     if cpf_cnpj:
         filtros.append(NotaFiscal.tomador_cpf_cnpj == cpf_cnpj)
     notas = (
@@ -856,24 +861,19 @@ def marcar_pago(
 
     # Reflete no Financeiro — INTEGRAÇÃO CROSS-MENU
     # (a) NF direta ao cliente: cria recebimento no honorario_id
-    # (b) NF com compensação: cria recebimento no contrato_compensacao_id (cliente pagou por terceiro)
+    # (b) NF com compensação: cria recebimento no honorario_compensacao_id
+    #     (pagamento por terceiro — ex.: NF contra Lucas quita recebível da Mangrove)
     # Aparece em: Financeiro (recebíveis), Reembolsos (se há caixa), Lançamentos
-    if nf.honorario_id or nf.cliente_compensacao_id:
-        from app.models.financeiro import Recebimento, Honorario, Contrato
+    if nf.honorario_id or nf.honorario_compensacao_id:
+        from app.models.financeiro import Recebimento, Honorario
         marca = f"[NF {nf.numero_nfse or nf.chave_acesso}]"
         valor_rec = float(nf.valor_compensacao or nf.valor_servicos)
 
         # Detecta qual honorário recebe o crédito
-        if nf.cliente_compensacao_id and nf.contrato_compensacao_id:
-            # Caso: pagamento por terceiro → recebimento vai para o cliente_compensacao
-            # (ex.: Ana Maria paga recebível da Mangrove)
-            contrato_alvo = db.query(Contrato).filter(Contrato.id == nf.contrato_compensacao_id).first()
-            if contrato_alvo and contrato_alvo.honorario_id:
-                hon_id = contrato_alvo.honorario_id
-                obs = f"Pagamento via NFS-e {marca} (tomador: {nf.tomador_nome})"
-            else:
-                hon_id = None
-                obs = None
+        if nf.honorario_compensacao_id:
+            # Compensação: crédito vai para o honorário do beneficiário (reduz saldo devedor dele)
+            hon_id = nf.honorario_compensacao_id
+            obs = f"Pagamento via NFS-e {marca} (tomador: {nf.tomador_nome})"
         else:
             # Caso padrão: recebimento vai para o honorario_id da NF
             hon_id = nf.honorario_id

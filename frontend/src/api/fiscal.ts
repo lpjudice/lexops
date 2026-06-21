@@ -46,6 +46,7 @@ export interface EmitirNFSeIn {
   // Compensação de recebível (pagamento por terceiro)
   cliente_compensacao_id?: string
   contrato_compensacao_id?: string
+  honorario_compensacao_id?: string
   valor_compensacao?: number
   // Substituição (corrige NF anterior sem cancelar)
   substitui_chave?: string
@@ -106,6 +107,7 @@ export interface NotaFiscalOut {
   recebimento_id?: string
   cliente_compensacao_id?: string
   contrato_compensacao_id?: string
+  honorario_compensacao_id?: string
   valor_compensacao?: number
   retroativa?: boolean
   pago?: boolean
