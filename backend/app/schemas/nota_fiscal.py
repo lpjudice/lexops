@@ -94,6 +94,7 @@ class NotaFiscalOut(BaseModel):
     tomador_cpf_cnpj: str
     tomador_nome: str
     tomador_email: Optional[str]
+    tomador_endereco: Optional[EnderecoIn] = None
 
     cod_tributacao_nacional: str
     descricao_servico: str

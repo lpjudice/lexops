@@ -95,6 +95,17 @@ def _nf_to_out(nf: NotaFiscal) -> NotaFiscalOut:
         out.consulta_publica_url = (
             f"https://www.nfse.gov.br/consultapublica?chaveAcesso={nf.chave_acesso}"
         )
+    # Monta EnderecoIn a partir dos campos individuais
+    if nf.tomador_logradouro or nf.tomador_cep:
+        from app.schemas.nota_fiscal import EnderecoIn
+        out.tomador_endereco = EnderecoIn(
+            logradouro=nf.tomador_logradouro,
+            numero=nf.tomador_numero,
+            bairro=nf.tomador_bairro,
+            cod_municipio=nf.tomador_cod_municipio,
+            cep=nf.tomador_cep,
+            complemento=nf.tomador_complemento,
+        )
     return out
 
 
