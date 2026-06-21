@@ -87,6 +87,61 @@ def _descricao_auto(honorario: Honorario, tipo_servico: str = "processo") -> str
     return " ".join(partes)
 
 
+def _upsert_pagante_de_nf(db: Session, nf: NotaFiscal, body) -> None:
+    """Cria ou atualiza um Pagante a partir do tomador da NF (chave: cpf_cnpj).
+
+    Mantém a aba Pagantes sempre populada com quem recebeu NF, mesmo que não
+    seja cliente cadastrado. Atualiza dados básicos (email/endereço) se vierem
+    preenchidos na NF.
+    """
+    from app.models.pagante import Pagante
+    doc = (nf.tomador_cpf_cnpj or "").strip()
+    if not doc and not nf.tomador_nome:
+        return
+
+    pag = None
+    if doc:
+        pag = db.query(Pagante).filter(Pagante.cpf_cnpj == doc).first()
+    if not pag:
+        # fallback por nome quando não há documento
+        pag = db.query(Pagante).filter(
+            Pagante.cpf_cnpj.is_(None), Pagante.nome == nf.tomador_nome
+        ).first() if not doc else None
+
+    end = getattr(body, "tomador_endereco", None)
+    if pag is None:
+        pag = Pagante(
+            nome=nf.tomador_nome,
+            cpf_cnpj=doc or None,
+            email=nf.tomador_email,
+            telefone=getattr(body, "tomador_telefone", None),
+            logradouro=end.logradouro if end else None,
+            numero=end.numero if end else None,
+            complemento=end.complemento if end else None,
+            bairro=end.bairro if end else None,
+            cod_municipio=end.cod_municipio if end else None,
+            cep=end.cep if end else None,
+            cliente_id=nf.cliente_id,
+            origem="nf",
+        )
+        db.add(pag)
+    else:
+        # Atualiza campos vazios com o que veio na NF (não sobrescreve dados manuais)
+        pag.nome = nf.tomador_nome or pag.nome
+        if nf.tomador_email and not pag.email:
+            pag.email = nf.tomador_email
+        if nf.cliente_id and not pag.cliente_id:
+            pag.cliente_id = nf.cliente_id
+        if end:
+            pag.logradouro = pag.logradouro or end.logradouro
+            pag.numero = pag.numero or end.numero
+            pag.bairro = pag.bairro or end.bairro
+            pag.cep = pag.cep or end.cep
+            pag.cod_municipio = pag.cod_municipio or end.cod_municipio
+            pag.complemento = pag.complemento or end.complemento
+    db.commit()
+
+
 def _nf_to_out(nf: NotaFiscal) -> NotaFiscalOut:
     import os
     out = NotaFiscalOut.model_validate(nf)
@@ -319,6 +374,13 @@ def emitir_nota(
     db.add(nf)
     db.commit()
     db.refresh(nf)
+
+    # Upsert do pagante (tomador vira/atualiza um registro persistente de Pagante)
+    if resultado.sucesso:
+        try:
+            _upsert_pagante_de_nf(db, nf, body)
+        except Exception as exc:
+            log.warning("Upsert pagante falhou: %s", exc)
 
     # Sucesso: gera/baixa e salva o PDF da DANFSe
     if resultado.sucesso and nf.chave_acesso:

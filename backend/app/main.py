@@ -16,7 +16,8 @@ from app.models import relatorio_fiscal_log as _relatorio_fiscal_log_model  # no
 from app.models import telegram_task as _telegram_task_model  # noqa: F401 — TelegramTaskBatch/Item/Session
 from app.models import backoffice as _backoffice_model  # noqa: F401
 from app.models import precedentcheck as _precedentcheck_model  # noqa: F401
-from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, fiscal, config_fiscal, jurisprudencia, organizador, pje, prazos, processos, publico, reembolsos, reunioes, system, tarefas, telegram, telegram_andamentos, telegram_tasks, teses, usuarios, webhooks
+from app.models import pagante as _pagante_model  # noqa: F401 — ensures Pagante table is registered
+from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, fiscal, pagantes, config_fiscal, jurisprudencia, organizador, pje, prazos, processos, publico, reembolsos, reunioes, system, tarefas, telegram, telegram_andamentos, telegram_tasks, teses, usuarios, webhooks
 from app.routers import backoffice, precedentcheck
 
 # Cria as tabelas (Alembic gerencia em produção; aqui facilita o dev)
@@ -902,6 +903,7 @@ app.include_router(teses.router)
 app.include_router(reembolsos.router)
 app.include_router(financeiro.router)
 app.include_router(fiscal.router)
+app.include_router(pagantes.router)
 app.include_router(backoffice.router)
 app.include_router(config_fiscal.router)
 app.include_router(publico.router)

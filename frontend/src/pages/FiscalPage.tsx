@@ -5,6 +5,8 @@ import { fiscalApi } from '../api/fiscal'
 import type { NotaFiscalOut, EmitirNFSeIn, StatusNF } from '../api/fiscal'
 import { clientesApi } from '../api/clientes'
 import type { Cliente } from '../api/clientes'
+import { pagantesApi } from '../api/pagantes'
+import type { PaganteOut } from '../api/pagantes'
 import { contratosApi } from '../api/contratos'
 import { processosApi } from '../api/processos'
 import { configFiscalApi } from '../api/configFiscal'
@@ -164,11 +166,14 @@ function SelectComDesc({
 
 function ClienteSearch({
   value, onSelect, label = 'Nome / Razão Social do Tomador *', placeholder,
+  incluirPagantes = false, onSelectPagante,
 }: {
   value: string
   onSelect: (c: Cliente | null, nomeRaw: string) => void
   label?: string
   placeholder?: string
+  incluirPagantes?: boolean
+  onSelectPagante?: (p: PaganteOut) => void
 }) {
   const [q, setQ] = useState(value)
   const [aberto, setAberto] = useState(false)
@@ -177,6 +182,12 @@ function ClienteSearch({
     queryKey: ['clientes'],
     queryFn: clientesApi.listar,
     staleTime: 60_000,
+  })
+  const { data: pagantes = [] } = useQuery({
+    queryKey: ['pagantes'],
+    queryFn: () => pagantesApi.listar(),
+    staleTime: 60_000,
+    enabled: incluirPagantes,
   })
 
   const filtrados = useMemo(() => {
@@ -195,6 +206,19 @@ function ClienteSearch({
     return matched.slice(0, 20)
   }, [q, clientes])
 
+  // Pagantes que NÃO são clientes (dedup por cpf_cnpj), só quando incluirPagantes
+  const pagantesFiltrados = useMemo(() => {
+    if (!incluirPagantes) return []
+    const docsClientes = new Set(clientes.map((c) => (c.cpf_cnpj || '').replace(/\D/g, '')).filter(Boolean))
+    const lower = q.toLowerCase()
+    const digits = q.replace(/\D/g, '')
+    return pagantes
+      .filter((p) => !p.cliente_id && !docsClientes.has((p.cpf_cnpj || '').replace(/\D/g, '')))
+      .filter((p) => !q || p.nome.toLowerCase().includes(lower) ||
+        (digits && (p.cpf_cnpj || '').includes(digits)))
+      .slice(0, 12)
+  }, [incluirPagantes, pagantes, clientes, q])
+
   return (
     <div className={cs.searchWrap}>
       <label className={cs.formLabel}>{label}</label>
@@ -207,7 +231,7 @@ function ClienteSearch({
         placeholder={placeholder ?? 'Digite para buscar cliente cadastrado…'}
         autoComplete="off"
       />
-      {aberto && filtrados.length > 0 && (
+      {aberto && (filtrados.length > 0 || pagantesFiltrados.length > 0) && (
         <ul className={cs.dropdown}>
           {filtrados.map((c) => (
             <li key={c.id} className={cs.dropdownItem}
@@ -215,6 +239,19 @@ function ClienteSearch({
               <span className={cs.dropdownNome}>{c.nome}</span>
               {c.cpf_cnpj && <span className={cs.dropdownDoc}>{c.cpf_cnpj}</span>}
               {c.email && <span className={cs.dropdownEmail}>{c.email}</span>}
+            </li>
+          ))}
+          {pagantesFiltrados.length > 0 && (
+            <li style={{ padding: '4px 10px', fontSize: 10, color: '#9ca3af', fontWeight: 600, background: '#f9fafb' }}>
+              PAGANTES (não-clientes)
+            </li>
+          )}
+          {pagantesFiltrados.map((p) => (
+            <li key={p.id} className={cs.dropdownItem}
+              onMouseDown={() => { setQ(p.nome); setAberto(false); onSelectPagante?.(p) }}>
+              <span className={cs.dropdownNome}>{p.nome} <span style={{ fontSize: 10, color: '#1d4ed8' }}>• pagante</span></span>
+              {p.cpf_cnpj && <span className={cs.dropdownDoc}>{p.cpf_cnpj}</span>}
+              {p.email && <span className={cs.dropdownEmail}>{p.email}</span>}
             </li>
           ))}
         </ul>
@@ -400,6 +437,27 @@ function EmissaoModal({
     }
   }
 
+  // Selecionou um pagante não-cliente: preenche tomador com dados do pagante (inclui endereço)
+  function handlePaganteSelect(p: PaganteOut) {
+    setClienteSelecionado(null)
+    setForm((f) => ({
+      ...f,
+      cliente_id: p.cliente_id || undefined,
+      tomador_nome: p.nome,
+      tomador_cpf_cnpj: (p.cpf_cnpj || '').replace(/\D/g, ''),
+      tomador_email: p.email || f.tomador_email,
+      tomador_telefone: (p.telefone || '').replace(/\D/g, '') || f.tomador_telefone,
+      tomador_endereco: (p.logradouro || p.cep) ? {
+        logradouro: p.logradouro || '',
+        numero: p.numero || '',
+        bairro: p.bairro || '',
+        cod_municipio: p.cod_municipio || '',
+        cep: p.cep || '',
+        complemento: p.complemento || undefined,
+      } : f.tomador_endereco,
+    }))
+  }
+
   function aplicarContrato(c: any) {
     if (c.valor_honorarios_num != null) set('valor_servicos', c.valor_honorarios_num)
     const desc = (c as any).objeto_texto_livre || c.descricao || ''
@@ -464,7 +522,8 @@ function EmissaoModal({
           </div>
 
           <div className={cs.formGridFull}>
-            <ClienteSearch value={form.tomador_nome} onSelect={handleClienteSelect} />
+            <ClienteSearch value={form.tomador_nome} onSelect={handleClienteSelect}
+              incluirPagantes onSelectPagante={handlePaganteSelect} />
 
             {/* Cliente novo → criar na hora */}
             {!clienteSelecionado && form.tomador_nome.trim().length > 2 && (
