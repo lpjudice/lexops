@@ -148,9 +148,12 @@ class DadosDPS:
     data_emissao: Optional[datetime] = None
 
     # Substituição: quando esta DPS substitui uma NFS-e anterior (grupo subst)
+    # TSCodJustSubst: 1=Desenq. Simples, 2=Enq. Simples, 3=Incl. imunidade,
+    # 4=Excl. imunidade, 5=Rejeição tomador, 99=Outros.
+    # Correção de dados (valor/tomador/descrição) NÃO é nenhum código tributário → usa 99.
     chave_substituida: Optional[str] = None   # chave de acesso (50 dígitos) da NFS-e substituída
-    motivo_substituicao: Optional[str] = None # texto do motivo
-    cod_motivo_subst: str = "1"               # 1=erro na emissão (padrão)
+    motivo_substituicao: Optional[str] = None # texto do motivo (obrigatório quando cMotivo=99)
+    cod_motivo_subst: str = "99"              # 99=Outros (padrão p/ correção de dados)
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -213,8 +216,10 @@ def montar_dps(dados: DadosDPS) -> bytes:
     if dados.chave_substituida:
         subst = _sub(inf, "subst")
         _sub(subst, "chSubstda", _apenas_digitos(dados.chave_substituida)[:50])
-        _sub(subst, "cMotivo", dados.cod_motivo_subst or "1")
-        _sub(subst, "xMotivo", (dados.motivo_substituicao or "Substituicao por erro na emissao")[:255])
+        cmot = dados.cod_motivo_subst or "99"
+        _sub(subst, "cMotivo", cmot)
+        # xMotivo é obrigatório quando cMotivo=99 (Outros)
+        _sub(subst, "xMotivo", (dados.motivo_substituicao or "Substituicao por correcao de dados")[:255])
 
     # ── Prestador (TCInfoPrestador) ────────────────────────────────────
     prest = _sub(inf, "prest")

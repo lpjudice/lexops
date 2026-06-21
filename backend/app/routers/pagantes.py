@@ -33,6 +33,8 @@ class PaganteIn(BaseModel):
     numero: Optional[str] = None
     complemento: Optional[str] = None
     bairro: Optional[str] = None
+    cidade: Optional[str] = None
+    estado: Optional[str] = None
     cod_municipio: Optional[str] = None
     cep: Optional[str] = None
     cliente_id: Optional[uuid.UUID] = None
@@ -49,6 +51,8 @@ class PaganteOut(BaseModel):
     numero: Optional[str]
     complemento: Optional[str]
     bairro: Optional[str]
+    cidade: Optional[str]
+    estado: Optional[str]
     cod_municipio: Optional[str]
     cep: Optional[str]
     cliente_id: Optional[uuid.UUID]
@@ -137,6 +141,8 @@ def criar_pagante(body: PaganteIn, db: Session = Depends(get_db), _=Depends(get_
         numero=body.numero,
         complemento=body.complemento,
         bairro=body.bairro,
+        cidade=body.cidade,
+        estado=(body.estado or "").upper()[:2] or None,
         cod_municipio=body.cod_municipio,
         cep=_so_digitos(body.cep),
         cliente_id=body.cliente_id,
@@ -163,6 +169,8 @@ def atualizar_pagante(pagante_id: uuid.UUID, body: PaganteIn,
     pag.numero = body.numero
     pag.complemento = body.complemento
     pag.bairro = body.bairro
+    pag.cidade = body.cidade
+    pag.estado = (body.estado or "").upper()[:2] or None
     pag.cod_municipio = body.cod_municipio
     pag.cep = _so_digitos(body.cep)
     pag.cliente_id = body.cliente_id

@@ -443,10 +443,18 @@ def emitir_nota(
 
     if not resultado.sucesso:
         log.error("Falha na emissão NFS-e: [%s] %s", resultado.erro_codigo, resultado.erro_mensagem)
+        detalhe = resultado.erro_mensagem
+        # E0014: a DPS já gerou uma NFS-e (envio anterior). NÃO re-emitir — sincronizar.
+        if (resultado.erro_codigo or "").upper() == "E0014" or "já existe em uma NFS-e" in (detalhe or ""):
+            detalhe = (
+                "Esta DPS já gerou uma NFS-e em um envio anterior (provável queda de conexão "
+                "após o Sefin processar). NÃO emita novamente — clique em 'Sincronizar' para "
+                "trazer a nota já gerada. Detalhe técnico: " + (detalhe or "")
+            )
         raise HTTPException(422, detail={
             "message": "Falha na emissão junto ao ADN",
             "codigo": resultado.erro_codigo,
-            "detalhe": resultado.erro_mensagem,
+            "detalhe": detalhe,
             "nf_id": str(nf.id),
         })
 
@@ -904,41 +912,6 @@ def sincronizar_dfe_gov(db: Session = Depends(get_db), _=Depends(get_current_use
     """Reconcilia notas do governo (DFe) — inclusive emitidas direto no portal."""
     from app.services.nfse.dfe_sync import sincronizar_dfe
     return sincronizar_dfe(db)
-
-
-@router.delete("/notas/{nf_id}")
-def deletar_nota(nf_id: uuid.UUID, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    """Deleta uma NF (mesmo que emitida/paga). ATENÇÃO: remove também recebimentos vinculados."""
-    from app.models.financeiro import Recebimento
-    nf = db.query(NotaFiscal).filter(NotaFiscal.id == nf_id).first()
-    if not nf:
-        raise HTTPException(404, "Nota fiscal não encontrada")
-
-    # Aviso sobre o que será deletado
-    avisos = []
-    if nf.status == "emitida":
-        avisos.append(f"NF foi emitida (chave: {nf.chave_acesso[:20]}... — será deletada do sistema)")
-    if nf.pago:
-        avisos.append(f"NF está marcada como paga — recebimento será removido do Financeiro")
-    if nf.honorario_id:
-        avisos.append(f"NF vinculada a um honorário — status pode mudar")
-    if nf.recebimento_id:
-        # Deleta também o recebimento
-        rec = db.query(Recebimento).filter(Recebimento.id == nf.recebimento_id).first()
-        if rec:
-            db.delete(rec)
-            avisos.append(f"Recebimento será deletado (R$ {rec.valor})")
-
-    # Deleta a NF
-    db.delete(nf)
-    db.commit()
-
-    return {
-        "deletada": True,
-        "numero_nfse": nf.numero_nfse,
-        "chave_acesso": nf.chave_acesso,
-        "avisos": avisos,
-    }
 
 
 @router.delete("/notas/erros")

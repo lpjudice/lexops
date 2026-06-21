@@ -21,7 +21,7 @@ import time
 import httpx
 
 from .client import get_sefin_client, get_adn_client
-from .dps_builder import DadosDPS, montar_dps
+from .dps_builder import DadosDPS, montar_dps, VER_APLIC
 from .signer import assinar_dps, assinar_evento
 
 log = logging.getLogger(__name__)
@@ -49,18 +49,38 @@ def _request_retry(metodo: str, alvo: str, path: str, *, max_tentativas: int = 5
                    ambiente: int | None = None, **kwargs):
     """Faz request com retry — o servidor do gov derruba as 1ªs conexões (warm-up).
 
-    Seguro para POST /nfse: o disconnect ocorre antes do envio (nada é criado);
-    além disso a DPS tem Id único (idempotência por nDPS no servidor).
+    IMPORTANTE (E0014): para POST (emissão/eventos), só fazemos retry em erros de
+    ESTABELECIMENTO de conexão (ConnectError/ConnectTimeout) — onde é certo que nada
+    foi enviado. Em erros de fase de resposta (ReadError/RemoteProtocolError) NÃO
+    repetimos, pois o Sefin pode já ter processado a DPS; reenviar geraria "DPS já
+    existe" (E0014) e risco de NFS-e duplicada. Para GET, retry em qualquer erro.
     """
+    is_post = metodo.upper() in ("POST", "PUT", "PATCH")
+    # Erros seguros para retry mesmo em POST (conexão nunca completou)
+    erros_conexao = (httpx.ConnectError, httpx.ConnectTimeout)
+    # Erros de fase de resposta — só retry em GET
+    erros_resposta = (httpx.RemoteProtocolError, httpx.ReadError, httpx.ReadTimeout)
+
     ultimo_erro = None
     for tentativa in range(max_tentativas):
         try:
             client = get_sefin_client(ambiente) if alvo == "sefin" else get_adn_client()
             with client:
                 return client.request(metodo, path, **kwargs)
-        except (httpx.RemoteProtocolError, httpx.ConnectError, httpx.ReadError) as exc:
+        except erros_conexao as exc:
             ultimo_erro = exc
-            log.warning("Conexão %s caiu (tentativa %s/%s): %s",
+            log.warning("Conexão %s não estabelecida (tentativa %s/%s): %s",
+                        alvo, tentativa + 1, max_tentativas, exc)
+            time.sleep(0.6 * (tentativa + 1))
+        except erros_resposta as exc:
+            ultimo_erro = exc
+            if is_post:
+                # Não repetir POST: a requisição pode ter sido processada pelo Sefin
+                log.error("POST %s/%s caiu na fase de resposta — NÃO será repetido "
+                          "(evita E0014/duplicação). Sincronize para verificar: %s",
+                          alvo, path, exc)
+                raise
+            log.warning("Leitura %s caiu (tentativa %s/%s): %s",
                         alvo, tentativa + 1, max_tentativas, exc)
             time.sleep(0.6 * (tentativa + 1))
     raise ultimo_erro  # type: ignore[misc]
@@ -237,17 +257,26 @@ def _montar_xml_cancelamento(chave_acesso: str, motivo: str) -> bytes:
     BRT = timezone(timedelta(hours=-3))
     dh = datetime.now(tz=BRT).strftime("%Y-%m-%dT%H:%M:%S") + "-03:00"
 
+    # Id do pedido de registro de evento (TSIdPedRefEvt, 62 chars):
+    # "PRE" + chave(50) + tpEvento(6) + nPedRegEvento(3)
+    # Cancelamento = evento e101101 → tpEvento "101101"; nPedRegEvento=1 (ocorre 1x)
+    TP_EVENTO_CANC = "101101"
+    n_ped = "1"
+    id_ped = f"PRE{chave_acesso}{TP_EVENTO_CANC}{n_ped.zfill(3)}"
+
     root = etree.Element("pedRegEvento", nsmap={None: NS})
     root.set("versao", "1.00")
     inf = etree.SubElement(root, "infPedReg")
-    inf.set("Id", f"PRE{chave_acesso}")
+    inf.set("Id", id_ped)
     etree.SubElement(inf, "tpAmb").text = "1"
+    etree.SubElement(inf, "verAplic").text = VER_APLIC
     etree.SubElement(inf, "dhEvento").text = dh
     etree.SubElement(inf, "CNPJAutor").text = "10901611000164"
     etree.SubElement(inf, "chNFSe").text = chave_acesso
-    etree.SubElement(inf, "nPedRegEvento").text = "1"
+    etree.SubElement(inf, "nPedRegEvento").text = n_ped
     e101101 = etree.SubElement(inf, "e101101")
     etree.SubElement(e101101, "xDesc").text = "Cancelamento de NFS-e"
+    # TSCodJustCanc: 1=Erro na Emissão, 2=Serviço não Prestado, 9=Outros
     etree.SubElement(e101101, "cMotivo").text = "1"
     etree.SubElement(e101101, "xMotivo").text = motivo[:255]
     return etree.tostring(root, xml_declaration=True, encoding="UTF-8")

@@ -149,9 +149,6 @@ export const fiscalApi = {
   analiseCancelamento: (id: string) =>
     api.get<{ nivel: string; vencimento_das: string; alertas: { nivel: string; titulo: string; detalhe: string }[] }>(
       `/fiscal/notas/${id}/cancelamento-analise`).then((r) => r.data),
-  deletar: (id: string) =>
-    api.delete<{ deletada: boolean; numero_nfse: string; chave_acesso: string; avisos: string[] }>(
-      `/fiscal/notas/${id}`).then((r) => r.data),
 
   prefillDeHonorario: (honorarioId: string, recebimentoId?: string) =>
     api

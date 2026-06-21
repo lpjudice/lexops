@@ -71,7 +71,8 @@ export default function PagantesPage() {
     setForm({
       nome: p.nome, cpf_cnpj: p.cpf_cnpj || '', email: p.email || '', telefone: p.telefone || '',
       logradouro: p.logradouro, numero: p.numero, complemento: p.complemento,
-      bairro: p.bairro, cod_municipio: p.cod_municipio, cep: p.cep,
+      bairro: p.bairro, cidade: p.cidade, estado: p.estado,
+      cod_municipio: p.cod_municipio, cep: p.cep,
       cliente_id: p.cliente_id, observacoes: p.observacoes,
     })
     setEditId(p.id); setErro(null); setBuscaCliente(''); setMostrarForm(true)
@@ -82,7 +83,8 @@ export default function PagantesPage() {
     : []
 
   const fmtEndereco = (p: PaganteOut) => {
-    const partes = [p.logradouro, p.numero, p.bairro, p.cep].filter(Boolean)
+    const cidadeUf = [p.cidade, p.estado].filter(Boolean).join('/')
+    const partes = [p.logradouro, p.numero, p.bairro, cidadeUf || null, p.cep].filter(Boolean)
     return partes.length ? partes.join(' · ') : '—'
   }
 
@@ -151,6 +153,8 @@ export default function PagantesPage() {
             <Campo label="Logradouro" value={form.logradouro || ''} onChange={(v) => set('logradouro', v)} />
             <Campo label="Número" value={form.numero || ''} onChange={(v) => set('numero', v)} />
             <Campo label="Bairro" value={form.bairro || ''} onChange={(v) => set('bairro', v)} />
+            <Campo label="Cidade" value={form.cidade || ''} onChange={(v) => set('cidade', v)} />
+            <Campo label="Estado (UF)" value={form.estado || ''} onChange={(v) => set('estado', v.toUpperCase().slice(0, 2))} />
             <Campo label="CEP" value={form.cep || ''} onChange={(v) => set('cep', soDigitos(v))} />
           </div>
 

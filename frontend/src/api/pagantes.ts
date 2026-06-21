@@ -9,6 +9,8 @@ export interface PaganteIn {
   numero?: string
   complemento?: string
   bairro?: string
+  cidade?: string
+  estado?: string
   cod_municipio?: string
   cep?: string
   cliente_id?: string
@@ -25,6 +27,8 @@ export interface PaganteOut {
   numero?: string
   complemento?: string
   bairro?: string
+  cidade?: string
+  estado?: string
   cod_municipio?: string
   cep?: string
   cliente_id?: string

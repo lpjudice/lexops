@@ -34,6 +34,8 @@ class Pagante(Base):
     numero: Mapped[str | None] = mapped_column(String(10), nullable=True)
     complemento: Mapped[str | None] = mapped_column(String(60), nullable=True)
     bairro: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    cidade: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    estado: Mapped[str | None] = mapped_column(String(2), nullable=True)  # UF
     cod_municipio: Mapped[str | None] = mapped_column(String(7), nullable=True)
     cep: Mapped[str | None] = mapped_column(String(8), nullable=True)
 
