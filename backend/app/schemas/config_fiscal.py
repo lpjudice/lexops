@@ -35,6 +35,7 @@ class ConfigFiscalBase(BaseModel):
 
     # Bases
     aliquota_iss: Decimal
+    nbs_codigo: Optional[str] = None
     regime_especial: str
     anexo_simples: str
     rbt12: Optional[Decimal] = None

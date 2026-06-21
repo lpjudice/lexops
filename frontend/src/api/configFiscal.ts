@@ -18,6 +18,7 @@ export interface ConfigFiscal {
   regime_tributario: string
   // Bases
   aliquota_iss: number
+  nbs_codigo?: string | null
   regime_especial: string
   anexo_simples: string
   rbt12?: number

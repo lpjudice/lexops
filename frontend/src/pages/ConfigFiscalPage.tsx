@@ -496,6 +496,12 @@ export default function ConfigFiscalPage() {
       <Secao titulo="⚖️ Bases de Tributação">
         <div style={GRID2}>
           <Campo label="Alíquota ISS (%)"><input className={inp} type="number" step="0.01" value={f.aliquota_iss} onChange={(e) => set('aliquota_iss', parseFloat(e.target.value) || 0)} /></Campo>
+          <Campo label="Código NBS (9 dígitos, opcional)">
+            <input className={inp} type="text" maxLength={11}
+              placeholder="ex.: 113019000 (advocacia)"
+              value={f.nbs_codigo ?? ''}
+              onChange={(e) => set('nbs_codigo', e.target.value.replace(/\D/g, '').slice(0, 9) || null as any)} />
+          </Campo>
           <Campo label="Regime especial">
             <select className={inp} value={f.regime_especial} onChange={(e) => set('regime_especial', e.target.value)}>
               <option value="0">Nenhum</option>

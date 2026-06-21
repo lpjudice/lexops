@@ -123,6 +123,7 @@ class DadosDPS:
     # Serviço
     descricao_servico: str
     cod_tributacao_nacional: str = CTN_ADVOCACIA
+    nbs_codigo: Optional[str] = None  # cNBS (9 dígitos) — opcional
 
     # Tributação
     natureza_operacao: str = "1"   # 1 = Tributado no município
@@ -278,6 +279,12 @@ def montar_dps(dados: DadosDPS) -> bytes:
     cserv = _sub(serv, "cServ")
     _sub(cserv, "cTribNac",  dados.cod_tributacao_nacional)
     _sub(cserv, "xDescServ", dados.descricao_servico[:2000])
+    # cNBS (Nomenclatura Brasileira de Serviços, 9 dígitos) — opcional.
+    # Algumas prefeituras exigem; vem da Config Fiscal. Advocacia: 113019000.
+    if dados.nbs_codigo:
+        nbs = _apenas_digitos(dados.nbs_codigo)[:9]
+        if len(nbs) == 9:
+            _sub(cserv, "cNBS", nbs)
 
     # ── Valores (TCInfoValores) ────────────────────────────────────────
     valores = _sub(inf, "valores")

@@ -305,6 +305,7 @@ def emitir_nota(
         tomador=tomador,
         descricao_servico=body.descricao_servico,
         cod_tributacao_nacional=body.cod_tributacao_nacional,
+        nbs_codigo=(cfg.nbs_codigo if cfg and cfg.nbs_codigo else None),
         natureza_operacao=body.natureza_operacao,
         regime_tributario=body.regime_tributario,
         reg_apuracao_sn=body.reg_apuracao_sn,
@@ -848,16 +849,25 @@ def historico_relatorios(db: Session = Depends(get_db), _=Depends(get_current_us
 def marcar_pago(
     nf_id: uuid.UUID,
     pago: bool = Query(True),
+    data: Optional[str] = Query(None, description="Data do pagamento YYYY-MM-DD (default hoje)"),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
-    """Marca/desmarca a NF como paga."""
+    """Marca/desmarca a NF como paga. `data` define a competência do recebimento no Financeiro."""
     from datetime import date as _date
     nf = db.query(NotaFiscal).filter(NotaFiscal.id == nf_id).first()
     if not nf:
         raise HTTPException(404, "Nota fiscal não encontrada")
+    # Não permite marcar pago em NF cancelada/substituída/erro
+    if pago and nf.status not in ("emitida",):
+        raise HTTPException(400, f"NFS-e com status '{nf.status}' não pode ser marcada como paga.")
+    # Data do pagamento (escolhida pelo usuário) — reflete no mês correto do Financeiro
+    try:
+        dt_pag = _date.fromisoformat(data) if data else _date.today()
+    except ValueError:
+        dt_pag = _date.today()
     nf.pago = pago
-    nf.data_pagamento = _date.today() if pago else None
+    nf.data_pagamento = dt_pag if pago else None
 
     # Reflete no Financeiro — INTEGRAÇÃO CROSS-MENU
     # (a) NF direta ao cliente: cria recebimento no honorario_id
@@ -886,7 +896,7 @@ def marcar_pago(
             if pago and not existente:
                 db.add(Recebimento(
                     honorario_id=hon_id, valor=valor_rec,
-                    data_recebimento=_date.today(), forma_pagamento="pix",
+                    data_recebimento=dt_pag, forma_pagamento="pix",
                     observacao=obs,
                 ))
             elif not pago and existente:

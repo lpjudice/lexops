@@ -29,6 +29,9 @@ class ConfigFiscal(Base):
 
     # ── B. Bases de tributação ────────────────────────────────────────────
     aliquota_iss: Mapped[float] = mapped_column(Numeric(5, 2), default=2.00)
+    # Código NBS (Nomenclatura Brasileira de Serviços, 9 dígitos) — opcional no
+    # portal nacional, exigido por algumas prefeituras. Advocacia: 1.1301.90.00 → "113019000"
+    nbs_codigo: Mapped[str | None] = mapped_column(String(9), nullable=True)
     regime_especial: Mapped[str] = mapped_column(String(2), default="0")  # 0=Nenhum 6=Soc.Prof
     anexo_simples: Mapped[str] = mapped_column(String(5), default="IV")
     rbt12: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)  # receita bruta 12m

@@ -182,8 +182,9 @@ export const fiscalApi = {
 
   sincronizarDfe: () => api.post('/fiscal/dfe/sincronizar').then((r) => r.data),
 
-  marcarPago: (id: string, pago: boolean) =>
-    api.patch<NotaFiscalOut>(`/fiscal/notas/${id}/pago`, null, { params: { pago } }).then((r) => r.data),
+  marcarPago: (id: string, pago: boolean, data?: string) =>
+    api.patch<NotaFiscalOut>(`/fiscal/notas/${id}/pago`, null,
+      { params: { pago, ...(data ? { data } : {}) } }).then((r) => r.data),
 
   danfseUrl: (id: string) => `/fiscal/notas/${id}/danfse`,
 

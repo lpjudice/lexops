@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fiscalApi } from '../api/fiscal'
-import type { NotaFiscalOut, EmitirNFSeIn, StatusNF } from '../api/fiscal'
+import type { NotaFiscalOut, NotaFiscalResumo, EmitirNFSeIn, StatusNF } from '../api/fiscal'
 import { clientesApi } from '../api/clientes'
 import type { Cliente } from '../api/clientes'
 import { pagantesApi } from '../api/pagantes'
@@ -1372,9 +1372,18 @@ export default function FiscalPage() {
   })
 
   const qc = useQueryClient()
+  // Modal de data ao marcar pago
+  const [pagandoNf, setPagandoNf] = useState<NotaFiscalResumo | null>(null)
+  const [dataPagamento, setDataPagamento] = useState(() => new Date().toISOString().slice(0, 10))
   const pagoMut = useMutation({
-    mutationFn: ({ id, pago }: { id: string; pago: boolean }) => fiscalApi.marcarPago(id, pago),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['notas-fiscais'] }),
+    mutationFn: ({ id, pago, data }: { id: string; pago: boolean; data?: string }) =>
+      fiscalApi.marcarPago(id, pago, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['notas-fiscais'] })
+      qc.invalidateQueries({ queryKey: ['honorarios'] })
+      qc.invalidateQueries({ queryKey: ['financeiro-resumo'] })
+      setPagandoNf(null)
+    },
   })
 
   function toggleGrupo(chave: string) {
@@ -1573,11 +1582,22 @@ export default function FiscalPage() {
                         )}
                       </td>
                       <td>
-                        <button className={styles.btnTable}
-                          style={nf.pago ? { background: '#dcfce7', color: '#15803d', borderColor: '#bbf7d0' } : {}}
-                          onClick={() => pagoMut.mutate({ id: nf.id, pago: !nf.pago })}>
-                          {nf.pago ? '✓ Pago' : 'Marcar pago'}
-                        </button>
+                        {nf.status === 'emitida' ? (
+                          nf.pago ? (
+                            <button className={styles.btnTable}
+                              style={{ background: '#dcfce7', color: '#15803d', borderColor: '#bbf7d0' }}
+                              onClick={() => pagoMut.mutate({ id: nf.id, pago: false })}>
+                              ✓ Pago
+                            </button>
+                          ) : (
+                            <button className={styles.btnTable}
+                              onClick={() => { setPagandoNf(nf); setDataPagamento(new Date().toISOString().slice(0, 10)) }}>
+                              Marcar pago
+                            </button>
+                          )
+                        ) : (
+                          <span style={{ fontSize: 11, color: '#9ca3af' }}>—</span>
+                        )}
                       </td>
                       <td>
                         <button className={styles.btnTable} onClick={() => fiscalApi.obter(nf.id).then(setNfDetalhe)}>Ver</button>
@@ -1610,6 +1630,33 @@ export default function FiscalPage() {
 
       {nfEmitida && <DetalheModal nf={nfEmitida} onClose={() => setNfEmitida(null)} onSubstituir={abrirSubstituicao} />}
       {nfDetalhe && !nfEmitida && <DetalheModal nf={nfDetalhe} onClose={() => setNfDetalhe(null)} onSubstituir={abrirSubstituicao} />}
+
+      {/* Modal: data do pagamento ao marcar pago */}
+      {pagandoNf && (
+        <div className={cs.overlay} onClick={(e) => e.target === e.currentTarget && setPagandoNf(null)}>
+          <div className={cs.modal} style={{ maxWidth: 380 }}>
+            <button className={cs.closeBtn} onClick={() => setPagandoNf(null)}>✕</button>
+            <div className={cs.modalTitle}>Marcar NFS-e como paga</div>
+            <p style={{ fontSize: 13, color: '#374151', margin: '8px 0 4px' }}>
+              {pagandoNf.tomador_nome} · {fmtBRL(pagandoNf.valor_servicos)}
+            </p>
+            <label className={cs.formLabel}>Data do pagamento *</label>
+            <input type="date" className={cs.input}
+              value={dataPagamento} onChange={(e) => setDataPagamento(e.target.value)} />
+            <p className={cs.fieldHint} style={{ marginTop: 6, fontSize: 12 }}>
+              O recebimento será lançado no Financeiro nesta data (entra no mês {fmtCompetencia(dataPagamento.slice(0, 7))}).
+            </p>
+            <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+              <button className={styles.btnPrimary}
+                disabled={!dataPagamento || pagoMut.isPending}
+                onClick={() => pagoMut.mutate({ id: pagandoNf.id, pago: true, data: dataPagamento })}>
+                {pagoMut.isPending ? 'Salvando…' : 'Confirmar pagamento'}
+              </button>
+              <button className={cs.btnSecondary} onClick={() => setPagandoNf(null)}>Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
