@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { financeiroApi } from '../api/financeiro'
-import type { HonorarioCreate, RecebimentoCreate, StatusHonorario, TipoHonorario, FormaPagamento } from '../api/financeiro'
+import type { HonorarioCreate, RecebimentoCreate, StatusHonorario, TipoHonorario, FormaPagamento, FluxoMes } from '../api/financeiro'
 import { clientesApi } from '../api/clientes'
 import { processosApi } from '../api/processos'
 import CurrencyInput from '../components/CurrencyInput'
@@ -37,6 +37,7 @@ function fmtData(d: string) {
 export default function FinanceiroPage() {
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const [aba, setAba] = useState<'recebiveis' | 'fluxo'>('recebiveis')
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<HonorarioCreate>(EMPTY_H)
   const [expandido, setExpandido] = useState<string | null>(null)
@@ -170,13 +171,33 @@ export default function FinanceiroPage() {
     <div>
       <div className={styles.pageHeader}>
         <h1 className={styles.pageTitle}>Financeiro</h1>
-        <button className={styles.btnPrimary} onClick={() => setShowForm(!showForm)}>
-          {showForm ? 'Cancelar' : '+ Novo Honorário'}
-        </button>
+        {aba === 'recebiveis' && (
+          <button className={styles.btnPrimary} onClick={() => setShowForm(!showForm)}>
+            {showForm ? 'Cancelar' : '+ Novo Honorário'}
+          </button>
+        )}
       </div>
 
+      {/* Abas: Recebíveis (contratos/honorários) × Fluxo de Caixa (entradas reais) */}
+      <div style={{ display: 'flex', gap: 8, borderBottom: '2px solid #e5e7eb', marginBottom: 20 }}>
+        {([['recebiveis', 'Recebíveis'], ['fluxo', 'Fluxo de Caixa']] as const).map(([k, label]) => (
+          <button key={k} onClick={() => setAba(k)}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer', padding: '8px 14px',
+              fontSize: 14, fontWeight: aba === k ? 700 : 500,
+              color: aba === k ? '#0f766e' : '#6b7280',
+              borderBottom: aba === k ? '2px solid #0f766e' : '2px solid transparent',
+              marginBottom: -2,
+            }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {aba === 'fluxo' && <FluxoCaixaView />}
+
       {/* Cards de resumo — Honorários */}
-      {resumo && (
+      {aba === 'recebiveis' && resumo && (
         <>
           <div className={cs.sectionTitle} style={{ marginBottom: 6 }}>Honorários</div>
           <div className={cs.summaryGrid}>
@@ -276,7 +297,7 @@ export default function FinanceiroPage() {
       )}
 
       {/* Gráfico de meses */}
-      {resumo && resumo.por_mes.length > 0 && (
+      {aba === 'recebiveis' && resumo && resumo.por_mes.length > 0 && (
         <div className={styles.form} style={{ marginBottom: 24 }}>
           <div className={cs.sectionTitle}>Recebimentos por mês</div>
           <div className={cs.mesesGrid}>
@@ -295,7 +316,7 @@ export default function FinanceiroPage() {
       )}
 
       {/* Resumo por cliente */}
-      {resumo && resumo.por_cliente.length > 0 && (
+      {aba === 'recebiveis' && resumo && resumo.por_cliente.length > 0 && (
         <div className={styles.form} style={{ marginTop: 16, marginBottom: 24 }}>
           <div className={cs.sectionTitle} style={{ marginBottom: 6 }}>Por cliente</div>
           <div className={cs.clienteScroll}>
@@ -315,7 +336,7 @@ export default function FinanceiroPage() {
       )}
 
       {/* Formulário novo honorário */}
-      {showForm && (
+      {aba === 'recebiveis' && showForm && (
         <form
           onSubmit={(e) => { e.preventDefault(); criar.mutate(form) }}
           className={styles.form}
@@ -472,7 +493,8 @@ export default function FinanceiroPage() {
         </form>
       )}
 
-      {/* Filtro status */}
+      {/* Filtro status + Lista (somente Recebíveis) */}
+      {aba === 'recebiveis' && (<>
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
         {(['', 'pendente', 'parcial', 'pago', 'cancelado', 'ag_assinatura'] as const).map((s) => (
           <button
@@ -815,6 +837,140 @@ export default function FinanceiroPage() {
             )
           })}
         </div>
+      )}
+      </>)}
+    </div>
+  )
+}
+
+// ─── Fluxo de Caixa (entradas reais por mês + crédito a receber) ───────────────
+
+const MESES_NOME = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
+function nomeCompet(c: string) {
+  const [a, m] = c.split('-')
+  return `${MESES_NOME[parseInt(m) - 1]} / ${a}`
+}
+
+function FluxoCaixaView() {
+  const [aberto, setAberto] = useState<Record<string, boolean>>({})
+  const { data, isLoading } = useQuery({
+    queryKey: ['fluxo-caixa'],
+    queryFn: () => financeiroApi.fluxoCaixa(),
+  })
+
+  if (isLoading) return <p className={styles.empty}>Carregando…</p>
+  if (!data) return <p className={styles.empty}>Sem dados.</p>
+
+  const totalEntradas = data.meses.reduce((s, m) => s + m.total, 0)
+  const mesCorrente = new Date().toISOString().slice(0, 7)
+
+  return (
+    <div>
+      {/* Cards resumo */}
+      <div className={cs.summaryGrid} style={{ marginBottom: 20 }}>
+        <div className={cs.summaryCard}>
+          <div className={cs.summaryLabel}>Entradas (caixa) — total</div>
+          <div className={cs.summaryValue} style={{ color: '#15803d' }}>{fmtVal(totalEntradas)}</div>
+        </div>
+        <div className={cs.summaryCard}>
+          <div className={cs.summaryLabel}>Crédito a receber</div>
+          <div className={cs.summaryValue} style={{ color: '#b45309' }}>{fmtVal(data.credito_a_receber.total)}</div>
+          <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
+            Honorários {fmtVal(data.credito_a_receber.honorarios_pendentes)} · NFs não pagas {fmtVal(data.credito_a_receber.nfs_nao_pagas)}
+          </div>
+        </div>
+      </div>
+
+      {/* Entradas por mês */}
+      <div className={cs.sectionTitle} style={{ marginBottom: 10 }}>Entradas por mês</div>
+      {data.meses.length === 0 ? (
+        <p className={styles.empty}>Nenhuma entrada registrada ainda.</p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 28 }}>
+          {data.meses.map((m: FluxoMes) => {
+            const isAberto = aberto[m.competencia] ?? (m.competencia === mesCorrente)
+            return (
+              <div key={m.competencia} style={{ border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden' }}>
+                <div onClick={() => setAberto((a) => ({ ...a, [m.competencia]: !isAberto }))}
+                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    padding: '12px 16px', cursor: 'pointer', background: '#f9fafb' }}>
+                  <span style={{ fontWeight: 700, color: '#1f2937' }}>
+                    {isAberto ? '▾' : '▸'} {nomeCompet(m.competencia)}
+                    <span style={{ fontWeight: 400, color: '#6b7280', marginLeft: 8, fontSize: 12 }}>
+                      {m.entradas.length} entrada(s)
+                    </span>
+                  </span>
+                  <span style={{ fontWeight: 700, color: '#15803d' }}>{fmtVal(m.total)}</span>
+                </div>
+                {isAberto && (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <tbody>
+                      {m.entradas.map((e, i) => (
+                        <tr key={i} style={{ borderTop: '1px solid #f3f4f6' }}>
+                          <td style={{ padding: '8px 16px', color: '#6b7280', whiteSpace: 'nowrap', width: 90 }}>{fmtData(e.data)}</td>
+                          <td style={{ padding: '8px 8px' }}>
+                            <div style={{ fontWeight: 600 }}>{e.cliente}</div>
+                            <div style={{ fontSize: 11, color: '#6b7280' }}>{e.descricao}</div>
+                          </td>
+                          <td style={{ padding: '8px 8px', textAlign: 'center' }}>
+                            <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 999, fontWeight: 700,
+                              background: e.origem === 'nf_avulsa' ? '#eff6ff' : '#f0fdf4',
+                              color: e.origem === 'nf_avulsa' ? '#1d4ed8' : '#15803d' }}>
+                              {e.origem === 'nf_avulsa' ? 'NF avulsa' : e.forma.toUpperCase()}
+                            </span>
+                          </td>
+                          <td style={{ padding: '8px 16px', textAlign: 'right', fontWeight: 700, color: '#065f46', whiteSpace: 'nowrap' }}>
+                            {fmtVal(e.valor)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Crédito a receber */}
+      <div className={cs.sectionTitle} style={{ marginBottom: 10 }}>
+        Crédito a receber (ainda não entrou no caixa)
+      </div>
+      {data.credito_a_receber.itens.length === 0 ? (
+        <p className={styles.empty}>Nada pendente.</p>
+      ) : (
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, border: '1px solid #e5e7eb', borderRadius: 10 }}>
+          <thead>
+            <tr style={{ background: '#fffbeb', borderBottom: '1px solid #fde68a' }}>
+              <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600 }}>Origem</th>
+              <th style={{ padding: '10px 8px', textAlign: 'left', fontWeight: 600 }}>Descrição</th>
+              <th style={{ padding: '10px 8px', textAlign: 'left', fontWeight: 600 }}>Vencimento</th>
+              <th style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600 }}>Valor</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.credito_a_receber.itens.map((it, i) => (
+              <tr key={i} style={{ borderTop: '1px solid #f3f4f6' }}>
+                <td style={{ padding: '8px 16px' }}>
+                  <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 999, fontWeight: 700,
+                    background: it.tipo === 'nf' ? '#eff6ff' : '#f3e8ff',
+                    color: it.tipo === 'nf' ? '#1d4ed8' : '#7c3aed' }}>
+                    {it.tipo === 'nf' ? 'NF não paga' : 'Honorário'}
+                  </span>
+                </td>
+                <td style={{ padding: '8px 8px' }}>
+                  <div style={{ fontWeight: 600 }}>{it.cliente}</div>
+                  <div style={{ fontSize: 11, color: '#6b7280' }}>{it.descricao}</div>
+                </td>
+                <td style={{ padding: '8px 8px', color: '#6b7280' }}>{it.vencimento ? fmtData(it.vencimento) : '—'}</td>
+                <td style={{ padding: '8px 16px', textAlign: 'right', fontWeight: 700, color: '#b45309', whiteSpace: 'nowrap' }}>
+                  {fmtVal(it.valor)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
     </div>
   )

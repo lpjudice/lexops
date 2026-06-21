@@ -103,4 +103,38 @@ export const financeiroApi = {
 
   resumo: () =>
     api.get<ResumoFinanceiro>('/financeiro/resumo/').then((r) => r.data),
+
+  fluxoCaixa: () =>
+    api.get<FluxoCaixa>('/financeiro/fluxo-caixa/').then((r) => r.data),
+}
+
+export interface FluxoEntrada {
+  data: string
+  descricao: string
+  cliente: string
+  valor: number
+  forma: string
+  origem: 'recebimento' | 'nf_avulsa'
+}
+export interface FluxoMes {
+  competencia: string
+  total: number
+  entradas: FluxoEntrada[]
+}
+export interface CreditoItem {
+  tipo: 'honorario' | 'nf'
+  descricao: string
+  cliente: string
+  valor: number
+  vencimento?: string | null
+  nf_id?: string
+}
+export interface FluxoCaixa {
+  meses: FluxoMes[]
+  credito_a_receber: {
+    total: number
+    honorarios_pendentes: number
+    nfs_nao_pagas: number
+    itens: CreditoItem[]
+  }
 }

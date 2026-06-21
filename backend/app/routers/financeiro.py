@@ -260,3 +260,96 @@ def resumo_financeiro(db: Session = Depends(get_db)):
         por_cliente=por_cliente,
         por_mes=por_mes,
     )
+
+
+@router.get("/fluxo-caixa/")
+def fluxo_caixa(db: Session = Depends(get_db)):
+    """Entradas reais por mês (caixa) + crédito a receber (futuro).
+
+    - Caixa = recebimentos de honorários + NFs pagas SEM vínculo a honorário
+      (entrada avulsa; evita dupla contagem, pois NF paga vinculada já gera recebimento).
+    - Crédito a receber = saldo de honorários em aberto + NFs emitidas não pagas avulsas.
+    """
+    from app.models.nota_fiscal import NotaFiscal
+    cli_nome = {c.id: c.nome for c in db.query(Cliente.id, Cliente.nome).all()}
+
+    meses: dict[str, dict] = defaultdict(lambda: {"entradas": [], "total": 0.0})
+
+    honorarios = db.query(Honorario).filter(Honorario.status != "cancelado").all()
+    for h in honorarios:
+        for rec in h.recebimentos:
+            comp = rec.data_recebimento.strftime("%Y-%m")
+            meses[comp]["entradas"].append({
+                "data": rec.data_recebimento.isoformat(),
+                "descricao": h.descricao,
+                "cliente": cli_nome.get(h.cliente_id, "—"),
+                "valor": float(rec.valor),
+                "forma": rec.forma_pagamento,
+                "origem": "recebimento",
+            })
+            meses[comp]["total"] += float(rec.valor)
+
+    # NFs pagas sem honorário vinculado (nem direto, nem compensação) = entrada avulsa
+    nfs_pagas = (db.query(NotaFiscal)
+                 .filter(NotaFiscal.pago.is_(True),
+                         NotaFiscal.status == "emitida",
+                         NotaFiscal.honorario_id.is_(None),
+                         NotaFiscal.honorario_compensacao_id.is_(None))
+                 .all())
+    for nf in nfs_pagas:
+        d = nf.data_pagamento or nf.data_emissao
+        if not d:
+            continue
+        comp = d.strftime("%Y-%m")
+        meses[comp]["entradas"].append({
+            "data": d.isoformat(),
+            "descricao": f"NFS-e {nf.numero_nfse or ''} — {(nf.descricao_servico or '')[:60]}",
+            "cliente": nf.tomador_nome,
+            "valor": float(nf.valor_servicos),
+            "forma": "nf",
+            "origem": "nf_avulsa",
+        })
+        meses[comp]["total"] += float(nf.valor_servicos)
+
+    meses_list = [
+        {"competencia": k, "total": round(v["total"], 2),
+         "entradas": sorted(v["entradas"], key=lambda x: x["data"], reverse=True)}
+        for k, v in sorted(meses.items(), reverse=True)
+    ]
+
+    # Crédito a receber (futuro)
+    cred_itens = []
+    cred_hon = 0.0
+    for h in honorarios:
+        if h.status in ("pendente", "parcial") and h.saldo_pendente > 0 and not h.pendente_assinatura:
+            cred_hon += h.saldo_pendente
+            cred_itens.append({
+                "tipo": "honorario", "descricao": h.descricao,
+                "cliente": cli_nome.get(h.cliente_id, "—"),
+                "valor": round(h.saldo_pendente, 2),
+                "vencimento": h.data_vencimento.isoformat() if h.data_vencimento else None,
+            })
+    nfs_nao_pagas = (db.query(NotaFiscal)
+                     .filter(NotaFiscal.pago.is_(False),
+                             NotaFiscal.status == "emitida",
+                             NotaFiscal.honorario_id.is_(None),
+                             NotaFiscal.honorario_compensacao_id.is_(None))
+                     .all())
+    cred_nfs = 0.0
+    for nf in nfs_nao_pagas:
+        cred_nfs += float(nf.valor_servicos)
+        cred_itens.append({
+            "tipo": "nf", "descricao": f"NFS-e {nf.numero_nfse or ''} — {nf.tomador_nome}",
+            "cliente": nf.tomador_nome, "valor": float(nf.valor_servicos),
+            "vencimento": None, "nf_id": str(nf.id),
+        })
+
+    return {
+        "meses": meses_list,
+        "credito_a_receber": {
+            "total": round(cred_hon + cred_nfs, 2),
+            "honorarios_pendentes": round(cred_hon, 2),
+            "nfs_nao_pagas": round(cred_nfs, 2),
+            "itens": sorted(cred_itens, key=lambda x: x["valor"], reverse=True),
+        },
+    }
