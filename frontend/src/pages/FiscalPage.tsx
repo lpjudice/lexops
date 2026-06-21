@@ -1163,12 +1163,12 @@ function DetalheModal({ nf, onClose, onSubstituir }: { nf: NotaFiscalOut; onClos
                   </div>
                 )}
                 <label className={cs.formLabel}>Motivo *</label>
-                <input className={cs.input} placeholder="Mínimo 10 caracteres"
+                <input className={cs.input} placeholder="Mínimo 15 caracteres"
                   value={motivo} onChange={(e) => setMotivo(e.target.value)}
                   disabled={cancelMut.isPending} />
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button className={styles.btnDanger}
-                    disabled={motivo.length < 10 || cancelMut.isPending}
+                    disabled={motivo.length < 15 || cancelMut.isPending}
                     onClick={() => cancelMut.mutate(motivo)}>
                     {cancelMut.isPending ? 'Conectando ao Sefin…' : 'Confirmar cancelamento'}
                   </button>

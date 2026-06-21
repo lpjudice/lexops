@@ -257,15 +257,23 @@ def _montar_xml_cancelamento(chave_acesso: str, motivo: str) -> bytes:
     BRT = timezone(timedelta(hours=-3))
     dh = datetime.now(tz=BRT).strftime("%Y-%m-%dT%H:%M:%S") + "-03:00"
 
-    # Id do pedido de registro de evento (TSIdPedRefEvt, 62 chars):
-    # "PRE" + chave(50) + tpEvento(6) + nPedRegEvento(3)
-    # Cancelamento = evento e101101 → tpEvento "101101"; nPedRegEvento=1 (ocorre 1x)
+    # Layout v1.01 (schema atual do Sefin — eventos atualizados dez/2025):
+    # - Id (TSIdPedRegEvt, pattern PRE[0-9]{56}, maxLen 59):
+    #     "PRE" + chave(50) + tpEvento(6)   ← SEM nPedRegEvento
+    # - elemento nPedRegEvento foi REMOVIDO do infPedReg na v1.01
+    # - versao do pedRegEvento = "1.01"
+    # Cancelamento = evento e101101 → tpEvento "101101"
     TP_EVENTO_CANC = "101101"
-    n_ped = "1"
-    id_ped = f"PRE{chave_acesso}{TP_EVENTO_CANC}{n_ped.zfill(3)}"
+    id_ped = f"PRE{chave_acesso}{TP_EVENTO_CANC}"  # PRE + 50 + 6 = 56 dígitos
+
+    # xMotivo (TSMotivo) exige mínimo 15 caracteres
+    motivo_xml = (motivo or "").strip()
+    if len(motivo_xml) < 15:
+        motivo_xml = (motivo_xml + " - cancelamento de NFS-e").ljust(15)
+    motivo_xml = motivo_xml[:255]
 
     root = etree.Element("pedRegEvento", nsmap={None: NS})
-    root.set("versao", "1.00")
+    root.set("versao", "1.01")
     inf = etree.SubElement(root, "infPedReg")
     inf.set("Id", id_ped)
     etree.SubElement(inf, "tpAmb").text = "1"
@@ -273,12 +281,11 @@ def _montar_xml_cancelamento(chave_acesso: str, motivo: str) -> bytes:
     etree.SubElement(inf, "dhEvento").text = dh
     etree.SubElement(inf, "CNPJAutor").text = "10901611000164"
     etree.SubElement(inf, "chNFSe").text = chave_acesso
-    etree.SubElement(inf, "nPedRegEvento").text = n_ped
     e101101 = etree.SubElement(inf, "e101101")
     etree.SubElement(e101101, "xDesc").text = "Cancelamento de NFS-e"
     # TSCodJustCanc: 1=Erro na Emissão, 2=Serviço não Prestado, 9=Outros
     etree.SubElement(e101101, "cMotivo").text = "1"
-    etree.SubElement(e101101, "xMotivo").text = motivo[:255]
+    etree.SubElement(e101101, "xMotivo").text = motivo_xml
     return etree.tostring(root, xml_declaration=True, encoding="UTF-8")
 
 
