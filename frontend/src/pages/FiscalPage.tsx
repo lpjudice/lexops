@@ -278,8 +278,9 @@ function EmissaoModal({
   const [mostrarIntermed, setMostrarIntermed] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
   const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(null)
-  const [vincularOutro, setVincularOutro] = useState(false)
   const [clienteVinculadoNome, setClienteVinculadoNome] = useState<string>('')
+  const [temCompensacao, setTemCompensacao] = useState(false)
+  const [nomeClienteCompensacao, setNomeClienteCompensacao] = useState<string>('')
 
   // Ao mudar tomador_nome, prefill com cache
   useEffect(() => {
@@ -513,40 +514,41 @@ function EmissaoModal({
                 A NF é emitida contra Ana Maria (tomadora), mas o recebimento
                 é creditado ao contrato da Mangrove. Cross-menu: Financeiro, Reembolsos, Lançamentos */}
             <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #e5e7eb' }}>
-              <label className={cs.checkboxLabel} style={{ marginBottom: 12 }}>
+              <label className={cs.checkboxLabel} style={{ marginBottom: 12, cursor: 'pointer' }}>
                 <input type="checkbox"
-                  checked={!!form.cliente_compensacao_id}
+                  checked={temCompensacao}
                   onChange={(e) => {
-                    if (e.target.checked) {
-                      // Apenas marca o checkbox, user seleciona o cliente
-                    } else {
+                    setTemCompensacao(e.target.checked)
+                    if (!e.target.checked) {
                       set('cliente_compensacao_id', undefined)
                       set('contrato_compensacao_id', undefined)
                       set('valor_compensacao', undefined)
+                      setNomeClienteCompensacao('')
                     }
                   }} />
-                Esta NF compensa recebível de outro cliente
+                Esta NF compensa recebível de outro cliente (pessoa X paga por pessoa Y)
               </label>
-              {form.cliente_compensacao_id && (
-                <div className={cs.fieldHint} style={{ background: '#f0fdf4', padding: 10, borderRadius: 6, marginBottom: 10 }}>
-                  💡 A NF será emitida contra <b>{form.tomador_nome}</b> (tomadora), mas o recebimento
-                  creditará o cliente/contrato principal. Aparece em: Financeiro, Reembolsos, Lançamentos.
-                </div>
-              )}
-              {!!form.cliente_compensacao_id && (
+
+              {temCompensacao && (
                 <>
+                  <div className={cs.fieldHint} style={{ background: '#f0fdf4', padding: 10, borderRadius: 6, marginBottom: 12 }}>
+                    💡 <b>Cenário de compensação:</b> A NF será emitida contra <b>{form.tomador_nome}</b> (pagante direto),
+                    mas o recebimento creditará a outro cliente/contrato (beneficiário). <br/>Ex: Ana Maria paga dívida de Mangrove.
+                  </div>
+
                   <ClienteSearch
-                    label="Cliente/contrato principal que receberá o crédito"
-                    value=""
+                    label="Cliente/contrato que receberá o crédito (beneficiário) *"
+                    value={nomeClienteCompensacao}
                     placeholder="Buscar cliente Mangrove ou similar…"
-                    onSelect={(c) => {
-                      if (c) set('cliente_compensacao_id', c.id)
+                    onSelect={(c, nome) => {
+                      setNomeClienteCompensacao(nome)
+                      if (c) {
+                        set('cliente_compensacao_id', c.id)
+                      }
                     }}
                   />
-                  {/* TODO: buscar contratos de cliente_compensacao e oferecer dropdown */}
-                  {/* Por enquanto, deixa o usuário linkar depois no detalhe da NF */}
-                  <p className={cs.fieldHint} style={{ marginTop: 8 }}>
-                    Selecione o contrato específico na tela de detalhe da NF após emitir.
+                  <p className={cs.fieldHint} style={{ marginTop: 8, fontSize: 12 }}>
+                    Selecione o contrato específico do beneficiário na tela de detalhe da NF após emitir, ou deixe em branco.
                   </p>
                 </>
               )}
