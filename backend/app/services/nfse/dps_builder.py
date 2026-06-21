@@ -144,6 +144,11 @@ class DadosDPS:
     # Percentual efetivo do Simples Nacional (Lei da Transparência / pTotTribSN)
     pct_trib_simples: Decimal = Decimal("6.00")
 
+    # Alíquota ISS a destacar na nota (pAliq). Opcional; quando informada (>0),
+    # vai no grupo tribMun. Para Simples Nacional o ISS é recolhido no DAS, mas o
+    # contribuinte pode destacar a alíquota municipal/efetiva na NFS-e.
+    aliquota_iss: Optional[Decimal] = None
+
     # Controle
     ambiente: int = 1
     data_emissao: Optional[datetime] = None
@@ -299,6 +304,9 @@ def montar_dps(dados: DadosDPS) -> bytes:
     _sub(trib_mun, "tribISSQN", "1")   # 1 = Operação tributável
     ret = dados.retencoes
     _sub(trib_mun, "tpRetISSQN", "2" if ret.iss_retido else "1")  # 1=Não Retido 2=Retido tomador
+    # pAliq: alíquota ISS destacada (opcional). Após tpRetISSQN no TCTribMunicipal.
+    if dados.aliquota_iss is not None and dados.aliquota_iss > 0:
+        _sub(trib_mun, "pAliq", _fmt_valor(dados.aliquota_iss))
 
     # tribNac (TCTribNacional): retenções federais (só se houver)
     if any(v > 0 for v in [ret.ir, ret.inss, ret.csll]):
