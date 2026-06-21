@@ -278,6 +278,7 @@ function EmissaoModal({
   const [mostrarIntermed, setMostrarIntermed] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
   const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(null)
+  const [vincularOutro, setVincularOutro] = useState(false)
   const [clienteVinculadoNome, setClienteVinculadoNome] = useState<string>('')
   const [temCompensacao, setTemCompensacao] = useState(false)
   const [nomeClienteCompensacao, setNomeClienteCompensacao] = useState<string>('')

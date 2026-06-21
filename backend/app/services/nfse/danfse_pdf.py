@@ -69,6 +69,9 @@ def gerar_danfse_pdf(xml_nfse: str, chave_acesso: str, prefixo_numero: str = "",
     # Prefixo com zero-pad (ex.: PJ150 + 17 → PJ150017)
     numero_exib = (f"{prefixo_numero}{str(numero).zfill(3)}"
                    if prefixo_numero and numero else (numero or ""))
+    # Número da DPS (sequência interna do emitente, diferente do nº da NFS-e)
+    numero_dps = _txt(root, "//n:nDPS", "//nDPS")
+    serie_dps = _txt(root, "//n:serie", "//serie")
     dh_proc = _txt(root, "//n:dhProc", "//dhProc")
     cod_verif = chave_acesso
     # Emitente
@@ -136,16 +139,21 @@ def gerar_danfse_pdf(xml_nfse: str, chave_acesso: str, prefixo_numero: str = "",
         elems.extend(titulo_cell)
     elems.append(Spacer(1, 6 * mm))
 
-    # Faixa: número / emissão / município
+    # Faixa: número NFS-e / número DPS / emissão / município
+    dps_exib = numero_dps or "—"
+    if numero_dps and serie_dps:
+        dps_exib = f"{numero_dps} (série {serie_dps})"
     cab = Table([[
         Paragraph("NÚMERO DA NFS-e", st_label),
+        Paragraph("NÚMERO DA DPS", st_label),
         Paragraph("COMPETÊNCIA / EMISSÃO", st_label),
         Paragraph("MUNICÍPIO EMISSOR", st_label),
     ], [
         Paragraph(f"<b>{numero_exib or '—'}</b>", st_val),
+        Paragraph(dps_exib, st_val),
         Paragraph(_fmt_dt(dh_proc), st_val),
         Paragraph(loc_emi or "—", st_val),
-    ]], colWidths=[55 * mm, 70 * mm, 55 * mm])
+    ]], colWidths=[42 * mm, 38 * mm, 50 * mm, 50 * mm])
     cab.setStyle(TableStyle([
         ("BOX", (0, 0), (-1, -1), 0.5, teal),
         ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#e5e7eb")),
