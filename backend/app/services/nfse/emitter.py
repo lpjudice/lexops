@@ -141,6 +141,10 @@ def emitir_nfse(dados: DadosDPS) -> ResultadoEmissao:
             nfse_xml = _ungzip_b64(data["nfseXmlGZipB64"])
         # número da NFS-e: extrai do <nNFSe> do XML retornado
         numero = _numero_do_xml(nfse_xml)
+        if numero:
+            log.info(f"NFS-e emitida com sucesso: número={numero}, chave={chave}")
+        else:
+            log.warning(f"NFS-e emitida mas número não encontrado no XML. Chave={chave}. XML primeiros 500 chars: {(nfse_xml or '')[:500]}")
         return ResultadoEmissao(
             sucesso=True,
             chave_acesso=chave,

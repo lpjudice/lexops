@@ -338,6 +338,7 @@ function EmissaoModal({
   const qc = useQueryClient()
   const mutation = useMutation({
     mutationFn: fiscalApi.emitir,
+    retry: false, // POST não faz retry automático (risco de duplicação)
     onSuccess: (nf) => {
       // Cache CPF/email do pagador para próximas emissões
       setCachePagador(form.tomador_nome, form.tomador_cpf_cnpj, form.tomador_email)
@@ -871,6 +872,7 @@ function DetalheModal({ nf, onClose }: { nf: NotaFiscalOut; onClose: () => void 
   const [deletando, setDeletando] = useState(false)
   const cancelMut = useMutation({
     mutationFn: (m: string) => fiscalApi.cancelar(nf.id, m),
+    retry: false, // POST sem retry (risco de duplicação de evento)
     onSuccess: () => {
       setErroCancelamento(null)
       qc.invalidateQueries({ queryKey: ['notas-fiscais'] })
@@ -883,6 +885,7 @@ function DetalheModal({ nf, onClose }: { nf: NotaFiscalOut; onClose: () => void 
   })
   const deleteMut = useMutation({
     mutationFn: () => fiscalApi.deletar(nf.id),
+    retry: false, // DELETE sem retry
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['notas-fiscais'] }); onClose() },
   })
   const { data: analise } = useQuery({

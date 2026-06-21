@@ -5,6 +5,7 @@ const TOKEN_KEY = 'gestor_jwt'
 const api = axios.create({
   baseURL: '/api',
   headers: { 'Content-Type': 'application/json' },
+  timeout: 30000, // 30s — evita requests penduradas infinitamente
 })
 
 api.interceptors.request.use((config) => {
