@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.dependencies import get_optional_user
+from app.dependencies import get_current_user, get_optional_user
 from app.models.anotacao import Anotacao
 from app.models.cliente import Cliente
 from app.models.prazo import Prazo
@@ -15,7 +15,8 @@ from app.models.usuario import Usuario
 from app.schemas.anotacao import AnotacaoCreate, AnotacaoOut, AnotacaoUpdate, TimelineItem
 from app.services.gmail_cliente import buscar_emails_cliente
 
-router = APIRouter(prefix="/anotacoes", tags=["anotacoes"])
+router = APIRouter(prefix="/anotacoes", tags=["anotacoes"],
+                   dependencies=[Depends(get_current_user)])
 
 
 def _pode_ver_anotacao(a: Anotacao, usuario: Usuario | None, db: Session) -> bool:

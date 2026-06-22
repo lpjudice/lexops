@@ -114,7 +114,10 @@ export interface FluxoEntrada {
   cliente: string
   valor: number
   forma: string
-  origem: 'recebimento' | 'nf_avulsa'
+  origem: 'recebimento' | 'nf_so'
+  nf_conciliada?: string | null
+  nf_tomador?: string | null
+  nf_id?: string
 }
 export interface FluxoMes {
   competencia: string

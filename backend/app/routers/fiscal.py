@@ -895,13 +895,19 @@ def marcar_pago(
                          .filter(Recebimento.honorario_id == hon_id,
                                  Recebimento.observacao.like(f"%{marca}%")).first())
             if pago and not existente:
-                db.add(Recebimento(
+                novo_rec = Recebimento(
                     honorario_id=hon_id, valor=valor_rec,
                     data_recebimento=dt_pag, forma_pagamento="pix",
                     observacao=obs,
-                ))
+                )
+                db.add(novo_rec)
+                db.flush()
+                nf.recebimento_id = novo_rec.id  # liga a NF à sua entrada de caixa
+            elif pago and existente:
+                nf.recebimento_id = existente.id
             elif not pago and existente:
                 db.delete(existente)
+                nf.recebimento_id = None
             # Atualiza status do honorário (pago/parcial/pendente)
             hon = db.query(Honorario).filter(Honorario.id == hon_id).first()
             if hon:
@@ -916,6 +922,101 @@ def marcar_pago(
     db.commit()
     db.refresh(nf)
     return _nf_to_out(nf)
+
+
+@router.get("/notas/{nf_id}/conciliaveis")
+def recebimentos_conciliaveis(nf_id: uuid.UUID, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Lista recebimentos (entradas de caixa) que podem ser a quitação desta NF.
+
+    Mostra recebimentos dos honorários do cliente/beneficiário, ainda não ligados
+    a OUTRA NF. Usado para conciliar a NF (fiscal) com o PIX/caixa real, sem criar
+    entrada duplicada no fluxo.
+    """
+    from app.models.financeiro import Recebimento, Honorario
+    nf = db.query(NotaFiscal).filter(NotaFiscal.id == nf_id).first()
+    if not nf:
+        raise HTTPException(404, "Nota fiscal não encontrada")
+
+    # Clientes candidatos: beneficiário da compensação, cliente vinculado, ou todos
+    cliente_ids = [cid for cid in (nf.cliente_compensacao_id, nf.cliente_id) if cid]
+    q = db.query(Recebimento).join(Honorario, Recebimento.honorario_id == Honorario.id)
+    if cliente_ids:
+        q = q.filter(Honorario.cliente_id.in_(cliente_ids))
+    recs = q.order_by(Recebimento.data_recebimento.desc()).limit(100).all()
+
+    # Exclui recebimentos já ligados a OUTRA NF
+    ligados = {r_id for (r_id,) in db.query(NotaFiscal.recebimento_id)
+               .filter(NotaFiscal.recebimento_id.isnot(None),
+                       NotaFiscal.id != nf_id).all()}
+    cli_nome = {c.id: c.nome for c in db.query(Cliente.id, Cliente.nome).all()}
+    out = []
+    for r in recs:
+        if r.id in ligados:
+            continue
+        hon = db.query(Honorario).filter(Honorario.id == r.honorario_id).first()
+        out.append({
+            "id": str(r.id),
+            "valor": float(r.valor),
+            "data": r.data_recebimento.isoformat(),
+            "forma": r.forma_pagamento,
+            "honorario_descricao": hon.descricao if hon else "—",
+            "cliente": cli_nome.get(hon.cliente_id, "—") if hon else "—",
+            "ja_conciliado_nesta": str(r.id) == str(nf.recebimento_id),
+        })
+    return out
+
+
+@router.post("/notas/{nf_id}/conciliar")
+def conciliar_nota(nf_id: uuid.UUID, recebimento_id: uuid.UUID = Query(...),
+                   db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Concilia a NF (fiscal) com um recebimento existente (caixa).
+
+    A NF passa a 'pago' apontando para esse recebimento; NÃO cria entrada nova.
+    Se a NF já tinha criado um recebimento automático (ex.: compensação ao marcar
+    pago), ele é REMOVIDO para não duplicar no fluxo de caixa.
+    """
+    from app.models.financeiro import Recebimento, Honorario
+    nf = db.query(NotaFiscal).filter(NotaFiscal.id == nf_id).first()
+    if not nf:
+        raise HTTPException(404, "Nota fiscal não encontrada")
+    rec = db.query(Recebimento).filter(Recebimento.id == recebimento_id).first()
+    if not rec:
+        raise HTTPException(404, "Recebimento não encontrado")
+
+    avisos = []
+    marca = f"[NF {nf.numero_nfse or nf.chave_acesso}]"
+    # Remove recebimento(s) auto-criado(s) por esta NF (evita dupla contagem)
+    auto = (db.query(Recebimento)
+            .filter(Recebimento.observacao.like(f"%{marca}%"),
+                    Recebimento.id != recebimento_id).all())
+    for a in auto:
+        hon_a = db.query(Honorario).filter(Honorario.id == a.honorario_id).first()
+        db.delete(a)
+        avisos.append(f"Removido recebimento duplicado de R$ {float(a.valor):.2f}")
+        if hon_a:
+            db.flush()
+            hon_a.status = "pago" if hon_a.saldo_pendente <= 0 else ("parcial" if hon_a.total_recebido > 0 else "pendente")
+
+    nf.recebimento_id = rec.id
+    nf.pago = True
+    nf.data_pagamento = rec.data_recebimento
+    db.commit()
+    db.refresh(nf)
+    return {"conciliada": True, "avisos": avisos, "nf": _nf_to_out(nf)}
+
+
+@router.post("/notas/{nf_id}/desconciliar")
+def desconciliar_nota(nf_id: uuid.UUID, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Desfaz a conciliação (NF deixa de apontar para o recebimento; volta a não paga)."""
+    nf = db.query(NotaFiscal).filter(NotaFiscal.id == nf_id).first()
+    if not nf:
+        raise HTTPException(404, "Nota fiscal não encontrada")
+    nf.recebimento_id = None
+    nf.pago = False
+    nf.data_pagamento = None
+    db.commit()
+    db.refresh(nf)
+    return {"conciliada": False, "nf": _nf_to_out(nf)}
 
 
 @router.post("/dfe/sincronizar")

@@ -2,6 +2,9 @@ import axios from 'axios'
 
 const TOKEN_KEY = 'gestor_jwt'
 
+/** JWT atual (para montar URLs de download abertas via <a href>, sem header). */
+export const getToken = () => localStorage.getItem(TOKEN_KEY)
+
 const api = axios.create({
   baseURL: '/api',
   headers: { 'Content-Type': 'application/json' },

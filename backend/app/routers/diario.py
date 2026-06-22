@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, get_db
+from app.dependencies import get_current_user
 from app.models.cliente import Cliente
 from app.models.prazo import Prazo
 from app.models.publicacao import Publicacao
@@ -19,7 +20,8 @@ from app.services.gmail_diario import sincronizar_gmail
 from app.services.ia_diario import analisar_publicacao
 from app.services.scraping_tribunais import TRIBUNAIS_VALIDOS, scrape_todos
 
-router = APIRouter(prefix="/diario", tags=["diario"])
+router = APIRouter(prefix="/diario", tags=["diario"],
+                   dependencies=[Depends(get_current_user)])
 
 
 DIARIO_SYNC_JOBS: dict[str, dict] = {}

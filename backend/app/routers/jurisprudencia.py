@@ -12,9 +12,11 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.dependencies import get_current_user
 from app.models.cliente import Cliente
 
-router = APIRouter(prefix="/jurisprudencia", tags=["jurisprudencia"])
+router = APIRouter(prefix="/jurisprudencia", tags=["jurisprudencia"],
+                   dependencies=[Depends(get_current_user)])
 
 PROMPT_ANALISE = """
 Você é um jurista experiente especializado em análise de jurisprudência. Analise o julgado/decisão judicial abaixo e produza um relatório estruturado com as seguintes seções:

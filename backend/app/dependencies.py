@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -9,16 +9,23 @@ from app.services.auth_service import decodificar_token
 
 def get_current_user(
     authorization: str | None = Header(None),
+    token: str | None = Query(None),
     db: Session = Depends(get_db),
 ):
-    """Extract and validate JWT from Authorization: Bearer <token> header."""
+    """Extract and validate JWT from the Authorization: Bearer <token> header.
+
+    Falls back to a ?token= query param so file-download links opened via plain
+    browser navigation (<a href>, which carries no Authorization header) can still
+    authenticate.
+    """
     from jose import JWTError
     from app.models.usuario import Usuario
 
-    if not authorization or not authorization.startswith("Bearer "):
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.removeprefix("Bearer ")
+    if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Não autenticado")
 
-    token = authorization.removeprefix("Bearer ")
     try:
         payload = decodificar_token(token)
         uid = uuid.UUID(payload["sub"])

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
+from app.dependencies import get_current_user
 from app.models.usuario import Usuario
 from app.schemas.usuario import (
     AcceptInviteRequest,
@@ -100,12 +101,12 @@ def aceitar_convite(token: str, body: AcceptInviteRequest, db: Session = Depends
 # ── CRUD ──────────────────────────────────────────────────────────────────────
 
 @router.get("/", response_model=list[UsuarioOut])
-def listar_usuarios(db: Session = Depends(get_db)):
+def listar_usuarios(db: Session = Depends(get_db), _=Depends(get_current_user)):
     return [_usuario_to_out(u, db) for u in db.query(Usuario).order_by(Usuario.nome).all()]
 
 
 @router.post("/", response_model=UsuarioOut, status_code=status.HTTP_201_CREATED)
-def criar_usuario(data: UsuarioCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def criar_usuario(data: UsuarioCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db), _=Depends(get_current_user)):
     if db.query(Usuario).filter(Usuario.email == data.email.lower()).first():
         raise HTTPException(status_code=409, detail="Email já cadastrado")
 
@@ -150,7 +151,7 @@ def _send_invite(to_email: str, invite_url: str, inviter_name: str) -> None:
 
 
 @router.patch("/{usuario_id}", response_model=UsuarioOut)
-def atualizar_usuario(usuario_id: uuid.UUID, data: UsuarioUpdate, db: Session = Depends(get_db)):
+def atualizar_usuario(usuario_id: uuid.UUID, data: UsuarioUpdate, db: Session = Depends(get_db), _=Depends(get_current_user)):
     u = db.query(Usuario).filter(Usuario.id == usuario_id).first()
     if not u:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
@@ -165,7 +166,7 @@ def atualizar_usuario(usuario_id: uuid.UUID, data: UsuarioUpdate, db: Session = 
 
 
 @router.post("/{usuario_id}/reenviar-convite", status_code=status.HTTP_204_NO_CONTENT)
-def reenviar_convite(usuario_id: uuid.UUID, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def reenviar_convite(usuario_id: uuid.UUID, background_tasks: BackgroundTasks, db: Session = Depends(get_db), _=Depends(get_current_user)):
     u = db.query(Usuario).filter(Usuario.id == usuario_id).first()
     if not u:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
@@ -186,7 +187,7 @@ def reenviar_convite(usuario_id: uuid.UUID, background_tasks: BackgroundTasks, d
 
 
 @router.delete("/{usuario_id}", status_code=status.HTTP_204_NO_CONTENT)
-def deletar_usuario(usuario_id: uuid.UUID, db: Session = Depends(get_db)):
+def deletar_usuario(usuario_id: uuid.UUID, db: Session = Depends(get_db), _=Depends(get_current_user)):
     u = db.query(Usuario).filter(Usuario.id == usuario_id).first()
     if not u:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
@@ -197,7 +198,7 @@ def deletar_usuario(usuario_id: uuid.UUID, db: Session = Depends(get_db)):
 
 
 @router.post("/{usuario_id}/clientes", status_code=status.HTTP_204_NO_CONTENT)
-def vincular_cliente(usuario_id: uuid.UUID, body: UserClienteLink, db: Session = Depends(get_db)):
+def vincular_cliente(usuario_id: uuid.UUID, body: UserClienteLink, db: Session = Depends(get_db), _=Depends(get_current_user)):
     u = db.query(Usuario).filter(Usuario.id == usuario_id).first()
     if not u:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
@@ -209,7 +210,7 @@ def vincular_cliente(usuario_id: uuid.UUID, body: UserClienteLink, db: Session =
 
 
 @router.delete("/{usuario_id}/clientes/{cliente_id}", status_code=status.HTTP_204_NO_CONTENT)
-def desvincular_cliente(usuario_id: uuid.UUID, cliente_id: uuid.UUID, db: Session = Depends(get_db)):
+def desvincular_cliente(usuario_id: uuid.UUID, cliente_id: uuid.UUID, db: Session = Depends(get_db), _=Depends(get_current_user)):
     db.execute(
         text("DELETE FROM user_clientes WHERE usuario_id = :uid AND cliente_id = :cid"),
         {"uid": usuario_id, "cid": cliente_id},

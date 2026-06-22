@@ -4,10 +4,13 @@ Credenciais armazenadas em /app/uploads/pje_config.json (persistente via volume)
 """
 import json
 from pathlib import Path
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/pje", tags=["pje"])
+from app.dependencies import get_current_user
+
+router = APIRouter(prefix="/pje", tags=["pje"],
+                   dependencies=[Depends(get_current_user)])
 CONFIG_PATH = Path("/app/uploads/pje_config.json")
 
 

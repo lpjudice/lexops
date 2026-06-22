@@ -4,10 +4,12 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.dependencies import get_current_user
 from app.feriados_seed import FERIADOS_SEED
 from app.models.feriado import Feriado
 
-router = APIRouter(prefix="/feriados", tags=["feriados"])
+router = APIRouter(prefix="/feriados", tags=["feriados"],
+                   dependencies=[Depends(get_current_user)])
 
 
 @router.post("/seed", status_code=status.HTTP_200_OK)

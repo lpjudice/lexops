@@ -9,6 +9,7 @@ from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.dependencies import get_current_user
 from app.models.processo import Processo, processo_clientes as assoc_table
 from app.schemas.processo import ProcessoClienteIn, ProcessoClienteOut, ProcessoCreate, ProcessoOut, ProcessoUpdate
 from app.services.consulta_processual.cnj import inferir_tribunal_pelo_cnj, normalizar_tribunal
@@ -16,7 +17,8 @@ from app.services.consulta_processual.cnj import inferir_tribunal_pelo_cnj, norm
 UPLOADS_DIR = Path("/app/uploads/processos")
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
-router = APIRouter(prefix="/processos", tags=["processos"])
+router = APIRouter(prefix="/processos", tags=["processos"],
+                   dependencies=[Depends(get_current_user)])
 
 
 TRIBUNAL_ESTADO_MAP = {

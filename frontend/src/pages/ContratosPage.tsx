@@ -360,7 +360,7 @@ export default function ContratosPage() {
                       )}
 
                       {c.arquivo_assinado_path && (
-                        <a href={`/api/contratos/${c.id}/download-assinado`}
+                        <a href={contratosApi.downloadAssinadoUrl(c.id)}
                           className={cs.btnDownload} target="_blank" rel="noreferrer">
                           ⬇ Baixar versão assinada
                         </a>

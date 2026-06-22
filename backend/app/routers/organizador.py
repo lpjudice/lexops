@@ -14,17 +14,19 @@ import unicodedata
 import zipfile
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from pypdf import PdfReader
 
 from app.config import settings
+from app.dependencies import get_current_user
 
 STAGING_DIR = Path("/app/uploads/organizador_staging")
 STAGING_DIR.mkdir(parents=True, exist_ok=True)
 
-router = APIRouter(prefix="/organizador", tags=["organizador"])
+router = APIRouter(prefix="/organizador", tags=["organizador"],
+                   dependencies=[Depends(get_current_user)])
 
 
 def _sanitizar_nome(nome: str) -> str:

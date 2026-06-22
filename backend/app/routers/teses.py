@@ -4,11 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.dependencies import get_current_user
 from app.models.tese import Tese
 from app.schemas.tese import ModeloIA, TeseCreate, TeseOut, TeseUpdate
 from app.services import ia_teses
 
-router = APIRouter(prefix="/teses", tags=["teses"])
+router = APIRouter(prefix="/teses", tags=["teses"],
+                   dependencies=[Depends(get_current_user)])
 
 CAMPO_RESPOSTA: dict[str, str] = {
     "claude": "resposta_claude",

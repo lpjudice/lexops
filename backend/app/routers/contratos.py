@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.dependencies import get_current_user
 from app.models.contrato import Contrato, Signatario
 from app.schemas.contrato import (
     ContratoCreate, ContratoOut, ContratoUpdate, GerarPdfRequest,
@@ -15,7 +16,8 @@ from app.services import clicksign
 UPLOADS_DIR = Path("/app/uploads/contratos")
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
-router = APIRouter(prefix="/contratos", tags=["contratos"])
+router = APIRouter(prefix="/contratos", tags=["contratos"],
+                   dependencies=[Depends(get_current_user)])
 
 
 # ── CRUD básico ───────────────────────────────────────────────────────────────

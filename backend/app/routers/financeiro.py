@@ -269,12 +269,18 @@ def resumo_financeiro(db: Session = Depends(get_db)):
 def fluxo_caixa(db: Session = Depends(get_db)):
     """Entradas reais por mês (caixa) + crédito a receber (futuro).
 
-    - Caixa = recebimentos de honorários + NFs pagas SEM vínculo a honorário
-      (entrada avulsa; evita dupla contagem, pois NF paga vinculada já gera recebimento).
-    - Crédito a receber = saldo de honorários em aberto + NFs emitidas não pagas avulsas.
+    Fonte da verdade da entrada = RECEBIMENTO (PIX/caixa). A NF é o documento
+    fiscal: quando conciliada a um recebimento (nf.recebimento_id), aparece como
+    selo 'NF ✓' na MESMA linha — nunca como linha nova (evita dupla contagem).
+    NF paga SEM recebimento conciliado = linha própria 'só NF (a conciliar)'.
     """
     from app.models.nota_fiscal import NotaFiscal
     cli_nome = {c.id: c.nome for c in db.query(Cliente.id, Cliente.nome).all()}
+
+    # Mapa recebimento_id → NF conciliada (selo na linha de caixa)
+    nfs_conciliadas = (db.query(NotaFiscal)
+                       .filter(NotaFiscal.recebimento_id.isnot(None)).all())
+    rec_to_nf = {nf.recebimento_id: nf for nf in nfs_conciliadas}
 
     meses: dict[str, dict] = defaultdict(lambda: {"entradas": [], "total": 0.0})
 
@@ -282,6 +288,7 @@ def fluxo_caixa(db: Session = Depends(get_db)):
     for h in honorarios:
         for rec in h.recebimentos:
             comp = rec.data_recebimento.strftime("%Y-%m")
+            nf_sel = rec_to_nf.get(rec.id)
             meses[comp]["entradas"].append({
                 "data": rec.data_recebimento.isoformat(),
                 "descricao": h.descricao,
@@ -289,15 +296,17 @@ def fluxo_caixa(db: Session = Depends(get_db)):
                 "valor": float(rec.valor),
                 "forma": rec.forma_pagamento,
                 "origem": "recebimento",
+                # Selo de conciliação fiscal
+                "nf_conciliada": (f"#{nf_sel.numero_nfse}" if nf_sel and nf_sel.numero_nfse else None),
+                "nf_tomador": (nf_sel.tomador_nome if nf_sel else None),
             })
             meses[comp]["total"] += float(rec.valor)
 
-    # NFs pagas sem honorário vinculado (nem direto, nem compensação) = entrada avulsa
+    # NFs pagas NÃO conciliadas a um recebimento = linha própria "só NF (a conciliar)"
     nfs_pagas = (db.query(NotaFiscal)
                  .filter(NotaFiscal.pago.is_(True),
                          NotaFiscal.status == "emitida",
-                         NotaFiscal.honorario_id.is_(None),
-                         NotaFiscal.honorario_compensacao_id.is_(None))
+                         NotaFiscal.recebimento_id.is_(None))
                  .all())
     for nf in nfs_pagas:
         d = nf.data_pagamento or nf.data_emissao
@@ -310,7 +319,8 @@ def fluxo_caixa(db: Session = Depends(get_db)):
             "cliente": nf.tomador_nome,
             "valor": float(nf.valor_servicos),
             "forma": "nf",
-            "origem": "nf_avulsa",
+            "origem": "nf_so",
+            "nf_id": str(nf.id),
         })
         meses[comp]["total"] += float(nf.valor_servicos)
 

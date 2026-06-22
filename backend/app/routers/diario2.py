@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
+from app.dependencies import get_current_user
 from app.models.cliente import Cliente
 from app.models.prazo import Prazo
 from app.models.processo import Processo
@@ -20,7 +21,8 @@ from app.services.google_master_tokens import load_master_google_tokens, save_ma
 from app.services.ia_diario import analisar_publicacao
 from app.services.prazo_calc import calcular_prazo
 
-router = APIRouter(prefix="/diario2", tags=["diario2"])
+router = APIRouter(prefix="/diario2", tags=["diario2"],
+                   dependencies=[Depends(get_current_user)])
 
 LUCAS_GMAIL = "lucasjudice@gmail.com"
 

@@ -11,9 +11,11 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.dependencies import get_current_user
 from app.models.precedentcheck import PrecedentCheckAnalise
 
-router = APIRouter(prefix="/precedentcheck", tags=["precedentcheck"])
+router = APIRouter(prefix="/precedentcheck", tags=["precedentcheck"],
+                   dependencies=[Depends(get_current_user)])
 
 
 # ---------------------------------------------------------------------------

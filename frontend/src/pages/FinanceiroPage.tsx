@@ -909,17 +909,30 @@ function FluxoCaixaView() {
                         <tr key={i} style={{ borderTop: '1px solid #f3f4f6' }}>
                           <td style={{ padding: '8px 16px', color: '#6b7280', whiteSpace: 'nowrap', width: 90 }}>{fmtData(e.data)}</td>
                           <td style={{ padding: '8px 8px' }}>
-                            <div style={{ fontWeight: 600 }}>{e.cliente}</div>
+                            <div style={{ fontWeight: 600 }}>
+                              {e.cliente}
+                              {e.nf_conciliada && (
+                                <span title={`Conciliada com NF ${e.nf_conciliada}${e.nf_tomador ? ' — ' + e.nf_tomador : ''}`}
+                                  style={{ marginLeft: 6, fontSize: 10, background: '#dcfce7', color: '#15803d', padding: '1px 6px', borderRadius: 999, fontWeight: 700 }}>
+                                  🧾 NF {e.nf_conciliada} ✓
+                                </span>
+                              )}
+                            </div>
                             <div style={{ fontSize: 11, color: '#6b7280' }}>{e.descricao}</div>
                           </td>
                           <td style={{ padding: '8px 8px', textAlign: 'center' }}>
-                            <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 999, fontWeight: 700,
-                              background: e.origem === 'nf_avulsa' ? '#eff6ff' : '#f0fdf4',
-                              color: e.origem === 'nf_avulsa' ? '#1d4ed8' : '#15803d' }}>
-                              {e.origem === 'nf_avulsa' ? 'NF avulsa' : e.forma.toUpperCase()}
-                            </span>
+                            {e.origem === 'nf_so' ? (
+                              <span title="NF paga sem entrada de caixa conciliada"
+                                style={{ fontSize: 10, padding: '2px 8px', borderRadius: 999, fontWeight: 700, background: '#fef3c7', color: '#b45309' }}>
+                                só NF · a conciliar
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 999, fontWeight: 700, background: '#f0fdf4', color: '#15803d' }}>
+                                {e.forma.toUpperCase()}
+                              </span>
+                            )}
                           </td>
-                          <td style={{ padding: '8px 16px', textAlign: 'right', fontWeight: 700, color: '#065f46', whiteSpace: 'nowrap' }}>
+                          <td style={{ padding: '8px 16px', textAlign: 'right', fontWeight: 700, color: e.origem === 'nf_so' ? '#b45309' : '#065f46', whiteSpace: 'nowrap' }}>
                             {fmtVal(e.valor)}
                           </td>
                         </tr>

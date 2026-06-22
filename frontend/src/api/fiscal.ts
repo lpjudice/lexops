@@ -186,6 +186,14 @@ export const fiscalApi = {
     api.patch<NotaFiscalOut>(`/fiscal/notas/${id}/pago`, null,
       { params: { pago, ...(data ? { data } : {}) } }).then((r) => r.data),
 
+  conciliaveis: (id: string) =>
+    api.get<{ id: string; valor: number; data: string; forma: string; honorario_descricao: string; cliente: string; ja_conciliado_nesta: boolean }[]>(
+      `/fiscal/notas/${id}/conciliaveis`).then((r) => r.data),
+  conciliar: (id: string, recebimentoId: string) =>
+    api.post(`/fiscal/notas/${id}/conciliar`, null, { params: { recebimento_id: recebimentoId } }).then((r) => r.data),
+  desconciliar: (id: string) =>
+    api.post(`/fiscal/notas/${id}/desconciliar`).then((r) => r.data),
+
   danfseUrl: (id: string) => `/fiscal/notas/${id}/danfse`,
 
   baixarDanfse: (id: string) =>

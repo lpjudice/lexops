@@ -17,12 +17,14 @@ from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, get_db
+from app.dependencies import get_current_user
 from app.models.andamento import AndamentoProcesso
 from app.models.processo import Processo
 from app.models.processo_parte import ProcessoParte
 from app.schemas.andamento import AndamentoOut, SincronizacaoResult
 
-router = APIRouter(prefix="/andamentos", tags=["andamentos"])
+router = APIRouter(prefix="/andamentos", tags=["andamentos"],
+                   dependencies=[Depends(get_current_user)])
 logger = logging.getLogger(__name__)
 
 

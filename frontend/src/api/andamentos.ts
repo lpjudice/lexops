@@ -1,4 +1,4 @@
-import api from './client'
+import api, { getToken } from './client'
 
 export interface Andamento {
   id: string
@@ -188,7 +188,8 @@ export const andamentosApi = {
       }>('/andamentos/jusbr/pkce/finish', { state_id, pasted_url })
       .then((r) => r.data),
 
-  arquivoUrl: (andamentoId: string) => `/api/andamentos/arquivo/${andamentoId}`,
+  arquivoUrl: (andamentoId: string) =>
+    `/api/andamentos/arquivo/${andamentoId}?token=${encodeURIComponent(getToken() ?? '')}`,
 
   importarJusBR: (processoId: string, payload: string) =>
     api

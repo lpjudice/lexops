@@ -4,13 +4,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.dependencies import get_current_user
 from app.models.prazo import Prazo
 from app.models.processo import Processo
 from app.schemas.prazo import PrazoCreate, PrazoOut, PrazoUpdate
 from app.services.google_calendar import criar_evento, deletar_evento
 from app.services.prazo_calc import calcular_prazo
 
-router = APIRouter(prefix="/prazos", tags=["prazos"])
+router = APIRouter(prefix="/prazos", tags=["prazos"],
+                   dependencies=[Depends(get_current_user)])
 
 
 def _recalcular(prazo: Prazo, processo: Processo, db: Session) -> None:

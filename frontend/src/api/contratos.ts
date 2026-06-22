@@ -1,4 +1,4 @@
-import api from './client'
+import api, { getToken } from './client'
 
 export type StatusContrato =
   | 'rascunho' | 'aguardando_assinatura' | 'parcialmente_assinado' | 'assinado' | 'cancelado'
@@ -98,7 +98,10 @@ export const contratosApi = {
     api.delete<Contrato>(`/contratos/${id}/arquivo`, { params: { filename } }).then((r) => r.data),
 
   verArquivoUrl: (id: string, filename: string) =>
-    `/api/contratos/${id}/arquivo/${encodeURIComponent(filename)}`,
+    `/api/contratos/${id}/arquivo/${encodeURIComponent(filename)}?token=${encodeURIComponent(getToken() ?? '')}`,
+
+  downloadAssinadoUrl: (id: string) =>
+    `/api/contratos/${id}/download-assinado?token=${encodeURIComponent(getToken() ?? '')}`,
 
   gerarPdf: (id: string, data: GerarPdfRequest) =>
     api.post<Contrato>(`/contratos/${id}/gerar-pdf`, data).then((r) => r.data),

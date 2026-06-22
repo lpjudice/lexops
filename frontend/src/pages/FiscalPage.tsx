@@ -992,6 +992,7 @@ function DetalheModal({ nf, onClose, onSubstituir }: { nf: NotaFiscalOut; onClos
   const [contrSel, setContrSel] = useState(nf.contrato_id ?? '')
   const [vincMsg, setVincMsg] = useState<string | null>(null)
   const [erroCancelamento, setErroCancelamento] = useState<string | null>(null)
+  const [conciliando, setConciliando] = useState(false)
   const qc = useQueryClient()
   const cancelMut = useMutation({
     mutationFn: (m: string) => fiscalApi.cancelar(nf.id, m),
@@ -1004,6 +1005,28 @@ function DetalheModal({ nf, onClose, onSubstituir }: { nf: NotaFiscalOut; onClos
     onError: (err: any) => {
       const msg = err.response?.data?.detail || err.message || 'Falha ao cancelar NF-e'
       setErroCancelamento(msg)
+    },
+  })
+  const { data: conciliaveis = [] } = useQuery({
+    queryKey: ['conciliaveis', nf.id, conciliando],
+    queryFn: () => fiscalApi.conciliaveis(nf.id),
+    enabled: conciliando,
+  })
+  const conciliarMut = useMutation({
+    mutationFn: (recId: string) => fiscalApi.conciliar(nf.id, recId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['notas-fiscais'] })
+      qc.invalidateQueries({ queryKey: ['fluxo-caixa'] })
+      qc.invalidateQueries({ queryKey: ['honorarios'] })
+      setConciliando(false); onClose()
+    },
+  })
+  const desconciliarMut = useMutation({
+    mutationFn: () => fiscalApi.desconciliar(nf.id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['notas-fiscais'] })
+      qc.invalidateQueries({ queryKey: ['fluxo-caixa'] })
+      onClose()
     },
   })
   const { data: analise } = useQuery({
@@ -1155,6 +1178,55 @@ function DetalheModal({ nf, onClose, onSubstituir }: { nf: NotaFiscalOut; onClos
           </div>
         )}
         {erroPdf && <div className={cs.erroBox} style={{ marginTop: 8 }}>⚠️ {erroPdf}</div>}
+
+        {/* Conciliação de caixa: liga a NF (fiscal) a um recebimento (PIX/caixa) sem duplicar */}
+        {nf.status === 'emitida' && (
+          <div style={{ marginTop: 16, padding: 12, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, color: '#15803d' }}>💵 Conciliação de caixa</div>
+            {nf.recebimento_id ? (
+              <div style={{ marginTop: 6 }}>
+                <div style={{ fontSize: 12, color: '#374151' }}>
+                  ✓ Esta NF está conciliada a uma entrada de caixa (não duplica no Fluxo de Caixa).
+                </div>
+                <button className={cs.btnSecondary} style={{ marginTop: 8 }}
+                  disabled={desconciliarMut.isPending}
+                  onClick={() => desconciliarMut.mutate()}>
+                  {desconciliarMut.isPending ? 'Desfazendo…' : 'Desfazer conciliação'}
+                </button>
+              </div>
+            ) : !conciliando ? (
+              <div style={{ marginTop: 6 }}>
+                <div style={{ fontSize: 12, color: '#374151', marginBottom: 8 }}>
+                  Se este pagamento já entrou no caixa (PIX/TED registrado como recebimento), concilie aqui:
+                  a NF vira o selo "🧾 NF ✓" na linha da entrada e <b>não cria entrada nova</b>.
+                </div>
+                <button className={styles.btnPrimary} onClick={() => setConciliando(true)}>
+                  Conciliar com entrada de caixa
+                </button>
+              </div>
+            ) : (
+              <div style={{ marginTop: 6 }}>
+                {conciliaveis.length === 0 ? (
+                  <p style={{ fontSize: 12, color: '#b45309' }}>
+                    Nenhuma entrada de caixa disponível do cliente/beneficiário. Registre o recebimento (PIX) no Financeiro primeiro.
+                  </p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {conciliaveis.map((r) => (
+                      <button key={r.id} disabled={conciliarMut.isPending}
+                        onClick={() => conciliarMut.mutate(r.id)}
+                        style={{ textAlign: 'left', background: '#fff', border: '1px solid #d1d5db', borderRadius: 6, padding: '8px 10px', cursor: 'pointer' }}>
+                        <span style={{ fontWeight: 700 }}>{fmtBRL(r.valor)}</span> · {fmtData(r.data)} · {r.forma.toUpperCase()}
+                        <div style={{ fontSize: 11, color: '#6b7280' }}>{r.cliente} — {r.honorario_descricao}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <button className={cs.btnSecondary} style={{ marginTop: 8 }} onClick={() => setConciliando(false)}>Cancelar</button>
+              </div>
+            )}
+          </div>
+        )}
 
         {nf.status === 'emitida' && (
           <div style={{ marginTop: 16 }}>

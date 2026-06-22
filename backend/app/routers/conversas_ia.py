@@ -5,11 +5,13 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.dependencies import get_current_user
 from app.models.conversa_ia import ConversaIA
 from app.models.cliente import Cliente
 from app.schemas.conversa_ia import ConversaIACreate, ConversaIAOut, ConversaIAUpdate
 
-router = APIRouter(prefix="/conversas-ia", tags=["conversas_ia"])
+router = APIRouter(prefix="/conversas-ia", tags=["conversas_ia"],
+                   dependencies=[Depends(get_current_user)])
 
 
 @router.get("/", response_model=list[ConversaIAOut])
