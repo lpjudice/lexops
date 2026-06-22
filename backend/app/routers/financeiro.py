@@ -299,6 +299,7 @@ def fluxo_caixa(db: Session = Depends(get_db)):
                 # Selo de conciliação fiscal
                 "nf_conciliada": (f"#{nf_sel.numero_nfse}" if nf_sel and nf_sel.numero_nfse else None),
                 "nf_tomador": (nf_sel.tomador_nome if nf_sel else None),
+                "nf_id": (str(nf_sel.id) if nf_sel else None),
             })
             meses[comp]["total"] += float(rec.valor)
 

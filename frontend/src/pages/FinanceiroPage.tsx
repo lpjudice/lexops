@@ -852,6 +852,7 @@ function nomeCompet(c: string) {
 }
 
 function FluxoCaixaView() {
+  const navigate = useNavigate()
   const [aberto, setAberto] = useState<Record<string, boolean>>({})
   const { data, isLoading } = useQuery({
     queryKey: ['fluxo-caixa'],
@@ -905,14 +906,18 @@ function FluxoCaixaView() {
                 {isAberto && (
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                     <tbody>
-                      {m.entradas.map((e, i) => (
-                        <tr key={i} style={{ borderTop: '1px solid #f3f4f6' }}>
+                      {m.entradas.map((e, i) => {
+                        const irNf = e.nf_id ? () => navigate(`/fiscal?nf=${e.nf_id}`) : undefined
+                        return (
+                        <tr key={i} style={{ borderTop: '1px solid #f3f4f6', cursor: irNf ? 'pointer' : 'default' }}
+                          onClick={irNf}
+                          title={irNf ? 'Abrir a NF' : undefined}>
                           <td style={{ padding: '8px 16px', color: '#6b7280', whiteSpace: 'nowrap', width: 90 }}>{fmtData(e.data)}</td>
                           <td style={{ padding: '8px 8px' }}>
                             <div style={{ fontWeight: 600 }}>
                               {e.cliente}
                               {e.nf_conciliada && (
-                                <span title={`Conciliada com NF ${e.nf_conciliada}${e.nf_tomador ? ' — ' + e.nf_tomador : ''}`}
+                                <span title={`Conciliada com NF ${e.nf_conciliada}${e.nf_tomador ? ' — ' + e.nf_tomador : ''} (clique para abrir)`}
                                   style={{ marginLeft: 6, fontSize: 10, background: '#dcfce7', color: '#15803d', padding: '1px 6px', borderRadius: 999, fontWeight: 700 }}>
                                   🧾 NF {e.nf_conciliada} ✓
                                 </span>
@@ -922,7 +927,7 @@ function FluxoCaixaView() {
                           </td>
                           <td style={{ padding: '8px 8px', textAlign: 'center' }}>
                             {e.origem === 'nf_so' ? (
-                              <span title="NF paga sem entrada de caixa conciliada"
+                              <span title="NF paga sem entrada de caixa conciliada — clique para abrir e conciliar"
                                 style={{ fontSize: 10, padding: '2px 8px', borderRadius: 999, fontWeight: 700, background: '#fef3c7', color: '#b45309' }}>
                                 só NF · a conciliar
                               </span>
@@ -936,7 +941,8 @@ function FluxoCaixaView() {
                             {fmtVal(e.valor)}
                           </td>
                         </tr>
-                      ))}
+                        )
+                      })}
                     </tbody>
                   </table>
                 )}
@@ -964,7 +970,9 @@ function FluxoCaixaView() {
           </thead>
           <tbody>
             {data.credito_a_receber.itens.map((it, i) => (
-              <tr key={i} style={{ borderTop: '1px solid #f3f4f6' }}>
+              <tr key={i} style={{ borderTop: '1px solid #f3f4f6', cursor: it.nf_id ? 'pointer' : 'default' }}
+                onClick={it.nf_id ? () => navigate(`/fiscal?nf=${it.nf_id}`) : undefined}
+                title={it.nf_id ? 'Abrir a NF' : undefined}>
                 <td style={{ padding: '8px 16px' }}>
                   <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 999, fontWeight: 700,
                     background: it.tipo === 'nf' ? '#eff6ff' : '#f3e8ff',

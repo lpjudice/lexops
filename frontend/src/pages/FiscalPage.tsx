@@ -1541,6 +1541,16 @@ export default function FiscalPage() {
     })
   }, [grupos.length]) // eslint-disable-line
 
+  // Abrir uma NF específica vinda do Fluxo de Caixa (?nf=<id>)
+  useEffect(() => {
+    const nfId = searchParams.get('nf')
+    if (!nfId) return
+    fiscalApi.obter(nfId).then((nf) => {
+      setNfDetalhe(nf)
+      setSearchParams({})
+    }).catch(() => setSearchParams({}))
+  }, []) // eslint-disable-line
+
   // Pré-fill vindo do Financeiro (?honorario=&recebimento=)
   useEffect(() => {
     const hId = searchParams.get('honorario')
