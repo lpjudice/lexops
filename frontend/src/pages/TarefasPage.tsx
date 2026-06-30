@@ -18,6 +18,8 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import { tarefasApi } from '../api/tarefas'
 import type { StatusTarefa, Tarefa } from '../api/tarefas'
+import { tarefaProjetosApi } from '../api/tarefaProjetos'
+import type { TarefaProjeto } from '../api/tarefaProjetos'
 import { clientesApi } from '../api/clientes'
 import { processosApi } from '../api/processos'
 import { anotacoesApi } from '../api/anotacoes'
@@ -83,6 +85,11 @@ interface TaskRow {
 
 const EMPTY_ROW: TaskRow = { titulo: '', descricao: '', data_limite: '', tag: '' }
 
+const CORES_PROJETO = [
+  '#6366f1', '#8b5cf6', '#ec4899', '#ef4444', '#f97316',
+  '#eab308', '#22c55e', '#14b8a6', '#3b82f6', '#64748b',
+]
+
 interface EditForm {
   titulo: string
   descricao: string
@@ -92,6 +99,7 @@ interface EditForm {
   tags: string
   cliente_id: string
   processo_id: string
+  projeto_id: string
   status: StatusTarefa
   confidencial?: boolean
 }
@@ -105,6 +113,13 @@ export default function TarefasPage() {
   const [rows, setRows] = useState<TaskRow[]>([{ ...EMPTY_ROW }])
   const [batchCliente, setBatchCliente] = useState('')
   const [batchProcesso, setBatchProcesso] = useState('')
+  const [batchProjeto, setBatchProjeto] = useState('')
+
+  // ── Gerenciar projetos ────────────────────────────────────────────────
+  const [showGerenciarProjetos, setShowGerenciarProjetos] = useState(false)
+  const [novoProjNome, setNovoProjNome] = useState('')
+  const [novoProjCor, setNovoProjCor] = useState(CORES_PROJETO[0])
+  const [editandoProj, setEditandoProj] = useState<TarefaProjeto | null>(null)
 
   const addRow = () => setRows((p) => [...p, { ...EMPTY_ROW }])
   const removeRow = (i: number) => setRows((p) => p.filter((_, idx) => idx !== i))
@@ -112,6 +127,7 @@ export default function TarefasPage() {
     setRows((p) => p.map((r, idx) => (idx === i ? { ...r, [field]: val } : r)))
 
   // ── Filters ───────────────────────────────────────────────────────────
+  const [filtroProjeto, setFiltroProjeto] = useState('')
   const [filtroStatus, setFiltroStatus] = useState<StatusTarefa | ''>('pendente')
   const [filtroCliente, setFiltroCliente] = useState('')
   const [filtroResponsavel, setFiltroResponsavel] = useState('')
@@ -128,7 +144,7 @@ export default function TarefasPage() {
   const [batchResponsavel, setBatchResponsavel] = useState({ nome: '', email: '' })
   const [editForm, setEditForm] = useState<EditForm>({
     titulo: '', descricao: '', responsavel: '', responsavel_email: '', data_limite: '', tags: '',
-    cliente_id: '', processo_id: '', status: 'pendente',
+    cliente_id: '', processo_id: '', projeto_id: '', status: 'pendente',
   })
 
   // ── Queries ───────────────────────────────────────────────────────────
@@ -157,6 +173,28 @@ export default function TarefasPage() {
     queryFn: usuariosApi.listar,
   })
 
+  const { data: projetos = [] } = useQuery({
+    queryKey: ['tarefa-projetos'],
+    queryFn: tarefaProjetosApi.listar,
+  })
+
+  // ── Mutations de projetos ─────────────────────────────────────────────
+  const criarProjeto = useMutation({
+    mutationFn: (data: { nome: string; cor: string }) => tarefaProjetosApi.criar(data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tarefa-projetos'] }); setNovoProjNome(''); setNovoProjCor(CORES_PROJETO[0]) },
+  })
+
+  const atualizarProjeto = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<{ nome: string; cor: string; oculto: boolean }> }) =>
+      tarefaProjetosApi.atualizar(id, data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tarefa-projetos'] }); setEditandoProj(null) },
+  })
+
+  const deletarProjeto = useMutation({
+    mutationFn: (id: string) => tarefaProjetosApi.deletar(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tarefa-projetos'] }),
+  })
+
   // ── Mutations ─────────────────────────────────────────────────────────
   const criar = useMutation({
     mutationFn: (tasks: Parameters<typeof tarefasApi.criar>[0][]) =>
@@ -167,6 +205,7 @@ export default function TarefasPage() {
       setRows([{ ...EMPTY_ROW }])
       setBatchCliente('')
       setBatchProcesso('')
+      setBatchProjeto('')
       setBatchResponsavel({ nome: '', email: '' })
     },
   })
@@ -235,6 +274,7 @@ export default function TarefasPage() {
     let arr = [...tarefas]
     if (filtroCliente) arr = arr.filter((t) => t.cliente_id === filtroCliente)
     if (filtroResponsavel) arr = arr.filter((t) => t.responsavel === filtroResponsavel)
+    if (filtroProjeto) arr = arr.filter((t) => t.projeto_id === filtroProjeto)
     if (filtroMes && filtroStatus === 'concluido') {
       arr = arr.filter((t) => t.updated_at?.startsWith(filtroMes) || t.created_at?.startsWith(filtroMes))
     }
@@ -275,7 +315,7 @@ export default function TarefasPage() {
       arr.sort((a, b) => (a.responsavel ?? '').localeCompare(b.responsavel ?? '', 'pt-BR'))
     }
     return arr
-  }, [tarefas, filtroCliente, filtroResponsavel, filtroMes, filtroStatus, sortBy, orderedIds, clientes]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tarefas, filtroCliente, filtroResponsavel, filtroProjeto, filtroMes, filtroStatus, sortBy, orderedIds, clientes]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const processoOptions = processos.map((p) => {
     const cliente = clientes.find((c) => c.id === p.cliente_id)
@@ -297,6 +337,7 @@ export default function TarefasPage() {
       tags: tarefa.tags ?? '',
       cliente_id: tarefa.cliente_id ?? '',
       processo_id: tarefa.processo_id ?? '',
+      projeto_id: tarefa.projeto_id ?? '',
       status: tarefa.status,
     })
     setExpandedId(null)
@@ -315,6 +356,7 @@ export default function TarefasPage() {
         tags: editForm.tags || null,
         cliente_id: editForm.cliente_id || null,
         processo_id: editForm.processo_id || null,
+        projeto_id: editForm.projeto_id || null,
         status: editForm.status,
         ...(editForm.confidencial !== undefined ? { confidencial: editForm.confidencial } : {}),
       },
@@ -335,6 +377,7 @@ export default function TarefasPage() {
         tags: r.tag || null,
         cliente_id: batchCliente || null,
         processo_id: batchProcesso || null,
+        projeto_id: batchProjeto || null,
       }))
     )
   }
@@ -501,6 +544,21 @@ export default function TarefasPage() {
           </div>
 
           <div className={styles.formRow}>
+            <label className={styles.formLabel}>Projeto (opcional)</label>
+            <select
+              value={batchProjeto}
+              onChange={(e) => setBatchProjeto(e.target.value)}
+              className={styles.input}
+              style={batchProjeto ? { borderLeft: `4px solid ${projetos.find(p => p.id === batchProjeto)?.cor ?? '#6366f1'}` } : undefined}
+            >
+              <option value="">— Nenhum projeto —</option>
+              {projetos.filter(p => !p.oculto).map(p => (
+                <option key={p.id} value={p.id}>{p.nome}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className={styles.formRow}>
             <label className={styles.formLabel}>Responsável (opcional)</label>
             <ResponsavelComboBox
               value={batchResponsavel}
@@ -594,6 +652,30 @@ export default function TarefasPage() {
                 <option key={r!} value={r!}>{r}</option>
               ))}
             </select>
+            {projetos.filter(p => !p.oculto).length > 0 && (
+              <select
+                value={filtroProjeto}
+                onChange={(e) => setFiltroProjeto(e.target.value)}
+                style={{
+                  fontSize: 12, padding: '5px 10px', borderRadius: 999, cursor: 'pointer', fontFamily: 'inherit',
+                  border: filtroProjeto
+                    ? `2px solid ${projetos.find(p => p.id === filtroProjeto)?.cor ?? '#6366f1'}`
+                    : '1px solid #e5e7eb',
+                  background: filtroProjeto
+                    ? `${projetos.find(p => p.id === filtroProjeto)?.cor ?? '#6366f1'}15`
+                    : '#fff',
+                  color: filtroProjeto
+                    ? (projetos.find(p => p.id === filtroProjeto)?.cor ?? '#6366f1')
+                    : '#9ca3af',
+                  fontWeight: filtroProjeto ? 700 : 400,
+                }}
+              >
+                <option value="">Projeto (todos)</option>
+                {projetos.filter(p => !p.oculto).map(p => (
+                  <option key={p.id} value={p.id}>{p.nome}</option>
+                ))}
+              </select>
+            )}
             {filtroStatus === 'concluido' && (
               <select
                 value={filtroMes}
@@ -608,14 +690,115 @@ export default function TarefasPage() {
                 })}
               </select>
             )}
-            {(filtroCliente || filtroResponsavel || filtroMes) && (
+            {(filtroCliente || filtroResponsavel || filtroProjeto || filtroMes) && (
               <button
-                onClick={() => { setFiltroCliente(''); setFiltroResponsavel(''); setFiltroMes('') }}
+                onClick={() => { setFiltroCliente(''); setFiltroResponsavel(''); setFiltroProjeto(''); setFiltroMes('') }}
                 style={{ fontSize: 11, color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
               >
                 Limpar filtros
               </button>
             )}
+            <button
+              onClick={() => setShowGerenciarProjetos(true)}
+              style={{ fontSize: 11, color: '#6366f1', background: 'none', border: '1px solid #e0e7ff', borderRadius: 999, padding: '4px 10px', cursor: 'pointer', fontFamily: 'inherit', marginLeft: 'auto' }}
+            >
+              ⊞ Projetos
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Gerenciar Projetos ────────────────────────────────── */}
+      {showGerenciarProjetos && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowGerenciarProjetos(false) }}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 28, minWidth: 360, maxWidth: 480, width: '90vw', boxShadow: '0 20px 60px rgba(0,0,0,.2)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>Projetos</h2>
+              <button onClick={() => setShowGerenciarProjetos(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#9ca3af' }}>×</button>
+            </div>
+
+            {/* Lista de projetos existentes */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
+              {projetos.length === 0 && <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>Nenhum projeto criado ainda.</p>}
+              {projetos.map(proj => (
+                <div key={proj.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 10, border: '1px solid #e5e7eb', background: proj.oculto ? '#fafafa' : '#fff' }}>
+                  <span style={{ width: 14, height: 14, borderRadius: '50%', background: proj.cor, flexShrink: 0, display: 'inline-block' }} />
+                  {editandoProj?.id === proj.id ? (
+                    <>
+                      <input
+                        value={editandoProj.nome}
+                        onChange={(e) => setEditandoProj({ ...editandoProj, nome: e.target.value })}
+                        style={{ flex: 1, fontSize: 13, padding: '3px 8px', borderRadius: 6, border: '1px solid #e5e7eb', fontFamily: 'inherit' }}
+                        autoFocus
+                      />
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                        {CORES_PROJETO.map(c => (
+                          <button key={c} onClick={() => setEditandoProj({ ...editandoProj, cor: c })}
+                            style={{ width: 16, height: 16, borderRadius: '50%', background: c, border: editandoProj.cor === c ? '2px solid #1d1e20' : '2px solid transparent', cursor: 'pointer', padding: 0 }} />
+                        ))}
+                      </div>
+                      <button onClick={() => atualizarProjeto.mutate({ id: proj.id, data: { nome: editandoProj.nome, cor: editandoProj.cor } })}
+                        style={{ fontSize: 12, background: '#6366f1', color: '#fff', border: 'none', borderRadius: 6, padding: '3px 10px', cursor: 'pointer', fontFamily: 'inherit' }}>
+                        Salvar
+                      </button>
+                      <button onClick={() => setEditandoProj(null)}
+                        style={{ fontSize: 12, background: 'none', border: '1px solid #e5e7eb', borderRadius: 6, padding: '3px 8px', cursor: 'pointer', color: '#6b7280', fontFamily: 'inherit' }}>
+                        ×
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <span style={{ flex: 1, fontSize: 13, fontWeight: 500, color: proj.oculto ? '#9ca3af' : '#1d1e20' }}>
+                        {proj.nome}
+                        {proj.oculto && <span style={{ fontSize: 11, marginLeft: 6, color: '#9ca3af' }}>(oculto)</span>}
+                      </span>
+                      <button onClick={() => setEditandoProj(proj)}
+                        style={{ fontSize: 12, background: 'none', border: '1px solid #e5e7eb', borderRadius: 6, padding: '3px 8px', cursor: 'pointer', color: '#6b7280', fontFamily: 'inherit' }}>
+                        ✎
+                      </button>
+                      <button
+                        onClick={() => atualizarProjeto.mutate({ id: proj.id, data: { oculto: !proj.oculto } })}
+                        title={proj.oculto ? 'Mostrar projeto' : 'Ocultar projeto'}
+                        style={{ fontSize: 12, background: 'none', border: '1px solid #e5e7eb', borderRadius: 6, padding: '3px 8px', cursor: 'pointer', color: '#6b7280', fontFamily: 'inherit' }}>
+                        {proj.oculto ? '👁' : '🙈'}
+                      </button>
+                      <button
+                        onClick={() => { if (confirm(`Excluir projeto "${proj.nome}"? As tarefas não serão excluídas.`)) deletarProjeto.mutate(proj.id) }}
+                        style={{ fontSize: 12, background: 'none', border: '1px solid #fecaca', borderRadius: 6, padding: '3px 8px', cursor: 'pointer', color: '#dc2626', fontFamily: 'inherit' }}>
+                        ×
+                      </button>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Form criar novo projeto */}
+            <div style={{ borderTop: '1px solid #f3f4f6', paddingTop: 16 }}>
+              <p style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', margin: '0 0 10px' }}>Novo projeto</p>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <input
+                  value={novoProjNome}
+                  onChange={(e) => setNovoProjNome(e.target.value)}
+                  placeholder="Nome do projeto"
+                  style={{ flex: 1, minWidth: 140, fontSize: 13, padding: '6px 10px', borderRadius: 8, border: '1px solid #e5e7eb', fontFamily: 'inherit' }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && novoProjNome.trim()) criarProjeto.mutate({ nome: novoProjNome.trim(), cor: novoProjCor }) }}
+                />
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {CORES_PROJETO.map(c => (
+                    <button key={c} onClick={() => setNovoProjCor(c)}
+                      style={{ width: 18, height: 18, borderRadius: '50%', background: c, border: novoProjCor === c ? '2px solid #1d1e20' : '2px solid transparent', cursor: 'pointer', padding: 0 }} />
+                  ))}
+                </div>
+                <button
+                  onClick={() => { if (novoProjNome.trim()) criarProjeto.mutate({ nome: novoProjNome.trim(), cor: novoProjCor }) }}
+                  disabled={!novoProjNome.trim() || criarProjeto.isPending}
+                  style={{ fontSize: 13, background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 16px', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600 }}>
+                  Criar
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -737,6 +920,20 @@ export default function TarefasPage() {
                           placeholder="Buscar por CNJ..."
                         />
                       </div>
+                    </div>
+                    <div className={styles.formRow}>
+                      <label className={styles.formLabel}>Projeto</label>
+                      <select
+                        value={editForm.projeto_id}
+                        onChange={(e) => setEditForm({ ...editForm, projeto_id: e.target.value })}
+                        className={styles.input}
+                        style={editForm.projeto_id ? { borderLeft: `4px solid ${projetos.find(p => p.id === editForm.projeto_id)?.cor ?? '#6366f1'}` } : undefined}
+                      >
+                        <option value="">— Nenhum projeto —</option>
+                        {projetos.filter(p => !p.oculto || p.id === editForm.projeto_id).map(p => (
+                          <option key={p.id} value={p.id}>{p.nome}{p.oculto ? ' (oculto)' : ''}</option>
+                        ))}
+                      </select>
                     </div>
                     <div className={t.twoCol}>
                       <div className={styles.formRow}>
@@ -917,6 +1114,17 @@ export default function TarefasPage() {
 
                       <div className={t.cardBody}>
                         <div className={t.tituloRow}>
+                          {tarefa.projeto_nome && (
+                            <span style={{
+                              fontSize: 11, fontWeight: 700, borderRadius: 4, padding: '2px 8px', flexShrink: 0,
+                              background: tarefa.projeto_cor ? `${tarefa.projeto_cor}22` : '#e0e7ff',
+                              color: tarefa.projeto_cor ?? '#6366f1',
+                              border: `1px solid ${tarefa.projeto_cor ?? '#6366f1'}44`,
+                              letterSpacing: '0.02em',
+                            }}>
+                              {tarefa.projeto_nome}
+                            </span>
+                          )}
                           {tarefa.confidencial && <span style={{ fontSize: 11, background: '#f3e8ff', color: '#7c3aed', borderRadius: 4, padding: '1px 6px', flexShrink: 0 }}>🔒 confidencial</span>}
                           {tarefa.tags?.split(',').map(t_ => t_.trim()).includes('telegram') && (
                             <span title="Criada via Telegram" style={{ fontSize: 11, background: '#e0f2fe', color: '#0369a1', borderRadius: 4, padding: '1px 6px', flexShrink: 0 }}>✈ telegram</span>

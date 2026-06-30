@@ -16,10 +16,11 @@ from app.models import relatorio_fiscal_log as _relatorio_fiscal_log_model  # no
 from app.models import telegram_task as _telegram_task_model  # noqa: F401 — TelegramTaskBatch/Item/Session
 from app.models import backoffice as _backoffice_model  # noqa: F401
 from app.models import precedentcheck as _precedentcheck_model  # noqa: F401
+from app.models import tarefa_projeto as _tarefa_projeto_model  # noqa: F401
 from app.models import pagante as _pagante_model  # noqa: F401 — ensures Pagante table is registered
 from app.models import conselho as _conselho_model  # noqa: F401 — ensures Conselho tables are registered
 from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, fiscal, pagantes, config_fiscal, jurisprudencia, organizador, pje, prazos, processos, publico, reembolsos, reunioes, system, tarefas, telegram, telegram_andamentos, telegram_tasks, teses, usuarios, webhooks
-from app.routers import backoffice, precedentcheck, conselho
+from app.routers import backoffice, precedentcheck, conselho, tarefa_projetos
 
 # Cria as tabelas (Alembic gerencia em produção; aqui facilita o dev)
 Base.metadata.create_all(bind=engine)
@@ -811,6 +812,20 @@ def _run_migrations() -> None:
         conn.execute(text(
             "ALTER TABLE tarefas ADD COLUMN IF NOT EXISTS ordem INTEGER"
         ))
+
+        # Projetos de tarefas
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS tarefa_projetos (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                nome VARCHAR(200) NOT NULL,
+                cor VARCHAR(7) NOT NULL DEFAULT '#6366f1',
+                oculto BOOLEAN NOT NULL DEFAULT false,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text(
+            "ALTER TABLE tarefas ADD COLUMN IF NOT EXISTS projeto_id UUID REFERENCES tarefa_projetos(id) ON DELETE SET NULL"
+        ))
         # Inicializa ordem = row_number por created_at para tarefas existentes sem valor
         conn.execute(text("""
             UPDATE tarefas SET ordem = sub.rn
@@ -1051,6 +1066,7 @@ app.include_router(telegram_andamentos.router)
 app.include_router(telegram_tasks.router)
 app.include_router(precedentcheck.router)
 app.include_router(conselho.router)
+app.include_router(tarefa_projetos.router)
 
 
 @app.on_event("startup")

@@ -7,6 +7,7 @@ from app.database import get_db
 from app.dependencies import get_current_user, get_optional_user
 from app.models.cliente import Cliente
 from app.models.tarefa import Tarefa
+from app.models.tarefa_projeto import TarefaProjeto
 from app.models.usuario import Usuario
 from app.schemas.tarefa import (
     PedidoAcessoTarefa,
@@ -61,6 +62,13 @@ def _enrich(t: Tarefa, db: Session, usuario: Usuario | None = None) -> TarefaOut
         u = db.query(Usuario).filter(Usuario.id == t.criado_por_id).first()
         if u:
             out.criado_por_nome = u.nome
+
+    # Enrich project info
+    if t.projeto_id:
+        p = db.query(TarefaProjeto).filter(TarefaProjeto.id == t.projeto_id).first()
+        if p and not p.oculto:
+            out.projeto_nome = p.nome
+            out.projeto_cor = p.cor
 
     # Pending access requests for creator / super_admin
     if can_manage:

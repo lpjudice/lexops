@@ -11,6 +11,7 @@ class TarefaCreate(BaseModel):
     cliente_id: uuid.UUID | None = None
     processo_id: uuid.UUID | None = None
     anotacao_id: uuid.UUID | None = None
+    projeto_id: uuid.UUID | None = None
     titulo: str
     descricao: str | None = None
     responsavel: str | None = None
@@ -28,6 +29,7 @@ class TarefaCreate(BaseModel):
 class TarefaUpdate(BaseModel):
     cliente_id: uuid.UUID | None = None
     processo_id: uuid.UUID | None = None
+    projeto_id: uuid.UUID | None = None
     titulo: str | None = None
     descricao: str | None = None
     responsavel: str | None = None
@@ -52,6 +54,9 @@ class TarefaOut(BaseModel):
     cliente_id: uuid.UUID | None
     processo_id: uuid.UUID | None
     anotacao_id: uuid.UUID | None
+    projeto_id: uuid.UUID | None = None
+    projeto_nome: str | None = None
+    projeto_cor: str | None = None
     criado_por_id: uuid.UUID | None = None
     titulo: str
     descricao: str | None

@@ -12,6 +12,9 @@ export interface Tarefa {
   cliente_id: string | null
   processo_id: string | null
   anotacao_id: string | null
+  projeto_id: string | null
+  projeto_nome: string | null
+  projeto_cor: string | null
   criado_por_id: string | null
   criado_por_nome: string | null
   cliente_nome: string | null
@@ -39,6 +42,7 @@ export interface TarefaCreate {
   cliente_id?: string | null
   processo_id?: string | null
   anotacao_id?: string | null
+  projeto_id?: string | null
   titulo: string
   descricao?: string | null
   responsavel?: string | null
