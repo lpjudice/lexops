@@ -798,6 +798,12 @@ def _run_migrations() -> None:
             "ALTER TABLE precedentcheck_analises ADD COLUMN IF NOT EXISTS custo_usd DOUBLE PRECISION NOT NULL DEFAULT 0"
         ))
 
+        # Conselho/Expansão: dias_lembrete adicionado a conselho_eventos depois da tabela já existir em produção
+        # (Base.metadata.create_all só cria tabelas novas, não adiciona colunas a tabelas existentes)
+        conn.execute(text(
+            "ALTER TABLE conselho_eventos ADD COLUMN IF NOT EXISTS dias_lembrete INTEGER NOT NULL DEFAULT 2"
+        ))
+
         # Tarefas: campo de ordenação manual
         conn.execute(text(
             "ALTER TABLE tarefas ADD COLUMN IF NOT EXISTS ordem INTEGER"
