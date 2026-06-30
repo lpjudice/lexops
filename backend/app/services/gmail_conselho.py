@@ -15,36 +15,49 @@ from sqlalchemy.orm import Session
 from app.models.usuario import Usuario
 
 
-def _obter_access_token(usuario: Usuario, db: Session) -> tuple[str, str] | None:
-    """Retorna (access_token, email_remetente) priorizando o Google do usuário logado."""
-    from app.services.google_calendar import _load_tokens as _load_master, _refresh_token as _refresh_master
+def _token_usuario(usuario: Usuario, db: Session) -> tuple[str, str] | None:
     from app.services.meet_sync import _refresh_tokens
 
-    if isinstance(usuario.google_tokens, dict) and usuario.google_tokens.get("refresh_token"):
-        tokens = usuario.google_tokens
-        try:
-            refreshed = _refresh_tokens(tokens, save=False)
-            if refreshed.get("access_token") != tokens.get("access_token"):
-                usuario.google_tokens = refreshed
-                db.commit()
-            tokens = refreshed
-        except Exception:
-            pass
-        access_token = tokens.get("access_token")
-        if access_token:
-            return access_token, tokens.get("email") or usuario.email
+    if not (isinstance(usuario.google_tokens, dict) and usuario.google_tokens.get("refresh_token")):
+        return None
+    tokens = usuario.google_tokens
+    try:
+        refreshed = _refresh_tokens(tokens, save=False)
+        if refreshed.get("access_token") != tokens.get("access_token"):
+            usuario.google_tokens = refreshed
+            db.commit()
+        tokens = refreshed
+    except Exception:
+        pass
+    access_token = tokens.get("access_token")
+    if not access_token:
+        return None
+    return access_token, tokens.get("email") or usuario.email
+
+
+def _token_master() -> tuple[str, str] | None:
+    from app.services.google_calendar import _load_tokens as _load_master, _refresh_token as _refresh_master
 
     master = _load_master()
-    if master:
-        try:
-            master = _refresh_master(master)
-        except Exception:
-            pass
-        access_token = master.get("access_token")
-        if access_token:
-            return access_token, master.get("email") or "conta master"
+    if not master:
+        return None
+    try:
+        master = _refresh_master(master)
+    except Exception:
+        pass
+    access_token = master.get("access_token")
+    if not access_token:
+        return None
+    return access_token, master.get("email") or "conta master"
 
-    return None
+
+def _scope_insuficiente(resp: httpx.Response) -> bool:
+    if resp.status_code != 403:
+        return False
+    try:
+        return "insufficient" in resp.text.lower()
+    except Exception:
+        return False
 
 
 def enviar_email(
@@ -57,11 +70,12 @@ def enviar_email(
     pdf_filename: str | None = None,
     bcc: list[str] | None = None,
 ) -> str:
-    """Envia via Gmail API. Retorna o e-mail usado como remetente. Levanta Exception em falha."""
-    remetente = _obter_access_token(usuario, db)
-    if not remetente:
+    """Envia via Gmail API. Tenta o Google pessoal do usuário; se faltar escopo de envio
+    (conexão pessoal hoje é só leitura), cai automaticamente para a conta master.
+    Retorna o e-mail usado como remetente. Levanta Exception em falha."""
+    candidatos = [c for c in (_token_usuario(usuario, db), _token_master()) if c]
+    if not candidatos:
         raise RuntimeError("Nenhuma conta Google conectada (nem do usuário, nem a master)")
-    access_token, email_remetente = remetente
 
     html_part = mime_multi.MIMEMultipart("alternative")
     html_part.attach(mime_text.MIMEText(html, "html", "utf-8"))
@@ -87,13 +101,21 @@ def enviar_email(
         msg_bytes = html_part.as_bytes()
 
     raw = base64.urlsafe_b64encode(msg_bytes).decode()
-    resp = httpx.post(
-        "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
-        headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
-        content=json.dumps({"raw": raw}),
-        timeout=20,
-    )
-    if resp.status_code not in (200, 201):
+
+    ultimo_erro: str | None = None
+    for access_token, email_remetente in candidatos:
+        resp = httpx.post(
+            "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+            headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+            content=json.dumps({"raw": raw}),
+            timeout=20,
+        )
+        if resp.status_code in (200, 201):
+            return email_remetente
+        if _scope_insuficiente(resp) and len(candidatos) > 1:
+            # conexão pessoal do usuário é só leitura — tenta o próximo candidato (master)
+            ultimo_erro = f"Gmail API retornou {resp.status_code}: {resp.text}"
+            continue
         raise RuntimeError(f"Gmail API retornou {resp.status_code}: {resp.text}")
 
-    return email_remetente
+    raise RuntimeError(ultimo_erro or "Falha ao enviar e-mail")
