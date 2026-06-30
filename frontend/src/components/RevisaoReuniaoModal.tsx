@@ -5,7 +5,10 @@ import { reunioesApi } from '../api/reunioes'
 import type { Reuniao, AcaoSugerida, TipoAcao } from '../api/reunioes'
 import { clientesApi } from '../api/clientes'
 import { processosApi } from '../api/processos'
+import { tarefaProjetosApi } from '../api/tarefaProjetos'
+import type { TarefaProjeto } from '../api/tarefaProjetos'
 import ClienteCombobox from './ClienteCombobox'
+import ProjetoCombobox from './ProjetoCombobox'
 import { useAuth } from '../contexts/AuthContext'
 import styles from './RevisaoReuniaoModal.module.css'
 import p from '../pages/Page.module.css'
@@ -64,6 +67,17 @@ export default function RevisaoReuniaoModal({ reuniao: initialReuniao, onClose }
     queryFn: () => processosApi.listar(),
     enabled: !!reuniao.cliente_id,
   })
+
+  const { data: projetos = [] } = useQuery({
+    queryKey: ['tarefa-projetos'],
+    queryFn: tarefaProjetosApi.listar,
+  })
+
+  const criarProjetoRapido = async (nome: string, cor: string): Promise<TarefaProjeto> => {
+    const novo = await tarefaProjetosApi.criar({ nome, cor })
+    qc.invalidateQueries({ queryKey: ['tarefa-projetos'] })
+    return novo
+  }
 
   const [clienteId, setClienteId] = useState(reuniao.cliente_id ?? '')
   const [processoId, setProcessoId] = useState(reuniao.processo_id ?? '')
@@ -462,26 +476,38 @@ export default function RevisaoReuniaoModal({ reuniao: initialReuniao, onClose }
                         )}
 
                         {acao.tipo === 'tarefa' && (
-                          <div className={styles.acaoInputRow}>
-                            <div>
-                              <label className={styles.acaoInputLabel}><Clock size={11} /> Prazo</label>
-                              <input
-                                type="date"
-                                className={styles.acaoInput}
-                                value={acao.data_limite ?? ''}
-                                onChange={(e) => updateAcao(idx, 'data_limite', e.target.value || null)}
-                              />
+                          <>
+                            <div className={styles.acaoInputRow}>
+                              <div>
+                                <label className={styles.acaoInputLabel}><Clock size={11} /> Prazo</label>
+                                <input
+                                  type="date"
+                                  className={styles.acaoInput}
+                                  value={acao.data_limite ?? ''}
+                                  onChange={(e) => updateAcao(idx, 'data_limite', e.target.value || null)}
+                                />
+                              </div>
+                              <div>
+                                <label className={styles.acaoInputLabel}>Responsável</label>
+                                <input
+                                  className={styles.acaoInput}
+                                  value={acao.responsavel ?? ''}
+                                  onChange={(e) => updateAcao(idx, 'responsavel', e.target.value || null)}
+                                  placeholder="Opcional"
+                                />
+                              </div>
                             </div>
                             <div>
-                              <label className={styles.acaoInputLabel}>Responsável</label>
-                              <input
-                                className={styles.acaoInput}
-                                value={acao.responsavel ?? ''}
-                                onChange={(e) => updateAcao(idx, 'responsavel', e.target.value || null)}
-                                placeholder="Opcional"
+                              <label className={styles.acaoInputLabel}>Projeto</label>
+                              <ProjetoCombobox
+                                projetos={projetos}
+                                value={acao.projeto_id ?? ''}
+                                onChange={(v) => updateAcao(idx, 'projeto_id', v || null)}
+                                onCriar={criarProjetoRapido}
+                                disabled={!!acao.criada}
                               />
                             </div>
-                          </div>
+                          </>
                         )}
 
                         {acao.tipo === 'contrato' && acao.valor_mencionado != null && (

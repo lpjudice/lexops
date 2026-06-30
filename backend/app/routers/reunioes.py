@@ -368,9 +368,16 @@ def confirmar_acoes(
                     data_limite = date.fromisoformat(acao["data_limite"])
                 except (ValueError, TypeError):
                     pass
+            projeto_id = None
+            if acao.get("projeto_id"):
+                try:
+                    projeto_id = uuid.UUID(str(acao["projeto_id"]))
+                except (ValueError, TypeError):
+                    pass
             tarefa = Tarefa(
                 cliente_id=r.cliente_id,
                 processo_id=r.processo_id,
+                projeto_id=projeto_id,
                 titulo=acao.get("titulo", "Tarefa da reunião"),
                 descricao=acao.get("descricao"),
                 responsavel=acao.get("responsavel"),

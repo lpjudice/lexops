@@ -16,6 +16,7 @@ export interface AcaoSugerida {
   // tarefa
   data_limite?: string | null
   responsavel?: string | null
+  projeto_id?: string | null
   // contrato
   valor_mencionado?: number | null
   // anotacao

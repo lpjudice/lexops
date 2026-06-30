@@ -20,6 +20,7 @@ import { tarefasApi } from '../api/tarefas'
 import type { StatusTarefa, Tarefa } from '../api/tarefas'
 import { tarefaProjetosApi } from '../api/tarefaProjetos'
 import type { TarefaProjeto } from '../api/tarefaProjetos'
+import ProjetoCombobox from '../components/ProjetoCombobox'
 import { clientesApi } from '../api/clientes'
 import { processosApi } from '../api/processos'
 import { anotacoesApi } from '../api/anotacoes'
@@ -244,6 +245,12 @@ export default function TarefasPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tarefas'] }),
     onError: () => alert('Erro ao recusar solicitação.'),
   })
+
+  const criarProjetoRapido = async (nome: string, cor: string): Promise<TarefaProjeto> => {
+    const novo = await tarefaProjetosApi.criar({ nome, cor })
+    qc.invalidateQueries({ queryKey: ['tarefa-projetos'] })
+    return novo
+  }
 
   const criarClienteRapido = async (raw: string): Promise<string> => {
     const [nome, tipo] = raw.split('|')
@@ -545,17 +552,12 @@ export default function TarefasPage() {
 
           <div className={styles.formRow}>
             <label className={styles.formLabel}>Projeto (opcional)</label>
-            <select
+            <ProjetoCombobox
+              projetos={projetos}
               value={batchProjeto}
-              onChange={(e) => setBatchProjeto(e.target.value)}
-              className={styles.input}
-              style={batchProjeto ? { borderLeft: `4px solid ${projetos.find(p => p.id === batchProjeto)?.cor ?? '#6366f1'}` } : undefined}
-            >
-              <option value="">— Nenhum projeto —</option>
-              {projetos.filter(p => !p.oculto).map(p => (
-                <option key={p.id} value={p.id}>{p.nome}</option>
-              ))}
-            </select>
+              onChange={setBatchProjeto}
+              onCriar={criarProjetoRapido}
+            />
           </div>
 
           <div className={styles.formRow}>
@@ -923,17 +925,12 @@ export default function TarefasPage() {
                     </div>
                     <div className={styles.formRow}>
                       <label className={styles.formLabel}>Projeto</label>
-                      <select
+                      <ProjetoCombobox
+                        projetos={projetos}
                         value={editForm.projeto_id}
-                        onChange={(e) => setEditForm({ ...editForm, projeto_id: e.target.value })}
-                        className={styles.input}
-                        style={editForm.projeto_id ? { borderLeft: `4px solid ${projetos.find(p => p.id === editForm.projeto_id)?.cor ?? '#6366f1'}` } : undefined}
-                      >
-                        <option value="">— Nenhum projeto —</option>
-                        {projetos.filter(p => !p.oculto || p.id === editForm.projeto_id).map(p => (
-                          <option key={p.id} value={p.id}>{p.nome}{p.oculto ? ' (oculto)' : ''}</option>
-                        ))}
-                      </select>
+                        onChange={(v) => setEditForm({ ...editForm, projeto_id: v })}
+                        onCriar={criarProjetoRapido}
+                      />
                     </div>
                     <div className={t.twoCol}>
                       <div className={styles.formRow}>
