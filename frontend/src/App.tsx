@@ -29,6 +29,7 @@ import ReformaPublicaPage from './pages/ReformaPublicaPage'
 import BackofficeDecisaoPage from './pages/BackofficeDecisaoPage'
 import DespesasPage from './pages/DespesasPage'
 import PrecedentCheckPage from './pages/PrecedentCheckPage'
+import ConselhoPage from './pages/ConselhoPage'
 
 const queryClient = new QueryClient()
 
@@ -72,6 +73,7 @@ function AppRoutes() {
         <Route path="jurisprudencia" element={<JurisprudenciaPage />} />
         <Route path="tarefas" element={<TarefasPage />} />
         <Route path="reunioes" element={<ReunioesPage />} />
+        <Route path="conselho" element={<ConselhoPage />} />
         <Route path="fiscal" element={<FiscalPage />} />
         <Route path="fiscal/visao" element={<VisaoFiscalPage />} />
         <Route path="fiscal/decisao" element={<BackofficeDecisaoPage />} />

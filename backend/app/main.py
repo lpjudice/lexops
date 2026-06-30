@@ -17,8 +17,9 @@ from app.models import telegram_task as _telegram_task_model  # noqa: F401 — T
 from app.models import backoffice as _backoffice_model  # noqa: F401
 from app.models import precedentcheck as _precedentcheck_model  # noqa: F401
 from app.models import pagante as _pagante_model  # noqa: F401 — ensures Pagante table is registered
+from app.models import conselho as _conselho_model  # noqa: F401 — ensures Conselho tables are registered
 from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, fiscal, pagantes, config_fiscal, jurisprudencia, organizador, pje, prazos, processos, publico, reembolsos, reunioes, system, tarefas, telegram, telegram_andamentos, telegram_tasks, teses, usuarios, webhooks
-from app.routers import backoffice, precedentcheck
+from app.routers import backoffice, precedentcheck, conselho
 
 # Cria as tabelas (Alembic gerencia em produção; aqui facilita o dev)
 Base.metadata.create_all(bind=engine)
@@ -927,6 +928,7 @@ app.include_router(telegram.router)
 app.include_router(telegram_andamentos.router)
 app.include_router(telegram_tasks.router)
 app.include_router(precedentcheck.router)
+app.include_router(conselho.router)
 
 
 @app.on_event("startup")
