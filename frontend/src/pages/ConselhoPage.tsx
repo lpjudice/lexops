@@ -377,6 +377,7 @@ function ContatoAutocomplete({ onSelect }: { onSelect: (c: Contato) => void }) {
         const c = resultados.find((r) => r.id === v)
         if (c) onSelect(c)
       }}
+      onQueryChange={setQuery}
       placeholder="Buscar contato por nome, e-mail ou WhatsApp..."
       onCreate={(q) => criar.mutate(q)}
       createLabel="Criar contato"
@@ -564,6 +565,22 @@ function GuestComments({ contato, eventoId, onSaved }: { contato: Contato; event
   )
 }
 
+function EventCard({ evento, onClick }: { evento: Evento; onClick: () => void }) {
+  const presentes = evento.convidados.filter((c) => c.presenca_confirmada).length
+  const participantes = evento.convidados.filter((c) => c.participacao_confirmada).length
+  return (
+    <div className={cs.eventCard} onClick={onClick}>
+      <div className={cs.cardTitle}>{evento.nome}</div>
+      <div style={{ fontSize: 12, color: '#9ca3af' }}>{fmtData(evento.data)}</div>
+      <div className={cs.eventStats}>
+        <span>{evento.convidados.length} convidados</span>
+        <span>{presentes} presentes</span>
+        <span>{participantes} participaram</span>
+      </div>
+    </div>
+  )
+}
+
 function EventosSubTab() {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
@@ -573,11 +590,20 @@ function EventosSubTab() {
   const [masterMsg, setMasterMsg] = useState('')
   const [showAddModal, setShowAddModal] = useState(false)
   const [emailTarget, setEmailTarget] = useState<EmailSendTarget | null>(null)
+  const [mostrarPassados, setMostrarPassados] = useState(false)
 
   const { data: eventos = [], isLoading } = useQuery({
     queryKey: ['conselho-eventos'],
     queryFn: () => conselhoApi.listarEventos(),
   })
+
+  const hoje = new Date().toISOString().slice(0, 10)
+  const eventosProximos = eventos
+    .filter((e) => !e.data || e.data >= hoje)
+    .sort((a, b) => (a.data || '9999-12-31').localeCompare(b.data || '9999-12-31'))
+  const eventosPassados = eventos
+    .filter((e) => e.data && e.data < hoje)
+    .sort((a, b) => b.data!.localeCompare(a.data!))
 
   const criar = useMutation({
     mutationFn: conselhoApi.criarEvento,
@@ -762,23 +788,24 @@ function EventosSubTab() {
           {emailTarget && <EmailSendModal target={emailTarget} onClose={() => setEmailTarget(null)} />}
         </div>
       ) : isLoading ? <p>Carregando...</p> : (
-        <div className={cs.cardGrid}>
-          {eventos.map((e) => {
-            const presentes = e.convidados.filter((c) => c.presenca_confirmada).length
-            const participantes = e.convidados.filter((c) => c.participacao_confirmada).length
-            return (
-              <div key={e.id} className={cs.eventCard} onClick={() => setExpandido(e.id)}>
-                <div className={cs.cardTitle}>{e.nome}</div>
-                <div style={{ fontSize: 12, color: '#9ca3af' }}>{fmtData(e.data)}</div>
-                <div className={cs.eventStats}>
-                  <span>{e.convidados.length} convidados</span>
-                  <span>{presentes} presentes</span>
-                  <span>{participantes} participaram</span>
+        <div>
+          <div className={cs.cardGrid}>
+            {eventosProximos.map((e) => <EventCard key={e.id} evento={e} onClick={() => setExpandido(e.id)} />)}
+            {eventos.length === 0 && <div className={styles.empty}>Nenhum evento cadastrado</div>}
+          </div>
+
+          {eventosPassados.length > 0 && (
+            <div style={{ marginTop: 20 }}>
+              <button className={styles.btnSmall} onClick={() => setMostrarPassados((s) => !s)}>
+                {mostrarPassados ? 'Ocultar' : 'Mostrar'} eventos passados ({eventosPassados.length})
+              </button>
+              {mostrarPassados && (
+                <div className={cs.cardGrid} style={{ marginTop: 12 }}>
+                  {eventosPassados.map((e) => <EventCard key={e.id} evento={e} onClick={() => setExpandido(e.id)} />)}
                 </div>
-              </div>
-            )
-          })}
-          {eventos.length === 0 && <div className={styles.empty}>Nenhum evento cadastrado</div>}
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

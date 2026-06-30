@@ -21,11 +21,12 @@ interface Props {
   disabled?: boolean
   required?: boolean
   className?: string
+  onQueryChange?: (query: string) => void  // fired on every keystroke — for remote/async search
 }
 
 export default function ComboBox({
   options, value, onChange, placeholder = 'Buscar...', onCreate,
-  createLabel = 'Criar', disabled, required, className,
+  createLabel = 'Criar', disabled, required, className, onQueryChange,
 }: Props) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
@@ -66,6 +67,7 @@ export default function ComboBox({
   const handleInputChange = (v: string) => {
     setQuery(v)
     setOpen(true)
+    onQueryChange?.(v)
     // If cleared, reset value
     if (!v) onChange('')
   }
