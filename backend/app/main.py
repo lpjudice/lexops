@@ -842,8 +842,121 @@ def _seed_super_admin() -> None:
         db.close()
 
 
+def _seed_conselho_data() -> None:
+    """Popula diretrizes/pipeline/parceiros de exemplo (idempotente — só roda se vazio)."""
+    from datetime import date as _date
+
+    from app.database import SessionLocal
+    from app.models.conselho import (
+        ConselhoDiretriz,
+        ConselhoDiretrizSubtask,
+        ConselhoParceiro,
+        ConselhoPipeline,
+    )
+
+    db = SessionLocal()
+    try:
+        if db.query(ConselhoDiretriz).count() > 0:
+            return
+
+        diretrizes = [
+            dict(
+                categoria="operacional",
+                titulo="Reativar pipeline de oportunidades",
+                descricao="Criar e preencher a planilha de pipeline retroativamente (últimos 30 dias) e a partir de 30/06 registrar todo lead novo no mesmo dia. Revisão obrigatória toda sexta-feira.",
+                prazo=_date(2026, 7, 10),
+                status="Em andamento",
+                subtasks=[
+                    ("Criar estrutura da planilha de pipeline", True),
+                    ("Registrar retroativamente oportunidades dos últimos 30 dias", False),
+                    ("Definir rotina fixa de revisão de sexta-feira", False),
+                ],
+            ),
+            dict(
+                categoria="comercial",
+                titulo="Estruturar os 3 cafés como funil profissional",
+                descricao="Holding+ITCMD, Reforma Tributária (holding imobiliária) e Conflitos Societários. Pré-evento, durante (conteúdo técnico, zero pitch) e pós-evento (follow-up 48h).",
+                prazo=_date(2026, 7, 31),
+                status="Não iniciado",
+                subtasks=[
+                    ("Definir co-host para o café de Conflitos Societários", False),
+                    ("Montar lista de convidados (15-18 por evento)", False),
+                    ("Preparar e-mail de follow-up pós-evento (48h)", False),
+                ],
+            ),
+            dict(
+                categoria="parcerias",
+                titulo="Reativar as 4 parcerias frias",
+                descricao="Ligação (não mensagem) reconhecendo o desequilíbrio e oferecendo contrapartida concreta: co-host em café, palestra exclusiva para a base do parceiro, ou estrutura de indicação.",
+                prazo=_date(2026, 7, 15),
+                status="Não iniciado",
+                subtasks=[
+                    ("Ligar para os 4 parceiros esfriados", False),
+                    ("Definir plano de retribuição individual por parceiro", False),
+                ],
+            ),
+            dict(
+                categoria="operacional",
+                titulo="Métrica diária + rotina de decisão",
+                descricao="Escolher uma métrica diária única (follow-ups, reuniões qualificadas ou horas em atividade comercial) e registrar por 60 dias contínuos.",
+                prazo=_date(2026, 6, 30),
+                status="Em andamento",
+                subtasks=[
+                    ("Escolher a métrica diária única", True),
+                    ("Registrar diariamente por 60 dias", False),
+                ],
+            ),
+            dict(
+                categoria="juridico",
+                titulo="Blindagem ética dos cafés e parcerias",
+                descricao="Convite institucional sempre via parceiro/co-host (nunca lista própria de empresas desconhecidas) — Art. 39 do Código de Ética. Com não-advogados: vedada comissão; retribuição apenas não-monetária.",
+                prazo=_date(2026, 7, 31),
+                status="Não iniciado",
+                subtasks=[
+                    ("Confirmar que todo convite institucional sai do parceiro/co-host", False),
+                    ("Revisar roteiro de divulgação dos cafés sob ótica do Provimento 205/2021", False),
+                ],
+            ),
+        ]
+
+        for d in diretrizes:
+            subtasks = d.pop("subtasks")
+            diretriz = ConselhoDiretriz(**d)
+            db.add(diretriz)
+            db.flush()
+            for i, (texto, concluida) in enumerate(subtasks):
+                db.add(ConselhoDiretrizSubtask(diretriz_id=diretriz.id, texto=texto, concluida=concluida, ordem=i))
+
+        db.add(ConselhoPipeline(
+            nome="Empresa X",
+            origem="Palestra",
+            tema="Holding",
+            estagio="Proposta enviada",
+            ultimo_contato=_date(2026, 6, 20),
+            proxima_acao="Follow-up",
+            proxima_data=_date(2026, 6, 28),
+            ticket=100000,
+            probabilidade=60,
+        ))
+
+        parceiros = [
+            ("Parceiro quente atual", "Advogado", "Quente", "Manter cadência mensal", None),
+            ("Parceiro esfriado 1", "Assessor de investimentos", "Frio", "Convidar como co-host do café societário + palestra para a base", _date(2026, 7, 15)),
+            ("Parceiro esfriado 2", "Advogado", "Frio", "Propor contrato de colaboração profissional (art. 50 CED)", _date(2026, 7, 15)),
+            ("Parceiro esfriado 3", "Assessor de investimentos", "Frio", "Oferecer consultoria preventiva gratuita para estrutura própria", _date(2026, 7, 15)),
+            ("Parceiro esfriado 4", "Advogado", "Frio", "A definir no contato", _date(2026, 7, 15)),
+        ]
+        for nome, tipo, status_p, plano, proximo in parceiros:
+            db.add(ConselhoParceiro(nome=nome, tipo=tipo, status=status_p, plano=plano, proximo_contato=proximo))
+
+        db.commit()
+    finally:
+        db.close()
+
+
 _run_migrations()
 _seed_super_admin()
+_seed_conselho_data()
 
 app = FastAPI(
     title="Sui",

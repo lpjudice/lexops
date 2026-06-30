@@ -123,6 +123,7 @@ export interface Evento {
   propostas?: number | null
   fechados?: number | null
   mensagem_master?: string | null
+  dias_lembrete: number
   created_at: string
   updated_at: string
   convidados: Convidado[]
@@ -135,6 +136,7 @@ export interface EventoCreate {
   custo?: number
   receita?: number
   mensagem_master?: string
+  dias_lembrete?: number
 }
 
 export interface Parceiro {
@@ -172,6 +174,37 @@ export interface Metricas {
   contatos_participaram_ao_menos_uma_vez: number
   contatos_reconvidados: number
   contatos_reiterados: number
+}
+
+export interface AnexoLib {
+  id: string
+  nome_arquivo: string
+  content_type?: string | null
+  created_at: string
+}
+
+export type ModoDisparo = 'individual' | 'bcc_unico'
+
+export interface DispararEmailRequest {
+  destinatarios: { contato_id: string; evento_id?: string }[]
+  assunto: string
+  corpo_template: string
+  modo: ModoDisparo
+  evento_nome?: string
+  anexo_id?: string
+}
+
+export interface DisparoResultadoItem {
+  contato_id: string
+  nome: string
+  email?: string | null
+  sucesso: boolean
+  erro?: string | null
+}
+
+export interface DispararEmailResponse {
+  enviado_por: string
+  resultados: DisparoResultadoItem[]
 }
 
 export const conselhoApi = {
@@ -237,4 +270,17 @@ export const conselhoApi = {
   // IA
   melhorarIA: (campo: string, texto: string) =>
     api.post<{ texto: string }>('/conselho/ia/melhorar', { campo, texto }).then((r) => r.data),
+
+  // Anexos
+  listarAnexos: () => api.get<AnexoLib[]>('/conselho/anexos').then((r) => r.data),
+  uploadAnexo: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post<AnexoLib>('/conselho/anexos', form, { headers: { 'Content-Type': 'multipart/form-data' } }).then((r) => r.data)
+  },
+  deletarAnexo: (id: string) => api.delete(`/conselho/anexos/${id}`),
+
+  // Disparo de e-mail real
+  dispararEmail: (data: DispararEmailRequest) =>
+    api.post<DispararEmailResponse>('/conselho/disparar-email', data).then((r) => r.data),
 }

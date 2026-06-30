@@ -117,6 +117,7 @@ class ConselhoEvento(Base):
     propostas: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
     fechados: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
     mensagem_master: Mapped[str | None] = mapped_column(Text, nullable=True)
+    dias_lembrete: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -163,4 +164,15 @@ class ConselhoLog(Base):
     data: Mapped[date] = mapped_column(Date, nullable=False, default=date.today)
     numero: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     nota: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ConselhoAnexo(Base):
+    """Biblioteca de anexos (PDFs) do módulo, reutilizável em qualquer disparo (evento ou Disparador)."""
+    __tablename__ = "conselho_anexos"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    nome_arquivo: Mapped[str] = mapped_column(String(500), nullable=False)
+    storage_path: Mapped[str] = mapped_column(String(1000), nullable=False)
+    content_type: Mapped[str | None] = mapped_column(String(150), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

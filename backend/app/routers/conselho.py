@@ -1,12 +1,14 @@
 import uuid
 from datetime import date, timedelta
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.conselho import (
+    ConselhoAnexo,
     ConselhoContato,
     ConselhoContatoNota,
     ConselhoDiretriz,
@@ -19,6 +21,7 @@ from app.models.conselho import (
 )
 from app.models.usuario import Usuario
 from app.schemas.conselho import (
+    AnexoLibOut,
     ContatoCreate,
     ContatoNotaCreate,
     ContatoNotaOut,
@@ -30,6 +33,9 @@ from app.schemas.conselho import (
     DiretrizCreate,
     DiretrizOut,
     DiretrizUpdate,
+    DispararEmailRequest,
+    DispararEmailResponse,
+    DisparoResultadoItem,
     EventoCreate,
     EventoOut,
     EventoUpdate,
@@ -47,6 +53,9 @@ from app.schemas.conselho import (
 )
 
 router = APIRouter(prefix="/conselho", tags=["conselho"])
+
+UPLOADS_DIR = Path("/app/uploads/conselho/anexos")
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ── Diretrizes ────────────────────────────────────────────────────────────
@@ -604,3 +613,143 @@ def melhorar_ia(
     from app.services.ia_conselho import melhorar_texto
 
     return MelhorarIAResponse(texto=melhorar_texto(data.campo, data.texto))
+
+
+# ── Anexos (biblioteca do módulo) ──────────────────────────────────────────
+
+@router.get("/anexos", response_model=list[AnexoLibOut])
+def listar_anexos(
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    return db.query(ConselhoAnexo).order_by(ConselhoAnexo.created_at.desc()).all()
+
+
+@router.post("/anexos", response_model=AnexoLibOut, status_code=status.HTTP_201_CREATED)
+async def upload_anexo(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    if (file.content_type or "") != "application/pdf" and not (file.filename or "").lower().endswith(".pdf"):
+        raise HTTPException(status_code=415, detail="Apenas arquivos PDF são suportados")
+    conteudo = await file.read()
+    nome_arquivo = file.filename or "anexo.pdf"
+    destino = UPLOADS_DIR / f"{uuid.uuid4()}_{nome_arquivo}"
+    destino.write_bytes(conteudo)
+    anexo = ConselhoAnexo(nome_arquivo=nome_arquivo, storage_path=str(destino), content_type=file.content_type)
+    db.add(anexo)
+    db.commit()
+    db.refresh(anexo)
+    return anexo
+
+
+@router.delete("/anexos/{anexo_id}", status_code=status.HTTP_204_NO_CONTENT)
+def deletar_anexo(
+    anexo_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    anexo = db.query(ConselhoAnexo).filter(ConselhoAnexo.id == anexo_id).first()
+    if not anexo:
+        raise HTTPException(status_code=404, detail="Anexo não encontrado")
+    try:
+        Path(anexo.storage_path).unlink(missing_ok=True)
+    except Exception:
+        pass
+    db.delete(anexo)
+    db.commit()
+
+
+# ── Disparo de e-mail ───────────────────────────────────────────────────────
+
+def _aplicar_placeholders(template: str, primeiro: str, ultimo: str, evento: str) -> str:
+    return (
+        template.replace("{primeiro}", primeiro)
+        .replace("{ultimo}", ultimo or "")
+        .replace("{evento}", evento or "")
+    )
+
+
+@router.post("/disparar-email", response_model=DispararEmailResponse)
+def disparar_email(
+    data: DispararEmailRequest,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    from app.services.gmail_conselho import enviar_email
+
+    pdf_bytes: bytes | None = None
+    pdf_filename: str | None = None
+    if data.anexo_id:
+        anexo = db.query(ConselhoAnexo).filter(ConselhoAnexo.id == data.anexo_id).first()
+        if not anexo:
+            raise HTTPException(status_code=404, detail="Anexo não encontrado")
+        try:
+            pdf_bytes = Path(anexo.storage_path).read_bytes()
+            pdf_filename = anexo.nome_arquivo
+        except Exception:
+            raise HTTPException(status_code=500, detail="Não foi possível ler o anexo")
+
+    contatos: dict[uuid.UUID, ConselhoContato] = {}
+    for dest in data.destinatarios:
+        if dest.contato_id not in contatos:
+            c = db.query(ConselhoContato).filter(ConselhoContato.id == dest.contato_id).first()
+            if c:
+                contatos[dest.contato_id] = c
+
+    resultados: list[DisparoResultadoItem] = []
+    enviado_por = ""
+
+    if data.modo == "bcc_unico":
+        emails = [contatos[d.contato_id].email for d in data.destinatarios if contatos.get(d.contato_id) and contatos[d.contato_id].email]
+        if not emails:
+            raise HTTPException(status_code=400, detail="Nenhum destinatário com e-mail")
+        corpo_generico = (
+            data.corpo_template.replace("{primeiro}", "").replace("{ultimo}", "").replace("{evento}", data.evento_nome or "")
+        )
+        try:
+            enviado_por = enviar_email(
+                usuario, db,
+                to=emails[0],
+                subject=data.assunto,
+                html=corpo_generico.replace("\n", "<br>"),
+                pdf_bytes=pdf_bytes,
+                pdf_filename=pdf_filename,
+                bcc=emails[1:] if len(emails) > 1 else None,
+            )
+            for d in data.destinatarios:
+                c = contatos.get(d.contato_id)
+                if c:
+                    resultados.append(DisparoResultadoItem(contato_id=d.contato_id, nome=c.primeiro_nome, email=c.email, sucesso=True))
+        except Exception as exc:
+            for d in data.destinatarios:
+                c = contatos.get(d.contato_id)
+                resultados.append(DisparoResultadoItem(
+                    contato_id=d.contato_id, nome=c.primeiro_nome if c else "?", email=c.email if c else None,
+                    sucesso=False, erro=str(exc),
+                ))
+    else:
+        for dest in data.destinatarios:
+            c = contatos.get(dest.contato_id)
+            if not c:
+                resultados.append(DisparoResultadoItem(contato_id=dest.contato_id, nome="?", email=None, sucesso=False, erro="Contato não encontrado"))
+                continue
+            if not c.email:
+                resultados.append(DisparoResultadoItem(contato_id=c.id, nome=c.primeiro_nome, email=None, sucesso=False, erro="Contato sem e-mail"))
+                continue
+            corpo = _aplicar_placeholders(data.corpo_template, c.primeiro_nome, c.sobrenome or "", data.evento_nome or "")
+            try:
+                enviado_por = enviar_email(
+                    usuario, db,
+                    to=c.email,
+                    subject=data.assunto,
+                    html=corpo.replace("\n", "<br>"),
+                    pdf_bytes=pdf_bytes,
+                    pdf_filename=pdf_filename,
+                )
+                resultados.append(DisparoResultadoItem(contato_id=c.id, nome=c.primeiro_nome, email=c.email, sucesso=True))
+            except Exception as exc:
+                resultados.append(DisparoResultadoItem(contato_id=c.id, nome=c.primeiro_nome, email=c.email, sucesso=False, erro=str(exc)))
+
+    return DispararEmailResponse(enviado_por=enviado_por or "—", resultados=resultados)

@@ -178,6 +178,7 @@ class EventoCreate(BaseModel):
     custo: float | None = None
     receita: float | None = None
     mensagem_master: str | None = None
+    dias_lembrete: int = 2
 
 
 class EventoUpdate(BaseModel):
@@ -190,6 +191,7 @@ class EventoUpdate(BaseModel):
     propostas: int | None = None
     fechados: int | None = None
     mensagem_master: str | None = None
+    dias_lembrete: int | None = None
 
 
 class EventoOut(BaseModel):
@@ -204,6 +206,7 @@ class EventoOut(BaseModel):
     propostas: int | None
     fechados: int | None
     mensagem_master: str | None
+    dias_lembrete: int
     created_at: datetime
     updated_at: datetime
     convidados: list[ConvidadoOut] = []
@@ -267,3 +270,45 @@ class MelhorarIARequest(BaseModel):
 
 class MelhorarIAResponse(BaseModel):
     texto: str
+
+
+# ── Anexos (biblioteca do módulo) ──────────────────────────────────────────
+
+class AnexoLibOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    nome_arquivo: str
+    content_type: str | None
+    created_at: datetime
+
+
+# ── Disparo de e-mail ───────────────────────────────────────────────────────
+
+ModoDisparo = Literal["individual", "bcc_unico"]
+
+
+class DestinatarioDisparo(BaseModel):
+    contato_id: uuid.UUID
+    evento_id: uuid.UUID | None = None  # usado para resolver {evento} quando o contato pertence a vários
+
+
+class DispararEmailRequest(BaseModel):
+    destinatarios: list[DestinatarioDisparo]
+    assunto: str
+    corpo_template: str
+    modo: ModoDisparo = "individual"
+    evento_nome: str | None = None
+    anexo_id: uuid.UUID | None = None
+
+
+class DisparoResultadoItem(BaseModel):
+    contato_id: uuid.UUID
+    nome: str
+    email: str | None
+    sucesso: bool
+    erro: str | None = None
+
+
+class DispararEmailResponse(BaseModel):
+    enviado_por: str  # e-mail usado como remetente (usuário ou master)
+    resultados: list[DisparoResultadoItem]

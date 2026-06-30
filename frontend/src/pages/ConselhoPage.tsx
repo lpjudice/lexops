@@ -7,6 +7,7 @@ import type {
 } from '../api/conselho'
 import ComboBox from '../components/ComboBox'
 import type { ComboOption } from '../components/ComboBox'
+import Modal from '../components/Modal'
 import styles from './Page.module.css'
 import cs from './ConselhoPage.module.css'
 
@@ -38,13 +39,25 @@ function aplicarPlaceholders(template: string, primeiro: string, ultimo: string,
     .replaceAll('{evento}', evento)
 }
 
+function exportarCSV(nomeArquivo: string, headers: string[], rows: (string | number)[][]) {
+  const escape = (v: string | number) => `"${String(v ?? '').replace(/"/g, '""')}"`
+  const conteudo = [headers, ...rows].map((r) => r.map(escape).join(';')).join('\n')
+  const blob = new Blob(['﻿' + conteudo], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = nomeArquivo
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 export default function ConselhoPage() {
   const [aba, setAba] = useState<'diretrizes' | 'pipeline' | 'eventos' | 'parcerias' | 'metricas'>('diretrizes')
 
   return (
     <div>
       <div className={styles.pageHeader}>
-        <div className={styles.pageTitle}>Painel do <strong>Conselho</strong></div>
+        <div className={styles.pageTitle}>Painel de <strong>Expansão</strong></div>
       </div>
       <div className={cs.tabs}>
         {([
@@ -371,6 +384,180 @@ function ContatoAutocomplete({ onSelect }: { onSelect: (c: Contato) => void }) {
   )
 }
 
+/** Modal: busca/cria contato por nome e captura e-mail/WhatsApp antes de adicionar ao evento.
+ *  Se o contato já existir, os campos vêm pré-preenchidos e são atualizados ao salvar (dedupe). */
+function AdicionarConvidadoModal({ onClose, onAdded }: { onClose: () => void; onAdded: (contato: Contato) => void }) {
+  const qc = useQueryClient()
+  const [selecionado, setSelecionado] = useState<Contato | null>(null)
+  const [email, setEmail] = useState('')
+  const [whatsapp, setWhatsapp] = useState('')
+
+  const salvar = useMutation({
+    mutationFn: async () => {
+      if (!selecionado) throw new Error('Selecione ou crie um contato')
+      const atualizado = await conselhoApi.atualizarContato(selecionado.id, {
+        email: email || undefined,
+        whatsapp: whatsapp || undefined,
+      })
+      return atualizado
+    },
+    onSuccess: (c) => {
+      qc.invalidateQueries({ queryKey: ['conselho-contatos'] })
+      onAdded(c)
+      onClose()
+    },
+  })
+
+  return (
+    <Modal title="Adicionar convidado" onClose={onClose}>
+      {!selecionado ? (
+        <div className={styles.formRow}>
+          <label className={styles.formLabel}>Nome</label>
+          <ContatoAutocomplete onSelect={(c) => { setSelecionado(c); setEmail(c.email || ''); setWhatsapp(c.whatsapp || '') }} />
+        </div>
+      ) : (
+        <div>
+          <p style={{ fontSize: 13, marginBottom: 12 }}>
+            <strong>{selecionado.primeiro_nome} {selecionado.sobrenome || ''}</strong>
+            {selecionado.eventos.length > 0 && <span style={{ color: '#9ca3af' }}> — já participou de: {selecionado.eventos.join(', ')}</span>}
+          </p>
+          <div className={styles.formRow}>
+            <label className={styles.formLabel}>E-mail</label>
+            <input className={styles.input} value={email} onChange={(e) => setEmail(e.target.value)} />
+          </div>
+          <div className={styles.formRow}>
+            <label className={styles.formLabel}>WhatsApp</label>
+            <input className={styles.input} value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} placeholder="DDI+DDD+número" />
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className={styles.btnPrimary} disabled={salvar.isPending} onClick={() => salvar.mutate()}>Salvar e adicionar</button>
+            <button className={styles.btnSmall} onClick={() => setSelecionado(null)}>Trocar contato</button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  )
+}
+
+/** Seletor de anexo PDF reutilizável em qualquer tela de disparo do módulo (upload novo ou da biblioteca). */
+function AnexoPicker({ anexoId, onChange }: { anexoId: string; onChange: (id: string) => void }) {
+  const qc = useQueryClient()
+  const { data: anexos = [] } = useQuery({ queryKey: ['conselho-anexos'], queryFn: () => conselhoApi.listarAnexos() })
+  const upload = useMutation({
+    mutationFn: (file: File) => conselhoApi.uploadAnexo(file),
+    onSuccess: (a) => {
+      qc.invalidateQueries({ queryKey: ['conselho-anexos'] })
+      onChange(a.id)
+    },
+  })
+  return (
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+      <select className={styles.input} style={{ maxWidth: 240 }} value={anexoId} onChange={(e) => onChange(e.target.value)}>
+        <option value="">Sem anexo</option>
+        {anexos.map((a) => <option key={a.id} value={a.id}>{a.nome_arquivo}</option>)}
+      </select>
+      <label className={styles.btnSmall} style={{ cursor: 'pointer' }}>
+        + Enviar PDF
+        <input type="file" accept="application/pdf" style={{ display: 'none' }} onChange={(e) => { if (e.target.files?.[0]) upload.mutate(e.target.files[0]) }} />
+      </label>
+    </div>
+  )
+}
+
+interface EmailSendTarget {
+  contatoId: string
+  email: string
+  nome: string
+  assunto: string
+  corpo: string
+  eventoId?: string
+  eventoNome?: string
+}
+
+/** Modal de confirmação de envio real (via backend/Gmail) — substitui o antigo link mailto:. */
+function EmailSendModal({ target, onClose }: { target: EmailSendTarget; onClose: () => void }) {
+  const [assunto, setAssunto] = useState(target.assunto)
+  const [corpo, setCorpo] = useState(target.corpo)
+  const [anexoId, setAnexoId] = useState('')
+  const [resultado, setResultado] = useState<string | null>(null)
+
+  const enviar = useMutation({
+    mutationFn: () => conselhoApi.dispararEmail({
+      destinatarios: [{ contato_id: target.contatoId, evento_id: target.eventoId }],
+      assunto,
+      corpo_template: corpo,
+      modo: 'individual',
+      evento_nome: target.eventoNome,
+      anexo_id: anexoId || undefined,
+    }),
+    onSuccess: (r) => {
+      const item = r.resultados[0]
+      setResultado(item?.sucesso ? `Enviado com sucesso (via ${r.enviado_por}).` : `Falha: ${item?.erro || 'erro desconhecido'}`)
+    },
+    onError: (e: Error) => setResultado(`Falha: ${e.message}`),
+  })
+
+  return (
+    <Modal title={`Enviar e-mail para ${target.nome}`} onClose={onClose}>
+      <div className={styles.formRow}>
+        <label className={styles.formLabel}>Para</label>
+        <input className={styles.input} value={target.email} disabled />
+      </div>
+      <div className={styles.formRow}>
+        <label className={styles.formLabel}>Assunto</label>
+        <input className={styles.input} value={assunto} onChange={(e) => setAssunto(e.target.value)} />
+      </div>
+      <div className={styles.formRow}>
+        <label className={styles.formLabel}>Mensagem</label>
+        <textarea className={cs.textarea} style={{ minHeight: 140 }} value={corpo} onChange={(e) => setCorpo(e.target.value)} />
+      </div>
+      <div className={styles.formRow}>
+        <label className={styles.formLabel}>Anexo (PDF)</label>
+        <AnexoPicker anexoId={anexoId} onChange={setAnexoId} />
+      </div>
+      {resultado && <p style={{ fontSize: 13, marginBottom: 10 }}>{resultado}</p>}
+      <button className={styles.btnPrimary} disabled={enviar.isPending} onClick={() => enviar.mutate()}>
+        {enviar.isPending ? 'Enviando...' : 'Enviar'}
+      </button>
+    </Modal>
+  )
+}
+
+const TEMPLATE_LEMBRETE = (dias: number) =>
+  `Olá {primeiro}, passando para lembrar que faltam ${dias} dia(s) para o {evento}. Confirma presença?`
+const TEMPLATE_POS_EVENTO =
+  'Olá {primeiro}, muito obrigado por participar do {evento}! Segue em anexo um material adicional que preparamos.'
+
+function GuestComments({ contato, eventoId, onSaved }: { contato: Contato; eventoId: string; onSaved: () => void }) {
+  const [aberto, setAberto] = useState(false)
+  const [texto, setTexto] = useState('')
+  const notasDoEvento = contato.notas.filter((n) => n.evento_id === eventoId)
+
+  const addNota = useMutation({
+    mutationFn: () => conselhoApi.addNotaContato(contato.id, texto, eventoId),
+    onSuccess: () => { setTexto(''); onSaved() },
+  })
+
+  return (
+    <div style={{ flexBasis: '100%', marginTop: 6 }}>
+      <button className={styles.btnSmall} onClick={() => setAberto((a) => !a)}>
+        {aberto ? 'Fechar comentários' : `Comentários (${notasDoEvento.length})`}
+      </button>
+      {aberto && (
+        <div style={{ marginTop: 8 }}>
+          {notasDoEvento.map((n) => (
+            <div key={n.id} style={{ fontSize: 12.5, padding: '4px 0', borderBottom: '1px solid #eee' }}>{n.texto}</div>
+          ))}
+          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+            <input className={styles.input} style={{ flex: 1 }} placeholder="Novo comentário sobre este convidado neste evento" value={texto} onChange={(e) => setTexto(e.target.value)} />
+            <button className={styles.btnSmall} disabled={!texto || addNota.isPending} onClick={() => addNota.mutate()}>Salvar</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function EventosSubTab() {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
@@ -378,6 +565,8 @@ function EventosSubTab() {
   const [data, setData] = useState('')
   const [expandido, setExpandido] = useState<string | null>(null)
   const [masterMsg, setMasterMsg] = useState('')
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [emailTarget, setEmailTarget] = useState<EmailSendTarget | null>(null)
 
   const { data: eventos = [], isLoading } = useQuery({
     queryKey: ['conselho-eventos'],
@@ -401,7 +590,7 @@ function EventosSubTab() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['conselho-eventos'] }),
   })
   const atualizarConvidado = useMutation({
-    mutationFn: ({ id, payload }: { id: string; payload: { presenca_confirmada?: boolean; participacao_confirmada?: boolean } }) =>
+    mutationFn: ({ id, payload }: { id: string; payload: { presenca_confirmada?: boolean; participacao_confirmada?: boolean; mensagem_pessoal?: string } }) =>
       conselhoApi.atualizarConvidado(id, payload),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['conselho-eventos'] }),
   })
@@ -411,6 +600,31 @@ function EventosSubTab() {
   })
 
   const eventoExpandido = eventos.find((e) => e.id === expandido)
+  const templateAtual = masterMsg || eventoExpandido?.mensagem_master || ''
+
+  async function aplicarATodos() {
+    if (!eventoExpandido) return
+    for (const cv of eventoExpandido.convidados) {
+      const texto = aplicarPlaceholders(templateAtual, cv.contato.primeiro_nome, cv.contato.sobrenome || '', eventoExpandido.nome)
+      await conselhoApi.atualizarConvidado(cv.id, { mensagem_pessoal: texto })
+    }
+    qc.invalidateQueries({ queryKey: ['conselho-eventos'] })
+  }
+
+  function exportarPresenca() {
+    if (!eventoExpandido) return
+    exportarCSV(
+      `presenca_${eventoExpandido.nome.replace(/\s+/g, '_')}.csv`,
+      ['Nome', 'E-mail', 'WhatsApp', 'Presença', 'Participação'],
+      eventoExpandido.convidados.map((cv) => [
+        `${cv.contato.primeiro_nome} ${cv.contato.sobrenome || ''}`.trim(),
+        cv.contato.email || '',
+        cv.contato.whatsapp || '',
+        cv.presenca_confirmada ? 'Sim' : 'Não',
+        cv.participacao_confirmada ? 'Sim' : 'Não',
+      ]),
+    )
+  }
 
   return (
     <div>
@@ -439,53 +653,107 @@ function EventosSubTab() {
           <h3 style={{ marginBottom: 4 }}>{eventoExpandido.nome}</h3>
           <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 14 }}>{fmtData(eventoExpandido.data)}</p>
 
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div className={styles.fieldGroup}>
+              <span>Lembrete (dias antes)</span>
+              <input
+                type="number"
+                className={styles.input}
+                style={{ maxWidth: 90 }}
+                defaultValue={eventoExpandido.dias_lembrete}
+                onBlur={(e) => atualizar.mutate({ id: eventoExpandido.id, payload: { dias_lembrete: Number(e.target.value) } })}
+              />
+            </div>
+            <button className={styles.btnSmall} onClick={() => setMasterMsg(TEMPLATE_LEMBRETE(eventoExpandido.dias_lembrete))}>
+              Usar modelo: Lembrete
+            </button>
+            <button className={styles.btnSmall} onClick={() => setMasterMsg(TEMPLATE_POS_EVENTO)}>
+              Usar modelo: Pós-evento (agradecimento)
+            </button>
+          </div>
+
           <div className={styles.formRow}>
             <label className={styles.formLabel}>Mensagem master (placeholders: {'{primeiro}'}, {'{ultimo}'}, {'{evento}'})</label>
             <textarea
               className={cs.textarea}
-              value={masterMsg || eventoExpandido.mensagem_master || ''}
+              value={templateAtual}
               onChange={(e) => setMasterMsg(e.target.value)}
-              onBlur={() => atualizar.mutate({ id: eventoExpandido.id, payload: { mensagem_master: masterMsg || eventoExpandido.mensagem_master || '' } })}
+              onBlur={() => atualizar.mutate({ id: eventoExpandido.id, payload: { mensagem_master: templateAtual } })}
             />
+            <button className={styles.btnSmall} style={{ marginTop: 6, alignSelf: 'flex-start' }} onClick={aplicarATodos}>
+              Aplicar a todos os convidados
+            </button>
           </div>
 
-          <div className={styles.formRow} style={{ maxWidth: 420 }}>
-            <label className={styles.formLabel}>Adicionar convidado</label>
-            <ContatoAutocomplete onSelect={(c) => addConvidado.mutate({ eventoId: eventoExpandido.id, contatoId: c.id })} />
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', marginBottom: 10 }}>
+            <div className={styles.formRow} style={{ maxWidth: 420, flex: 1, marginBottom: 0 }}>
+              <label className={styles.formLabel}>Adicionar convidado</label>
+              <button className={styles.btnSmall} onClick={() => setShowAddModal(true)}>+ Adicionar convidado</button>
+            </div>
+            <button className={styles.btnSmall} onClick={exportarPresenca}>Exportar lista de presença (CSV)</button>
           </div>
 
-          <div className={styles.tableCard} style={{ marginTop: 14 }}>
+          {showAddModal && (
+            <AdicionarConvidadoModal
+              onClose={() => setShowAddModal(false)}
+              onAdded={(c) => addConvidado.mutate({ eventoId: eventoExpandido.id, contatoId: c.id })}
+            />
+          )}
+
+          <div className={styles.tableCard} style={{ marginTop: 14, padding: '6px 14px' }}>
             {eventoExpandido.convidados.length === 0 && <div className={styles.empty}>Nenhum convidado ainda</div>}
-            {eventoExpandido.convidados.map((cv) => (
-              <div key={cv.id} className={cs.guestRow}>
-                <span className={cs.guestName}>{cv.contato.primeiro_nome} {cv.contato.sobrenome || ''}</span>
-                <label className={cs.checkboxLabel}>
-                  <input type="checkbox" checked={cv.presenca_confirmada} onChange={(e) => atualizarConvidado.mutate({ id: cv.id, payload: { presenca_confirmada: e.target.checked } })} />
-                  Presença
-                </label>
-                <label className={cs.checkboxLabel}>
-                  <input type="checkbox" checked={cv.participacao_confirmada} onChange={(e) => atualizarConvidado.mutate({ id: cv.id, payload: { participacao_confirmada: e.target.checked } })} />
-                  Participação
-                </label>
-                {cv.contato.whatsapp && (
-                  <a className={`${cs.linkBtn} ${cs.linkWhatsapp}`} target="_blank" rel="noreferrer"
-                     href={`https://wa.me/${cv.contato.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(aplicarPlaceholders(eventoExpandido.mensagem_master || '', cv.contato.primeiro_nome, cv.contato.sobrenome || '', eventoExpandido.nome))}`}>
-                    WhatsApp
-                  </a>
-                )}
-                {cv.contato.email && (
-                  <a className={`${cs.linkBtn} ${cs.linkEmail}`}
-                     href={`mailto:${cv.contato.email}?subject=${encodeURIComponent(eventoExpandido.nome)}&body=${encodeURIComponent(aplicarPlaceholders(eventoExpandido.mensagem_master || '', cv.contato.primeiro_nome, cv.contato.sobrenome || '', eventoExpandido.nome))}`}>
-                    E-mail
-                  </a>
-                )}
-                <button className={styles.btnDanger} onClick={() => removerConvidado.mutate(cv.id)}>Remover</button>
-              </div>
-            ))}
+            {eventoExpandido.convidados.map((cv) => {
+              const mensagemResolvida = cv.mensagem_pessoal || aplicarPlaceholders(templateAtual, cv.contato.primeiro_nome, cv.contato.sobrenome || '', eventoExpandido.nome)
+              return (
+                <div key={cv.id} style={{ borderBottom: '1px solid #f5f5f5', padding: '8px 0' }}>
+                  <div className={cs.guestRow} style={{ borderBottom: 'none', padding: 0, flexWrap: 'wrap' }}>
+                    <span className={cs.guestName}>{cv.contato.primeiro_nome} {cv.contato.sobrenome || ''}</span>
+                    <label className={cs.checkboxLabel}>
+                      <input type="checkbox" checked={cv.presenca_confirmada} onChange={(e) => atualizarConvidado.mutate({ id: cv.id, payload: { presenca_confirmada: e.target.checked } })} />
+                      Presença
+                    </label>
+                    <label className={cs.checkboxLabel}>
+                      <input type="checkbox" checked={cv.participacao_confirmada} onChange={(e) => atualizarConvidado.mutate({ id: cv.id, payload: { participacao_confirmada: e.target.checked } })} />
+                      Participação
+                    </label>
+                    {cv.contato.whatsapp && (
+                      <a className={`${cs.linkBtn} ${cs.linkWhatsapp}`} target="_blank" rel="noreferrer"
+                         href={`https://wa.me/${cv.contato.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(mensagemResolvida)}`}>
+                        WhatsApp
+                      </a>
+                    )}
+                    {cv.contato.email && (
+                      <button
+                        className={`${cs.linkBtn} ${cs.linkEmail}`}
+                        style={{ border: 'none', cursor: 'pointer' }}
+                        onClick={() => setEmailTarget({
+                          contatoId: cv.contato.id, email: cv.contato.email!, nome: cv.contato.primeiro_nome,
+                          assunto: eventoExpandido.nome, corpo: mensagemResolvida,
+                          eventoId: eventoExpandido.id, eventoNome: eventoExpandido.nome,
+                        })}
+                      >
+                        E-mail
+                      </button>
+                    )}
+                    <button className={styles.btnDanger} onClick={() => removerConvidado.mutate(cv.id)}>Remover</button>
+                  </div>
+                  <textarea
+                    className={cs.textarea}
+                    style={{ marginTop: 6, fontSize: 12 }}
+                    placeholder="Mensagem individual (editável)"
+                    defaultValue={cv.mensagem_pessoal || ''}
+                    onBlur={(e) => atualizarConvidado.mutate({ id: cv.id, payload: { mensagem_pessoal: e.target.value } })}
+                  />
+                  <GuestComments contato={cv.contato} eventoId={eventoExpandido.id} onSaved={() => qc.invalidateQueries({ queryKey: ['conselho-eventos'] })} />
+                </div>
+              )
+            })}
           </div>
           <button className={styles.btnDanger} style={{ marginTop: 14 }} onClick={() => { if (confirm('Excluir evento?')) { deletar.mutate(eventoExpandido.id); setExpandido(null) } }}>
             Excluir evento
           </button>
+
+          {emailTarget && <EmailSendModal target={emailTarget} onClose={() => setEmailTarget(null)} />}
         </div>
       ) : isLoading ? <p>Carregando...</p> : (
         <div className={cs.cardGrid}>
@@ -522,6 +790,7 @@ function ContatosSubTab() {
   const [sobrenome, setSobrenome] = useState('')
   const [email, setEmail] = useState('')
   const [whatsapp, setWhatsapp] = useState('')
+  const [emailTarget, setEmailTarget] = useState<EmailSendTarget | null>(null)
 
   const { data: eventos = [] } = useQuery({ queryKey: ['conselho-eventos'], queryFn: () => conselhoApi.listarEventos() })
   const { data: contatos = [], isLoading } = useQuery({
@@ -554,6 +823,16 @@ function ContatosSubTab() {
       <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
         <button className={styles.btnPrimary} onClick={() => setShowNovo((s) => !s)}>
           {showNovo ? 'Cancelar' : '+ Novo contato'}
+        </button>
+        <button
+          className={styles.btnSmall}
+          onClick={() => exportarCSV(
+            'contatos.csv',
+            ['Nome', 'E-mail', 'WhatsApp', 'Eventos'],
+            contatos.map((c) => [`${c.primeiro_nome} ${c.sobrenome || ''}`.trim(), c.email || '', c.whatsapp || '', c.eventos.join(', ')]),
+          )}
+        >
+          Exportar CSV
         </button>
         <div className={styles.fieldGroup}>
           <span>Evento</span>
@@ -596,7 +875,15 @@ function ContatosSubTab() {
                 <span className={cs.guestName}>{c.primeiro_nome} {c.sobrenome || ''}</span>
                 <span style={{ fontSize: 12, color: '#9ca3af' }}>{c.eventos.join(', ') || 'Sem evento'}</span>
                 {c.whatsapp && <a className={`${cs.linkBtn} ${cs.linkWhatsapp}`} onClick={(e) => e.stopPropagation()} target="_blank" rel="noreferrer" href={`https://wa.me/${c.whatsapp.replace(/\D/g, '')}`}>WhatsApp</a>}
-                {c.email && <a className={`${cs.linkBtn} ${cs.linkEmail}`} onClick={(e) => e.stopPropagation()} href={`mailto:${c.email}`}>E-mail</a>}
+                {c.email && (
+                  <button
+                    className={`${cs.linkBtn} ${cs.linkEmail}`}
+                    style={{ border: 'none', cursor: 'pointer' }}
+                    onClick={(e) => { e.stopPropagation(); setEmailTarget({ contatoId: c.id, email: c.email!, nome: c.primeiro_nome, assunto: '', corpo: c.mensagem_global || '' }) }}
+                  >
+                    E-mail
+                  </button>
+                )}
                 <button className={styles.btnDanger} onClick={(e) => { e.stopPropagation(); if (confirm('Excluir contato?')) deletar.mutate(c.id) }}>Excluir</button>
               </div>
               {expandido === c.id && (
@@ -625,6 +912,7 @@ function ContatosSubTab() {
           {contatos.length === 0 && <div className={styles.empty}>Nenhum contato encontrado</div>}
         </div>
       )}
+      {emailTarget && <EmailSendModal target={emailTarget} onClose={() => setEmailTarget(null)} />}
     </div>
   )
 }
@@ -636,6 +924,11 @@ function DisparadorSubTab() {
   const [busca, setBusca] = useState('')
   const [msgWhatsapp, setMsgWhatsapp] = useState('Olá {primeiro}, tudo bem? Te convido para o {evento}!')
   const [msgEmail, setMsgEmail] = useState('Olá {primeiro},\n\nTe convido para o {evento}.\n\nAbraço.')
+  const [assuntoEmail, setAssuntoEmail] = useState('Convite')
+  const [modoEnvio, setModoEnvio] = useState<'individual' | 'bcc_unico'>('individual')
+  const [anexoId, setAnexoId] = useState('')
+  const [enviando, setEnviando] = useState(false)
+  const [resultados, setResultados] = useState<{ nome: string; sucesso: boolean; erro?: string | null }[] | null>(null)
 
   const contatosPorEvento = useMemo(() => {
     const map = new Map<string, Contato[]>()
@@ -682,6 +975,27 @@ function DisparadorSubTab() {
 
   const selecionados = todosContatos.filter((c) => contatosSelecionados.has(c.id))
 
+  async function disparar() {
+    setEnviando(true)
+    setResultados(null)
+    try {
+      const destinatarios = selecionados
+        .filter((c) => c.email)
+        .map((c) => ({ contato_id: c.id, evento_id: undefined }))
+      const r = await conselhoApi.dispararEmail({
+        destinatarios,
+        assunto: assuntoEmail,
+        corpo_template: msgEmail,
+        modo: modoEnvio,
+        evento_nome: selecionados[0] ? (selecionados[0] as Contato & { eventoNome?: string }).eventoNome : undefined,
+        anexo_id: anexoId || undefined,
+      })
+      setResultados(r.resultados.map((res) => ({ nome: res.nome, sucesso: res.sucesso, erro: res.erro })))
+    } finally {
+      setEnviando(false)
+    }
+  }
+
   return (
     <div>
       <h4 style={{ marginBottom: 8 }}>1. Selecione eventos</h4>
@@ -698,6 +1012,10 @@ function DisparadorSubTab() {
       <div className={styles.formRow}>
         <label className={styles.formLabel}>WhatsApp</label>
         <textarea className={cs.textarea} value={msgWhatsapp} onChange={(e) => setMsgWhatsapp(e.target.value)} />
+      </div>
+      <div className={styles.formRow}>
+        <label className={styles.formLabel}>Assunto do e-mail</label>
+        <input className={styles.input} value={assuntoEmail} onChange={(e) => setAssuntoEmail(e.target.value)} />
       </div>
       <div className={styles.formRow}>
         <label className={styles.formLabel}>E-mail</label>
@@ -720,24 +1038,33 @@ function DisparadorSubTab() {
         <div className={styles.empty}>Selecione ao menos um contato</div>
       ) : (
         <div>
-          <div style={{ marginBottom: 10 }}>
-            <a
-              className={`${cs.linkBtn} ${cs.linkEmail}`}
-              href={`mailto:?bcc=${selecionados.filter((c) => c.email).map((c) => c.email).join(',')}&subject=Convite&body=${encodeURIComponent(msgEmail)}`}
-            >
-              E-mail único (todos em BCC)
-            </a>
+          <div style={{ display: 'flex', gap: 16, marginBottom: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <label className={cs.checkboxLabel}>
+              <input type="radio" checked={modoEnvio === 'individual'} onChange={() => setModoEnvio('individual')} />
+              Envio individual (personalizado por pessoa)
+            </label>
+            <label className={cs.checkboxLabel}>
+              <input type="radio" checked={modoEnvio === 'bcc_unico'} onChange={() => setModoEnvio('bcc_unico')} />
+              E-mail único em BCC (não personaliza o nome)
+            </label>
           </div>
-          <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 6 }}>E-mail individual:</div>
-          <div style={{ marginBottom: 14 }}>
-            {selecionados.filter((c) => c.email).map((c) => (
-              <a key={c.id} className={`${cs.linkBtn} ${cs.linkEmail}`}
-                 href={`mailto:${c.email}?subject=Convite&body=${encodeURIComponent(aplicarPlaceholders(msgEmail, c.primeiro_nome, c.sobrenome || '', (c as Contato & { eventoNome?: string }).eventoNome || ''))}`}>
-                {c.primeiro_nome}
-              </a>
-            ))}
+          <div className={styles.formRow} style={{ maxWidth: 420 }}>
+            <label className={styles.formLabel}>Anexo (PDF, opcional — vale para qualquer disparo deste menu)</label>
+            <AnexoPicker anexoId={anexoId} onChange={setAnexoId} />
           </div>
-          <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 6 }}>WhatsApp individual:</div>
+          <button className={styles.btnPrimary} disabled={enviando} onClick={disparar} style={{ marginBottom: 14 }}>
+            {enviando ? 'Enviando...' : `Enviar e-mail real para ${selecionados.filter((c) => c.email).length} destinatário(s)`}
+          </button>
+          {resultados && (
+            <div className={styles.tableCard} style={{ marginBottom: 14, padding: '8px 14px' }}>
+              {resultados.map((r, i) => (
+                <div key={i} style={{ fontSize: 12.5, padding: '3px 0', color: r.sucesso ? '#15803d' : '#b91c1c' }}>
+                  {r.sucesso ? '✓' : '✗'} {r.nome}{!r.sucesso && r.erro ? ` — ${r.erro}` : ''}
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 6 }}>WhatsApp individual (link manual):</div>
           <div>
             {selecionados.filter((c) => c.whatsapp).map((c) => (
               <a key={c.id} className={`${cs.linkBtn} ${cs.linkWhatsapp}`} target="_blank" rel="noreferrer"
@@ -850,7 +1177,11 @@ function MetricasTab() {
         <div className={cs.metricCard}><div className={cs.metricValue}>{metricas?.contatos_reiterados ?? '—'}</div><div className={cs.metricLabel}>Reiterados (2x+)</div></div>
       </div>
 
-      <h4 style={{ marginBottom: 8 }}>Registro diário</h4>
+      <h4 style={{ marginBottom: 4 }}>Registro diário</h4>
+      <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 12, maxWidth: 560 }}>
+        Escolha uma métrica única para acompanhar todo dia (ex.: nº de follow-ups feitos, reuniões qualificadas ou horas em atividade comercial)
+        e registre esse número diariamente — o hábito importa mais que o valor em si. A "nota" é um comentário livre opcional do dia.
+      </p>
       <div style={{ display: 'flex', gap: 10, marginBottom: 16, alignItems: 'flex-end' }}>
         <input className={styles.input} style={{ maxWidth: 140 }} type="number" placeholder="Número" value={numero} onChange={(e) => setNumero(e.target.value)} />
         <input className={styles.input} style={{ maxWidth: 240 }} placeholder="Nota (opcional)" value={nota} onChange={(e) => setNota(e.target.value)} />

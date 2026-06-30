@@ -72,7 +72,7 @@ const navGroups: NavGroup[] = [
       { to: '/atendimentos', label: 'Atendimentos', Icon: Handshake },
       { to: '/tarefas', label: 'Tarefas', Icon: CheckSquare },
       { to: '/reunioes', label: 'Reuniões', Icon: Video },
-      { to: '/conselho', label: 'Conselho', Icon: Users2 },
+      { to: '/conselho', label: 'Expansão', Icon: Users2 },
     ],
   },
   {
@@ -146,7 +146,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/atendimentos': 'Atendimentos',
   '/tarefas': 'Tarefas',
   '/reunioes': 'Reuniões',
-  '/conselho': 'Conselho',
+  '/conselho': 'Expansão',
   '/configuracoes': 'Configurações',
 }
 
