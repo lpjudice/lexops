@@ -389,6 +389,7 @@ function ContatoAutocomplete({ onSelect }: { onSelect: (c: Contato) => void }) {
 function AdicionarConvidadoModal({ onClose, onAdded }: { onClose: () => void; onAdded: (contato: Contato) => void }) {
   const qc = useQueryClient()
   const [selecionado, setSelecionado] = useState<Contato | null>(null)
+  const [empresa, setEmpresa] = useState('')
   const [email, setEmail] = useState('')
   const [whatsapp, setWhatsapp] = useState('')
 
@@ -396,6 +397,7 @@ function AdicionarConvidadoModal({ onClose, onAdded }: { onClose: () => void; on
     mutationFn: async () => {
       if (!selecionado) throw new Error('Selecione ou crie um contato')
       const atualizado = await conselhoApi.atualizarContato(selecionado.id, {
+        empresa: empresa || undefined,
         email: email || undefined,
         whatsapp: whatsapp || undefined,
       })
@@ -413,7 +415,7 @@ function AdicionarConvidadoModal({ onClose, onAdded }: { onClose: () => void; on
       {!selecionado ? (
         <div className={styles.formRow}>
           <label className={styles.formLabel}>Nome</label>
-          <ContatoAutocomplete onSelect={(c) => { setSelecionado(c); setEmail(c.email || ''); setWhatsapp(c.whatsapp || '') }} />
+          <ContatoAutocomplete onSelect={(c) => { setSelecionado(c); setEmpresa(c.empresa || ''); setEmail(c.email || ''); setWhatsapp(c.whatsapp || '') }} />
         </div>
       ) : (
         <div>
@@ -421,6 +423,10 @@ function AdicionarConvidadoModal({ onClose, onAdded }: { onClose: () => void; on
             <strong>{selecionado.primeiro_nome} {selecionado.sobrenome || ''}</strong>
             {selecionado.eventos.length > 0 && <span style={{ color: '#9ca3af' }}> — já participou de: {selecionado.eventos.join(', ')}</span>}
           </p>
+          <div className={styles.formRow}>
+            <label className={styles.formLabel}>Empresa</label>
+            <input className={styles.input} value={empresa} onChange={(e) => setEmpresa(e.target.value)} />
+          </div>
           <div className={styles.formRow}>
             <label className={styles.formLabel}>E-mail</label>
             <input className={styles.input} value={email} onChange={(e) => setEmail(e.target.value)} />
@@ -779,6 +785,49 @@ function EventosSubTab() {
   )
 }
 
+function ContatoExpandPanel({ contato, onSaved }: { contato: Contato; onSaved: () => void }) {
+  const [empresa, setEmpresa] = useState(contato.empresa || '')
+  const [email, setEmail] = useState(contato.email || '')
+  const [whatsapp, setWhatsapp] = useState(contato.whatsapp || '')
+  const [mensagem, setMensagem] = useState(contato.mensagem_global || '')
+
+  const salvar = useMutation({
+    mutationFn: () => conselhoApi.atualizarContato(contato.id, {
+      empresa: empresa || undefined, email: email || undefined, whatsapp: whatsapp || undefined, mensagem_global: mensagem || undefined,
+    }),
+    onSuccess: onSaved,
+  })
+
+  return (
+    <div style={{ padding: '10px 18px 16px', background: '#fafafa' }}>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+        <input className={styles.input} style={{ maxWidth: 200 }} value={empresa} onChange={(e) => setEmpresa(e.target.value)} placeholder="Empresa" />
+        <input className={styles.input} style={{ maxWidth: 200 }} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="E-mail" />
+        <input className={styles.input} style={{ maxWidth: 200 }} value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} placeholder="WhatsApp" />
+      </div>
+      <textarea className={cs.textarea} value={mensagem} onChange={(e) => setMensagem(e.target.value)} placeholder="Mensagem individual padrão" />
+      <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
+        <button className={styles.btnPrimary} disabled={salvar.isPending} onClick={() => salvar.mutate()}>Salvar</button>
+        {whatsapp && (
+          <a className={`${cs.linkBtn} ${cs.linkWhatsapp}`} target="_blank" rel="noreferrer"
+             href={`https://wa.me/${whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(mensagem)}`}>
+            Enviar WhatsApp com esta mensagem
+          </a>
+        )}
+      </div>
+      {contato.notas.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          {contato.notas.map((n) => (
+            <div key={n.id} style={{ fontSize: 12.5, padding: '4px 0', borderBottom: '1px solid #eee' }}>
+              <strong>{n.evento_nome || 'Geral'}</strong> ({fmtData(n.data)}): {n.texto}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ContatosSubTab() {
   const qc = useQueryClient()
   const [filtroEvento, setFiltroEvento] = useState('')
@@ -788,6 +837,7 @@ function ContatosSubTab() {
   const [showNovo, setShowNovo] = useState(false)
   const [primeiroNome, setPrimeiroNome] = useState('')
   const [sobrenome, setSobrenome] = useState('')
+  const [empresaNovo, setEmpresaNovo] = useState('')
   const [email, setEmail] = useState('')
   const [whatsapp, setWhatsapp] = useState('')
   const [emailTarget, setEmailTarget] = useState<EmailSendTarget | null>(null)
@@ -806,12 +856,8 @@ function ContatosSubTab() {
     mutationFn: conselhoApi.criarContato,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['conselho-contatos'] })
-      setShowNovo(false); setPrimeiroNome(''); setSobrenome(''); setEmail(''); setWhatsapp('')
+      setShowNovo(false); setPrimeiroNome(''); setSobrenome(''); setEmpresaNovo(''); setEmail(''); setWhatsapp('')
     },
-  })
-  const atualizar = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<Contato> }) => conselhoApi.atualizarContato(id, data as never),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['conselho-contatos'] }),
   })
   const deletar = useMutation({
     mutationFn: conselhoApi.deletarContato,
@@ -859,9 +905,10 @@ function ContatosSubTab() {
         <div className={styles.form}>
           <div className={styles.formRow}><label className={styles.formLabel}>Primeiro nome</label><input className={styles.input} value={primeiroNome} onChange={(e) => setPrimeiroNome(e.target.value)} /></div>
           <div className={styles.formRow}><label className={styles.formLabel}>Sobrenome</label><input className={styles.input} value={sobrenome} onChange={(e) => setSobrenome(e.target.value)} /></div>
+          <div className={styles.formRow}><label className={styles.formLabel}>Empresa</label><input className={styles.input} value={empresaNovo} onChange={(e) => setEmpresaNovo(e.target.value)} /></div>
           <div className={styles.formRow}><label className={styles.formLabel}>E-mail</label><input className={styles.input} value={email} onChange={(e) => setEmail(e.target.value)} /></div>
           <div className={styles.formRow}><label className={styles.formLabel}>WhatsApp</label><input className={styles.input} value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} /></div>
-          <button className={styles.btnPrimary} disabled={!primeiroNome} onClick={() => criar.mutate({ primeiro_nome: primeiroNome, sobrenome: sobrenome || undefined, email: email || undefined, whatsapp: whatsapp || undefined })}>
+          <button className={styles.btnPrimary} disabled={!primeiroNome} onClick={() => criar.mutate({ primeiro_nome: primeiroNome, sobrenome: sobrenome || undefined, empresa: empresaNovo || undefined, email: email || undefined, whatsapp: whatsapp || undefined })}>
             Criar contato
           </button>
         </div>
@@ -873,6 +920,7 @@ function ContatosSubTab() {
             <div key={c.id}>
               <div className={cs.guestRow} style={{ cursor: 'pointer' }} onClick={() => setExpandido(expandido === c.id ? null : c.id)}>
                 <span className={cs.guestName}>{c.primeiro_nome} {c.sobrenome || ''}</span>
+                {c.empresa && <span style={{ fontSize: 12, color: '#9ca3af' }}>{c.empresa}</span>}
                 <span style={{ fontSize: 12, color: '#9ca3af' }}>{c.eventos.join(', ') || 'Sem evento'}</span>
                 {c.whatsapp && <a className={`${cs.linkBtn} ${cs.linkWhatsapp}`} onClick={(e) => e.stopPropagation()} target="_blank" rel="noreferrer" href={`https://wa.me/${c.whatsapp.replace(/\D/g, '')}`}>WhatsApp</a>}
                 {c.email && (
@@ -887,25 +935,7 @@ function ContatosSubTab() {
                 <button className={styles.btnDanger} onClick={(e) => { e.stopPropagation(); if (confirm('Excluir contato?')) deletar.mutate(c.id) }}>Excluir</button>
               </div>
               {expandido === c.id && (
-                <div style={{ padding: '10px 18px 16px', background: '#fafafa' }}>
-                  <div style={{ display: 'flex', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
-                    <input className={styles.input} style={{ maxWidth: 200 }} defaultValue={c.email || ''} placeholder="E-mail"
-                      onBlur={(e) => atualizar.mutate({ id: c.id, data: { email: e.target.value } })} />
-                    <input className={styles.input} style={{ maxWidth: 200 }} defaultValue={c.whatsapp || ''} placeholder="WhatsApp"
-                      onBlur={(e) => atualizar.mutate({ id: c.id, data: { whatsapp: e.target.value } })} />
-                  </div>
-                  <textarea className={cs.textarea} defaultValue={c.mensagem_global || ''} placeholder="Mensagem individual padrão"
-                    onBlur={(e) => atualizar.mutate({ id: c.id, data: { mensagem_global: e.target.value } })} />
-                  {c.notas.length > 0 && (
-                    <div style={{ marginTop: 10 }}>
-                      {c.notas.map((n) => (
-                        <div key={n.id} style={{ fontSize: 12.5, padding: '4px 0', borderBottom: '1px solid #eee' }}>
-                          <strong>{n.evento_nome || 'Geral'}</strong> ({fmtData(n.data)}): {n.texto}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <ContatoExpandPanel contato={c} onSaved={() => qc.invalidateQueries({ queryKey: ['conselho-contatos'] })} />
               )}
             </div>
           ))}
@@ -917,10 +947,12 @@ function ContatosSubTab() {
   )
 }
 
+type FiltroConvidados = 'todos' | 'presenca' | 'participacao'
+
 function DisparadorSubTab() {
   const { data: eventos = [] } = useQuery({ queryKey: ['conselho-eventos'], queryFn: () => conselhoApi.listarEventos() })
-  const [eventosSelecionados, setEventosSelecionados] = useState<Set<string>>(new Set())
   const [contatosSelecionados, setContatosSelecionados] = useState<Set<string>>(new Set())
+  const [filtroPorEvento, setFiltroPorEvento] = useState<Record<string, FiltroConvidados>>({})
   const [busca, setBusca] = useState('')
   const [msgWhatsapp, setMsgWhatsapp] = useState('Olá {primeiro}, tudo bem? Te convido para o {evento}!')
   const [msgEmail, setMsgEmail] = useState('Olá {primeiro},\n\nTe convido para o {evento}.\n\nAbraço.')
@@ -929,12 +961,6 @@ function DisparadorSubTab() {
   const [anexoId, setAnexoId] = useState('')
   const [enviando, setEnviando] = useState(false)
   const [resultados, setResultados] = useState<{ nome: string; sucesso: boolean; erro?: string | null }[] | null>(null)
-
-  const contatosPorEvento = useMemo(() => {
-    const map = new Map<string, Contato[]>()
-    for (const e of eventos) map.set(e.id, e.convidados.map((cv) => cv.contato))
-    return map
-  }, [eventos])
 
   const todosContatos = useMemo(() => {
     const seen = new Map<string, Contato & { eventoNome: string }>()
@@ -950,21 +976,23 @@ function DisparadorSubTab() {
     .filter((c) => `${c.primeiro_nome} ${c.sobrenome || ''}`.toLowerCase().includes(busca.toLowerCase()))
     .sort((a, b) => a.primeiro_nome.localeCompare(b.primeiro_nome))
 
-  function toggleEvento(eventoId: string) {
-    const next = new Set(eventosSelecionados)
-    const contatosEvento = contatosPorEvento.get(eventoId) || []
-    if (next.has(eventoId)) {
-      next.delete(eventoId)
-      const nextC = new Set(contatosSelecionados)
-      contatosEvento.forEach((c) => nextC.delete(c.id))
-      setContatosSelecionados(nextC)
-    } else {
-      next.add(eventoId)
-      const nextC = new Set(contatosSelecionados)
-      contatosEvento.forEach((c) => nextC.add(c.id))
-      setContatosSelecionados(nextC)
-    }
-    setEventosSelecionados(next)
+  function contatosDoEvento(eventoId: string, filtro: FiltroConvidados): Contato[] {
+    const evento = eventos.find((e) => e.id === eventoId)
+    if (!evento) return []
+    return evento.convidados
+      .filter((cv) => filtro === 'todos' || (filtro === 'presenca' && cv.presenca_confirmada) || (filtro === 'participacao' && cv.participacao_confirmada))
+      .map((cv) => cv.contato)
+  }
+
+  function adicionarDoEvento(eventoId: string) {
+    const filtro = filtroPorEvento[eventoId] || 'todos'
+    const ids = contatosDoEvento(eventoId, filtro).map((c) => c.id)
+    setContatosSelecionados((prev) => new Set([...prev, ...ids]))
+  }
+
+  function removerDoEvento(eventoId: string) {
+    const ids = new Set(contatosDoEvento(eventoId, 'todos').map((c) => c.id))
+    setContatosSelecionados((prev) => new Set([...prev].filter((id) => !ids.has(id))))
   }
 
   function toggleContato(id: string) {
@@ -1000,12 +1028,27 @@ function DisparadorSubTab() {
     <div>
       <h4 style={{ marginBottom: 8 }}>1. Selecione eventos</h4>
       <div className={cs.dispatchList}>
-        {eventos.map((e) => (
-          <label key={e.id} className={cs.checkboxLabel} style={{ fontSize: 13 }}>
-            <input type="checkbox" checked={eventosSelecionados.has(e.id)} onChange={() => toggleEvento(e.id)} />
-            {e.nome} ({e.convidados.length} convidados)
-          </label>
-        ))}
+        {eventos.map((e) => {
+          const filtro = filtroPorEvento[e.id] || 'todos'
+          const qtd = contatosDoEvento(e.id, filtro).length
+          return (
+            <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '4px 0', flexWrap: 'wrap' }}>
+              <span style={{ minWidth: 160 }}>{e.nome} ({e.convidados.length} convidados)</span>
+              <select
+                className={styles.input}
+                style={{ padding: '4px 6px', fontSize: 12, maxWidth: 200 }}
+                value={filtro}
+                onChange={(ev) => setFiltroPorEvento((prev) => ({ ...prev, [e.id]: ev.target.value as FiltroConvidados }))}
+              >
+                <option value="todos">Todos os convidados</option>
+                <option value="presenca">Apenas presença confirmada</option>
+                <option value="participacao">Apenas participação confirmada</option>
+              </select>
+              <button className={styles.btnSmall} onClick={() => adicionarDoEvento(e.id)}>+ Adicionar ({qtd})</button>
+              <button className={styles.btnSmall} onClick={() => removerDoEvento(e.id)}>Remover deste evento</button>
+            </div>
+          )
+        })}
       </div>
 
       <h4 style={{ marginBottom: 8 }}>2. Mensagens (placeholders: {'{primeiro}'}, {'{ultimo}'}, {'{evento}'})</h4>

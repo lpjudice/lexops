@@ -120,6 +120,7 @@ class ContatoNotaOut(BaseModel):
 class ContatoCreate(BaseModel):
     primeiro_nome: str
     sobrenome: str | None = None
+    empresa: str | None = None
     email: str | None = None
     whatsapp: str | None = None
     mensagem_global: str | None = None
@@ -129,6 +130,7 @@ class ContatoCreate(BaseModel):
 class ContatoUpdate(BaseModel):
     primeiro_nome: str | None = None
     sobrenome: str | None = None
+    empresa: str | None = None
     email: str | None = None
     whatsapp: str | None = None
     mensagem_global: str | None = None
@@ -139,6 +141,7 @@ class ContatoOut(BaseModel):
     id: uuid.UUID
     primeiro_nome: str
     sobrenome: str | None
+    empresa: str | None
     email: str | None
     whatsapp: str | None
     mensagem_global: str | None

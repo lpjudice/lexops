@@ -84,6 +84,7 @@ export interface Contato {
   id: string
   primeiro_nome: string
   sobrenome?: string | null
+  empresa?: string | null
   email?: string | null
   whatsapp?: string | null
   mensagem_global?: string | null
@@ -96,6 +97,7 @@ export interface Contato {
 export interface ContatoCreate {
   primeiro_nome: string
   sobrenome?: string
+  empresa?: string
   email?: string
   whatsapp?: string
   mensagem_global?: string

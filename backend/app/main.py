@@ -803,6 +803,9 @@ def _run_migrations() -> None:
         conn.execute(text(
             "ALTER TABLE conselho_eventos ADD COLUMN IF NOT EXISTS dias_lembrete INTEGER NOT NULL DEFAULT 2"
         ))
+        conn.execute(text(
+            "ALTER TABLE conselho_contatos ADD COLUMN IF NOT EXISTS empresa VARCHAR(300)"
+        ))
 
         # Tarefas: campo de ordenação manual
         conn.execute(text(
