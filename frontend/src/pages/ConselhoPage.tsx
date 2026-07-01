@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { conselhoApi } from '../api/conselho'
 import type {
@@ -47,6 +47,50 @@ function aplicarPlaceholders(template: string, primeiro: string, ultimo: string,
     .replaceAll('{primeiro}', primeiro)
     .replaceAll('{ultimo}', ultimo || '')
     .replaceAll('{evento}', evento)
+}
+
+// Painel colapsável de mensagem individual por convidado.
+// Usa useEffect para sincronizar com mensagem_pessoal quando aplicarATodos atualiza os dados.
+function MensagemConvidadoPanel({
+  cv, templateAtual, eventoNome, onSave,
+}: {
+  cv: import('../api/conselho').Convidado
+  templateAtual: string
+  eventoNome: string
+  onSave: (texto: string) => void
+}) {
+  const textoPadrao = aplicarPlaceholders(templateAtual, cv.contato.primeiro_nome, cv.contato.sobrenome || '', eventoNome)
+  const [aberto, setAberto] = useState(false)
+  const [texto, setTexto] = useState(cv.mensagem_pessoal || '')
+
+  // Sincroniza quando aplicarATodos (ou outra mutation) atualiza cv.mensagem_pessoal
+  useEffect(() => {
+    setTexto(cv.mensagem_pessoal || '')
+  }, [cv.mensagem_pessoal])
+
+  const isPersonalizada = !!texto && texto !== textoPadrao
+
+  return (
+    <div style={{ marginTop: 4 }}>
+      <button
+        className={styles.btnSmall}
+        style={{ fontSize: 11, opacity: 0.8 }}
+        onClick={() => setAberto((s) => !s)}
+      >
+        {isPersonalizada ? '✏️ Personalizada' : '📋 Padrão'} {aberto ? '▲' : '▼'}
+      </button>
+      {aberto && (
+        <textarea
+          className={cs.textarea}
+          style={{ marginTop: 4, fontSize: 12 }}
+          placeholder="Mensagem individual (editável)"
+          value={texto}
+          onChange={(e) => setTexto(e.target.value)}
+          onBlur={() => onSave(texto)}
+        />
+      )}
+    </div>
+  )
 }
 
 function exportarCSV(nomeArquivo: string, headers: string[], rows: (string | number)[][]) {
@@ -632,7 +676,7 @@ function EventosSubTab() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['conselho-eventos'] }),
   })
   const atualizarConvidado = useMutation({
-    mutationFn: ({ id, payload }: { id: string; payload: { presenca_confirmada?: boolean; participacao_confirmada?: boolean; mensagem_pessoal?: string } }) =>
+    mutationFn: ({ id, payload }: { id: string; payload: { presenca_confirmada?: boolean; participacao_confirmada?: boolean; recusou?: boolean; mensagem_pessoal?: string } }) =>
       conselhoApi.atualizarConvidado(id, payload),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['conselho-eventos'] }),
   })
@@ -758,6 +802,10 @@ function EventosSubTab() {
                       <input type="checkbox" checked={cv.participacao_confirmada} onChange={(e) => atualizarConvidado.mutate({ id: cv.id, payload: { participacao_confirmada: e.target.checked } })} />
                       Participação
                     </label>
+                    <label className={cs.checkboxLabel} style={{ color: cv.recusou ? '#ef4444' : undefined }}>
+                      <input type="checkbox" checked={cv.recusou} onChange={(e) => atualizarConvidado.mutate({ id: cv.id, payload: { recusou: e.target.checked } })} />
+                      Recusou
+                    </label>
                     {cv.contato.whatsapp && (
                       <>
                         <a className={`${cs.linkBtn} ${cs.linkWhatsapp}`} target="_blank" rel="noreferrer"
@@ -782,12 +830,11 @@ function EventosSubTab() {
                     )}
                     <button className={styles.btnDanger} onClick={() => removerConvidado.mutate(cv.id)}>Remover</button>
                   </div>
-                  <textarea
-                    className={cs.textarea}
-                    style={{ marginTop: 6, fontSize: 12 }}
-                    placeholder="Mensagem individual (editável)"
-                    defaultValue={cv.mensagem_pessoal || ''}
-                    onBlur={(e) => atualizarConvidado.mutate({ id: cv.id, payload: { mensagem_pessoal: e.target.value } })}
+                  <MensagemConvidadoPanel
+                    cv={cv}
+                    templateAtual={templateAtual}
+                    eventoNome={eventoExpandido.nome}
+                    onSave={(texto) => atualizarConvidado.mutate({ id: cv.id, payload: { mensagem_pessoal: texto } })}
                   />
                   <GuestComments contato={cv.contato} eventoId={eventoExpandido.id} onSaved={() => qc.invalidateQueries({ queryKey: ['conselho-eventos'] })} />
                 </div>

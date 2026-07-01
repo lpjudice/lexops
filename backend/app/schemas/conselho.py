@@ -160,6 +160,7 @@ class ConvidadoAdd(BaseModel):
 class ConvidadoUpdate(BaseModel):
     presenca_confirmada: bool | None = None
     participacao_confirmada: bool | None = None
+    recusou: bool | None = None
     mensagem_pessoal: str | None = None
 
 
@@ -170,6 +171,7 @@ class ConvidadoOut(BaseModel):
     contato_id: uuid.UUID
     presenca_confirmada: bool
     participacao_confirmada: bool
+    recusou: bool
     mensagem_pessoal: str | None
     contato: ContatoOut
 
