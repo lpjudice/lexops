@@ -121,10 +121,13 @@ export default function Diario2Page() {
           <p className={diario2Styles.muted}>Publicações importadas do Gmail do Recorte Digital/OABES.</p>
         </div>
         <div className={diario2Styles.toolbar}>
-          <span className={`${diario2Styles.statusPill} ${gmailStatus?.ok ? '' : diario2Styles.statusWarn}`}>
+          <span
+            className={`${diario2Styles.statusPill} ${gmailStatus?.ok ? '' : diario2Styles.statusWarn}`}
+            title={gmailStatus?.email_esperado ? `Conta esperada: ${gmailStatus.email_esperado}` : undefined}
+          >
             Gmail: {gmailStatus?.email ?? 'não conectado'}
           </span>
-          <a className={styles.btnPrimary} href="/api/auth/google">Conectar Gmail Lucas</a>
+          <a className={styles.btnPrimary} href="/api/auth/google">Conectar Gmail master</a>
         </div>
       </div>
 

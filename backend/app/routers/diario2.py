@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import uuid
 from collections import defaultdict
@@ -24,7 +25,12 @@ from app.services.prazo_calc import calcular_prazo
 router = APIRouter(prefix="/diario2", tags=["diario2"],
                    dependencies=[Depends(get_current_user)])
 
-LUCAS_GMAIL = "lucasjudice@gmail.com"
+# Conta Gmail que abastece o Recorte Digital OAB. Passou a ser a conta master do
+# sistema (pj@pimentajudice.com.br), que hoje também recebe as publicações do
+# oabes@recortedigital.adv.br. Configurável por env; a conta antiga do Lucas
+# segue aceita por compatibilidade (o sync lê a caixa de quem for o token master).
+CONTA_RECORTE = os.getenv("DIARIO2_GMAIL_CONTA", "pj@pimentajudice.com.br").lower()
+CONTAS_RECORTE_ACEITAS = {CONTA_RECORTE, "lucasjudice@gmail.com"}
 
 
 class SyncDiario2Result(BaseModel):
@@ -549,7 +555,7 @@ def _publicacao_payload(pub: Publicacao) -> dict[str, Any]:
         "cliente_sugerido": None if cliente else _cliente_sugerido(texto_visivel or pub.texto_resumo),
         "processo_id": str(pub.processo_id) if pub.processo_id else None,
         "tribunal": pub.tribunal,
-        "publicado_em_nome_de": LUCAS_GMAIL,
+        "publicado_em_nome_de": CONTA_RECORTE,
         "resumo_curto": _resumo_dez_palavras(resumo_fonte),
         "texto_resumo": resumo_visivel,
         "texto_completo": texto_visivel,
@@ -604,7 +610,7 @@ def _refresh_google_tokens(tokens: dict) -> dict:
 def gmail_status():
     tokens = load_master_google_tokens()
     if not tokens:
-        return {"conectado": False, "email": None, "email_esperado": LUCAS_GMAIL, "ok": False}
+        return {"conectado": False, "email": None, "email_esperado": CONTA_RECORTE, "ok": False}
     email = tokens.get("email")
     try:
         headers = {"Authorization": f"Bearer {tokens.get('access_token', '')}"}
@@ -623,8 +629,8 @@ def gmail_status():
     return {
         "conectado": bool(tokens),
         "email": email,
-        "email_esperado": LUCAS_GMAIL,
-        "ok": (email or "").lower() == LUCAS_GMAIL,
+        "email_esperado": CONTA_RECORTE,
+        "ok": (email or "").lower() in CONTAS_RECORTE_ACEITAS,
     }
 
 
@@ -632,11 +638,14 @@ def gmail_status():
 def sync_gmail_diario2(days_back: int = Query(7, ge=1, le=60), db: Session = Depends(get_db)):
     status_info = gmail_status()
     if not status_info.get("conectado"):
-        raise HTTPException(status_code=400, detail="Conecte o Gmail do Lucas antes de importar.")
+        raise HTTPException(status_code=400, detail="Conecte o Gmail master do sistema antes de importar.")
     if not status_info.get("ok"):
         raise HTTPException(
             status_code=400,
-            detail=f"Conta conectada: {status_info.get('email') or 'desconhecida'}. Conecte {LUCAS_GMAIL}.",
+            detail=(
+                f"Conta conectada: {status_info.get('email') or 'desconhecida'}. "
+                f"Conecte {CONTA_RECORTE} (ou lucasjudice@gmail.com)."
+            ),
         )
     itens = sincronizar_gmail(days_back=days_back)
     ins, dup, err, sem = _inserir_publicacoes_gmail(itens, db)
