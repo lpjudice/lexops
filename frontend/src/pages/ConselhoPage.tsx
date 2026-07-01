@@ -906,37 +906,47 @@ function EventosSubTab() {
                 <div key={cv.id} className={cs.guestCard}>
                   {/* Cabeçalho do card — clicável para expandir */}
                   <div className={cs.guestCardHeader} onClick={() => setExpandidoConvidado(isExpanded ? null : cv.id)}>
-                    <span className={cs.guestCardName}>{cv.contato.primeiro_nome} {cv.contato.sobrenome || ''}</span>
-                    <div className={cs.guestCardBadges}>
-                      {cv.presenca_confirmada && <span className={`${cs.badge} ${cs.badgeConfirmado}`}>✓ Conf.</span>}
-                      {cv.recusou && <span className={`${cs.badge} ${cs.badgeRecusou}`}>✗ Recus.</span>}
-                      {cv.participacao_confirmada && <span className={`${cs.badge} ${cs.badgeParticipou}`}>✓ Part.</span>}
-                      {cv.pendente && <span className={`${cs.badge} ${cs.badgePendente}`}>⏳ Pend.</span>}
+                    {/* Linha 1: nome + chevron */}
+                    <div className={cs.guestCardTopRow}>
+                      <span className={cs.guestCardName}>{cv.contato.primeiro_nome} {cv.contato.sobrenome || ''}</span>
+                      <span style={{ fontSize: 10, color: '#9ca3af' }}>{isExpanded ? '▲' : '▼'}</span>
                     </div>
-                    <div className={cs.guestCardActions} onClick={(e) => e.stopPropagation()}>
-                      {cv.contato.whatsapp && (
-                        <>
-                          <a className={`${cs.linkBtn} ${cs.linkWhatsapp}`} style={{ padding: '3px 8px', fontSize: 11 }} target="_blank" rel="noreferrer"
-                             href={`https://wa.me/${cv.contato.whatsapp.replace(/\D/g, '')}?text=${encodeWaText(mensagemResolvida)}`}>
-                            WA
-                          </a>
-                          <button className={styles.btnSmall} style={{ padding: '3px 6px', fontSize: 11 }} title="Copiar mensagem" onClick={() => navigator.clipboard.writeText(mensagemResolvida)}>📋</button>
-                        </>
-                      )}
-                      {cv.contato.email && (
-                        <button
-                          className={`${cs.linkBtn} ${cs.linkEmail}`}
-                          style={{ border: 'none', cursor: 'pointer', padding: '3px 8px', fontSize: 11 }}
-                          onClick={() => setEmailTarget({
-                            contatoId: cv.contato.id, email: cv.contato.email!, nome: cv.contato.primeiro_nome,
-                            assunto: eventoExpandido.nome, corpo: mensagemResolvida,
-                            eventoId: eventoExpandido.id, eventoNome: eventoExpandido.nome,
-                          })}
-                        >
-                          Email
-                        </button>
-                      )}
-                      <button className={styles.btnDanger} style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => removerConvidado.mutate(cv.id)}>✕</button>
+                    {/* Linha 2: badges + ações */}
+                    <div className={cs.guestCardBottomRow} onClick={(e) => e.stopPropagation()}>
+                      <div className={cs.guestCardBadges}>
+                        {cv.presenca_confirmada && <span className={`${cs.badge} ${cs.badgeConfirmado}`}>✓ Conf.</span>}
+                        {cv.recusou && <span className={`${cs.badge} ${cs.badgeRecusou}`}>✗ Recus.</span>}
+                        {cv.participacao_confirmada && <span className={`${cs.badge} ${cs.badgeParticipou}`}>✓ Part.</span>}
+                        {cv.pendente && <span className={`${cs.badge} ${cs.badgePendente}`}>⏳ Pend.</span>}
+                        {!cv.presenca_confirmada && !cv.recusou && !cv.participacao_confirmada && !cv.pendente && (
+                          <span style={{ fontSize: 10, color: '#d1d5db' }}>sem status</span>
+                        )}
+                      </div>
+                      <div className={cs.guestCardActions}>
+                        {cv.contato.whatsapp && (
+                          <>
+                            <a className={`${cs.linkBtn} ${cs.linkWhatsapp}`} style={{ padding: '3px 8px', fontSize: 11 }} target="_blank" rel="noreferrer"
+                               href={`https://wa.me/${cv.contato.whatsapp.replace(/\D/g, '')}?text=${encodeWaText(mensagemResolvida)}`}>
+                              WA
+                            </a>
+                            <button className={styles.btnSmall} style={{ padding: '3px 6px', fontSize: 11 }} title="Copiar mensagem" onClick={() => navigator.clipboard.writeText(mensagemResolvida)}>📋</button>
+                          </>
+                        )}
+                        {cv.contato.email && (
+                          <button
+                            className={`${cs.linkBtn} ${cs.linkEmail}`}
+                            style={{ border: 'none', cursor: 'pointer', padding: '3px 8px', fontSize: 11 }}
+                            onClick={() => setEmailTarget({
+                              contatoId: cv.contato.id, email: cv.contato.email!, nome: cv.contato.primeiro_nome,
+                              assunto: eventoExpandido.nome, corpo: mensagemResolvida,
+                              eventoId: eventoExpandido.id, eventoNome: eventoExpandido.nome,
+                            })}
+                          >
+                            Email
+                          </button>
+                        )}
+                        <button className={styles.btnDanger} style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => removerConvidado.mutate(cv.id)}>✕</button>
+                      </div>
                     </div>
                   </div>
 

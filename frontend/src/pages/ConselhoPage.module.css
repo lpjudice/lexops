@@ -154,9 +154,15 @@
 /* Guest cards grid (inside event detail) */
 .guestCardGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-template-columns: repeat(2, 1fr);
   gap: 10px;
   margin-top: 14px;
+}
+
+@media (max-width: 640px) {
+  .guestCardGrid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .guestCard {
@@ -169,8 +175,8 @@
 
 .guestCardHeader {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
   padding: 10px 12px;
   cursor: pointer;
   user-select: none;
@@ -180,6 +186,12 @@
   background: #f9fafb;
 }
 
+.guestCardTopRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .guestCardName {
   flex: 1;
   font-weight: 700;
@@ -187,10 +199,18 @@
   color: var(--dark);
 }
 
+.guestCardBottomRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .guestCardBadges {
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
+  flex: 1;
 }
 
 .badge {
@@ -210,6 +230,7 @@
   display: flex;
   gap: 4px;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .guestCardBody {

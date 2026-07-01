@@ -19,6 +19,7 @@ from app.models.conselho import (
     ConselhoParceiro,
     ConselhoPipeline,
 )
+from app.models.tarefa import Tarefa
 from app.models.usuario import Usuario
 from app.schemas.conselho import (
     AnexoLibOut,
@@ -56,6 +57,38 @@ router = APIRouter(prefix="/conselho", tags=["conselho"])
 
 UPLOADS_DIR = Path("/app/uploads/conselho/anexos")
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _data_lembrete(data_evento: date) -> date:
+    """Retorna o dia útil 2 dias antes do evento (pula fim de semana para sexta)."""
+    candidato = data_evento - timedelta(days=2)
+    # 5 = sábado, 6 = domingo
+    if candidato.weekday() == 5:
+        candidato -= timedelta(days=1)
+    elif candidato.weekday() == 6:
+        candidato -= timedelta(days=2)
+    return candidato
+
+
+def _upsert_tarefa_lembrete(evento: ConselhoEvento, db: Session, criado_por_id) -> None:
+    """Cria ou atualiza a tarefa de lembrete pré-evento vinculada à Monielly."""
+    if not evento.data:
+        return
+    data_limite = _data_lembrete(evento.data)
+    titulo = f"Lembrete pré-evento: {evento.nome}"
+    # Idempotente: atualiza se já existe, cria se não
+    tarefa = db.query(Tarefa).filter(Tarefa.titulo == titulo).first()
+    if tarefa:
+        tarefa.data_limite = data_limite
+    else:
+        db.add(Tarefa(
+            titulo=titulo,
+            descricao="Entrar em contato com todos os confirmados para reconfirmar presença.",
+            responsavel="Monielly",
+            data_limite=data_limite,
+            status="pendente",
+            criado_por_id=criado_por_id,
+        ))
 
 
 # ── Diretrizes ────────────────────────────────────────────────────────────
@@ -395,6 +428,8 @@ def criar_evento(
 ):
     evento = ConselhoEvento(**data.model_dump())
     db.add(evento)
+    db.flush()  # gera o id antes de criar a tarefa
+    _upsert_tarefa_lembrete(evento, db, usuario.id)
     db.commit()
     db.refresh(evento)
     return evento
@@ -427,8 +462,11 @@ def atualizar_evento(
     evento = db.query(ConselhoEvento).filter(ConselhoEvento.id == evento_id).first()
     if not evento:
         raise HTTPException(status_code=404, detail="Evento não encontrado")
-    for field, value in data.model_dump(exclude_unset=True).items():
+    updates = data.model_dump(exclude_unset=True)
+    for field, value in updates.items():
         setattr(evento, field, value)
+    if "data" in updates:
+        _upsert_tarefa_lembrete(evento, db, usuario.id)
     db.commit()
     db.refresh(evento)
     return evento
@@ -479,8 +517,6 @@ def atualizar_convidado(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
 ):
-    from app.models.tarefa import Tarefa
-
     cv = db.query(ConselhoEventoConvidado).filter(ConselhoEventoConvidado.id == convidado_id).first()
     if not cv:
         raise HTTPException(status_code=404, detail="Convidado não encontrado")
