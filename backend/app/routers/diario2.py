@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 import uuid
@@ -31,6 +32,8 @@ router = APIRouter(prefix="/diario2", tags=["diario2"],
 # segue aceita por compatibilidade (o sync lê a caixa de quem for o token master).
 CONTA_RECORTE = os.getenv("DIARIO2_GMAIL_CONTA", "pj@pimentajudice.com.br").lower()
 CONTAS_RECORTE_ACEITAS = {CONTA_RECORTE, "lucasjudice@gmail.com"}
+
+logger = logging.getLogger(__name__)
 
 
 class SyncDiario2Result(BaseModel):
@@ -185,6 +188,15 @@ def _cliente_sugerido(texto: str | None) -> str | None:
     return None
 
 
+def _total_publicacoes_email(texto: str | None) -> int | None:
+    """Nº informado no rodapé do e-mail ("Total de Publicações: N"), se houver.
+    Serve só de parâmetro de validação — nunca descarta publicações."""
+    if not texto:
+        return None
+    m = re.search(r"Total de Publica(?:ç|c)[õo]es:\s*(\d+)", texto, flags=re.IGNORECASE)
+    return int(m.group(1)) if m else None
+
+
 def _split_blocos_publicacao(texto: str | None) -> list[str]:
     texto_limpo = _limpar_texto(texto)
     if not texto_limpo:
@@ -247,7 +259,9 @@ def _expandir_itens_por_contador(itens: list[dict[str, Any]]) -> list[dict[str, 
 
     expandidos = list(avulsos)
     for base_id, item in grupos.items():
-        blocos = _split_blocos_publicacao(item.get("texto_completo") or item.get("texto_resumo"))
+        full_text = item.get("texto_completo") or item.get("texto_resumo")
+        total_esperado = _total_publicacoes_email(full_text)
+        blocos = _split_blocos_publicacao(full_text)
         if not blocos:
             expandidos.append(item)
             continue
@@ -261,6 +275,8 @@ def _expandir_itens_por_contador(itens: list[dict[str, Any]]) -> list[dict[str, 
                 "email_message_id": f"{base_id}_pub{idx}_{cnj or 'sem-cnj'}",
                 "_email_base_id": base_id,
                 "_publicacao_idx": idx,
+                "_total_esperado": total_esperado,
+                "_blocos_encontrados": len(blocos),
             })
     return expandidos
 
@@ -429,7 +445,7 @@ def _vincular_processo(db: Session, item: dict[str, Any]) -> uuid.UUID | None:
     return processo.id if processo else None
 
 
-def _inserir_publicacoes_gmail(itens: list[dict[str, Any]], db: Session) -> tuple[int, int, int, int]:
+def _inserir_publicacoes_gmail(itens: list[dict[str, Any]], db: Session) -> tuple[int, int, int, int, list[str]]:
     inseridas = duplicatas = erros = sem_publicacoes = 0
     itens_expandidos = _expandir_itens_por_contador(itens)
     bases_processadas = {
@@ -516,7 +532,52 @@ def _inserir_publicacoes_gmail(itens: list[dict[str, Any]], db: Session) -> tupl
         except Exception:
             erros += 1
     db.commit()
-    return inseridas, duplicatas, erros, sem_publicacoes
+
+    # ── Validação NÃO destrutiva: "Total de Publicações: N" do e-mail ──────────
+    # Nunca descarta nada; só compara e, se faltou, anexa uma anotação para o
+    # Lucas validar manualmente. Também loga para diagnóstico (flyctl logs).
+    avisos: list[str] = []
+    esperado_por_base: dict[str, int] = {}
+    blocos_por_base: dict[str, int] = {}
+    for item in itens_expandidos:
+        base = item.get("_email_base_id")
+        esperado = item.get("_total_esperado")
+        if base and esperado:
+            esperado_por_base[base] = esperado
+        if base and item.get("_blocos_encontrados"):
+            blocos_por_base[base] = item["_blocos_encontrados"]
+    for base_id, esperado in esperado_por_base.items():
+        no_banco = (
+            db.query(Publicacao)
+            .filter(Publicacao.fonte == "gmail")
+            .filter(Publicacao.email_message_id.like(f"{base_id}_pub%"))
+            .count()
+        )
+        logger.info(
+            "Diário2 recorte base=%s: total_email=%s, blocos_split=%s, no_banco=%s",
+            base_id, esperado, blocos_por_base.get(base_id), no_banco,
+        )
+        if no_banco < esperado:
+            exemplo = (
+                db.query(Publicacao)
+                .filter(Publicacao.email_message_id.like(f"{base_id}_pub%"))
+                .first()
+            )
+            dref = (
+                exemplo.data_publicacao.strftime("%d/%m/%Y")
+                if exemplo and exemplo.data_publicacao else "data desconhecida"
+            )
+            faltam = esperado - no_banco
+            avisos.append(
+                f"{dref}: o Recorte informou {esperado} publicação(ões), "
+                f"o sistema tem {no_banco} — faltam {faltam}, verifique manualmente."
+            )
+            logger.warning(
+                "Diário2 recorte %s: divergência — esperado=%s no_banco=%s (faltam %s)",
+                dref, esperado, no_banco, faltam,
+            )
+
+    return inseridas, duplicatas, erros, sem_publicacoes, avisos
 
 
 def _prazo_payload(pub: Publicacao, prazo: Prazo | None) -> dict[str, Any] | None:
@@ -648,13 +709,16 @@ def sync_gmail_diario2(days_back: int = Query(7, ge=1, le=60), db: Session = Dep
             ),
         )
     itens = sincronizar_gmail(days_back=days_back)
-    ins, dup, err, sem = _inserir_publicacoes_gmail(itens, db)
+    ins, dup, err, sem, avisos = _inserir_publicacoes_gmail(itens, db)
+    mensagem = f"Diário 2: {ins} nova(s), {dup} já existentes, {sem} aviso(s) sem publicação."
+    if avisos:
+        mensagem += " ⚠️ " + " | ".join(avisos)
     return SyncDiario2Result(
         inseridas=ins,
         duplicatas=dup,
         erros=err,
         sem_publicacoes=sem,
-        mensagem=f"Diário 2: {ins} nova(s), {dup} já existentes, {sem} aviso(s) sem publicação.",
+        mensagem=mensagem,
     )
 
 
@@ -790,13 +854,16 @@ def sync_diario2_job(days_back: int = 7) -> SyncDiario2Result:
     db = SessionLocal()
     try:
         itens = sincronizar_gmail(days_back=days_back)
-        ins, dup, err, sem = _inserir_publicacoes_gmail(itens, db)
+        ins, dup, err, sem, avisos = _inserir_publicacoes_gmail(itens, db)
+        mensagem = f"Diário 2 automático: {ins} nova(s), {dup} já existentes, {sem} aviso(s) sem publicação."
+        if avisos:
+            mensagem += " ⚠️ " + " | ".join(avisos)
         return SyncDiario2Result(
             inseridas=ins,
             duplicatas=dup,
             erros=err,
             sem_publicacoes=sem,
-            mensagem=f"Diário 2 automático: {ins} nova(s), {dup} já existentes, {sem} aviso(s) sem publicação.",
+            mensagem=mensagem,
         )
     finally:
         db.close()
