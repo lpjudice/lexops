@@ -4,6 +4,7 @@ Usa o Gmail pessoal do usuário logado (usuario.google_tokens) quando conectado;
 cai para a conta master do escritório caso contrário.
 """
 import base64
+import email.header
 import email.mime.application as mime_app
 import email.mime.multipart as mime_multi
 import email.mime.text as mime_text
@@ -77,6 +78,8 @@ def enviar_email(
     if not candidatos:
         raise RuntimeError("Nenhuma conta Google conectada (nem do usuário, nem a master)")
 
+    encoded_subject = email.header.Header(subject, "utf-8")
+
     html_part = mime_multi.MIMEMultipart("alternative")
     html_part.attach(mime_text.MIMEText(html, "html", "utf-8"))
 
@@ -84,7 +87,7 @@ def enviar_email(
         outer = mime_multi.MIMEMultipart("mixed")
         outer["to"] = to
         outer["from"] = "me"
-        outer["subject"] = subject
+        outer["subject"] = encoded_subject
         if bcc:
             outer["bcc"] = ", ".join(bcc)
         outer.attach(html_part)
@@ -95,7 +98,7 @@ def enviar_email(
     else:
         html_part["to"] = to
         html_part["from"] = "me"
-        html_part["subject"] = subject
+        html_part["subject"] = encoded_subject
         if bcc:
             html_part["bcc"] = ", ".join(bcc)
         msg_bytes = html_part.as_bytes()
