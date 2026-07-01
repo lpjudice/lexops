@@ -138,6 +138,9 @@ class ConselhoEventoConvidado(Base):
     presenca_confirmada: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     participacao_confirmada: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     recusou: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    pendente: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    pendente_obs: Mapped[str | None] = mapped_column(Text, nullable=True)
+    followup_data: Mapped[date | None] = mapped_column(Date, nullable=True)
     mensagem_pessoal: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

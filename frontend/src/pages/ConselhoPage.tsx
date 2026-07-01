@@ -676,7 +676,7 @@ function EventosSubTab() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['conselho-eventos'] }),
   })
   const atualizarConvidado = useMutation({
-    mutationFn: ({ id, payload }: { id: string; payload: { presenca_confirmada?: boolean; participacao_confirmada?: boolean; recusou?: boolean; mensagem_pessoal?: string } }) =>
+    mutationFn: ({ id, payload }: { id: string; payload: { presenca_confirmada?: boolean; participacao_confirmada?: boolean; recusou?: boolean; pendente?: boolean; pendente_obs?: string; followup_data?: string | null; mensagem_pessoal?: string } }) =>
       conselhoApi.atualizarConvidado(id, payload),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['conselho-eventos'] }),
   })
@@ -806,6 +806,10 @@ function EventosSubTab() {
                       <input type="checkbox" checked={cv.participacao_confirmada} onChange={(e) => atualizarConvidado.mutate({ id: cv.id, payload: { participacao_confirmada: e.target.checked } })} />
                       Participou
                     </label>
+                    <label className={cs.checkboxLabel} style={{ color: cv.pendente ? '#f59e0b' : undefined }}>
+                      <input type="checkbox" checked={cv.pendente} onChange={(e) => atualizarConvidado.mutate({ id: cv.id, payload: { pendente: e.target.checked } })} />
+                      ⏳ Pendente
+                    </label>
                     {cv.contato.whatsapp && (
                       <>
                         <a className={`${cs.linkBtn} ${cs.linkWhatsapp}`} target="_blank" rel="noreferrer"
@@ -830,6 +834,27 @@ function EventosSubTab() {
                     )}
                     <button className={styles.btnDanger} onClick={() => removerConvidado.mutate(cv.id)}>Remover</button>
                   </div>
+                  {cv.pendente && (
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 6, flexWrap: 'wrap' }}>
+                      <input
+                        className={styles.input}
+                        style={{ flex: 1, minWidth: 180, fontSize: 12 }}
+                        placeholder="Observação / motivo pendência"
+                        defaultValue={cv.pendente_obs || ''}
+                        onBlur={(e) => atualizarConvidado.mutate({ id: cv.id, payload: { pendente_obs: e.target.value } })}
+                      />
+                      <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
+                        Follow-up em
+                        <input
+                          type="date"
+                          className={styles.input}
+                          style={{ fontSize: 12, width: 140 }}
+                          defaultValue={cv.followup_data || ''}
+                          onBlur={(e) => atualizarConvidado.mutate({ id: cv.id, payload: { followup_data: e.target.value || null } })}
+                        />
+                      </label>
+                    </div>
+                  )}
                   <MensagemConvidadoPanel
                     cv={cv}
                     templateAtual={templateAtual}

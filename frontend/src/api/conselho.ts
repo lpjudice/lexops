@@ -111,6 +111,9 @@ export interface Convidado {
   presenca_confirmada: boolean
   participacao_confirmada: boolean
   recusou: boolean
+  pendente: boolean
+  pendente_obs?: string | null
+  followup_data?: string | null
   mensagem_pessoal?: string | null
   contato: Contato
 }
@@ -252,7 +255,7 @@ export const conselhoApi = {
   deletarEvento: (id: string) => api.delete(`/conselho/eventos/${id}`),
   addConvidado: (eventoId: string, contatoId: string) =>
     api.post<Evento>(`/conselho/eventos/${eventoId}/convidados`, { contato_id: contatoId }).then((r) => r.data),
-  atualizarConvidado: (convidadoId: string, data: { presenca_confirmada?: boolean; participacao_confirmada?: boolean; recusou?: boolean; mensagem_pessoal?: string }) =>
+  atualizarConvidado: (convidadoId: string, data: { presenca_confirmada?: boolean; participacao_confirmada?: boolean; recusou?: boolean; pendente?: boolean; pendente_obs?: string; followup_data?: string | null; mensagem_pessoal?: string }) =>
     api.patch<Convidado>(`/conselho/eventos/convidados/${convidadoId}`, data).then((r) => r.data),
   removerConvidado: (convidadoId: string) => api.delete(`/conselho/eventos/convidados/${convidadoId}`),
 

@@ -161,6 +161,9 @@ class ConvidadoUpdate(BaseModel):
     presenca_confirmada: bool | None = None
     participacao_confirmada: bool | None = None
     recusou: bool | None = None
+    pendente: bool | None = None
+    pendente_obs: str | None = None
+    followup_data: date | None = None
     mensagem_pessoal: str | None = None
 
 
@@ -172,6 +175,9 @@ class ConvidadoOut(BaseModel):
     presenca_confirmada: bool
     participacao_confirmada: bool
     recusou: bool
+    pendente: bool
+    pendente_obs: str | None
+    followup_data: date | None
     mensagem_pessoal: str | None
     contato: ContatoOut
 

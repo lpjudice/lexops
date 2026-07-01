@@ -810,6 +810,15 @@ def _run_migrations() -> None:
         conn.execute(text(
             "ALTER TABLE conselho_evento_convidados ADD COLUMN IF NOT EXISTS recusou BOOLEAN NOT NULL DEFAULT FALSE"
         ))
+        conn.execute(text(
+            "ALTER TABLE conselho_evento_convidados ADD COLUMN IF NOT EXISTS pendente BOOLEAN NOT NULL DEFAULT FALSE"
+        ))
+        conn.execute(text(
+            "ALTER TABLE conselho_evento_convidados ADD COLUMN IF NOT EXISTS pendente_obs TEXT"
+        ))
+        conn.execute(text(
+            "ALTER TABLE conselho_evento_convidados ADD COLUMN IF NOT EXISTS followup_data DATE"
+        ))
 
         # Tarefas: campo de ordenação manual
         conn.execute(text(
