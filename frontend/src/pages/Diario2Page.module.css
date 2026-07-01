@@ -79,6 +79,20 @@
   color: #17211f;
 }
 
+/* rótulos singelos "Disp." / "Pub." antes de cada data no cabeçalho do dia */
+.dayDateLabel {
+  font-size: 10px;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.daySep {
+  margin: 0 7px;
+  color: #cbd5e1;
+  font-weight: 400;
+}
+
 .dayCount {
   font-size: 11px;
   color: #64748b;

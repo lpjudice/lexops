@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { diario2Api } from '../api/diario2'
-import type { Diario2Publicacao, Diario2PrazoCreate, StatusPrazoDiario2 } from '../api/diario2'
+import type { Diario2Publicacao, Diario2Dia, Diario2PrazoCreate, StatusPrazoDiario2 } from '../api/diario2'
 import { processosApi } from '../api/processos'
 import { usuariosApi } from '../api/usuarios'
 import styles from './Page.module.css'
@@ -16,6 +16,12 @@ const PECAS = [
 function formatDate(date?: string | null) {
   if (!date) return '-'
   return new Date(date + 'T12:00:00').toLocaleDateString('pt-BR')
+}
+
+// Data de disponibilização representativa do dia (vem no texto de cada publicação).
+function dispDoDia(dia: Diario2Dia): string | null {
+  const pub = dia.publicacoes.find((p) => p.detalhes?.data_disponibilizacao)
+  return pub?.detalhes?.data_disponibilizacao ?? null
 }
 
 function defaultPrazo(pub: Diario2Publicacao): Diario2PrazoCreate {
@@ -182,7 +188,17 @@ export default function Diario2Page() {
           {data.dias.map((dia) => (
             <section key={dia.data} className={diario2Styles.dayBlock}>
               <div className={diario2Styles.dayHeader}>
-                <span className={diario2Styles.dayTitle}>{formatDate(dia.data)}</span>
+                <span className={diario2Styles.dayTitle}>
+                  {dispDoDia(dia) && (
+                    <>
+                      <span className={diario2Styles.dayDateLabel}>Disp.</span>{' '}
+                      {dispDoDia(dia)}
+                      <span className={diario2Styles.daySep}>·</span>
+                    </>
+                  )}
+                  <span className={diario2Styles.dayDateLabel}>Pub.</span>{' '}
+                  {formatDate(dia.data)}
+                </span>
                 <span className={diario2Styles.dayCount}>{dia.publicacoes.length} registro(s)</span>
               </div>
               <div className={diario2Styles.publicationList}>
