@@ -306,7 +306,11 @@ def emitir_nota(
         descricao_servico=body.descricao_servico,
         cod_tributacao_nacional=body.cod_tributacao_nacional,
         nbs_codigo=(cfg.nbs_codigo if cfg and cfg.nbs_codigo else None),
-        aliquota_iss=(cfg.aliquota_iss if cfg and cfg.aliquota_iss else None),
+        # pAliq só é permitido FORA do Simples Nacional. Para ME/EPP (opSimpNac=3)
+        # com convênio municipal ativo, informar alíquota gera E0635 — o município
+        # aplica a própria alíquota. Só enviamos em Lucro Presumido/Real.
+        aliquota_iss=(cfg.aliquota_iss if cfg and cfg.aliquota_iss
+                      and (cfg.regime_tributario or "simples") != "simples" else None),
         natureza_operacao=body.natureza_operacao,
         regime_tributario=body.regime_tributario,
         reg_apuracao_sn=body.reg_apuracao_sn,

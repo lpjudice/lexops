@@ -19,8 +19,9 @@ from app.models import precedentcheck as _precedentcheck_model  # noqa: F401
 from app.models import tarefa_projeto as _tarefa_projeto_model  # noqa: F401
 from app.models import pagante as _pagante_model  # noqa: F401 — ensures Pagante table is registered
 from app.models import conselho as _conselho_model  # noqa: F401 — ensures Conselho tables are registered
+from app.models import tarefa_card as _tarefa_card_model  # noqa: F401 — ensures TarefaCard tables are registered
 from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, fiscal, pagantes, config_fiscal, jurisprudencia, organizador, pje, prazos, processos, publico, reembolsos, reunioes, system, tarefas, telegram, telegram_andamentos, telegram_tasks, teses, usuarios, webhooks
-from app.routers import backoffice, precedentcheck, conselho, tarefa_projetos
+from app.routers import backoffice, precedentcheck, conselho, tarefa_projetos, tarefa_cards
 
 # Cria as tabelas (Alembic gerencia em produção; aqui facilita o dev)
 Base.metadata.create_all(bind=engine)
@@ -848,6 +849,42 @@ def _run_migrations() -> None:
             WHERE tarefas.id = sub.id
         """))
 
+        # Tarefas Cards (teste): card macro + subtarefas, tabelas próprias
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS tarefa_cards (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                projeto_id UUID REFERENCES tarefa_projetos(id) ON DELETE SET NULL,
+                cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL,
+                processo_id UUID REFERENCES processos(id) ON DELETE SET NULL,
+                criado_por_id UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+                titulo VARCHAR(500) NOT NULL,
+                descricao TEXT,
+                notas TEXT,
+                responsavel VARCHAR(255),
+                responsavel_email VARCHAR(255),
+                status VARCHAR(50) NOT NULL DEFAULT 'pendente',
+                data_limite DATE,
+                google_event_id VARCHAR(500),
+                ordem INTEGER,
+                confidencial BOOLEAN NOT NULL DEFAULT false,
+                usuarios_com_acesso JSONB DEFAULT '[]'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS tarefa_card_subtasks (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                card_id UUID NOT NULL REFERENCES tarefa_cards(id) ON DELETE CASCADE,
+                texto VARCHAR(500) NOT NULL,
+                concluida BOOLEAN NOT NULL DEFAULT false,
+                ordem INTEGER NOT NULL DEFAULT 0
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_tarefa_card_subtasks_card ON tarefa_card_subtasks(card_id)"
+        ))
+
         conn.commit()
 
 
@@ -1079,6 +1116,7 @@ app.include_router(telegram_tasks.router)
 app.include_router(precedentcheck.router)
 app.include_router(conselho.router)
 app.include_router(tarefa_projetos.router)
+app.include_router(tarefa_cards.router)
 
 
 @app.on_event("startup")

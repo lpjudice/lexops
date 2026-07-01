@@ -1,0 +1,242 @@
+/* Tarefas Cards — visual de card macro (estilo Diretriz) + funções de Tarefa */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.filtroProjeto {
+  margin-left: auto;
+  min-width: 220px;
+}
+
+/* ── Agrupamento por projeto ─────────────────────────────── */
+.projetoSection {
+  margin-bottom: 26px;
+}
+
+.projetoHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  color: var(--dark);
+}
+
+.projetoDot {
+  width: 12px;
+  height: 12px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.projetoCount {
+  font-size: 11px;
+  font-weight: 600;
+  color: #9ca3af;
+}
+
+/* ── Grid de cards ──────────────────────────────────────── */
+.cardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+}
+
+.card {
+  background: var(--white);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: 16px 18px;
+  border-left: 4px solid var(--gray-border);
+  display: flex;
+  flex-direction: column;
+}
+
+.card_pendente { border-left-color: #9ca3af; }
+.card_em_andamento { border-left-color: #3b82f6; }
+.card_concluido { border-left-color: #10b981; }
+.card_cancelado { border-left-color: #ef4444; }
+.card_confidencial { border-left-color: #a855f7 !important; }
+
+.cardTopRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cardTitle {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--dark);
+  margin-bottom: 4px;
+  line-height: 1.35;
+}
+
+.lockBadge {
+  font-size: 10px;
+  font-weight: 600;
+  background: #f3e8ff;
+  color: #7c3aed;
+  border-radius: 4px;
+  padding: 2px 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.cardDesc {
+  font-size: 12.5px;
+  color: #6b7280;
+  margin-bottom: 10px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+/* Chips de meta (responsável, cliente, processo, prazo) */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #4b5563;
+  background: #f3f4f6;
+  border-radius: 999px;
+  padding: 3px 9px;
+}
+
+.chipPrazo { background: #fef3c7; color: #92400e; }
+.chipVencido { background: #fee2e2; color: #b91c1c; }
+
+.cardMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.statusSelect {
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #1d1e20;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+/* ── Subtarefas ─────────────────────────────────────────── */
+.subtasks {
+  border-top: 1px dashed #e5e7eb;
+  padding-top: 8px;
+  margin-top: 2px;
+}
+
+.subtaskProgress {
+  font-size: 11px;
+  color: #9ca3af;
+  margin-bottom: 4px;
+}
+
+.subtaskRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  padding: 3px 0;
+}
+
+.subtaskRow input[type='checkbox'] { cursor: pointer; }
+
+.subtaskText { flex: 1; }
+
+.subtaskDone {
+  text-decoration: line-through;
+  color: #9ca3af;
+}
+
+.subtaskDel {
+  border: none;
+  background: none;
+  color: #d1d5db;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.subtaskDel:hover { color: #ef4444; }
+
+.addSubtask {
+  margin-top: 6px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 8px;
+  font-size: 12px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  outline: none;
+  font-family: inherit;
+}
+
+/* ── Ações do card ──────────────────────────────────────── */
+.cardActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #f3f4f6;
+}
+
+.linkBtn {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  padding: 0;
+}
+.linkAgendar { color: #2563eb; }
+.linkAgendado { color: #10b981; }
+.linkEditar { color: #6b7280; }
+.linkExcluir { color: #dc2626; margin-left: auto; }
+.linkBtn:hover { text-decoration: underline; }
+
+/* Card confidencial mascarado */
+.restrito {
+  text-align: center;
+  padding: 8px 0 4px;
+}
+.restritoIcon { font-size: 20px; }
+.restritoTxt { font-size: 12px; color: #7c3aed; margin: 4px 0 8px; }
+
+/* ── Formulário (create/edit) ───────────────────────────── */
+.subtaskFormRow {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.confidencialRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #7c3aed;
+  cursor: pointer;
+  margin: 6px 0;
+}

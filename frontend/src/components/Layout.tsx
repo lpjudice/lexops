@@ -24,6 +24,7 @@ import {
   BarChart3,
   ShieldCheck,
   Users2,
+  LayoutGrid,
 } from 'lucide-react'
 import api from '../api/client'
 import { useAuth } from '../contexts/AuthContext'
@@ -71,6 +72,7 @@ const navGroups: NavGroup[] = [
       { to: '/prazos', label: 'Prazos', Icon: Calendar },
       { to: '/atendimentos', label: 'Atendimentos', Icon: Handshake },
       { to: '/tarefas', label: 'Tarefas', Icon: CheckSquare },
+      { to: '/tarefas-cards', label: 'Tarefas Cards', Icon: LayoutGrid },
       { to: '/reunioes', label: 'Reuniões', Icon: Video },
       { to: '/conselho', label: 'Expansão', Icon: Users2 },
     ],
@@ -145,6 +147,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/backoffice/despesas': 'Despesas',
   '/atendimentos': 'Atendimentos',
   '/tarefas': 'Tarefas',
+  '/tarefas-cards': 'Tarefas Cards',
   '/reunioes': 'Reuniões',
   '/conselho': 'Expansão',
   '/configuracoes': 'Configurações',

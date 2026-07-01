@@ -20,6 +20,7 @@ import ConfiguracoesPage from './pages/ConfiguracoesPage'
 import OrganizadorPage from './pages/OrganizadorPage'
 import JurisprudenciaPage from './pages/JurisprudenciaPage'
 import TarefasPage from './pages/TarefasPage'
+import TarefasCardsPage from './pages/TarefasCardsPage'
 import AceitarConvitePage from './pages/AceitarConvitePage'
 import ReunioesPage from './pages/ReunioesPage'
 import FiscalPage from './pages/FiscalPage'
@@ -72,6 +73,7 @@ function AppRoutes() {
         <Route path="organizador" element={<OrganizadorPage />} />
         <Route path="jurisprudencia" element={<JurisprudenciaPage />} />
         <Route path="tarefas" element={<TarefasPage />} />
+        <Route path="tarefas-cards" element={<TarefasCardsPage />} />
         <Route path="reunioes" element={<ReunioesPage />} />
         <Route path="conselho" element={<ConselhoPage />} />
         <Route path="fiscal" element={<FiscalPage />} />
