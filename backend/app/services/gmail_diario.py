@@ -20,6 +20,13 @@ from app.services.google_master_tokens import load_master_google_tokens, save_ma
 
 GMAIL_API = "https://gmail.googleapis.com/gmail/v1"
 
+# Limite de texto guardado por e-mail. Precisa ser generoso porque o corpo é
+# fatiado por publicação (marcadores "Publicação: N.") DEPOIS deste corte: se a
+# 1ª publicação for longa e estourar o limite, os marcadores seguintes ficam de
+# fora e o e-mail inteiro colapsa em 1 publicação. Cada bloco final guarda só o
+# seu próprio texto, então este teto só afeta o insumo do fatiador.
+MAX_TEXTO_EMAIL = 400_000
+
 # Regex CNJ padrão
 CNJ_RE = re.compile(r"\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}")
 # Link PJe nos textos de publicação
@@ -269,7 +276,7 @@ def sincronizar_gmail(days_back: int = 3) -> list[dict]:
                         "tipo_ato": tipo_ato,
                         "tribunal": tribunais[0] if tribunais else None,
                         "texto_resumo": resumo,
-                        "texto_completo": texto[:10000],
+                        "texto_completo": texto[:MAX_TEXTO_EMAIL],
                         "email_message_id": f"{msg_id}_{cnj}",
                         "url_fonte": url_fonte,
                     })
@@ -283,7 +290,7 @@ def sincronizar_gmail(days_back: int = 3) -> list[dict]:
                         "tipo_ato": tipo_ato,
                         "tribunal": tribunal,
                         "texto_resumo": resumo,
-                        "texto_completo": texto[:10000],
+                        "texto_completo": texto[:MAX_TEXTO_EMAIL],
                         "email_message_id": f"{msg_id}_pub_{tribunal}",
                         "url_fonte": url_fonte,
                     })
