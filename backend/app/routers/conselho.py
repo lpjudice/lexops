@@ -338,6 +338,19 @@ def deletar_contato(
     db.commit()
 
 
+@router.delete("/contatos/notas/{nota_id}", status_code=status.HTTP_204_NO_CONTENT)
+def deletar_nota_contato(
+    nota_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(get_current_user),
+):
+    nota = db.query(ConselhoContatoNota).filter(ConselhoContatoNota.id == nota_id).first()
+    if not nota:
+        raise HTTPException(status_code=404, detail="Nota não encontrada")
+    db.delete(nota)
+    db.commit()
+
+
 @router.post("/contatos/{contato_id}/notas", response_model=ContatoOut)
 def add_nota_contato(
     contato_id: uuid.UUID,
@@ -462,11 +475,35 @@ def atualizar_convidado(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
 ):
+    from app.models.tarefa import Tarefa
+
     cv = db.query(ConselhoEventoConvidado).filter(ConselhoEventoConvidado.id == convidado_id).first()
     if not cv:
         raise HTTPException(status_code=404, detail="Convidado não encontrado")
-    for field, value in data.model_dump(exclude_unset=True).items():
+
+    followup_anterior = cv.followup_data
+    updates = data.model_dump(exclude_unset=True)
+    for field, value in updates.items():
         setattr(cv, field, value)
+
+    # Cria tarefa para Monielly quando followup_data é definida pela primeira vez
+    nova_followup = updates.get("followup_data")
+    if nova_followup and nova_followup != followup_anterior:
+        evento = db.query(ConselhoEvento).filter(ConselhoEvento.id == cv.evento_id).first()
+        contato = cv.contato
+        nome_contato = f"{contato.primeiro_nome} {contato.sobrenome or ''}".strip()
+        nome_evento = evento.nome if evento else "evento"
+        obs = cv.pendente_obs or updates.get("pendente_obs") or ""
+        tarefa = Tarefa(
+            titulo=f"Follow-up: {nome_contato} – {nome_evento}",
+            descricao=obs or None,
+            responsavel="Monielly",
+            data_limite=nova_followup,
+            status="pendente",
+            criado_por_id=usuario.id,
+        )
+        db.add(tarefa)
+
     db.commit()
     db.refresh(cv)
     return cv

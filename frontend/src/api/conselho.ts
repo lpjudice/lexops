@@ -245,6 +245,7 @@ export const conselhoApi = {
   deletarContato: (id: string) => api.delete(`/conselho/contatos/${id}`),
   addNotaContato: (contatoId: string, texto: string, eventoId?: string) =>
     api.post<Contato>(`/conselho/contatos/${contatoId}/notas`, { texto, evento_id: eventoId }).then((r) => r.data),
+  deletarNotaContato: (notaId: string) => api.delete(`/conselho/contatos/notas/${notaId}`),
 
   // Eventos
   listarEventos: () => api.get<Evento[]>('/conselho/eventos').then((r) => r.data),

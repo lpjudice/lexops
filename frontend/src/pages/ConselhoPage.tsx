@@ -598,6 +598,10 @@ function GuestComments({ contato, eventoId, onSaved }: { contato: Contato; event
     mutationFn: () => conselhoApi.addNotaContato(contato.id, texto, eventoId),
     onSuccess: () => { setTexto(''); onSaved() },
   })
+  const deletarNota = useMutation({
+    mutationFn: (notaId: string) => conselhoApi.deletarNotaContato(notaId),
+    onSuccess: onSaved,
+  })
 
   return (
     <div style={{ flexBasis: '100%', marginTop: 6 }}>
@@ -607,7 +611,14 @@ function GuestComments({ contato, eventoId, onSaved }: { contato: Contato; event
       {aberto && (
         <div style={{ marginTop: 8 }}>
           {notasDoEvento.map((n) => (
-            <div key={n.id} style={{ fontSize: 12.5, padding: '4px 0', borderBottom: '1px solid #eee' }}>{n.texto}</div>
+            <div key={n.id} style={{ fontSize: 12.5, padding: '4px 0', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+              <span style={{ flex: 1 }}>{n.texto}</span>
+              <button
+                className={styles.btnDanger}
+                style={{ padding: '1px 6px', fontSize: 11 }}
+                onClick={() => deletarNota.mutate(n.id)}
+              >✕</button>
+            </div>
           ))}
           <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
             <input className={styles.input} style={{ flex: 1 }} placeholder="Novo comentário sobre este convidado neste evento" value={texto} onChange={(e) => setTexto(e.target.value)} />
@@ -620,16 +631,20 @@ function GuestComments({ contato, eventoId, onSaved }: { contato: Contato; event
 }
 
 function EventCard({ evento, onClick }: { evento: Evento; onClick: () => void }) {
-  const presentes = evento.convidados.filter((c) => c.presenca_confirmada).length
-  const participantes = evento.convidados.filter((c) => c.participacao_confirmada).length
+  const confirmados = evento.convidados.filter((c) => c.presenca_confirmada).length
+  const recusaram = evento.convidados.filter((c) => c.recusou).length
+  const participaram = evento.convidados.filter((c) => c.participacao_confirmada).length
+  const pendentes = evento.convidados.filter((c) => c.pendente).length
   return (
     <div className={cs.eventCard} onClick={onClick}>
       <div className={cs.cardTitle}>{evento.nome}</div>
       <div style={{ fontSize: 12, color: '#9ca3af' }}>{fmtData(evento.data)}</div>
       <div className={cs.eventStats}>
         <span>{evento.convidados.length} convidados</span>
-        <span>{presentes} presentes</span>
-        <span>{participantes} participaram</span>
+        <span style={{ color: '#22c55e' }}>✓ {confirmados} confirm.</span>
+        {recusaram > 0 && <span style={{ color: '#ef4444' }}>✗ {recusaram} recus.</span>}
+        {pendentes > 0 && <span style={{ color: '#f59e0b' }}>⏳ {pendentes} pend.</span>}
+        <span>{participaram} particip.</span>
       </div>
     </div>
   )
@@ -641,6 +656,7 @@ function EventosSubTab() {
   const [nome, setNome] = useState('')
   const [data, setData] = useState('')
   const [expandido, setExpandido] = useState<string | null>(null)
+  const [expandidoConvidado, setExpandidoConvidado] = useState<string | null>(null)
   const [masterMsg, setMasterMsg] = useState('')
   const [showAddModal, setShowAddModal] = useState(false)
   const [emailTarget, setEmailTarget] = useState<EmailSendTarget | null>(null)
@@ -735,7 +751,7 @@ function EventosSubTab() {
 
       {eventoExpandido ? (
         <div>
-          <button className={styles.btnSmall} onClick={() => setExpandido(null)} style={{ marginBottom: 14 }}>← Voltar</button>
+          <button className={styles.btnSmall} onClick={() => { setExpandido(null); setExpandidoConvidado(null) }} style={{ marginBottom: 14 }}>← Voltar</button>
           <h3 style={{ marginBottom: 4 }}>{eventoExpandido.nome}</h3>
           <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 14 }}>{fmtData(eventoExpandido.data)}</p>
 
@@ -786,82 +802,106 @@ function EventosSubTab() {
             />
           )}
 
-          <div className={styles.tableCard} style={{ marginTop: 14, padding: '6px 14px' }}>
-            {eventoExpandido.convidados.length === 0 && <div className={styles.empty}>Nenhum convidado ainda</div>}
+          {eventoExpandido.convidados.length === 0 && <div className={styles.empty} style={{ marginTop: 14 }}>Nenhum convidado ainda</div>}
+          <div className={cs.guestCardGrid}>
             {eventoExpandido.convidados.map((cv) => {
               const mensagemResolvida = cv.mensagem_pessoal || aplicarPlaceholders(templateAtual, cv.contato.primeiro_nome, cv.contato.sobrenome || '', eventoExpandido.nome)
+              const isExpanded = expandidoConvidado === cv.id
               return (
-                <div key={cv.id} style={{ borderBottom: '1px solid #f5f5f5', padding: '8px 0' }}>
-                  <div className={cs.guestRow} style={{ borderBottom: 'none', padding: 0, flexWrap: 'wrap' }}>
-                    <span className={cs.guestName}>{cv.contato.primeiro_nome} {cv.contato.sobrenome || ''}</span>
-                    <label className={cs.checkboxLabel}>
-                      <input type="checkbox" checked={cv.presenca_confirmada} onChange={(e) => atualizarConvidado.mutate({ id: cv.id, payload: { presenca_confirmada: e.target.checked } })} />
-                      Confirmado
-                    </label>
-                    <label className={cs.checkboxLabel} style={{ color: cv.recusou ? '#ef4444' : undefined }}>
-                      <input type="checkbox" checked={cv.recusou} onChange={(e) => atualizarConvidado.mutate({ id: cv.id, payload: { recusou: e.target.checked } })} />
-                      Recusou
-                    </label>
-                    <label className={cs.checkboxLabel}>
-                      <input type="checkbox" checked={cv.participacao_confirmada} onChange={(e) => atualizarConvidado.mutate({ id: cv.id, payload: { participacao_confirmada: e.target.checked } })} />
-                      Participou
-                    </label>
-                    <label className={cs.checkboxLabel} style={{ color: cv.pendente ? '#f59e0b' : undefined }}>
-                      <input type="checkbox" checked={cv.pendente} onChange={(e) => atualizarConvidado.mutate({ id: cv.id, payload: { pendente: e.target.checked } })} />
-                      ⏳ Pendente
-                    </label>
-                    {cv.contato.whatsapp && (
-                      <>
-                        <a className={`${cs.linkBtn} ${cs.linkWhatsapp}`} target="_blank" rel="noreferrer"
-                           href={`https://wa.me/${cv.contato.whatsapp.replace(/\D/g, '')}?text=${encodeWaText(mensagemResolvida)}`}>
-                          WhatsApp
-                        </a>
-                        <button className={styles.btnSmall} title="Copiar mensagem" onClick={() => navigator.clipboard.writeText(mensagemResolvida)}>📋 Copiar</button>
-                      </>
-                    )}
-                    {cv.contato.email && (
-                      <button
-                        className={`${cs.linkBtn} ${cs.linkEmail}`}
-                        style={{ border: 'none', cursor: 'pointer' }}
-                        onClick={() => setEmailTarget({
-                          contatoId: cv.contato.id, email: cv.contato.email!, nome: cv.contato.primeiro_nome,
-                          assunto: eventoExpandido.nome, corpo: mensagemResolvida,
-                          eventoId: eventoExpandido.id, eventoNome: eventoExpandido.nome,
-                        })}
-                      >
-                        E-mail
-                      </button>
-                    )}
-                    <button className={styles.btnDanger} onClick={() => removerConvidado.mutate(cv.id)}>Remover</button>
+                <div key={cv.id} className={cs.guestCard}>
+                  {/* Cabeçalho do card — clicável para expandir */}
+                  <div className={cs.guestCardHeader} onClick={() => setExpandidoConvidado(isExpanded ? null : cv.id)}>
+                    <span className={cs.guestCardName}>{cv.contato.primeiro_nome} {cv.contato.sobrenome || ''}</span>
+                    <div className={cs.guestCardBadges}>
+                      {cv.presenca_confirmada && <span className={`${cs.badge} ${cs.badgeConfirmado}`}>✓ Conf.</span>}
+                      {cv.recusou && <span className={`${cs.badge} ${cs.badgeRecusou}`}>✗ Recus.</span>}
+                      {cv.participacao_confirmada && <span className={`${cs.badge} ${cs.badgeParticipou}`}>✓ Part.</span>}
+                      {cv.pendente && <span className={`${cs.badge} ${cs.badgePendente}`}>⏳ Pend.</span>}
+                    </div>
+                    <div className={cs.guestCardActions} onClick={(e) => e.stopPropagation()}>
+                      {cv.contato.whatsapp && (
+                        <>
+                          <a className={`${cs.linkBtn} ${cs.linkWhatsapp}`} style={{ padding: '3px 8px', fontSize: 11 }} target="_blank" rel="noreferrer"
+                             href={`https://wa.me/${cv.contato.whatsapp.replace(/\D/g, '')}?text=${encodeWaText(mensagemResolvida)}`}>
+                            WA
+                          </a>
+                          <button className={styles.btnSmall} style={{ padding: '3px 6px', fontSize: 11 }} title="Copiar mensagem" onClick={() => navigator.clipboard.writeText(mensagemResolvida)}>📋</button>
+                        </>
+                      )}
+                      {cv.contato.email && (
+                        <button
+                          className={`${cs.linkBtn} ${cs.linkEmail}`}
+                          style={{ border: 'none', cursor: 'pointer', padding: '3px 8px', fontSize: 11 }}
+                          onClick={() => setEmailTarget({
+                            contatoId: cv.contato.id, email: cv.contato.email!, nome: cv.contato.primeiro_nome,
+                            assunto: eventoExpandido.nome, corpo: mensagemResolvida,
+                            eventoId: eventoExpandido.id, eventoNome: eventoExpandido.nome,
+                          })}
+                        >
+                          Email
+                        </button>
+                      )}
+                      <button className={styles.btnDanger} style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => removerConvidado.mutate(cv.id)}>✕</button>
+                    </div>
                   </div>
-                  {cv.pendente && (
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 6, flexWrap: 'wrap' }}>
-                      <input
-                        className={styles.input}
-                        style={{ flex: 1, minWidth: 180, fontSize: 12 }}
-                        placeholder="Observação / motivo pendência"
-                        defaultValue={cv.pendente_obs || ''}
-                        onBlur={(e) => atualizarConvidado.mutate({ id: cv.id, payload: { pendente_obs: e.target.value } })}
+
+                  {/* Corpo expandido */}
+                  {isExpanded && (
+                    <div className={cs.guestCardBody}>
+                      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                        <label className={cs.checkboxLabel}>
+                          <input type="checkbox" checked={cv.presenca_confirmada} onChange={(e) => {
+                            const checked = e.target.checked
+                            atualizarConvidado.mutate({ id: cv.id, payload: { presenca_confirmada: checked, ...(checked ? { recusou: false } : {}) } })
+                          }} />
+                          Confirmado
+                        </label>
+                        <label className={cs.checkboxLabel} style={{ color: cv.recusou ? '#ef4444' : undefined }}>
+                          <input type="checkbox" checked={cv.recusou} onChange={(e) => {
+                            const checked = e.target.checked
+                            atualizarConvidado.mutate({ id: cv.id, payload: { recusou: checked, ...(checked ? { presenca_confirmada: false } : {}) } })
+                          }} />
+                          Recusou
+                        </label>
+                        <label className={cs.checkboxLabel}>
+                          <input type="checkbox" checked={cv.participacao_confirmada} onChange={(e) => atualizarConvidado.mutate({ id: cv.id, payload: { participacao_confirmada: e.target.checked } })} />
+                          Participou
+                        </label>
+                        <label className={cs.checkboxLabel} style={{ color: cv.pendente ? '#f59e0b' : undefined }}>
+                          <input type="checkbox" checked={cv.pendente} onChange={(e) => atualizarConvidado.mutate({ id: cv.id, payload: { pendente: e.target.checked } })} />
+                          ⏳ Pendente
+                        </label>
+                      </div>
+                      {cv.pendente && (
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                          <input
+                            className={styles.input}
+                            style={{ flex: 1, minWidth: 160, fontSize: 12 }}
+                            placeholder="Observação / motivo pendência"
+                            defaultValue={cv.pendente_obs || ''}
+                            onBlur={(e) => atualizarConvidado.mutate({ id: cv.id, payload: { pendente_obs: e.target.value } })}
+                          />
+                          <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
+                            Follow-up em
+                            <input
+                              type="date"
+                              className={styles.input}
+                              style={{ fontSize: 12, width: 140 }}
+                              defaultValue={cv.followup_data || ''}
+                              onBlur={(e) => atualizarConvidado.mutate({ id: cv.id, payload: { followup_data: e.target.value || null } })}
+                            />
+                          </label>
+                        </div>
+                      )}
+                      <MensagemConvidadoPanel
+                        cv={cv}
+                        templateAtual={templateAtual}
+                        eventoNome={eventoExpandido.nome}
+                        onSave={(texto) => atualizarConvidado.mutate({ id: cv.id, payload: { mensagem_pessoal: texto } })}
                       />
-                      <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
-                        Follow-up em
-                        <input
-                          type="date"
-                          className={styles.input}
-                          style={{ fontSize: 12, width: 140 }}
-                          defaultValue={cv.followup_data || ''}
-                          onBlur={(e) => atualizarConvidado.mutate({ id: cv.id, payload: { followup_data: e.target.value || null } })}
-                        />
-                      </label>
+                      <GuestComments contato={cv.contato} eventoId={eventoExpandido.id} onSaved={() => qc.invalidateQueries({ queryKey: ['conselho-eventos'] })} />
                     </div>
                   )}
-                  <MensagemConvidadoPanel
-                    cv={cv}
-                    templateAtual={templateAtual}
-                    eventoNome={eventoExpandido.nome}
-                    onSave={(texto) => atualizarConvidado.mutate({ id: cv.id, payload: { mensagem_pessoal: texto } })}
-                  />
-                  <GuestComments contato={cv.contato} eventoId={eventoExpandido.id} onSaved={() => qc.invalidateQueries({ queryKey: ['conselho-eventos'] })} />
                 </div>
               )
             })}

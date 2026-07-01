@@ -151,6 +151,75 @@
   color: var(--dark);
 }
 
+/* Guest cards grid (inside event detail) */
+.guestCardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.guestCard {
+  background: var(--white);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  border: 1px solid #e5e7eb;
+  overflow: hidden;
+}
+
+.guestCardHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.guestCardHeader:hover {
+  background: #f9fafb;
+}
+
+.guestCardName {
+  flex: 1;
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--dark);
+}
+
+.guestCardBadges {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.badgeConfirmado { background: #dcfce7; color: #15803d; }
+.badgeRecusou    { background: #fee2e2; color: #b91c1c; }
+.badgeParticipou { background: #dbeafe; color: #1d4ed8; }
+.badgePendente   { background: #fef3c7; color: #92400e; }
+
+.guestCardActions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.guestCardBody {
+  border-top: 1px solid #f0f0f0;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .checkboxLabel {
   display: flex;
   align-items: center;
