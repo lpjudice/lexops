@@ -759,10 +759,13 @@ function EventosSubTab() {
                       Participação
                     </label>
                     {cv.contato.whatsapp && (
-                      <a className={`${cs.linkBtn} ${cs.linkWhatsapp}`} target="_blank" rel="noreferrer"
-                         href={`https://wa.me/${cv.contato.whatsapp.replace(/\D/g, '')}?text=${encodeWaText(mensagemResolvida)}`}>
-                        WhatsApp
-                      </a>
+                      <>
+                        <a className={`${cs.linkBtn} ${cs.linkWhatsapp}`} target="_blank" rel="noreferrer"
+                           href={`https://wa.me/${cv.contato.whatsapp.replace(/\D/g, '')}?text=${encodeWaText(mensagemResolvida)}`}>
+                          WhatsApp
+                        </a>
+                        <button className={styles.btnSmall} title="Copiar mensagem" onClick={() => navigator.clipboard.writeText(mensagemResolvida)}>📋 Copiar</button>
+                      </>
                     )}
                     {cv.contato.email && (
                       <button
@@ -846,10 +849,13 @@ function ContatoExpandPanel({ contato, onSaved }: { contato: Contato; onSaved: (
       <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
         <button className={styles.btnPrimary} disabled={salvar.isPending} onClick={() => salvar.mutate()}>Salvar</button>
         {whatsapp && (
-          <a className={`${cs.linkBtn} ${cs.linkWhatsapp}`} target="_blank" rel="noreferrer"
-             href={`https://wa.me/${whatsapp.replace(/\D/g, '')}?text=${encodeWaText(mensagem)}`}>
-            Enviar WhatsApp com esta mensagem
-          </a>
+          <>
+            <a className={`${cs.linkBtn} ${cs.linkWhatsapp}`} target="_blank" rel="noreferrer"
+               href={`https://wa.me/${whatsapp.replace(/\D/g, '')}?text=${encodeWaText(mensagem)}`}>
+              Enviar WhatsApp
+            </a>
+            <button className={styles.btnSmall} title="Copiar mensagem para área de transferência" onClick={() => navigator.clipboard.writeText(mensagem)}>📋 Copiar msg</button>
+          </>
         )}
       </div>
       {contato.notas.length > 0 && (
@@ -1146,12 +1152,18 @@ function DisparadorSubTab() {
           )}
           <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 6 }}>WhatsApp individual (link manual):</div>
           <div>
-            {selecionados.filter((c) => c.whatsapp).map((c) => (
-              <a key={c.id} className={`${cs.linkBtn} ${cs.linkWhatsapp}`} target="_blank" rel="noreferrer"
-                 href={`https://wa.me/${c.whatsapp!.replace(/\D/g, '')}?text=${encodeURIComponent(aplicarPlaceholders(msgWhatsapp, c.primeiro_nome, c.sobrenome || '', (c as Contato & { eventoNome?: string }).eventoNome || ''))}`}>
-                {c.primeiro_nome}
-              </a>
-            ))}
+            {selecionados.filter((c) => c.whatsapp).map((c) => {
+              const msgResolvida = aplicarPlaceholders(msgWhatsapp, c.primeiro_nome, c.sobrenome || '', (c as Contato & { eventoNome?: string }).eventoNome || '')
+              return (
+                <span key={c.id} style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                  <a className={`${cs.linkBtn} ${cs.linkWhatsapp}`} target="_blank" rel="noreferrer"
+                     href={`https://wa.me/${c.whatsapp!.replace(/\D/g, '')}?text=${encodeWaText(msgResolvida)}`}>
+                    {c.primeiro_nome}
+                  </a>
+                  <button className={styles.btnSmall} title="Copiar mensagem" onClick={() => navigator.clipboard.writeText(msgResolvida)}>📋</button>
+                </span>
+              )
+            })}
           </div>
         </div>
       )}
