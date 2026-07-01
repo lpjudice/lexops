@@ -796,15 +796,15 @@ function EventosSubTab() {
                     <span className={cs.guestName}>{cv.contato.primeiro_nome} {cv.contato.sobrenome || ''}</span>
                     <label className={cs.checkboxLabel}>
                       <input type="checkbox" checked={cv.presenca_confirmada} onChange={(e) => atualizarConvidado.mutate({ id: cv.id, payload: { presenca_confirmada: e.target.checked } })} />
-                      Presença
-                    </label>
-                    <label className={cs.checkboxLabel}>
-                      <input type="checkbox" checked={cv.participacao_confirmada} onChange={(e) => atualizarConvidado.mutate({ id: cv.id, payload: { participacao_confirmada: e.target.checked } })} />
-                      Participação
+                      Confirmado
                     </label>
                     <label className={cs.checkboxLabel} style={{ color: cv.recusou ? '#ef4444' : undefined }}>
                       <input type="checkbox" checked={cv.recusou} onChange={(e) => atualizarConvidado.mutate({ id: cv.id, payload: { recusou: e.target.checked } })} />
                       Recusou
+                    </label>
+                    <label className={cs.checkboxLabel}>
+                      <input type="checkbox" checked={cv.participacao_confirmada} onChange={(e) => atualizarConvidado.mutate({ id: cv.id, payload: { participacao_confirmada: e.target.checked } })} />
+                      Participou
                     </label>
                     {cv.contato.whatsapp && (
                       <>
