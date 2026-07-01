@@ -141,14 +141,18 @@ def add_subtask(
 @router.patch("/diretrizes/subtasks/{subtask_id}", response_model=DiretrizOut)
 def toggle_subtask(
     subtask_id: uuid.UUID,
-    concluida: bool = Query(...),
+    concluida: bool | None = Query(None),
+    texto: str | None = Query(None),
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
 ):
     st = db.query(ConselhoDiretrizSubtask).filter(ConselhoDiretrizSubtask.id == subtask_id).first()
     if not st:
         raise HTTPException(status_code=404, detail="Subtask não encontrada")
-    st.concluida = concluida
+    if concluida is not None:
+        st.concluida = concluida
+    if texto is not None and texto.strip():
+        st.texto = texto.strip()
     db.commit()
     d = db.query(ConselhoDiretriz).filter(ConselhoDiretriz.id == st.diretriz_id).first()
     db.refresh(d)

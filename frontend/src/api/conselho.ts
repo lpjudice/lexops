@@ -226,6 +226,8 @@ export const conselhoApi = {
     api.post<Diretriz>(`/conselho/diretrizes/${diretrizId}/subtasks`, null, { params: { texto } }).then((r) => r.data),
   toggleSubtask: (subtaskId: string, concluida: boolean) =>
     api.patch<Diretriz>(`/conselho/diretrizes/subtasks/${subtaskId}`, null, { params: { concluida } }).then((r) => r.data),
+  editarSubtask: (subtaskId: string, texto: string) =>
+    api.patch<Diretriz>(`/conselho/diretrizes/subtasks/${subtaskId}`, null, { params: { texto } }).then((r) => r.data),
   deletarSubtask: (subtaskId: string) => api.delete(`/conselho/diretrizes/subtasks/${subtaskId}`),
 
   // Pipeline

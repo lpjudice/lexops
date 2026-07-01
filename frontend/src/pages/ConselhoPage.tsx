@@ -184,6 +184,32 @@ function DiretrizesTab() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['conselho-diretrizes'] }),
   })
 
+  const editarSubtask = useMutation({
+    mutationFn: ({ id, texto }: { id: string; texto: string }) => conselhoApi.editarSubtask(id, texto),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['conselho-diretrizes'] }); setEditSub(null) },
+  })
+  const deletarSubtask = useMutation({
+    mutationFn: (id: string) => conselhoApi.deletarSubtask(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['conselho-diretrizes'] }),
+  })
+
+  // Edição de diretriz e de subtarefas
+  const [editDir, setEditDir] = useState<Diretriz | null>(null)
+  const [editForm, setEditForm] = useState({ categoria: 'operacional' as CategoriaDiretriz, titulo: '', descricao: '', prazo: '' })
+  const [editSub, setEditSub] = useState<{ id: string; texto: string } | null>(null)
+
+  const abrirEdicao = (d: Diretriz) => {
+    setEditDir(d)
+    setEditForm({ categoria: d.categoria, titulo: d.titulo, descricao: d.descricao || '', prazo: d.prazo || '' })
+  }
+  const salvarEdicao = () => {
+    if (!editDir || !editForm.titulo.trim()) return
+    atualizar.mutate(
+      { id: editDir.id, data: { categoria: editForm.categoria, titulo: editForm.titulo.trim(), descricao: editForm.descricao || undefined, prazo: editForm.prazo || undefined } },
+      { onSuccess: () => setEditDir(null) },
+    )
+  }
+
   return (
     <div>
       <button className={styles.btnPrimary} onClick={() => setShowForm((s) => !s)} style={{ marginBottom: 16 }}>
@@ -246,7 +272,36 @@ function DiretrizesTab() {
                     checked={st.concluida}
                     onChange={(e) => toggleSubtask.mutate({ id: st.id, concluida: e.target.checked })}
                   />
-                  <span className={st.concluida ? cs.subtaskDone : ''}>{st.texto}</span>
+                  {editSub?.id === st.id ? (
+                    <input
+                      autoFocus
+                      className={styles.input}
+                      style={{ flex: 1, padding: '3px 6px', fontSize: 12 }}
+                      value={editSub.texto}
+                      onChange={(e) => setEditSub({ id: st.id, texto: e.target.value })}
+                      onBlur={() => editSub.texto.trim() ? editarSubtask.mutate({ id: st.id, texto: editSub.texto.trim() }) : setEditSub(null)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && editSub.texto.trim()) editarSubtask.mutate({ id: st.id, texto: editSub.texto.trim() })
+                        if (e.key === 'Escape') setEditSub(null)
+                      }}
+                    />
+                  ) : (
+                    <span
+                      style={{ flex: 1 }}
+                      className={st.concluida ? cs.subtaskDone : ''}
+                      onDoubleClick={() => setEditSub({ id: st.id, texto: st.texto })}
+                    >{st.texto}</span>
+                  )}
+                  <button
+                    style={{ border: 'none', background: 'none', color: '#c7c9cc', cursor: 'pointer', fontSize: 12 }}
+                    title="Editar subtarefa"
+                    onClick={() => setEditSub({ id: st.id, texto: st.texto })}
+                  >✎</button>
+                  <button
+                    style={{ border: 'none', background: 'none', color: '#d1d5db', cursor: 'pointer', fontSize: 14, lineHeight: 1 }}
+                    title="Excluir subtarefa"
+                    onClick={() => deletarSubtask.mutate(st.id)}
+                  >×</button>
                 </div>
               ))}
               <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
@@ -264,12 +319,52 @@ function DiretrizesTab() {
                   }}
                 />
               </div>
-              <button className={styles.btnDanger} style={{ marginTop: 10 }} onClick={() => { if (confirm('Excluir diretriz?')) deletar.mutate(d.id) }}>
-                Excluir
-              </button>
+              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                <button className={styles.btnPrimary} style={{ padding: '6px 12px', fontSize: 12 }} onClick={() => abrirEdicao(d)}>
+                  ✎ Editar
+                </button>
+                <button className={styles.btnDanger} style={{ marginLeft: 'auto' }} onClick={() => { if (confirm('Excluir diretriz?')) deletar.mutate(d.id) }}>
+                  Excluir
+                </button>
+              </div>
             </div>
           ))}
         </div>
+      )}
+
+      {editDir && (
+        <Modal title="Editar diretriz" onClose={() => setEditDir(null)} width={480}>
+          <div className={styles.formRow}>
+            <label className={styles.formLabel}>Categoria</label>
+            <select className={styles.input} value={editForm.categoria}
+              onChange={(e) => setEditForm((f) => ({ ...f, categoria: e.target.value as CategoriaDiretriz }))}>
+              {CATEGORIAS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+            </select>
+          </div>
+          <div className={styles.formRow}>
+            <label className={styles.formLabel}>Título</label>
+            <input className={styles.input} value={editForm.titulo}
+              onChange={(e) => setEditForm((f) => ({ ...f, titulo: e.target.value }))} />
+          </div>
+          <div className={styles.formRow}>
+            <label className={styles.formLabel}>Descrição</label>
+            <textarea className={cs.textarea} value={editForm.descricao}
+              onChange={(e) => setEditForm((f) => ({ ...f, descricao: e.target.value }))} />
+          </div>
+          <div className={styles.formRow}>
+            <label className={styles.formLabel}>Prazo</label>
+            <input type="date" className={styles.input} value={editForm.prazo}
+              onChange={(e) => setEditForm((f) => ({ ...f, prazo: e.target.value }))} />
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            <button className={styles.btnPrimary} disabled={!editForm.titulo.trim() || atualizar.isPending} onClick={salvarEdicao}>
+              {atualizar.isPending ? 'Salvando...' : 'Salvar alterações'}
+            </button>
+            <button className={styles.btnDanger} style={{ background: 'transparent', color: '#6b7280' }} onClick={() => setEditDir(null)}>
+              Cancelar
+            </button>
+          </div>
+        </Modal>
       )}
     </div>
   )

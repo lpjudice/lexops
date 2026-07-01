@@ -78,6 +78,8 @@ export const tarefaCardsApi = {
     api.post<TarefaCard>(`/tarefa-cards/${cardId}/subtasks`, null, { params: { texto } }).then((r) => r.data),
   toggleSubtask: (subtaskId: string, concluida: boolean) =>
     api.patch<TarefaCard>(`/tarefa-cards/subtasks/${subtaskId}`, null, { params: { concluida } }).then((r) => r.data),
+  editarSubtask: (subtaskId: string, texto: string) =>
+    api.patch<TarefaCard>(`/tarefa-cards/subtasks/${subtaskId}`, null, { params: { texto } }).then((r) => r.data),
   deletarSubtask: (subtaskId: string) => api.delete(`/tarefa-cards/subtasks/${subtaskId}`),
 
   agendarCalendario: (id: string) =>

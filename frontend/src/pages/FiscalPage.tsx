@@ -209,14 +209,23 @@ function ClienteSearch({
     return matched.slice(0, 20)
   }, [q, clientes])
 
-  // Pagantes que NÃO são clientes (dedup por cpf_cnpj), só quando incluirPagantes
+  // Pagantes a exibir (dedup só por CPF/CNPJ igual a um cliente já listado —
+  // NÃO por cliente_id, que na compensação aponta para o beneficiário, não para
+  // o próprio pagante). Assim pagantes não-clientes (ex.: Ana Maria) aparecem.
   const pagantesFiltrados = useMemo(() => {
     if (!incluirPagantes) return []
     const docsClientes = new Set(clientes.map((c) => (c.cpf_cnpj || '').replace(/\D/g, '')).filter(Boolean))
+    const nomesClientes = new Set(clientes.map((c) => c.nome.toLowerCase()))
     const lower = q.toLowerCase()
     const digits = q.replace(/\D/g, '')
     return pagantes
-      .filter((p) => !p.cliente_id && !docsClientes.has((p.cpf_cnpj || '').replace(/\D/g, '')))
+      .filter((p) => {
+        const doc = (p.cpf_cnpj || '').replace(/\D/g, '')
+        // esconde se já é cliente (mesmo doc, ou mesmo nome quando sem doc)
+        if (doc && docsClientes.has(doc)) return false
+        if (!doc && nomesClientes.has(p.nome.toLowerCase())) return false
+        return true
+      })
       .filter((p) => !q || p.nome.toLowerCase().includes(lower) ||
         (digits && (p.cpf_cnpj || '').includes(digits)))
       .slice(0, 12)
@@ -322,6 +331,7 @@ function EmissaoModal({
   const [clienteVinculadoNome, setClienteVinculadoNome] = useState<string>('')
   const [temCompensacao, setTemCompensacao] = useState(false)
   const [nomeClienteCompensacao, setNomeClienteCompensacao] = useState<string>('')
+  const [paganteSelNome, setPaganteSelNome] = useState<string | null>(null)
 
   // Ao mudar tomador_nome, prefill com cache
   useEffect(() => {
@@ -405,6 +415,7 @@ function EmissaoModal({
     setForm((f) => ({ ...f, [k]: v }))
   }
 
+  const [erroCadastro, setErroCadastro] = useState<string | null>(null)
   const criarClienteMut = useMutation({
     mutationFn: () => clientesApi.criar({
       nome: form.tomador_nome,
@@ -414,9 +425,31 @@ function EmissaoModal({
       telefone: form.tomador_telefone || undefined,
     } as any),
     onSuccess: (c: Cliente) => {
+      setErroCadastro(null)
       setClienteSelecionado(c)
       set('cliente_id', c.id)
       qc.invalidateQueries({ queryKey: ['clientes'] })
+    },
+    onError: (err: any) => {
+      const d = err?.response?.data?.detail
+      setErroCadastro(typeof d === 'string' ? d : (d?.message || err?.message || 'Falha ao cadastrar cliente'))
+    },
+  })
+  const criarPaganteMut = useMutation({
+    mutationFn: () => pagantesApi.criar({
+      nome: form.tomador_nome,
+      cpf_cnpj: form.tomador_cpf_cnpj || undefined,
+      email: form.tomador_email || undefined,
+      telefone: form.tomador_telefone || undefined,
+    }),
+    onSuccess: () => {
+      setErroCadastro(null)
+      setPaganteSelNome(form.tomador_nome)  // resolve o tomador → esconde o banner
+      qc.invalidateQueries({ queryKey: ['pagantes'] })
+    },
+    onError: (err: any) => {
+      const d = err?.response?.data?.detail
+      setErroCadastro(typeof d === 'string' ? d : (d?.message || err?.message || 'Falha ao cadastrar pagante'))
     },
   })
 
@@ -433,6 +466,7 @@ function EmissaoModal({
 
   function handleClienteSelect(c: Cliente | null, nome: string) {
     setClienteSelecionado(c)
+    setPaganteSelNome(null)  // ao mexer no tomador, limpa flag de pagante selecionado
     if (c) {
       setForm((f) => ({
         ...f,
@@ -450,6 +484,7 @@ function EmissaoModal({
   // Selecionou um pagante não-cliente: preenche tomador com dados do pagante (inclui endereço)
   function handlePaganteSelect(p: PaganteOut) {
     setClienteSelecionado(null)
+    setPaganteSelNome(p.nome)
     setForm((f) => ({
       ...f,
       cliente_id: p.cliente_id || undefined,
@@ -547,15 +582,34 @@ function EmissaoModal({
             <ClienteSearch value={form.tomador_nome} onSelect={handleClienteSelect}
               incluirPagantes onSelectPagante={handlePaganteSelect} />
 
-            {/* Cliente novo → criar na hora */}
-            {!clienteSelecionado && form.tomador_nome.trim().length > 2 && (
-              <div className={cs.prefillBanner} style={{ marginTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span>Tomador não cadastrado.</span>
-                <button type="button" className={cs.templateBtn}
-                  disabled={criarClienteMut.isPending}
-                  onClick={() => criarClienteMut.mutate()}>
-                  {criarClienteMut.isPending ? 'Criando…' : `➕ Criar cliente "${form.tomador_nome.slice(0, 30)}"`}
-                </button>
+            {/* Tomador novo → cadastrar como cliente OU pagante */}
+            {!clienteSelecionado && paganteSelNome !== form.tomador_nome && form.tomador_nome.trim().length > 2 && (
+              <div className={cs.prefillBanner} style={{ marginTop: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                  <span>Tomador "<b>{form.tomador_nome.slice(0, 30)}</b>" não cadastrado. Cadastrar como:</span>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button type="button" className={cs.templateBtn}
+                      disabled={criarClienteMut.isPending || criarPaganteMut.isPending}
+                      onClick={() => criarClienteMut.mutate()}
+                      title="Cliente: entidade principal, com processos/contratos">
+                      {criarClienteMut.isPending ? 'Criando…' : '👤 Cliente'}
+                    </button>
+                    <button type="button" className={cs.templateBtn}
+                      disabled={criarClienteMut.isPending || criarPaganteMut.isPending}
+                      onClick={() => criarPaganteMut.mutate()}
+                      title="Pagante: quem paga a NF sem ser cliente (ex.: Ana Maria pagando pela Mangrove)">
+                      {criarPaganteMut.isPending ? 'Criando…' : '💳 Pagante'}
+                    </button>
+                  </div>
+                </div>
+                {criarPaganteMut.isSuccess && (
+                  <div style={{ fontSize: 11, color: '#15803d', marginTop: 6 }}>
+                    ✓ Pagante cadastrado. Ele já aparece na busca de tomador.
+                  </div>
+                )}
+                {erroCadastro && (
+                  <div style={{ fontSize: 12, color: '#b91c1c', marginTop: 6 }}>⚠️ {erroCadastro}</div>
+                )}
               </div>
             )}
 

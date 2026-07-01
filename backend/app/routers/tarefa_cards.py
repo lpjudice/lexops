@@ -237,7 +237,8 @@ def add_subtask(
 @router.patch("/subtasks/{subtask_id}", response_model=TarefaCardOut)
 def toggle_subtask(
     subtask_id: uuid.UUID,
-    concluida: bool = Query(...),
+    concluida: bool | None = Query(None),
+    texto: str | None = Query(None),
     db: Session = Depends(get_db),
     usuario: Usuario | None = Depends(get_optional_user),
 ):
@@ -247,7 +248,10 @@ def toggle_subtask(
     card = db.query(TarefaCard).filter(TarefaCard.id == st.card_id).first()
     if not _pode_ver(card, usuario):
         raise HTTPException(status_code=403, detail="Acesso restrito a este card")
-    st.concluida = concluida
+    if concluida is not None:
+        st.concluida = concluida
+    if texto is not None and texto.strip():
+        st.texto = texto.strip()
     db.commit()
     db.refresh(card)
     return _enrich(card, db, usuario)

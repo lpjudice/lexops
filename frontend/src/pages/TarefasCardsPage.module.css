@@ -8,9 +8,76 @@
   margin-bottom: 16px;
 }
 
-.filtroProjeto {
-  margin-left: auto;
-  min-width: 220px;
+/* ── Barra de filtros ────────────────────────────────────── */
+.filters {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.statusTabs {
+  display: inline-flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.statusTab {
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #6b7280;
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.statusTab:hover { background: #f9fafb; }
+.statusTabActive {
+  background: var(--dark, #1d1e20);
+  color: #fff;
+  border-color: var(--dark, #1d1e20);
+}
+
+.filterSelect {
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #4b5563;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+/* Chips de projeto (multi-seleção) */
+.projetoChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 18px;
+}
+
+.projChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #4b5563;
+  border-radius: 999px;
+  padding: 4px 11px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.projChip:hover { background: #f9fafb; }
+.projChipOn {
+  border-color: #6366f1;
+  background: #eef2ff;
+  color: #4338ca;
+  font-weight: 600;
 }
 
 /* ── Agrupamento por projeto ─────────────────────────────── */
@@ -179,6 +246,28 @@
   padding: 0 2px;
 }
 .subtaskDel:hover { color: #ef4444; }
+
+.subEdit {
+  border: none;
+  background: none;
+  color: #d1d5db;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.subEdit:hover { color: #2563eb; }
+
+.subEditInput {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  font-size: 12.5px;
+  border: 1px solid #c7d2fe;
+  border-radius: 6px;
+  outline: none;
+  font-family: inherit;
+}
 
 .addSubtask {
   margin-top: 6px;
