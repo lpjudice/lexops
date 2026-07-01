@@ -32,6 +32,16 @@ function diasDesde(d?: string | null) {
   return Math.floor((Date.now() - new Date(d + 'T12:00:00').getTime()) / 86400000)
 }
 
+// encodeURIComponent codifica emojis acima de U+FFFF como 4 bytes percent-encoded (%F0...),
+// mas o WhatsApp Desktop/macOS não os decodifica corretamente. Passá-los como chars raw
+// funciona porque o browser converte Unicode raw em UTF-8 antes de enviar ao wa.me.
+function encodeWaText(text: string): string {
+  return encodeURIComponent(text).replace(
+    /%[Ff][0-4](?:%[89ABab][0-9A-Fa-f]){3}/g,
+    m => decodeURIComponent(m),
+  )
+}
+
 function aplicarPlaceholders(template: string, primeiro: string, ultimo: string, evento: string) {
   return template
     .replaceAll('{primeiro}', primeiro)
@@ -750,7 +760,7 @@ function EventosSubTab() {
                     </label>
                     {cv.contato.whatsapp && (
                       <a className={`${cs.linkBtn} ${cs.linkWhatsapp}`} target="_blank" rel="noreferrer"
-                         href={`https://wa.me/${cv.contato.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(mensagemResolvida)}`}>
+                         href={`https://wa.me/${cv.contato.whatsapp.replace(/\D/g, '')}?text=${encodeWaText(mensagemResolvida)}`}>
                         WhatsApp
                       </a>
                     )}
@@ -837,7 +847,7 @@ function ContatoExpandPanel({ contato, onSaved }: { contato: Contato; onSaved: (
         <button className={styles.btnPrimary} disabled={salvar.isPending} onClick={() => salvar.mutate()}>Salvar</button>
         {whatsapp && (
           <a className={`${cs.linkBtn} ${cs.linkWhatsapp}`} target="_blank" rel="noreferrer"
-             href={`https://wa.me/${whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(mensagem)}`}>
+             href={`https://wa.me/${whatsapp.replace(/\D/g, '')}?text=${encodeWaText(mensagem)}`}>
             Enviar WhatsApp com esta mensagem
           </a>
         )}
