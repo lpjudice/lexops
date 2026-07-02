@@ -1203,7 +1203,7 @@ function fmtData(iso?: string | null) {
 function LinhaDespesa({
   d, depth = 0, fornecedores, allCats,
   editId, editForm, setEditForm, setEditId,
-  iniciarEdit, salvarEdit, patchElegivel, deleteDespesa,
+  iniciarEdit, salvarEdit, patchElegivel, patchReembolsos, deleteDespesa,
 }: {
   d: Despesa; depth?: number
   fornecedores: Fornecedor[]; allCats: string[]
@@ -1212,6 +1212,7 @@ function LinhaDespesa({
   iniciarEdit: (d: Despesa) => void
   salvarEdit: { mutate: (id: string) => void; isPending: boolean }
   patchElegivel: { mutate: (a: { id: string; elegivel: boolean }) => void }
+  patchReembolsos: { mutate: (a: { id: string; ids: string[] }) => void }
   deleteDespesa: { mutate: (id: string) => void }
 }) {
   const indent = depth * 18
@@ -1302,33 +1303,36 @@ function LinhaDespesa({
             {d.criado_por_nome.split(' ')[0]}
           </span>
         )}
-        {(d.reembolsos_vinculados?.length ?? 0) > 0 && (
-          <span style={{ position: 'relative', display: 'inline-block' }}>
-            <span
-              onClick={(e) => { e.stopPropagation(); setShowVinc(v => !v) }}
-              style={{ marginLeft: 6, fontSize: 9, background: '#e0e7ff', color: '#3730a3', padding: '1px 6px', borderRadius: 999, fontWeight: 600, cursor: 'pointer' }}
-              title="Clique para ver os reembolsos/clientes"
-            >
-              🔗 {d.reembolsos_vinculados!.length === 1
+        <span style={{ position: 'relative', display: 'inline-block' }}>
+          <span
+            onClick={(e) => { e.stopPropagation(); setShowVinc(v => !v) }}
+            style={{ marginLeft: 6, fontSize: 9,
+              background: (d.reembolsos_vinculados?.length ?? 0) > 0 ? '#e0e7ff' : '#f3f4f6',
+              color: (d.reembolsos_vinculados?.length ?? 0) > 0 ? '#3730a3' : '#6b7280',
+              padding: '1px 6px', borderRadius: 999, fontWeight: 600, cursor: 'pointer' }}
+            title="Vincular / reclassificar reembolso"
+          >
+            🔗 {(d.reembolsos_vinculados?.length ?? 0) === 0
+              ? 'reembolso'
+              : d.reembolsos_vinculados!.length === 1
                 ? `${d.reembolsos_vinculados![0].cliente_nome ?? d.reembolsos_vinculados![0].titulo}`
                 : `${d.reembolsos_vinculados!.length} reembolsos`}
-            </span>
-            {showVinc && (
-              <div
-                onClick={(e) => e.stopPropagation()}
-                style={{ position: 'absolute', top: '100%', left: 0, zIndex: 50, marginTop: 4, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, boxShadow: '0 6px 20px rgba(0,0,0,.12)', padding: '8px 10px', minWidth: 200 }}
-              >
-                <div style={{ fontSize: 10, color: 'var(--gray-mid)', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase' }}>Reembolsos vinculados</div>
-                {d.reembolsos_vinculados!.map(r => (
-                  <div key={r.id} style={{ fontSize: 12, padding: '2px 0' }}>
-                    <strong>{r.cliente_nome ?? '—'}</strong>
-                    <span style={{ color: 'var(--gray-mid)' }}> · {r.titulo}</span>
-                  </div>
-                ))}
-              </div>
-            )}
           </span>
-        )}
+          {showVinc && (
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{ position: 'absolute', top: '100%', left: 0, zIndex: 50, marginTop: 4, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, boxShadow: '0 6px 20px rgba(0,0,0,.12)', padding: '10px 12px', minWidth: 280 }}
+            >
+              <div style={{ fontSize: 10, color: 'var(--gray-mid)', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase' }}>
+                Reembolsos desta despesa
+              </div>
+              <VincularReembolso
+                value={d.reembolso_ids ?? []}
+                onChange={(ids) => patchReembolsos.mutate({ id: d.id, ids })}
+              />
+            </div>
+          )}
+        </span>
       </td>
       <td style={{ fontSize: 11, color: 'var(--gray-mid)' }}>{d.categoria}</td>
       <td style={{ textAlign: 'right' }}>{fmtBRL(d.valor)}</td>
@@ -1409,6 +1413,13 @@ function TabelaDespesas({ mes }: { mes: string }) {
   const patchElegivel = useMutation({
     mutationFn: ({ id, elegivel }: { id: string; elegivel: boolean }) =>
       backofficeApi.patchDespesa(id, { elegivel }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['backoffice-lancamentos', mes] }),
+  })
+  // Reclassificar/vincular reembolsos numa despesa já existente (fix: antes só dava
+  // pra vincular na pré-tela do extrato; agora dá pra reclassificar depois também).
+  const patchReembolsos = useMutation({
+    mutationFn: ({ id, ids }: { id: string; ids: string[] }) =>
+      backofficeApi.patchDespesa(id, { reembolso_ids: ids }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['backoffice-lancamentos', mes] }),
   })
   const salvarEdit = useMutation({
@@ -1541,7 +1552,7 @@ function TabelaDespesas({ mes }: { mes: string }) {
                       <LinhaDespesa key={it.id} d={it} depth={1}
                         fornecedores={fornecedores} allCats={allCats}
                         editId={editId} editForm={editForm} setEditForm={setEditForm} setEditId={setEditId}
-                        iniciarEdit={iniciarEdit} salvarEdit={salvarEdit} patchElegivel={patchElegivel} deleteDespesa={deleteDespesa}
+                        iniciarEdit={iniciarEdit} salvarEdit={salvarEdit} patchElegivel={patchElegivel} patchReembolsos={patchReembolsos} deleteDespesa={deleteDespesa}
                       />
                     ))}
                   </Fragment>
@@ -1554,7 +1565,7 @@ function TabelaDespesas({ mes }: { mes: string }) {
                   return <LinhaDespesa key={l.despesa.id} d={l.despesa}
                     fornecedores={fornecedores} allCats={allCats}
                     editId={editId} editForm={editForm} setEditForm={setEditForm} setEditId={setEditId}
-                    iniciarEdit={iniciarEdit} salvarEdit={salvarEdit} patchElegivel={patchElegivel} deleteDespesa={deleteDespesa}
+                    iniciarEdit={iniciarEdit} salvarEdit={salvarEdit} patchElegivel={patchElegivel} patchReembolsos={patchReembolsos} deleteDespesa={deleteDespesa}
                   />
                 }
                 const grpKey = `fornecedor:${l.nome}`
@@ -1581,7 +1592,7 @@ function TabelaDespesas({ mes }: { mes: string }) {
                       <LinhaDespesa key={it.id} d={it} depth={1}
                         fornecedores={fornecedores} allCats={allCats}
                         editId={editId} editForm={editForm} setEditForm={setEditForm} setEditId={setEditId}
-                        iniciarEdit={iniciarEdit} salvarEdit={salvarEdit} patchElegivel={patchElegivel} deleteDespesa={deleteDespesa}
+                        iniciarEdit={iniciarEdit} salvarEdit={salvarEdit} patchElegivel={patchElegivel} patchReembolsos={patchReembolsos} deleteDespesa={deleteDespesa}
                       />
                     ))}
                   </Fragment>
