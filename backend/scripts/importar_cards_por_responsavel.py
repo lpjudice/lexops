@@ -17,6 +17,9 @@ import sys
 
 from sqlalchemy import func
 
+# Importa o app completo para registrar TODOS os mappers do SQLAlchemy
+# (relacionamentos cruzados como Anotacao->Reuniao exigem todos os models carregados).
+import app.main  # noqa: F401
 from app.database import SessionLocal
 from app.models.tarefa import Tarefa
 from app.models.tarefa_card import TarefaCard

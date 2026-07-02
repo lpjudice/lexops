@@ -75,7 +75,7 @@ export default function TarefasCardsPage() {
   // Filtros
   const [filtroStatus, setFiltroStatus] = useState<'' | StatusTarefaCard>('')
   const [filtroVenc, setFiltroVenc] = useState<FiltroVenc>('')
-  const [filtroResp, setFiltroResp] = useState('')
+  const [filtroResp, setFiltroResp] = useState<string[]>([])
   const [filtroProjetos, setFiltroProjetos] = useState<string[]>([])
 
   const [novaSubtask, setNovaSubtask] = useState<Record<string, string>>({})
@@ -149,6 +149,8 @@ export default function TarefasCardsPage() {
 
   const toggleProjetoFiltro = (id: string) =>
     setFiltroProjetos((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])
+  const toggleRespFiltro = (nome: string) =>
+    setFiltroResp((prev) => prev.includes(nome) ? prev.filter((x) => x !== nome) : [...prev, nome])
 
   const submitCreate = () => {
     if (!form.titulo.trim()) return
@@ -169,7 +171,7 @@ export default function TarefasCardsPage() {
   // ── Filtragem + agrupamento por projeto ──────────────────────────────────
   const passaFiltro = (c: TarefaCard) => {
     if (filtroStatus && c.status !== filtroStatus) return false
-    if (filtroResp && c.responsavel !== filtroResp) return false
+    if (filtroResp.length > 0 && !filtroResp.includes(c.responsavel || '__none__')) return false
     if (filtroProjetos.length > 0 && !filtroProjetos.includes(c.projeto_id || '__none__')) return false
     if (filtroVenc) {
       const d = c.data_limite
@@ -233,15 +235,30 @@ export default function TarefasCardsPage() {
         <select className={cs.filterSelect} value={filtroVenc} onChange={(e) => setFiltroVenc(e.target.value as FiltroVenc)}>
           {VENC_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
-        <select className={cs.filterSelect} value={filtroResp} onChange={(e) => setFiltroResp(e.target.value)}>
-          <option value="">Responsável: todos</option>
-          {responsaveis.map((r) => <option key={r} value={r}>{r}</option>)}
-        </select>
       </div>
+
+      {/* Filtro multi-responsável (chips) */}
+      {(responsaveis.length > 0 || cards.some((c) => !c.responsavel)) && (
+        <div className={cs.projetoChips}>
+          <span className={cs.chipsLabel}>Responsável:</span>
+          {responsaveis.map((r) => (
+            <button key={r} className={`${cs.projChip} ${filtroResp.includes(r) ? cs.projChipOn : ''}`}
+              onClick={() => toggleRespFiltro(r)}>👤 {r}</button>
+          ))}
+          {cards.some((c) => !c.responsavel) && (
+            <button className={`${cs.projChip} ${filtroResp.includes('__none__') ? cs.projChipOn : ''}`}
+              onClick={() => toggleRespFiltro('__none__')}>Sem responsável</button>
+          )}
+          {filtroResp.length > 0 && (
+            <button className={cs.linkBtn} style={{ color: '#6b7280' }} onClick={() => setFiltroResp([])}>limpar</button>
+          )}
+        </div>
+      )}
 
       {/* Filtro multi-projeto (chips) */}
       {(projetos.some((p) => !p.oculto) || cards.some((c) => !c.projeto_id)) && (
         <div className={cs.projetoChips}>
+          <span className={cs.chipsLabel}>Projeto:</span>
           {projetos.filter((p) => !p.oculto).map((p) => (
             <button key={p.id} className={`${cs.projChip} ${filtroProjetos.includes(p.id) ? cs.projChipOn : ''}`}
               onClick={() => toggleProjetoFiltro(p.id)}>
@@ -314,6 +331,7 @@ export default function TarefasCardsPage() {
                         {/* Subtarefas */}
                         <div className={cs.subtasks}>
                           {c.subtasks.length > 0 && <div className={cs.subtaskProgress}>{done}/{c.subtasks.length} concluídas</div>}
+                          <div className={cs.subtaskList}>
                           {c.subtasks.map((st) => (
                             <div key={st.id} className={cs.subtaskRow}>
                               <input type="checkbox" checked={st.concluida}
@@ -334,6 +352,7 @@ export default function TarefasCardsPage() {
                               <button className={cs.subtaskDel} title="Excluir" onClick={() => delSubtask.mutate(st.id)}>×</button>
                             </div>
                           ))}
+                          </div>
                           <input className={cs.addSubtask} placeholder="+ subtarefa (Enter)"
                             value={novaSubtask[c.id] || ''}
                             onChange={(e) => setNovaSubtask((s) => ({ ...s, [c.id]: e.target.value }))}

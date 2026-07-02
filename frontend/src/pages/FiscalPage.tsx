@@ -1554,6 +1554,23 @@ export default function FiscalPage() {
       setPagandoNf(null)
     },
   })
+  // Anti-duplicação: ao marcar pago, procura entradas de caixa já existentes
+  // (mesmo cliente/beneficiário) para conciliar em vez de criar uma nova.
+  const { data: conciliaveisPago = [] } = useQuery({
+    queryKey: ['conciliaveis', pagandoNf?.id],
+    queryFn: () => fiscalApi.conciliaveis(pagandoNf!.id),
+    enabled: !!pagandoNf,
+  })
+  const conciliarPagoMut = useMutation({
+    mutationFn: ({ id, recId }: { id: string; recId: string }) => fiscalApi.conciliar(id, recId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['notas-fiscais'] })
+      qc.invalidateQueries({ queryKey: ['fluxo-caixa'] })
+      qc.invalidateQueries({ queryKey: ['honorarios'] })
+      qc.invalidateQueries({ queryKey: ['financeiro-resumo'] })
+      setPagandoNf(null)
+    },
+  })
 
   function toggleGrupo(chave: string) {
     setColapsados((c) => ({ ...c, [chave]: !c[chave] }))
@@ -1811,31 +1828,70 @@ export default function FiscalPage() {
       {nfDetalhe && !nfEmitida && <DetalheModal nf={nfDetalhe} onClose={() => setNfDetalhe(null)} onSubstituir={abrirSubstituicao} />}
 
       {/* Modal: data do pagamento ao marcar pago */}
-      {pagandoNf && (
+      {pagandoNf && (() => {
+        const val = pagandoNf.valor_servicos
+        // Ordena: entradas de valor igual primeiro (prováveis o mesmo pagamento)
+        const matches = [...conciliaveisPago].sort((a, b) =>
+          Math.abs(a.valor - val) - Math.abs(b.valor - val))
+        const temIgual = matches.some((m) => Math.abs(m.valor - val) < 0.01)
+        return (
         <div className={cs.overlay} onClick={(e) => e.target === e.currentTarget && setPagandoNf(null)}>
-          <div className={cs.modal} style={{ maxWidth: 380 }}>
+          <div className={cs.modal} style={{ maxWidth: 440 }}>
             <button className={cs.closeBtn} onClick={() => setPagandoNf(null)}>✕</button>
             <div className={cs.modalTitle}>Marcar NFS-e como paga</div>
             <p style={{ fontSize: 13, color: '#374151', margin: '8px 0 4px' }}>
-              {pagandoNf.tomador_nome} · {fmtBRL(pagandoNf.valor_servicos)}
+              {pagandoNf.tomador_nome} · {fmtBRL(val)}
             </p>
-            <label className={cs.formLabel}>Data do pagamento *</label>
-            <input type="date" className={cs.input}
-              value={dataPagamento} onChange={(e) => setDataPagamento(e.target.value)} />
-            <p className={cs.fieldHint} style={{ marginTop: 6, fontSize: 12 }}>
-              O recebimento será lançado no Financeiro nesta data (entra no mês {fmtCompetencia(dataPagamento.slice(0, 7))}).
-            </p>
-            <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-              <button className={styles.btnPrimary}
-                disabled={!dataPagamento || pagoMut.isPending}
-                onClick={() => pagoMut.mutate({ id: pagandoNf.id, pago: true, data: dataPagamento })}>
-                {pagoMut.isPending ? 'Salvando…' : 'Confirmar pagamento'}
-              </button>
-              <button className={cs.btnSecondary} onClick={() => setPagandoNf(null)}>Cancelar</button>
+
+            {/* Anti-duplicação: entradas de caixa já existentes */}
+            {matches.length > 0 && (
+              <div style={{ background: temIgual ? '#fffbeb' : '#f9fafb', border: `1px solid ${temIgual ? '#fde68a' : '#e5e7eb'}`, borderRadius: 8, padding: 10, marginTop: 10 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: temIgual ? '#b45309' : '#374151' }}>
+                  {temIgual ? '⚠️ Já existe entrada de caixa deste valor. É este pagamento?' : 'Entradas de caixa do cliente — é uma delas?'}
+                </div>
+                <div style={{ fontSize: 11, color: '#6b7280', margin: '2px 0 8px' }}>
+                  Conciliar evita lançar o dinheiro duas vezes no Fluxo de Caixa.
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {matches.slice(0, 5).map((r) => {
+                    const igual = Math.abs(r.valor - val) < 0.01
+                    return (
+                      <button key={r.id} disabled={conciliarPagoMut.isPending}
+                        onClick={() => conciliarPagoMut.mutate({ id: pagandoNf.id, recId: r.id })}
+                        style={{ textAlign: 'left', background: '#fff', border: `1px solid ${igual ? '#86efac' : '#d1d5db'}`, borderRadius: 6, padding: '7px 10px', cursor: 'pointer' }}>
+                        <span style={{ fontWeight: 700, color: igual ? '#15803d' : '#374151' }}>{fmtBRL(r.valor)}</span>
+                        {igual && <span style={{ fontSize: 10, color: '#15803d', marginLeft: 6 }}>• mesmo valor</span>}
+                        <span style={{ color: '#6b7280' }}> · {fmtData(r.data)} · {r.forma.toUpperCase()}</span>
+                        <div style={{ fontSize: 11, color: '#6b7280' }}>{r.cliente} — {r.honorario_descricao}</div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: matches.length > 0 ? '1px solid #e5e7eb' : 'none' }}>
+              <label className={cs.formLabel}>
+                {matches.length > 0 ? 'Nenhuma acima? Registrar nova entrada na data:' : 'Data do pagamento *'}
+              </label>
+              <input type="date" className={cs.input}
+                value={dataPagamento} onChange={(e) => setDataPagamento(e.target.value)} />
+              <p className={cs.fieldHint} style={{ marginTop: 6, fontSize: 12 }}>
+                Cria um recebimento novo no Financeiro nesta data (mês {fmtCompetencia(dataPagamento.slice(0, 7))}).
+              </p>
+              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                <button className={temIgual ? cs.btnSecondary : styles.btnPrimary}
+                  disabled={!dataPagamento || pagoMut.isPending}
+                  onClick={() => pagoMut.mutate({ id: pagandoNf.id, pago: true, data: dataPagamento })}>
+                  {pagoMut.isPending ? 'Salvando…' : temIgual ? 'Criar nova mesmo assim' : 'Confirmar pagamento'}
+                </button>
+                <button className={cs.btnSecondary} onClick={() => setPagandoNf(null)}>Cancelar</button>
+              </div>
             </div>
           </div>
         </div>
-      )}
+        )
+      })()}
     </div>
   )
 }
