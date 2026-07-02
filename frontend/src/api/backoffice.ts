@@ -243,13 +243,13 @@ export const backofficeApi = {
     api.post(`/backoffice/adiantamentos/${despesaId}/desfazer-perda`).then(r => r.data),
 
   // Fila de sugestões de NF (entradas do extrato)
-  criarSugestoesNf: (items: Array<{ data?: string; pagador: string; valor: number; descricao?: string; tipo_sugerido: string }>) =>
+  criarSugestoesNf: (items: Array<{ data?: string; pagador: string; valor: number; descricao?: string; tipo_sugerido: string; status?: string }>) =>
     api.post<{ criadas: number }>('/backoffice/sugestoes-nf/batch', items).then(r => r.data),
 
   listarSugestoesNf: (status = 'pendente') =>
     api.get<SugestaoNF[]>('/backoffice/sugestoes-nf', { params: { status } }).then(r => r.data),
 
-  patchSugestaoNf: (id: string, data: { status?: string; nota_fiscal_id?: string; reembolso_ids?: string[] }) =>
+  patchSugestaoNf: (id: string, data: { status?: string; nota_fiscal_id?: string; reembolso_ids?: string[]; tipo_sugerido?: string }) =>
     api.patch(`/backoffice/sugestoes-nf/${id}`, data).then(r => r.data),
 
 

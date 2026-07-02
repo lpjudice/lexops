@@ -1400,11 +1400,24 @@ function SugestoesNFSection({ onEmitir }: { onEmitir: (s: SugestaoNF) => void })
     queryKey: ['notas-fiscais', 'emitida'],
     queryFn: () => fiscalApi.listar({ status: 'emitida' }),
   })
+  // Item 3: entradas do extrato arquivadas (não tratadas) — recuperáveis
+  const { data: arquivadas = [] } = useQuery({
+    queryKey: ['sugestoes-nf', 'arquivada'],
+    queryFn: () => backofficeApi.listarSugestoesNf('arquivada'),
+  })
+  const recuperar = useMutation({
+    mutationFn: (id: string) => backofficeApi.patchSugestaoNf(id, { status: 'pendente' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sugestoes-nf'] })
+      qc.invalidateQueries({ queryKey: ['sugestoes-nf', 'arquivada'] })
+    },
+  })
   const [aberto, setAberto] = useState(true)
+  const [verArquivadas, setVerArquivadas] = useState(false)
   const [vinculando, setVinculando] = useState<string | null>(null)
   const [linkandoNf, setLinkandoNf] = useState<string | null>(null)
 
-  if (sugestoes.length === 0) return null
+  if (sugestoes.length === 0 && arquivadas.length === 0) return null
   const fmt = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
   const pastasOpts = reembolsos
     .filter(r => r.status !== 'cancelado')
@@ -1510,6 +1523,35 @@ function SugestoesNFSection({ onEmitir }: { onEmitir: (s: SugestaoNF) => void })
               </div>
             )
           })}
+          {sugestoes.length === 0 && (
+            <div style={{ padding: '12px 18px', fontSize: 12, color: '#6b7280' }}>
+              Nenhuma sugestão pendente.
+            </div>
+          )}
+
+          {/* Item 3: entradas arquivadas do extrato — recuperáveis */}
+          {arquivadas.length > 0 && (
+            <div style={{ borderTop: '1px solid #e5e7eb', background: '#fafafa' }}>
+              <div
+                onClick={() => setVerArquivadas(v => !v)}
+                style={{ padding: '8px 18px', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: '#6b7280', display: 'flex', justifyContent: 'space-between' }}>
+                <span>🗄️ {arquivadas.length} entrada(s) do extrato arquivada(s) — não tratadas</span>
+                <span>{verArquivadas ? '▲' : '▼'}</span>
+              </div>
+              {verArquivadas && arquivadas.map(a => (
+                <div key={a.id} style={{ display: 'grid', gridTemplateColumns: '90px 1fr 120px auto', gap: 10, alignItems: 'center', padding: '6px 18px', borderTop: '1px solid #f3f4f6' }}>
+                  <span style={{ fontSize: 12, color: 'var(--gray-mid)' }}>{a.data ?? '—'}</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.pagador}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, textAlign: 'right' }}>{fmt(a.valor)}</span>
+                  <button className={cs.btnSecondary} style={{ padding: '4px 10px', fontSize: 12 }}
+                    disabled={recuperar.isPending}
+                    onClick={() => recuperar.mutate(a.id)}>
+                    ↩︎ Recuperar p/ fila
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

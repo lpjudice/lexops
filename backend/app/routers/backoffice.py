@@ -1233,30 +1233,37 @@ class SugestaoNFIn(BaseModel):
     valor: float
     descricao: str | None = None
     tipo_sugerido: str = "receita"
+    # "pendente" (entra na fila) ou "arquivada" (persistida, mas fora da fila —
+    # entrada do extrato que não foi tratada; pode ser recuperada depois).
+    status: str = "pendente"
 
 
 @router.post("/sugestoes-nf/batch")
 def criar_sugestoes_nf(items: list[SugestaoNFIn], _=Depends(get_current_user), db: Session = Depends(get_db)) -> Any:
-    """Cria sugestões de NF (fila) a partir das entradas selecionadas do extrato.
-    Deduplica contra sugestões pendentes/emitidas e NFs já emitidas na competência."""
+    """Cria sugestões de NF a partir das entradas do extrato.
+
+    As selecionadas entram na fila (status pendente); as demais são gravadas como
+    'arquivada' para NÃO se perderem — podem ser reclassificadas/recuperadas depois.
+    Deduplica contra sugestões existentes e NFs já emitidas na competência."""
     criadas = 0
     for it in items:
         comp = it.data.strftime("%Y-%m") if it.data else None
-        # Dedup: mesma data+valor+pagador já na fila (qualquer status != ignorada)
+        status = it.status if it.status in ("pendente", "arquivada") else "pendente"
+        # Dedup: mesma data+valor+pagador já registrada (qualquer status, para não
+        # duplicar ao reprocessar o mesmo extrato)
         existe = (
             db.query(NotaFiscalSugestao)
             .filter(
                 NotaFiscalSugestao.valor == it.valor,
                 NotaFiscalSugestao.pagador == it.pagador,
                 NotaFiscalSugestao.data == it.data,
-                NotaFiscalSugestao.status != "ignorada",
             )
             .first()
         )
         if existe:
             continue
         # Dedup contra NF já emitida na competência com mesmo valor
-        if comp:
+        if comp and status == "pendente":
             nf = (
                 db.query(NotaFiscal)
                 .filter(
@@ -1270,7 +1277,7 @@ def criar_sugestoes_nf(items: list[SugestaoNFIn], _=Depends(get_current_user), d
                 continue
         db.add(NotaFiscalSugestao(
             data=it.data, competencia=comp, pagador=it.pagador, valor=it.valor,
-            descricao=it.descricao, tipo_sugerido=it.tipo_sugerido, status="pendente",
+            descricao=it.descricao, tipo_sugerido=it.tipo_sugerido, status=status,
         ))
         criadas += 1
     db.commit()
@@ -1305,8 +1312,10 @@ def patch_sugestao_nf(id: uuid.UUID, body: dict, _=Depends(get_current_user), db
     s = db.get(NotaFiscalSugestao, id)
     if not s:
         raise HTTPException(404, "Sugestão não encontrada")
-    if "status" in body and body["status"] in ("pendente", "emitida", "ignorada", "vinculada"):
+    if "status" in body and body["status"] in ("pendente", "emitida", "ignorada", "vinculada", "arquivada"):
         s.status = body["status"]
+    if "tipo_sugerido" in body and body["tipo_sugerido"] in ("receita", "reembolso_recebido", "outro"):
+        s.tipo_sugerido = body["tipo_sugerido"]
     if "nota_fiscal_id" in body:
         s.nota_fiscal_id = body["nota_fiscal_id"]
     if "reembolso_ids" in body:

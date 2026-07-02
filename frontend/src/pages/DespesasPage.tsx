@@ -767,15 +767,16 @@ function SecaoExtrato({
           reembolso_ids: l.reembolso_ids && l.reembolso_ids.length ? l.reembolso_ids : undefined,
         })))
       }
-      // Entradas selecionadas → fila de sugestões de NF
-      const entSel = entradas.filter(e => e.selecionado)
-      if (entSel.length > 0) {
-        await backofficeApi.criarSugestoesNf(entSel.map(e => ({
+      // TODAS as entradas são gravadas: selecionadas entram na fila (pendente);
+      // as demais ficam 'arquivada' para não se perderem (recuperáveis depois).
+      if (entradas.length > 0) {
+        await backofficeApi.criarSugestoesNf(entradas.map(e => ({
           data: e.data,
           pagador: e.pagador,
           valor: e.valor,
           descricao: e.descricao,
           tipo_sugerido: e.tipo_sugerido,
+          status: e.selecionado ? 'pendente' : 'arquivada',
         })))
       }
     },
