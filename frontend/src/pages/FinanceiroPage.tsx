@@ -723,10 +723,6 @@ export default function FinanceiroPage() {
                       </div>
                     ) : (
                       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                        <button className={styles.btnPrimary}
-                          onClick={() => navigate(`/fiscal?honorario=${h.id}`)}>
-                          🧾 Emitir NFS-e
-                        </button>
                         <button className={cs.btnExpand}
                           onClick={() => { setEditandoHonorario(h.id); setEditForm({}) }}>
                           ✎ Editar honorário
