@@ -325,11 +325,40 @@ def fluxo_caixa(db: Session = Depends(get_db)):
         })
         meses[comp]["total"] += float(nf.valor_servicos)
 
-    meses_list = [
-        {"competencia": k, "total": round(v["total"], 2),
-         "entradas": sorted(v["entradas"], key=lambda x: x["data"], reverse=True)}
-        for k, v in sorted(meses.items(), reverse=True)
-    ]
+    # ── SAÍDAS (dinheiro que saiu do caixa) = despesas reais do escritório ──────
+    # Inclui adiantamentos de reembolso (despesas ligadas a um reembolso), pois o
+    # dinheiro deixou a conta — assim a soma do caixa bate com o extrato do banco.
+    from app.models.backoffice import FiscalDespesa
+    saidas_por_mes: dict[str, dict] = defaultdict(lambda: {"itens": [], "total": 0.0})
+    for d in db.query(FiscalDespesa).all():
+        dt = d.data
+        comp = dt.strftime("%Y-%m") if dt else (d.mes or "")
+        if not comp:
+            continue
+        eh_reemb = bool(d.reembolso_ids)
+        saidas_por_mes[comp]["itens"].append({
+            "data": dt.isoformat() if dt else f"{comp}-01",
+            "descricao": d.descricao or d.fornecedor,
+            "fornecedor": d.fornecedor,
+            "categoria": d.categoria,
+            "valor": float(d.valor),
+            "eh_reembolso": eh_reemb,
+        })
+        saidas_por_mes[comp]["total"] += float(d.valor)
+
+    todos_meses = sorted(set(meses) | set(saidas_por_mes), reverse=True)
+    meses_list = []
+    for k in todos_meses:
+        ent = meses.get(k, {"entradas": [], "total": 0.0})
+        sai = saidas_por_mes.get(k, {"itens": [], "total": 0.0})
+        meses_list.append({
+            "competencia": k,
+            "total": round(ent["total"], 2),            # total de entradas
+            "total_saidas": round(sai["total"], 2),
+            "saldo": round(ent["total"] - sai["total"], 2),
+            "entradas": sorted(ent["entradas"], key=lambda x: x["data"], reverse=True),
+            "saidas": sorted(sai["itens"], key=lambda x: x["data"], reverse=True),
+        })
 
     # Crédito a receber (futuro)
     cred_itens = []

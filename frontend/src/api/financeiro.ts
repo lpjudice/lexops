@@ -119,10 +119,21 @@ export interface FluxoEntrada {
   nf_tomador?: string | null
   nf_id?: string
 }
+export interface FluxoSaida {
+  data: string
+  descricao: string
+  fornecedor: string
+  categoria: string
+  valor: number
+  eh_reembolso: boolean
+}
 export interface FluxoMes {
   competencia: string
   total: number
+  total_saidas: number
+  saldo: number
   entradas: FluxoEntrada[]
+  saidas: FluxoSaida[]
 }
 export interface CreditoItem {
   tipo: 'honorario' | 'nf'

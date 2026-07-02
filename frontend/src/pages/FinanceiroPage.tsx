@@ -863,6 +863,8 @@ function FluxoCaixaView() {
   if (!data) return <p className={styles.empty}>Sem dados.</p>
 
   const totalEntradas = data.meses.reduce((s, m) => s + m.total, 0)
+  const totalSaidas = data.meses.reduce((s, m) => s + (m.total_saidas || 0), 0)
+  const saldoTotal = totalEntradas - totalSaidas
   const mesCorrente = new Date().toISOString().slice(0, 7)
 
   return (
@@ -870,8 +872,16 @@ function FluxoCaixaView() {
       {/* Cards resumo */}
       <div className={cs.summaryGrid} style={{ marginBottom: 20 }}>
         <div className={cs.summaryCard}>
-          <div className={cs.summaryLabel}>Entradas (caixa) — total</div>
+          <div className={cs.summaryLabel}>Entradas (caixa)</div>
           <div className={cs.summaryValue} style={{ color: '#15803d' }}>{fmtVal(totalEntradas)}</div>
+        </div>
+        <div className={cs.summaryCard}>
+          <div className={cs.summaryLabel}>Saídas (despesas)</div>
+          <div className={cs.summaryValue} style={{ color: '#b91c1c' }}>{fmtVal(totalSaidas)}</div>
+        </div>
+        <div className={cs.summaryCard}>
+          <div className={cs.summaryLabel}>Saldo (entradas − saídas)</div>
+          <div className={cs.summaryValue} style={{ color: saldoTotal >= 0 ? '#15803d' : '#b91c1c' }}>{fmtVal(saldoTotal)}</div>
         </div>
         <div className={cs.summaryCard}>
           <div className={cs.summaryLabel}>Crédito a receber</div>
@@ -882,8 +892,8 @@ function FluxoCaixaView() {
         </div>
       </div>
 
-      {/* Entradas por mês */}
-      <div className={cs.sectionTitle} style={{ marginBottom: 10 }}>Entradas por mês</div>
+      {/* Movimento por mês (entradas − saídas) */}
+      <div className={cs.sectionTitle} style={{ marginBottom: 10 }}>Movimento por mês</div>
       {data.meses.length === 0 ? (
         <p className={styles.empty}>Nenhuma entrada registrada ainda.</p>
       ) : (
@@ -898,10 +908,16 @@ function FluxoCaixaView() {
                   <span style={{ fontWeight: 700, color: '#1f2937' }}>
                     {isAberto ? '▾' : '▸'} {nomeCompet(m.competencia)}
                     <span style={{ fontWeight: 400, color: '#6b7280', marginLeft: 8, fontSize: 12 }}>
-                      {m.entradas.length} entrada(s)
+                      {m.entradas.length} entrada(s) · {m.saidas.length} saída(s)
                     </span>
                   </span>
-                  <span style={{ fontWeight: 700, color: '#15803d' }}>{fmtVal(m.total)}</span>
+                  <span style={{ display: 'flex', gap: 14, alignItems: 'baseline', fontSize: 13 }}>
+                    <span style={{ color: '#15803d' }}>+{fmtVal(m.total)}</span>
+                    <span style={{ color: '#b91c1c' }}>−{fmtVal(m.total_saidas)}</span>
+                    <span style={{ fontWeight: 700, color: m.saldo >= 0 ? '#15803d' : '#b91c1c' }}>
+                      = {fmtVal(m.saldo)}
+                    </span>
+                  </span>
                 </div>
                 {isAberto && (
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
@@ -943,6 +959,38 @@ function FluxoCaixaView() {
                         </tr>
                         )
                       })}
+                      {m.saidas.length > 0 && (
+                        <tr style={{ borderTop: '1px solid #e5e7eb', background: '#fef2f2' }}>
+                          <td colSpan={4} style={{ padding: '6px 16px', fontSize: 11, fontWeight: 700, color: '#b91c1c' }}>
+                            Saídas (despesas que saíram do caixa)
+                          </td>
+                        </tr>
+                      )}
+                      {m.saidas.map((s, i) => (
+                        <tr key={`s${i}`} style={{ borderTop: '1px solid #f3f4f6' }}>
+                          <td style={{ padding: '8px 16px', color: '#6b7280', whiteSpace: 'nowrap', width: 90 }}>{fmtData(s.data)}</td>
+                          <td style={{ padding: '8px 8px' }}>
+                            <div style={{ fontWeight: 600 }}>
+                              {s.fornecedor}
+                              {s.eh_reembolso && (
+                                <span title="Adiantamento reembolsável — o cliente devolve depois"
+                                  style={{ marginLeft: 6, fontSize: 10, background: '#e0e7ff', color: '#3730a3', padding: '1px 6px', borderRadius: 999, fontWeight: 700 }}>
+                                  reembolso
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontSize: 11, color: '#6b7280' }}>{s.descricao}</div>
+                          </td>
+                          <td style={{ padding: '8px 8px', textAlign: 'center' }}>
+                            <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 999, fontWeight: 700, background: '#fef2f2', color: '#b91c1c' }}>
+                              {s.categoria}
+                            </span>
+                          </td>
+                          <td style={{ padding: '8px 16px', textAlign: 'right', fontWeight: 700, color: '#b91c1c', whiteSpace: 'nowrap' }}>
+                            −{fmtVal(s.valor)}
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 )}
