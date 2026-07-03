@@ -928,6 +928,40 @@ def marcar_pago(
     return _nf_to_out(nf)
 
 
+@router.get("/nfs-para-conciliar")
+def nfs_para_conciliar(
+    cliente_id: Optional[uuid.UUID] = Query(None),
+    valor: Optional[float] = Query(None),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """NFs emitidas NÃO pagas e ainda não conciliadas — candidatas a serem a NF de
+    um recebimento recém-registrado (anti-duplicação reversa: Financeiro → NF)."""
+    from sqlalchemy import or_
+    q = (db.query(NotaFiscal)
+         .filter(NotaFiscal.status == "emitida",
+                 NotaFiscal.pago.is_(False),
+                 NotaFiscal.recebimento_id.is_(None)))
+    if cliente_id:
+        conds = [NotaFiscal.cliente_id == cliente_id,
+                 NotaFiscal.cliente_compensacao_id == cliente_id]
+        cli = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+        if cli and cli.cpf_cnpj:
+            conds.append(NotaFiscal.tomador_cpf_cnpj == _apenas_digitos(cli.cpf_cnpj))
+        q = q.filter(or_(*conds))
+    nfs = q.order_by(NotaFiscal.data_emissao.desc()).limit(50).all()
+    if valor is not None:
+        nfs = sorted(nfs, key=lambda n: abs(float(n.valor_servicos) - valor))
+    return [{
+        "id": str(n.id),
+        "numero_nfse": n.numero_nfse,
+        "tomador_nome": n.tomador_nome,
+        "valor": float(n.valor_servicos),
+        "competencia": n.competencia,
+        "data_emissao": n.data_emissao.isoformat() if n.data_emissao else None,
+    } for n in nfs]
+
+
 @router.get("/notas/{nf_id}/conciliaveis")
 def recebimentos_conciliaveis(nf_id: uuid.UUID, db: Session = Depends(get_db), _=Depends(get_current_user)):
     """Lista recebimentos (entradas de caixa) que podem ser a quitação desta NF.

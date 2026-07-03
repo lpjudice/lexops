@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { financeiroApi } from '../api/financeiro'
 import type { HonorarioCreate, RecebimentoCreate, StatusHonorario, TipoHonorario, FormaPagamento, FluxoMes } from '../api/financeiro'
+import { fiscalApi } from '../api/fiscal'
 import { clientesApi } from '../api/clientes'
 import { processosApi } from '../api/processos'
 import CurrencyInput from '../components/CurrencyInput'
@@ -121,13 +122,39 @@ export default function FinanceiroPage() {
     },
   })
 
-  const adicionarRec = useMutation({
-    mutationFn: ({ hid, data }: { hid: string; data: RecebimentoCreate }) =>
-      financeiroApi.adicionarRecebimento(hid, data),
+  // Anti-duplicação reversa: ao registrar recebimento, achar NF de mesmo valor
+  // (não paga) e sugerir vincular, em vez de a NF virar outra entrada depois.
+  const [vincNfPrompt, setVincNfPrompt] = useState<
+    { recId: string; valor: number; matches: { id: string; numero_nfse?: string; tomador_nome: string; valor: number; competencia: string }[] } | null
+  >(null)
+  const conciliarNfRec = useMutation({
+    mutationFn: ({ nfId, recId }: { nfId: string; recId: string }) => fiscalApi.conciliar(nfId, recId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['honorarios'] })
       qc.invalidateQueries({ queryKey: ['financeiro-resumo'] })
+      qc.invalidateQueries({ queryKey: ['fluxo-caixa'] })
+      qc.invalidateQueries({ queryKey: ['notas-fiscais'] })
+      setVincNfPrompt(null)
+    },
+  })
+  const adicionarRec = useMutation({
+    mutationFn: ({ hid, data }: { hid: string; data: RecebimentoCreate }) =>
+      financeiroApi.adicionarRecebimento(hid, data),
+    onSuccess: async (rec: any, variables) => {
+      qc.invalidateQueries({ queryKey: ['honorarios'] })
+      qc.invalidateQueries({ queryKey: ['financeiro-resumo'] })
+      qc.invalidateQueries({ queryKey: ['fluxo-caixa'] })
       setRecForm(EMPTY_REC)
+      // Procura NF emitida não paga de mesmo valor para sugerir conciliação
+      try {
+        const h = honorarios.find((x) => x.id === variables.hid)
+        const val = Number(rec?.valor ?? variables.data.valor)
+        if (rec?.id && h) {
+          const nfs = await fiscalApi.nfsParaConciliar(h.cliente_id, val)
+          const iguais = nfs.filter((n) => Math.abs(n.valor - val) < 0.01)
+          if (iguais.length > 0) setVincNfPrompt({ recId: rec.id, valor: val, matches: iguais })
+        }
+      } catch { /* silencioso: conciliação é opcional */ }
     },
   })
 
@@ -835,6 +862,36 @@ export default function FinanceiroPage() {
         </div>
       )}
       </>)}
+
+      {/* Anti-duplicação reversa: recebimento registrado combina com NF não paga */}
+      {vincNfPrompt && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+          onClick={(e) => { if (e.target === e.currentTarget) setVincNfPrompt(null) }}>
+          <div style={{ background: '#fff', borderRadius: 12, padding: 20, maxWidth: 440, width: '90%' }}>
+            <div style={{ fontWeight: 700, fontSize: 16, color: '#1f2937', marginBottom: 4 }}>Vincular à NF?</div>
+            <div style={{ fontSize: 13, color: '#374151', marginBottom: 12 }}>
+              Existe NF emitida <b>não paga</b> de mesmo valor ({fmtVal(vincNfPrompt.valor)}). Se este recebimento é o
+              pagamento dela, vincule — assim a NF não vira <b>outra</b> entrada no Fluxo de Caixa.
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {vincNfPrompt.matches.map((n) => (
+                <button key={n.id} disabled={conciliarNfRec.isPending}
+                  onClick={() => conciliarNfRec.mutate({ nfId: n.id, recId: vincNfPrompt.recId })}
+                  style={{ textAlign: 'left', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8, padding: '10px 12px', cursor: 'pointer' }}>
+                  <span style={{ fontWeight: 700, color: '#15803d' }}>
+                    {n.numero_nfse ? `NF #${n.numero_nfse}` : 'NF'} · {fmtVal(n.valor)}
+                  </span>
+                  <div style={{ fontSize: 11, color: '#6b7280' }}>{n.tomador_nome} · {n.competencia}</div>
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setVincNfPrompt(null)}
+              style={{ marginTop: 12, background: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: 8, padding: '8px 14px', cursor: 'pointer' }}>
+              Não vincular (deixar separado)
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

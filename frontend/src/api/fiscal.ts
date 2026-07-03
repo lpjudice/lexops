@@ -189,6 +189,9 @@ export const fiscalApi = {
   conciliaveis: (id: string) =>
     api.get<{ id: string; valor: number; data: string; forma: string; honorario_descricao: string; cliente: string; ja_conciliado_nesta: boolean }[]>(
       `/fiscal/notas/${id}/conciliaveis`).then((r) => r.data),
+  nfsParaConciliar: (clienteId?: string, valor?: number) =>
+    api.get<{ id: string; numero_nfse?: string; tomador_nome: string; valor: number; competencia: string; data_emissao?: string }[]>(
+      '/fiscal/nfs-para-conciliar', { params: { ...(clienteId ? { cliente_id: clienteId } : {}), ...(valor != null ? { valor } : {}) } }).then((r) => r.data),
   conciliar: (id: string, recebimentoId: string) =>
     api.post(`/fiscal/notas/${id}/conciliar`, null, { params: { recebimento_id: recebimentoId } }).then((r) => r.data),
   desconciliar: (id: string) =>
