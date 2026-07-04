@@ -738,6 +738,44 @@ def listar_arquivos(nome_cliente: str, subfolder: str, sub_subfolder: str | None
             return []
 
 
+def extrair_file_id(drive_link: str) -> str | None:
+    """Extrai o ID do arquivo de uma URL do Drive (formatos /d/<id>/ ou ?id=<id>)."""
+    import re
+    match = re.search(r"/d/([\w-]{20,})", drive_link) or re.search(r"[?&]id=([\w-]{20,})", drive_link)
+    return match.group(1) if match else None
+
+
+def baixar_arquivo_por_id(file_id: str) -> bytes | None:
+    """Baixa o conteúdo bruto de um arquivo do Drive pelo ID (alt=media)."""
+    tokens = _load_tokens()
+    if not tokens:
+        return None
+
+    def _do(tkns: dict) -> bytes:
+        h = _auth_headers(tkns)
+        r = httpx.get(
+            f"{DRIVE_META}/files/{file_id}",
+            headers=h,
+            params={"alt": "media", "supportsAllDrives": True},
+            timeout=60,
+        )
+        r.raise_for_status()
+        return r.content
+
+    try:
+        return _do(tokens)
+    except Exception as exc:
+        if not _is_unauthorized(exc):
+            logger.warning("Falha ao baixar arquivo %s do Drive: %s", file_id, exc)
+            return None
+        tokens2 = _refresh(tokens)
+        try:
+            return _do(tokens2)
+        except Exception as exc2:
+            logger.warning("Falha ao baixar arquivo %s do Drive apos refresh: %s", file_id, exc2)
+            return None
+
+
 def deletar_arquivo(nome_cliente: str, subfolder: str, nome_arquivo: str, sub_subfolder: str | None = None) -> bool:
     """Moves matching Drive file(s) in {nome_cliente}/{subfolder}[/{sub_subfolder}] to trash."""
     tokens = _load_tokens()

@@ -48,6 +48,11 @@ class Publicacao(Base):
     prazo_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("prazos.id"), nullable=True
     )
+    # Confirmação humana do vínculo processo/cliente (tela Despacho) — o match
+    # automático (CNJ/OAB/nome) só é tratado como certo depois disso.
+    vinculo_confirmado: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Sugestão de ação da IA (JSON), gerada após a confirmação do vínculo.
+    sugestao_acao: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # IA
     analise_ia: Mapped[str | None] = mapped_column(Text)          # JSON do Claude

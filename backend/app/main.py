@@ -22,7 +22,7 @@ from app.models import conselho as _conselho_model  # noqa: F401 — ensures Con
 from app.models import tarefa_card as _tarefa_card_model  # noqa: F401 — ensures TarefaCard tables are registered
 from app.models import memoria_estrategica as _memoria_estrategica_model  # noqa: F401 — ensures MemoriaEstrategica table is registered
 from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, fiscal, pagantes, config_fiscal, jurisprudencia, organizador, pje, prazos, processos, publico, reembolsos, reunioes, system, tarefas, telegram, telegram_andamentos, telegram_tasks, teses, usuarios, webhooks
-from app.routers import backoffice, precedentcheck, conselho, tarefa_projetos, tarefa_cards, memoria_estrategica
+from app.routers import backoffice, precedentcheck, conselho, tarefa_projetos, tarefa_cards, memoria_estrategica, despacho
 
 # Cria as tabelas (Alembic gerencia em produção; aqui facilita o dev)
 Base.metadata.create_all(bind=engine)
@@ -914,6 +914,17 @@ def _run_migrations() -> None:
             "ALTER TABLE emails_cliente ADD COLUMN IF NOT EXISTS categoria VARCHAR(20)"
         ))
 
+        conn.execute(text(
+            "ALTER TABLE andamentos_processo ADD COLUMN IF NOT EXISTS texto_extraido TEXT"
+        ))
+
+        conn.execute(text(
+            "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS vinculo_confirmado BOOLEAN NOT NULL DEFAULT false"
+        ))
+        conn.execute(text(
+            "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS sugestao_acao TEXT"
+        ))
+
         conn.commit()
 
 
@@ -1147,6 +1158,7 @@ app.include_router(conselho.router)
 app.include_router(tarefa_projetos.router)
 app.include_router(tarefa_cards.router)
 app.include_router(memoria_estrategica.router)
+app.include_router(despacho.router)
 
 
 @app.on_event("startup")

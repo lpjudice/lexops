@@ -25,6 +25,7 @@ import {
   ShieldCheck,
   Users2,
   LayoutGrid,
+  Gavel,
 } from 'lucide-react'
 import api from '../api/client'
 import { useAuth } from '../contexts/AuthContext'
@@ -80,6 +81,7 @@ const navGroups: NavGroup[] = [
   {
     label: 'CONTEÚDO',
     items: [
+      { to: '/despacho', label: 'Despacho', Icon: Gavel },
       { to: '/diario', label: 'Diário Oficial', Icon: Newspaper },
       { to: '/diario2', label: 'Recorte Digital OAB', Icon: Newspaper },
       { to: '/teses', label: 'Teses IA', Icon: Sparkles },

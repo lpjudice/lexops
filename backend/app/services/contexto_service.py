@@ -155,6 +155,42 @@ def _andamentos_texto(processo: Processo) -> list[str]:
     ]
 
 
+def _obter_texto_documento(db: Session, andamento) -> str | None:
+    """Lê o PDF do andamento (Drive), com cache em texto_extraido. None se falhar."""
+    if andamento.texto_extraido:
+        return andamento.texto_extraido
+    if not andamento.arquivo_drive_link:
+        return None
+    try:
+        from app.services.google_drive import baixar_arquivo_por_id, extrair_file_id
+        from app.services.pdf_extract import extrair_texto_pdf
+
+        file_id = extrair_file_id(andamento.arquivo_drive_link)
+        if not file_id:
+            return None
+        conteudo = baixar_arquivo_por_id(file_id)
+        if not conteudo:
+            return None
+        texto = extrair_texto_pdf(conteudo)
+        if texto:
+            andamento.texto_extraido = texto
+            db.commit()
+        return texto or None
+    except Exception:
+        return None
+
+
+def _documentos_texto(db: Session, processo: Processo, limite: int = 2) -> list[str]:
+    """Trecho dos documentos (peças/decisões) dos andamentos mais recentes com PDF."""
+    linhas = []
+    com_doc = [a for a in processo.andamentos if a.arquivo_drive_link][:limite]
+    for a in com_doc:
+        texto = _obter_texto_documento(db, a)
+        if texto:
+            linhas.append(f"### Documento de [{a.data_andamento}] {a.tipo or 'Andamento'} ({a.arquivo_nome or 'sem nome'})\n{texto[:1500]}")
+    return linhas
+
+
 def _financeiro_texto(db: Session, usuario: Usuario, *, cliente_id=None, processo_id=None) -> list[str]:
     if not usuario.pode_ver_financeiro:
         return []
@@ -249,6 +285,11 @@ def montar_contexto_processo(db: Session, processo: Processo, usuario: Usuario) 
     if andamentos:
         blocos.append(f"\n## Últimos andamentos (até {ANDAMENTOS_LIMITE})")
         blocos.extend(andamentos)
+
+    documentos = _documentos_texto(db, processo)
+    if documentos:
+        blocos.append("\n## Trecho dos documentos mais recentes (Drive)")
+        blocos.extend(documentos)
 
     tarefas = _tarefas_texto(db, usuario, processo_id=processo.id)
     if tarefas:

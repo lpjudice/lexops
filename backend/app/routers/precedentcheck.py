@@ -2,7 +2,6 @@
 PrecedentCheck — verificação reversa de citações jurisprudenciais em peças e decisões.
 """
 
-import io
 import uuid
 from datetime import datetime
 
@@ -39,54 +38,6 @@ class AnalisarResponse(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 
-def _extrair_com_pypdf(content: bytes) -> str:
-    from pypdf import PdfReader
-    reader = PdfReader(io.BytesIO(content))
-    paginas = [page.extract_text() or "" for page in reader.pages[:50]]
-    return "\n\n".join(p.strip() for p in paginas if p.strip())
-
-
-def _extrair_com_pdfminer(content: bytes) -> str:
-    from pdfminer.high_level import extract_text as pdfminer_extract
-    return pdfminer_extract(io.BytesIO(content), maxpages=50) or ""
-
-
-def _extrair_com_claude_ocr(content: bytes) -> str:
-    """Último recurso: envia o PDF para Claude ler via visão nativa (PDFs escaneados sem texto)."""
-    import base64
-    import anthropic
-    client = anthropic.Anthropic()
-    # Limita a 5MB para evitar timeouts
-    if len(content) > 5 * 1024 * 1024:
-        content = content[:5 * 1024 * 1024]
-    resp = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=8192,
-        messages=[{
-            "role": "user",
-            "content": [
-                {
-                    "type": "document",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "application/pdf",
-                        "data": base64.b64encode(content).decode(),
-                    },
-                },
-                {
-                    "type": "text",
-                    "text": (
-                        "Extraia TODO o texto desta peça ou decisão judicial exatamente como está, "
-                        "preservando parágrafos, numerações e formatação. "
-                        "Retorne APENAS o texto extraído, sem comentários adicionais."
-                    ),
-                },
-            ],
-        }],
-    )
-    return resp.content[0].text if resp.content else ""
-
-
 @router.post("/extrair-pdf")
 async def extrair_pdf(arquivo: UploadFile = File(...)):
     """
@@ -99,35 +50,8 @@ async def extrair_pdf(arquivo: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Arquivo deve ser PDF")
     content = await arquivo.read()
 
-    import logging
-    logger = logging.getLogger(__name__)
-    logger.info("extrair-pdf: arquivo=%s tamanho=%d bytes", arquivo.filename, len(content))
-
-    # Tentativa 1: pypdf
-    texto = ""
-    try:
-        texto = _extrair_com_pypdf(content)
-        logger.info("pypdf extraiu %d chars", len(texto))
-    except Exception as exc:
-        logger.warning("pypdf falhou: %s", exc)
-
-    # Tentativa 2: pdfminer
-    if not texto.strip():
-        try:
-            texto = _extrair_com_pdfminer(content)
-            logger.info("pdfminer extraiu %d chars", len(texto))
-        except Exception as exc:
-            logger.warning("pdfminer falhou: %s", exc)
-
-    # Tentativa 3: Claude OCR (PDFs escaneados — imagem sem texto)
-    if not texto.strip():
-        logger.info("tentando Claude OCR")
-        try:
-            texto = _extrair_com_claude_ocr(content)
-            logger.info("Claude OCR extraiu %d chars", len(texto))
-        except Exception as e:
-            logger.error("Claude OCR falhou: %s", e)
-            raise HTTPException(status_code=500, detail=f"Não foi possível extrair texto do PDF: {e}")
+    from app.services.pdf_extract import extrair_texto_pdf
+    texto = extrair_texto_pdf(content)
 
     if not texto.strip():
         raise HTTPException(

@@ -29,6 +29,9 @@ class AndamentoProcesso(Base):
     arquivo_drive_link: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     documento_id: Mapped[str | None] = mapped_column(String(500), nullable=True, index=True)
     hash_unico: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    # Texto extraído do PDF (arquivo_drive_link), cacheado na primeira leitura
+    # pelo gestor jurídico — evita baixar/reprocessar o mesmo documento sempre.
+    texto_extraido: Mapped[str | None] = mapped_column(Text, nullable=True)
     lido: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     notificado: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
