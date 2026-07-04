@@ -164,7 +164,7 @@ def _financeiro_texto(db: Session, usuario: Usuario, *, cliente_id=None, process
     for h in q.all():
         linhas.append(
             f"- Honorário {h.status}: total R$ {h.valor_total:.2f}, "
-            f"recebido R$ {h.total_recebido:.2f}, saldo R$ {h.saldo:.2f}"
+            f"recebido R$ {h.total_recebido:.2f}, saldo R$ {h.saldo_pendente:.2f}"
         )
     return linhas
 
