@@ -32,6 +32,7 @@ import DespesasPage from './pages/DespesasPage'
 import PrecedentCheckPage from './pages/PrecedentCheckPage'
 import ConselhoPage from './pages/ConselhoPage'
 import DespachoPage from './pages/DespachoPage'
+import ConselhoJuridicoPage from './pages/ConselhoJuridicoPage'
 
 const queryClient = new QueryClient()
 
@@ -84,6 +85,7 @@ function AppRoutes() {
         <Route path="fiscal/config" element={<ConfigFiscalPage />} />
         <Route path="precedentcheck" element={<PrecedentCheckPage />} />
         <Route path="despacho" element={<DespachoPage />} />
+        <Route path="conselho-juridico" element={<ConselhoJuridicoPage />} />
       </Route>
     </Routes>
   )

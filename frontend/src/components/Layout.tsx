@@ -26,6 +26,7 @@ import {
   Users2,
   LayoutGrid,
   Gavel,
+  Landmark,
 } from 'lucide-react'
 import api from '../api/client'
 import { useAuth } from '../contexts/AuthContext'
@@ -82,6 +83,7 @@ const navGroups: NavGroup[] = [
     label: 'CONTEÚDO',
     items: [
       { to: '/despacho', label: 'Despacho', Icon: Gavel },
+      { to: '/conselho-juridico', label: 'Conselho Jurídico', Icon: Landmark },
       { to: '/diario', label: 'Diário Oficial', Icon: Newspaper },
       { to: '/diario2', label: 'Recorte Digital OAB', Icon: Newspaper },
       { to: '/teses', label: 'Teses IA', Icon: Sparkles },
