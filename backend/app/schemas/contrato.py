@@ -72,6 +72,8 @@ class ContratoOut(ContratoCreate):
     arquivos: list[dict] = []
     status: StatusContrato
     assinatura_manual: bool = False
+    drive_link_cliente: str | None = None
+    drive_link_master: str | None = None
     clicksign_document_key: str | None
     signatarios: list[SignatarioOut] = []
     created_at: datetime

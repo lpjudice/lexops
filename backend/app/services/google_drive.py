@@ -655,6 +655,36 @@ def upload_arquivo_raiz(
         return None
 
 
+def get_folder_link_raiz(subpath: list[str]) -> str | None:
+    """
+    Retorna o link (webViewLink) de uma pasta sob a raiz LexOps, navegando/criando
+    o caminho `subpath` (lista de nomes de pasta). Ex.: subpath=["Contratos"] →
+    link da pasta LexOps/Contratos.
+    """
+    tokens = _load_tokens()
+    if not tokens:
+        return None
+
+    def _do(tkns: dict) -> str:
+        h = _auth_headers(tkns)
+        parent_id = DRIVE_FOLDER_ID
+        for nome in subpath:
+            parent_id = _get_or_create_subfolder(nome, parent_id, h)
+        return f"https://drive.google.com/drive/folders/{parent_id}"
+
+    try:
+        return _do(tokens)
+    except Exception as exc:
+        if not _is_unauthorized(exc):
+            logger.warning("Falha ao obter link de pasta raiz do Drive: %s", exc)
+            return None
+        try:
+            return _do(_refresh(tokens))
+        except Exception as exc2:
+            logger.warning("Falha ao obter link de pasta raiz do Drive apos refresh: %s", exc2)
+            return None
+
+
 def listar_arquivos(nome_cliente: str, subfolder: str, sub_subfolder: str | None = None) -> list[dict]:
     """Lists files from {nome_cliente}/{subfolder}[/{sub_subfolder}] in Drive."""
     tokens = _load_tokens()

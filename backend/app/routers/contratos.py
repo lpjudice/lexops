@@ -20,6 +20,33 @@ router = APIRouter(prefix="/contratos", tags=["contratos"],
                    dependencies=[Depends(get_current_user)])
 
 
+def _duplicar_assinado_para_drive(db: Session, contrato: Contrato, pdf_bytes: bytes, nome_arquivo: str) -> tuple[str | None, str | None]:
+    """
+    Sobe o PDF final assinado para a pasta do cliente (LexOps/{cliente}/Contratos) e para
+    a pasta mestra (LexOps/Contratos/{cliente}), que reúne todos os contratos finalizados
+    da plataforma. Retorna (link_cliente, link_master); qualquer um pode vir None se o
+    Drive não estiver conectado ou o upload falhar.
+    """
+    from app.models.cliente import Cliente
+    from app.services.google_drive import upload_arquivo, upload_arquivo_raiz
+
+    cliente = db.query(Cliente).filter(Cliente.id == contrato.cliente_id).first()
+    if not cliente:
+        return None, None
+
+    link_cliente = None
+    link_master = None
+    try:
+        link_cliente = upload_arquivo(pdf_bytes, nome_arquivo, cliente.nome, "Contratos")
+    except Exception:
+        pass
+    try:
+        link_master = upload_arquivo_raiz(pdf_bytes, nome_arquivo, subpath=["Contratos", cliente.nome], mimetype="application/pdf")
+    except Exception:
+        pass
+    return link_cliente, link_master
+
+
 # ── CRUD básico ───────────────────────────────────────────────────────────────
 
 @router.get("/", response_model=list[ContratoOut])
@@ -40,6 +67,13 @@ def criar_contrato(data: ContratoCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(contrato)
     return contrato
+
+
+@router.get("/pasta-mestra")
+def obter_pasta_mestra():
+    """Link da pasta mestra /Contratos na raiz do Drive (duplica todos os contratos finalizados)."""
+    from app.services.google_drive import get_folder_link_raiz
+    return {"link": get_folder_link_raiz(["Contratos"])}
 
 
 @router.get("/{contrato_id}", response_model=ContratoOut)
@@ -439,6 +473,68 @@ def confirmar_assinatura_manual(contrato_id: uuid.UUID, db: Session = Depends(ge
     return c
 
 
+@router.post("/{contrato_id}/finalizar-assinado-manual", response_model=ContratoOut)
+def finalizar_assinado_manual(contrato_id: uuid.UUID, db: Session = Depends(get_db)):
+    """
+    Finaliza um contrato já assinado fora do sistema (ex: assinatura física ou por outro
+    meio), a partir do(s) PDF(s) já anexados — sem passar pelo ClickSign e sem notificar
+    ou reenviar nada ao cliente. Marca status="assinado" + assinatura_manual=True e
+    duplica o PDF final para a pasta do cliente e para a pasta mestra /Contratos no Drive.
+    """
+    c = db.query(Contrato).filter(Contrato.id == contrato_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Contrato não encontrado")
+    if c.status != "rascunho":
+        raise HTTPException(status_code=400, detail="Só é possível finalizar contratos em rascunho")
+
+    arquivos_atuais = list(c.arquivos or [])
+    if not arquivos_atuais and c.arquivo_path:
+        arquivos_atuais = [{"filename": Path(c.arquivo_path).name, "path": c.arquivo_path}]
+    if not arquivos_atuais:
+        raise HTTPException(status_code=400, detail="Anexe o PDF já assinado antes de finalizar")
+
+    # Mescla múltiplos PDFs em um único arquivo final, como no envio ao ClickSign
+    if len(arquivos_atuais) > 1:
+        try:
+            from pypdf import PdfWriter
+            writer = PdfWriter()
+            for arq in arquivos_atuais:
+                writer.append(arq["path"])
+            nome_final = f"contrato_{contrato_id.hex[:8]}_assinado.pdf"
+            path_final = UPLOADS_DIR / nome_final
+            with open(path_final, "wb") as fout:
+                writer.write(fout)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Erro ao mesclar PDFs: {e}")
+    else:
+        path_final = Path(arquivos_atuais[0]["path"])
+        nome_final = arquivos_atuais[0].get("filename") or path_final.name
+
+    pdf_bytes = path_final.read_bytes()
+    c.arquivo_assinado_path = str(path_final)
+    c.status = "assinado"
+    c.assinatura_manual = True
+
+    link_cliente, link_master = _duplicar_assinado_para_drive(db, c, pdf_bytes, nome_final)
+    if link_cliente:
+        c.drive_link_cliente = link_cliente
+    if link_master:
+        c.drive_link_master = link_master
+
+    # Remove pendência do honorário vinculado
+    try:
+        from app.models.financeiro import Honorario
+        h = db.query(Honorario).filter(Honorario.contrato_id == contrato_id).first()
+        if h:
+            h.pendente_assinatura = False
+    except Exception:
+        pass
+
+    db.commit()
+    db.refresh(c)
+    return c
+
+
 @router.post("/{contrato_id}/cancelar", response_model=ContratoOut)
 def cancelar_contrato_clicksign(contrato_id: uuid.UUID, db: Session = Depends(get_db)):
     c = db.query(Contrato).filter(Contrato.id == contrato_id).first()
@@ -489,13 +585,7 @@ async def webhook_clicksign(request: Request, db: Session = Depends(get_db)):
         todos = db.query(Signatario).filter(Signatario.contrato_id == contrato.id).all()
         if all(s.status_assinatura == "assinado" for s in todos):
             contrato.status = "assinado"
-
-            # Baixa o PDF assinado
-            pdf_bytes = clicksign.baixar_documento_assinado(doc_key)
-            if pdf_bytes:
-                path_assinado = UPLOADS_DIR / f"{contrato.id}_assinado.pdf"
-                path_assinado.write_bytes(pdf_bytes)
-                contrato.arquivo_assinado_path = str(path_assinado)
+            _baixar_e_arquivar_assinado_clicksign(db, contrato, doc_key)
         else:
             contrato.status = "parcialmente_assinado"
 
@@ -504,9 +594,34 @@ async def webhook_clicksign(request: Request, db: Session = Depends(get_db)):
 
     elif nome_evento == "close":
         contrato.status = "assinado"
+        _baixar_e_arquivar_assinado_clicksign(db, contrato, doc_key)
 
     db.commit()
     return {"ok": True}
+
+
+def _baixar_e_arquivar_assinado_clicksign(db: Session, contrato: Contrato, doc_key: str) -> None:
+    """
+    Baixa o PDF final assinado do ClickSign (se ainda não baixado) e o duplica no Drive
+    — pasta do cliente e pasta mestra /Contratos. Idempotente: não baixa/reenvia de novo
+    se `arquivo_assinado_path` já estiver preenchido (evita duplicar em múltiplos eventos
+    de webhook para o mesmo documento, ex: "sign" do último signatário + "close").
+    """
+    if contrato.arquivo_assinado_path:
+        return
+    pdf_bytes = clicksign.baixar_documento_assinado(doc_key)
+    if not pdf_bytes:
+        return
+    nome_arquivo = f"{contrato.id}_assinado.pdf"
+    path_assinado = UPLOADS_DIR / nome_arquivo
+    path_assinado.write_bytes(pdf_bytes)
+    contrato.arquivo_assinado_path = str(path_assinado)
+
+    link_cliente, link_master = _duplicar_assinado_para_drive(db, contrato, pdf_bytes, nome_arquivo)
+    if link_cliente:
+        contrato.drive_link_cliente = link_cliente
+    if link_master:
+        contrato.drive_link_master = link_master
 
 
 # ── Download do PDF assinado ──────────────────────────────────────────────────

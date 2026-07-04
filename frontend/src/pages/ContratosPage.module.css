@@ -368,6 +368,37 @@
 }
 .btnDownload:hover { background: #e8f7f4; }
 
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.driveLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.btnDrive {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #4285f4;
+  background: #e8f0fe;
+  color: #1a73e8;
+  text-decoration: none;
+  transition: all 0.15s;
+}
+.btnDrive:hover {
+  background: #1a73e8;
+  color: #fff;
+}
+
 /* Gerar contrato form */
 .gerarForm {
   background: #f0fdf9;

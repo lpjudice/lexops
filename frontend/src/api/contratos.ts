@@ -34,6 +34,8 @@ export interface Contrato {
   arquivos: ContratoArquivo[]
   status: StatusContrato
   assinatura_manual?: boolean
+  drive_link_cliente?: string | null
+  drive_link_master?: string | null
   clicksign_document_key?: string
   signatarios: Signatario[]
   created_at: string
@@ -120,4 +122,10 @@ export const contratosApi = {
 
   confirmarAssinatura: (id: string) =>
     api.post<Contrato>(`/contratos/${id}/confirmar-assinatura`).then((r) => r.data),
+
+  finalizarAssinadoManual: (id: string) =>
+    api.post<Contrato>(`/contratos/${id}/finalizar-assinado-manual`).then((r) => r.data),
+
+  pastaMestra: () =>
+    api.get<{ link: string | null }>('/contratos/pasta-mestra').then((r) => r.data),
 }

@@ -96,6 +96,10 @@ export default function ContratosPage() {
     queryKey: ['processos'],
     queryFn: () => processosApi.listar(),
   })
+  const { data: pastaMestra } = useQuery({
+    queryKey: ['contratos-pasta-mestra'],
+    queryFn: () => contratosApi.pastaMestra(),
+  })
 
   const criar = useMutation({
     mutationFn: contratosApi.criar,
@@ -170,6 +174,17 @@ export default function ContratosPage() {
     },
   })
 
+  const finalizarManual = useMutation({
+    mutationFn: (id: string) => contratosApi.finalizarAssinadoManual(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['contratos'] })
+      qc.invalidateQueries({ queryKey: ['honorarios'] })
+      qc.invalidateQueries({ queryKey: ['honorarios-pendentes-assinatura'] })
+      qc.invalidateQueries({ queryKey: ['financeiro-resumo'] })
+    },
+    onError: (e: any) => alert(`Erro ao finalizar contrato:\n${e?.response?.data?.detail || e?.message || 'Erro desconhecido'}`),
+  })
+
   const deletar = useMutation({
     mutationFn: (id: string) => contratosApi.deletar(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['contratos'] }),
@@ -222,9 +237,16 @@ export default function ContratosPage() {
     <div>
       <div className={styles.pageHeader}>
         <h1 className={styles.pageTitle}>Contratos</h1>
-        <button className={styles.btnPrimary} onClick={() => setShowForm(!showForm)}>
-          {showForm ? 'Cancelar' : '+ Novo Contrato'}
-        </button>
+        <div className={cs.headerActions}>
+          {pastaMestra?.link && (
+            <a href={pastaMestra.link} target="_blank" rel="noreferrer" className={cs.btnDrive}>
+              ☁ Pasta mestra de Contratos
+            </a>
+          )}
+          <button className={styles.btnPrimary} onClick={() => setShowForm(!showForm)}>
+            {showForm ? 'Cancelar' : '+ Novo Contrato'}
+          </button>
+        </div>
       </div>
 
       {showForm && (
@@ -364,6 +386,20 @@ export default function ContratosPage() {
                           className={cs.btnDownload} target="_blank" rel="noreferrer">
                           ⬇ Baixar versão assinada
                         </a>
+                      )}
+                      {(c.drive_link_cliente || c.drive_link_master) && (
+                        <div className={cs.driveLinks}>
+                          {c.drive_link_cliente && (
+                            <a href={c.drive_link_cliente} target="_blank" rel="noreferrer" className={cs.btnDrive}>
+                              ☁ Ver no Drive (pasta do cliente)
+                            </a>
+                          )}
+                          {c.drive_link_master && (
+                            <a href={c.drive_link_master} target="_blank" rel="noreferrer" className={cs.btnDrive}>
+                              ☁ Ver na pasta mestra
+                            </a>
+                          )}
+                        </div>
                       )}
                     </div>
 
@@ -593,6 +629,17 @@ export default function ContratosPage() {
                           }}
                           disabled={enviar.isPending}>
                           {enviar.isPending ? '⏳ Enviando...' : '✉ Enviar para assinatura (ClickSign)'}
+                        </button>
+                      )}
+                      {c.status === 'rascunho' && temArquivos(c) && (
+                        <button className={styles.btnTable}
+                          onClick={() => {
+                            if (confirm('Finalizar este contrato como já assinado?\n\nO(s) PDF(s) anexados serão marcados como versão final. Não passa pelo ClickSign e não notifica nem reenvia nada ao cliente.'))
+                              finalizarManual.mutate(c.id)
+                          }}
+                          disabled={finalizarManual.isPending}
+                          title="Para contratos já assinados fora do sistema (fisicamente ou por outro meio)">
+                          {finalizarManual.isPending ? '⏳ Finalizando...' : '📥 Finalizar (já assinado, upload direto)'}
                         </button>
                       )}
                       {['aguardando_assinatura', 'parcialmente_assinado'].includes(c.status) && (

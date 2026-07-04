@@ -884,6 +884,13 @@ def _run_migrations() -> None:
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_tarefa_card_subtasks_card ON tarefa_card_subtasks(card_id)"
         ))
+        # Links do Drive para o contrato finalizado (pasta do cliente + pasta mestra /Contratos)
+        conn.execute(text(
+            "ALTER TABLE contratos ADD COLUMN IF NOT EXISTS drive_link_cliente VARCHAR(1000)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE contratos ADD COLUMN IF NOT EXISTS drive_link_master VARCHAR(1000)"
+        ))
 
         conn.commit()
 

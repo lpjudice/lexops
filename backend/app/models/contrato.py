@@ -44,6 +44,10 @@ class Contrato(Base):
     # Assinatura manual (fora do ClickSign)
     assinatura_manual: Mapped[bool] = mapped_column(default=False, server_default="false")
 
+    # Links do Drive do documento final assinado (pasta do cliente + pasta mestra /Contratos)
+    drive_link_cliente: Mapped[str | None] = mapped_column(String(1000))
+    drive_link_master: Mapped[str | None] = mapped_column(String(1000))
+
     # ClickSign
     clicksign_document_key: Mapped[str | None] = mapped_column(String(255), unique=True)
     clicksign_request_signature_key: Mapped[str | None] = mapped_column(String(255))
