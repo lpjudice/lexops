@@ -224,6 +224,7 @@ def sync_emails_for_client(
         return {"synced": 0, "new": 0, "error": None}
 
     new_count = 0
+    novos_records: list = []
     for msg_id in message_ids:
         # Skip if already in DB
         existing = db_session.query(EmailCliente).filter(
@@ -266,7 +267,17 @@ def sync_emails_for_client(
             lido=True,
         )
         db_session.add(email_record)
+        novos_records.append(email_record)
         new_count += 1
+
+    if novos_records:
+        from app.services.ia_email_classificacao import classificar_lote
+        categorias = classificar_lote([
+            {"remetente": r.remetente, "assunto": r.assunto, "snippet": r.snippet}
+            for r in novos_records
+        ])
+        for record, categoria in zip(novos_records, categorias):
+            record.categoria = categoria
 
     try:
         db_session.commit()

@@ -466,6 +466,39 @@ def obter_contexto_cliente(
     return {"contexto": montar_contexto_cliente(db, cliente, current)}
 
 
+@router.post("/{cliente_id}/emails/classificar-pendentes")
+def classificar_emails_pendentes(
+    cliente_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current: Usuario = Depends(get_current_user),
+):
+    """Classifica (processual/comercial/ruído) os e-mails já sincronizados
+    antes desta feature existir, que ainda estão sem categoria."""
+    from app.models.email_cliente import EmailCliente
+    from app.services.ia_email_classificacao import classificar_lote
+
+    pendentes = db.query(EmailCliente).filter(
+        EmailCliente.cliente_id == cliente_id,
+        EmailCliente.categoria.is_(None),
+    ).all()
+    if not pendentes:
+        return {"classificados": 0}
+
+    LOTE = 30
+    total = 0
+    for i in range(0, len(pendentes), LOTE):
+        chunk = pendentes[i:i + LOTE]
+        categorias = classificar_lote([
+            {"remetente": e.remetente, "assunto": e.assunto, "snippet": e.snippet}
+            for e in chunk
+        ])
+        for email, categoria in zip(chunk, categorias):
+            email.categoria = categoria
+        total += len(chunk)
+    db.commit()
+    return {"classificados": total}
+
+
 # ── Emails ────────────────────────────────────────────────────────────────────
 
 class EmailSyncRequest(BaseModel):

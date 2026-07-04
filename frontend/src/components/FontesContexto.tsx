@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation } from '@tanstack/react-query'
 import { clientesApi } from '../api/clientes'
 import { processosApi } from '../api/processos'
 
@@ -15,6 +15,11 @@ export default function FontesContexto({ clienteId, processoId }: Props) {
     queryKey: ['contexto-ia', clienteId, processoId],
     queryFn: () => (processoId ? processosApi.obterContexto(processoId) : clientesApi.obterContexto(clienteId!)),
     enabled: aberto,
+  })
+
+  const classificar = useMutation({
+    mutationFn: () => clientesApi.classificarEmailsPendentes(clienteId!),
+    onSuccess: () => refetch(),
   })
 
   return (
@@ -45,8 +50,25 @@ export default function FontesContexto({ clienteId, processoId }: Props) {
           )}
           <p style={{ fontSize: 11, color: 'var(--gray-mid)', marginTop: 8, marginBottom: 0 }}>
             Este é exatamente o texto enviado ao modelo em cada pergunta do chat — inclui só o que
-            você tem permissão de ver (ex: financeiro some se você não tiver acesso).
+            você tem permissão de ver (ex: financeiro some se você não tiver acesso), e só e-mails
+            já classificados como relevantes (processual/comercial) — ruído pessoal é filtrado.
           </p>
+          {clienteId && !processoId && (
+            <button
+              onClick={() => classificar.mutate()}
+              disabled={classificar.isPending}
+              style={{
+                marginTop: 8, fontSize: 11, fontWeight: 600, color: 'var(--teal)', background: 'none',
+                border: '1px solid var(--teal)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer',
+              }}
+            >
+              {classificar.isPending
+                ? 'Classificando...'
+                : classificar.data
+                  ? `${classificar.data.classificados} e-mail(s) classificado(s)`
+                  : 'Classificar e-mails pendentes'}
+            </button>
+          )}
         </div>
       )}
     </div>

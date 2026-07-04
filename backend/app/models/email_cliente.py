@@ -32,6 +32,10 @@ class EmailCliente(Base):
     data: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     lido: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
+    # "processual" | "comercial" | "ruido" — classificado por IA na sincronização.
+    # NULL = ainda não classificado (e-mails sincronizados antes desta feature).
+    categoria: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
     # Privacidade: por padrão todo email puxado é visível a todos os usuários.
     # Quando privado=True, só quem marcou (privado_por) e super-admins enxergam.
     privado: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)

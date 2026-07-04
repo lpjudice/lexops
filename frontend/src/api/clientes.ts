@@ -93,6 +93,8 @@ export const clientesApi = {
       .then((r) => r.data),
   obterContexto: (id: string) =>
     api.get<{ contexto: string }>(`/clientes/${id}/contexto`).then((r) => r.data),
+  classificarEmailsPendentes: (id: string) =>
+    api.post<{ classificados: number }>(`/clientes/${id}/emails/classificar-pendentes`).then((r) => r.data),
 
   pastaArquivos: (clienteId: string) =>
     api.get<PastaArquivo[]>(`/clientes/${clienteId}/pasta-arquivos/refresh`).then(r => r.data),

@@ -910,6 +910,10 @@ def _run_migrations() -> None:
             "CREATE INDEX IF NOT EXISTS ix_memorias_estrategicas_processo ON memorias_estrategicas(processo_id, created_at DESC)"
         ))
 
+        conn.execute(text(
+            "ALTER TABLE emails_cliente ADD COLUMN IF NOT EXISTS categoria VARCHAR(20)"
+        ))
+
         conn.commit()
 
 

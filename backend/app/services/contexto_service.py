@@ -45,7 +45,10 @@ def _processos_do_cliente(db: Session, cliente: Cliente) -> list[Processo]:
 
 
 def _emails_texto(db: Session, usuario: Usuario, cliente_id) -> list[str]:
-    q = db.query(EmailCliente).filter(EmailCliente.cliente_id == cliente_id)
+    q = db.query(EmailCliente).filter(
+        EmailCliente.cliente_id == cliente_id,
+        EmailCliente.categoria.in_(["processual", "comercial"]),
+    )
     emails = q.order_by(EmailCliente.data.desc()).limit(EMAILS_LIMITE * 2).all()
     linhas = []
     for e in emails:
