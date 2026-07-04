@@ -77,6 +77,7 @@ export default function TarefasCardsPage() {
   const [filtroVenc, setFiltroVenc] = useState<FiltroVenc>('')
   const [filtroResp, setFiltroResp] = useState<string[]>([])
   const [filtroProjetos, setFiltroProjetos] = useState<string[]>([])
+  const [filtroCriador, setFiltroCriador] = useState<string[]>([])
 
   const [novaSubtask, setNovaSubtask] = useState<Record<string, string>>({})
   const [editSub, setEditSub] = useState<{ id: string; texto: string } | null>(null)
@@ -147,10 +148,24 @@ export default function TarefasCardsPage() {
     [cards],
   )
 
+  // Criadores distintos (id → nome); cards sem dono = "Sistema"
+  const criadores = useMemo(() => {
+    const map = new Map<string, string>()
+    let temSistema = false
+    for (const c of cards) {
+      if (c.criado_por_id) map.set(c.criado_por_id, c.criado_por_nome || 'Usuário')
+      else temSistema = true
+    }
+    const arr = [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]))
+    return { lista: arr, temSistema }
+  }, [cards])
+
   const toggleProjetoFiltro = (id: string) =>
     setFiltroProjetos((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])
   const toggleRespFiltro = (nome: string) =>
     setFiltroResp((prev) => prev.includes(nome) ? prev.filter((x) => x !== nome) : [...prev, nome])
+  const toggleCriadorFiltro = (id: string) =>
+    setFiltroCriador((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])
 
   const submitCreate = () => {
     if (!form.titulo.trim()) return
@@ -172,6 +187,7 @@ export default function TarefasCardsPage() {
   const passaFiltro = (c: TarefaCard) => {
     if (filtroStatus && c.status !== filtroStatus) return false
     if (filtroResp.length > 0 && !filtroResp.includes(c.responsavel || '__none__')) return false
+    if (filtroCriador.length > 0 && !filtroCriador.includes(c.criado_por_id || '__sistema__')) return false
     if (filtroProjetos.length > 0 && !filtroProjetos.includes(c.projeto_id || '__none__')) return false
     if (filtroVenc) {
       const d = c.data_limite
@@ -197,7 +213,7 @@ export default function TarefasCardsPage() {
       return a[1].nome.localeCompare(b[1].nome)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cards, filtroStatus, filtroVenc, filtroResp, filtroProjetos])
+  }, [cards, filtroStatus, filtroVenc, filtroResp, filtroCriador, filtroProjetos])
 
   const podeGerenciar = (c: TarefaCard) => isSuperAdmin || (c.criado_por_id && usuario?.id === c.criado_por_id)
   const totalFiltrado = grupos.reduce((n, [, g]) => n + g.cards.length, 0)
@@ -251,6 +267,24 @@ export default function TarefasCardsPage() {
           )}
           {filtroResp.length > 0 && (
             <button className={cs.linkBtn} style={{ color: '#6b7280' }} onClick={() => setFiltroResp([])}>limpar</button>
+          )}
+        </div>
+      )}
+
+      {/* Filtro multi-criador (chips) */}
+      {(criadores.lista.length > 0 || criadores.temSistema) && (
+        <div className={cs.projetoChips}>
+          <span className={cs.chipsLabel}>Criado por:</span>
+          {criadores.lista.map(([id, nome]) => (
+            <button key={id} className={`${cs.projChip} ${filtroCriador.includes(id) ? cs.projChipOn : ''}`}
+              onClick={() => toggleCriadorFiltro(id)}>{nome}</button>
+          ))}
+          {criadores.temSistema && (
+            <button className={`${cs.projChip} ${filtroCriador.includes('__sistema__') ? cs.projChipOn : ''}`}
+              onClick={() => toggleCriadorFiltro('__sistema__')}>⚙️ Sistema</button>
+          )}
+          {filtroCriador.length > 0 && (
+            <button className={cs.linkBtn} style={{ color: '#6b7280' }} onClick={() => setFiltroCriador([])}>limpar</button>
           )}
         </div>
       )}

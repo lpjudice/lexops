@@ -13,6 +13,7 @@ from app.models.contrato import Contrato
 from app.models.processo import Processo
 from app.models.reuniao import Reuniao
 from app.models.tarefa import Tarefa
+from app.models.tarefa_card import TarefaCard
 from app.models.usuario import Usuario
 from app.schemas.reuniao import (
     ConfirmarAcoesRequest,
@@ -388,6 +389,20 @@ def confirmar_acoes(
                 criado_por_id=usuario.id if usuario else None,
             )
             db.add(tarefa)
+            # Duplica no menu "Tarefas Cards". Gerada pelo sistema (sem dono →
+            # aparece no filtro "Criado por: Sistema").
+            db.add(TarefaCard(
+                cliente_id=r.cliente_id,
+                processo_id=r.processo_id,
+                projeto_id=projeto_id,
+                titulo=acao.get("titulo", "Tarefa da reunião"),
+                descricao=acao.get("descricao"),
+                responsavel=acao.get("responsavel"),
+                data_limite=data_limite,
+                status="pendente",
+                confidencial=acao_confidencial,
+                criado_por_id=None,
+            ))
             acao["criada"] = True
 
         elif tipo == "contrato":
