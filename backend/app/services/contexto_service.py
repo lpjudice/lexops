@@ -188,6 +188,9 @@ def montar_contexto_cliente(db: Session, cliente: Cliente, usuario: Usuario) -> 
         for p in processos:
             litisconsorte = " (litisconsórcio)" if p not in cliente.processos else ""
             blocos.append(f"- {p.numero_cnj} ({p.status}, {p.fase or 'fase n/d'}){litisconsorte}: {p.objeto or 'sem objeto cadastrado'}")
+            if p.ultimo_andamento_data or p.ultimo_andamento_desc:
+                nao_lidos = f", {p.andamentos_nao_lidos} não lido(s)" if p.andamentos_nao_lidos else ""
+                blocos.append(f"  Último andamento [{p.ultimo_andamento_data or '?'}]{nao_lidos}: {p.ultimo_andamento_desc or '(sem descrição)'}")
 
     tarefas = _tarefas_texto(db, usuario, cliente_id=cliente.id)
     if tarefas:
