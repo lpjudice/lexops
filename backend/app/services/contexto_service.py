@@ -12,15 +12,69 @@ from sqlalchemy.orm import Session
 
 from app.models.anotacao import Anotacao
 from app.models.cliente import Cliente
+from app.models.email_cliente import EmailCliente
 from app.models.financeiro import Honorario
 from app.models.memoria_estrategica import MemoriaEstrategica
 from app.models.prazo import Prazo
-from app.models.processo import Processo
+from app.models.processo import Processo, processo_clientes
+from app.models.reuniao import Reuniao
 from app.models.tarefa import Tarefa
 from app.models.usuario import Usuario
 
 ANDAMENTOS_LIMITE = 10
 ANOTACOES_LIMITE = 10
+EMAILS_LIMITE = 10
+REUNIOES_LIMITE = 10
+
+
+def _processos_do_cliente(db: Session, cliente: Cliente) -> list[Processo]:
+    """Processos onde o cliente é o principal (FK direta) OU litisconsorte."""
+    litisconsorcio = (
+        db.query(Processo)
+        .join(processo_clientes, Processo.id == processo_clientes.c.processo_id)
+        .filter(processo_clientes.c.cliente_id == cliente.id)
+        .all()
+    )
+    vistos = {p.id for p in cliente.processos}
+    todos = list(cliente.processos)
+    for p in litisconsorcio:
+        if p.id not in vistos:
+            todos.append(p)
+            vistos.add(p.id)
+    return todos
+
+
+def _emails_texto(db: Session, usuario: Usuario, cliente_id) -> list[str]:
+    q = db.query(EmailCliente).filter(EmailCliente.cliente_id == cliente_id)
+    emails = q.order_by(EmailCliente.data.desc()).limit(EMAILS_LIMITE * 2).all()
+    linhas = []
+    for e in emails:
+        if e.privado and usuario.role != "super_admin" and e.privado_por != usuario.id:
+            continue
+        data = e.data.strftime("%Y-%m-%d") if e.data else "?"
+        linhas.append(f"- [{data}] De: {e.remetente or '?'} — {e.assunto or '(sem assunto)'}: {(e.snippet or '')[:200]}")
+        if len(linhas) >= EMAILS_LIMITE:
+            break
+    return linhas
+
+
+def _reunioes_texto(db: Session, usuario: Usuario, *, cliente_id=None, processo_id=None) -> list[str]:
+    q = db.query(Reuniao)
+    if processo_id:
+        q = q.filter(Reuniao.processo_id == processo_id)
+    elif cliente_id:
+        q = q.filter(Reuniao.cliente_id == cliente_id)
+    reunioes = q.order_by(Reuniao.data_reuniao.desc()).limit(REUNIOES_LIMITE * 2).all()
+    linhas = []
+    for r in reunioes:
+        if not _visivel_para(usuario, r.confidencial, r.usuarios_com_acesso):
+            continue
+        data = r.data_reuniao.strftime("%Y-%m-%d") if r.data_reuniao else "?"
+        resumo = r.resumo_ia or "(sem resumo)"
+        linhas.append(f"- [{data}] {r.titulo}: {resumo[:300]}")
+        if len(linhas) >= REUNIOES_LIMITE:
+            break
+    return linhas
 
 
 def _memoria_atual(db: Session, *, cliente_id=None, processo_id=None) -> str | None:
@@ -125,11 +179,12 @@ def montar_contexto_cliente(db: Session, cliente: Cliente, usuario: Usuario) -> 
         blocos.append("\n## Memória Estratégica (o que buscamos com este cliente)")
         blocos.append(memoria)
 
-    processos = cliente.processos
+    processos = _processos_do_cliente(db, cliente)
     if processos:
         blocos.append(f"\n## Processos vinculados ({len(processos)})")
         for p in processos:
-            blocos.append(f"- {p.numero_cnj} ({p.status}, {p.fase or 'fase n/d'}): {p.objeto or 'sem objeto cadastrado'}")
+            litisconsorte = " (litisconsórcio)" if p not in cliente.processos else ""
+            blocos.append(f"- {p.numero_cnj} ({p.status}, {p.fase or 'fase n/d'}){litisconsorte}: {p.objeto or 'sem objeto cadastrado'}")
 
     tarefas = _tarefas_texto(db, usuario, cliente_id=cliente.id)
     if tarefas:
@@ -140,6 +195,16 @@ def montar_contexto_cliente(db: Session, cliente: Cliente, usuario: Usuario) -> 
     if anotacoes:
         blocos.append("\n## Anotações recentes")
         blocos.extend(anotacoes)
+
+    reunioes = _reunioes_texto(db, usuario, cliente_id=cliente.id)
+    if reunioes:
+        blocos.append("\n## Reuniões recentes")
+        blocos.extend(reunioes)
+
+    emails = _emails_texto(db, usuario, cliente.id)
+    if emails:
+        blocos.append("\n## E-mails recentes")
+        blocos.extend(emails)
 
     financeiro = _financeiro_texto(db, usuario, cliente_id=cliente.id)
     if financeiro:
@@ -188,6 +253,11 @@ def montar_contexto_processo(db: Session, processo: Processo, usuario: Usuario) 
     if anotacoes:
         blocos.append("\n## Anotações recentes")
         blocos.extend(anotacoes)
+
+    reunioes = _reunioes_texto(db, usuario, processo_id=processo.id)
+    if reunioes:
+        blocos.append("\n## Reuniões recentes")
+        blocos.extend(reunioes)
 
     financeiro = _financeiro_texto(db, usuario, processo_id=processo.id)
     if financeiro:
