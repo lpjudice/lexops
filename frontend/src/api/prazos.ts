@@ -20,6 +20,7 @@ export interface Prazo {
   data_limite_sem_feriado?: string
   status: StatusPrazo
   google_event_id?: string
+  criado_automaticamente?: boolean
   created_at: string
   updated_at: string
 }

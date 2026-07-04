@@ -72,6 +72,7 @@ class TarefaOut(BaseModel):
     ordem: int | None = None
     confidencial: bool = False
     usuarios_com_acesso: list[str] | None = None
+    criado_automaticamente: bool = False
     created_at: datetime
     updated_at: datetime
     # Enriched

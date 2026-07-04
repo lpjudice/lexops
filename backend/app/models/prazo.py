@@ -63,3 +63,5 @@ class Prazo(Base):
     peca_necessaria: Mapped[str | None] = mapped_column(String(100))
     responsavel: Mapped[str | None] = mapped_column(String(100))
     google_event_id: Mapped[str | None] = mapped_column(String(255))
+    # Criado automaticamente pelo gestor jurídico (Despacho), sem clique humano.
+    criado_automaticamente: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")

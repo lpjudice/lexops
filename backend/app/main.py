@@ -925,6 +925,13 @@ def _run_migrations() -> None:
             "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS sugestao_acao TEXT"
         ))
 
+        conn.execute(text(
+            "ALTER TABLE prazos ADD COLUMN IF NOT EXISTS criado_automaticamente BOOLEAN NOT NULL DEFAULT false"
+        ))
+        conn.execute(text(
+            "ALTER TABLE tarefas ADD COLUMN IF NOT EXISTS criado_automaticamente BOOLEAN NOT NULL DEFAULT false"
+        ))
+
         conn.commit()
 
 

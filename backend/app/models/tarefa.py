@@ -36,6 +36,9 @@ class Tarefa(Base):
     # List of usuario UUID strings with explicit access (same "req:" prefix for pending requests)
     usuarios_com_acesso: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=list)
 
+    # Criada automaticamente pelo gestor jurídico (Despacho), sem clique humano.
+    criado_automaticamente: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

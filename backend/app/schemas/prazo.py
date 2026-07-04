@@ -46,6 +46,7 @@ class PrazoOut(PrazoBase):
     peca_necessaria: str | None
     responsavel: str | None
     google_event_id: str | None
+    criado_automaticamente: bool = False
     created_at: datetime
     updated_at: datetime
 

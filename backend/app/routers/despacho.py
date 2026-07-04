@@ -2,8 +2,14 @@
 vínculo (processo/cliente) e, depois de confirmadas, de uma sugestão de ação
 do gestor jurídico. Só lê/aciona módulos existentes (Diário, Processos,
 Prazos, Tarefas) — não altera a lógica deles.
+
+Quando o vínculo é de altíssima confiança (CNJ exato batendo com um processo
+já cadastrado), o pipeline inteiro roda sozinho: confirma, pede sugestão à
+IA, cria prazo/tarefa e avisa por Telegram — sem esperar clique. Confiança
+média/baixa continua exigindo confirmação humana antes de qualquer ação.
 """
 import json
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -22,6 +28,10 @@ from app.models.usuario import Usuario
 router = APIRouter(prefix="/despacho", tags=["despacho"],
                    dependencies=[Depends(get_current_user)])
 
+logger = logging.getLogger(__name__)
+
+TEXTO_SEM_PUBLICACAO = "Sem publicações nesta edição."
+
 
 def _confianca(pub: Publicacao) -> str:
     if pub.processo_id and pub.numero_cnj:
@@ -33,11 +43,187 @@ def _confianca(pub: Publicacao) -> str:
     return "sem_vinculo"
 
 
+def _usuario_sistema(db: Session) -> Usuario | None:
+    """Usuário usado como 'ator' quando o gestor age sozinho (sem humano na tela)."""
+    return db.query(Usuario).filter(Usuario.role == "super_admin").first()
+
+
+def _notificar_telegram(texto: str) -> None:
+    try:
+        from app.config import settings
+        from app.services.telegram_api import send_message
+
+        chat_id_raw = (settings.andamentos_push_chat_id or "").strip()
+        if not chat_id_raw:
+            return
+        send_message(int(chat_id_raw), texto)
+    except Exception:
+        logger.warning("Falha ao notificar Telegram sobre ação automática", exc_info=True)
+
+
+def _criar_prazo_tarefa(
+    db: Session,
+    pub: Publicacao,
+    processo: Processo,
+    *,
+    peca_necessaria: str | None,
+    dias_prazo: int | None,
+    tipo_contagem: str,
+    tarefa_titulo: str | None,
+    tarefa_responsavel: str | None,
+    criar_prazo: bool,
+    criar_tarefa: bool,
+    automatico: bool,
+) -> dict:
+    """Cria Prazo/Tarefa a partir de uma sugestão (manual ou automática) e
+    retorna um dict com os ids criados. Compartilhado entre /aprovar e o
+    pipeline automático pra não duplicar a lógica."""
+    resultado: dict = {}
+
+    if criar_prazo and peca_necessaria and dias_prazo:
+        from app.services.google_calendar import criar_evento
+        from app.services.prazo_calc import calcular_prazo
+
+        data_com, data_sem = calcular_prazo(
+            db=db,
+            data_publicacao=pub.data_publicacao,
+            dias=dias_prazo,
+            estado=processo.estado,
+            tipo_contagem=tipo_contagem,
+        )
+        prazo = Prazo(
+            processo_id=processo.id,
+            tipo=peca_necessaria,
+            descricao=pub.texto_resumo,
+            data_publicacao=pub.data_publicacao,
+            dias_prazo=dias_prazo,
+            tipo_contagem=tipo_contagem,
+            data_limite=data_com,
+            data_limite_sem_feriado=data_sem,
+            responsavel=tarefa_responsavel,
+            criado_automaticamente=automatico,
+        )
+        db.add(prazo)
+        db.commit()
+        db.refresh(prazo)
+
+        if prazo.data_limite:
+            titulo_evento = f"[PRAZO] {prazo.tipo.upper()} — {processo.numero_cnj}"
+            event_id = criar_evento(titulo_evento, prazo.data_limite, prazo.descricao or "")
+            if event_id:
+                prazo.google_event_id = event_id
+                db.commit()
+
+        pub.prazo_id = prazo.id
+        pub.gera_prazo = True
+        resultado["prazo_id"] = str(prazo.id)
+        resultado["prazo_data_limite"] = prazo.data_limite.isoformat() if prazo.data_limite else None
+
+    if criar_tarefa and tarefa_titulo:
+        tarefa = Tarefa(
+            cliente_id=processo.cliente_id,
+            processo_id=processo.id,
+            titulo=tarefa_titulo,
+            responsavel=tarefa_responsavel,
+            status="pendente",
+            criado_automaticamente=automatico,
+        )
+        db.add(tarefa)
+        db.commit()
+        db.refresh(tarefa)
+        resultado["tarefa_id"] = str(tarefa.id)
+
+    return resultado
+
+
+def _processar_automaticos(db: Session) -> int:
+    """Roda o pipeline inteiro (confirmar → sugerir → criar) para publicações
+    de confiança alta (CNJ exato) que ainda não foram tratadas. Retorna
+    quantas foram processadas."""
+    candidatas = (
+        db.query(Publicacao)
+        .filter(
+            Publicacao.lida.is_(False),
+            Publicacao.rejeitada.is_(False),
+            Publicacao.vinculo_confirmado.is_(False),
+            Publicacao.processo_id.isnot(None),
+            Publicacao.numero_cnj.isnot(None),
+        )
+        .all()
+    )
+    if not candidatas:
+        return 0
+
+    from app.services.contexto_service import montar_contexto_processo
+    from app.services.ia_despacho import sugerir_acao as gerar_sugestao
+
+    usuario = _usuario_sistema(db)
+    processadas = 0
+
+    for pub in candidatas:
+        processo = db.query(Processo).filter(Processo.id == pub.processo_id).first()
+        if not processo or not usuario:
+            continue
+
+        pub.vinculo_confirmado = True
+        db.commit()
+
+        contexto = montar_contexto_processo(db, processo, usuario)
+        texto_publicacao = pub.texto_completo or pub.texto_resumo or ""
+        sugestao = gerar_sugestao(contexto, texto_publicacao)
+        if sugestao.get("erro"):
+            logger.warning("Sugestão automática falhou pra publicação %s: %s", pub.id, sugestao["erro"])
+            continue
+
+        pub.sugestao_acao = json.dumps(sugestao, ensure_ascii=False)
+        db.commit()
+
+        criado = _criar_prazo_tarefa(
+            db, pub, processo,
+            peca_necessaria=sugestao.get("peca_necessaria"),
+            dias_prazo=sugestao.get("dias_prazo"),
+            tipo_contagem=sugestao.get("tipo_contagem") or "uteis",
+            tarefa_titulo=sugestao.get("tarefa_titulo"),
+            tarefa_responsavel=sugestao.get("tarefa_responsavel"),
+            criar_prazo=bool(sugestao.get("requer_prazo")),
+            criar_tarefa=bool(sugestao.get("tarefa_titulo")),
+            automatico=True,
+        )
+
+        pub.lida = True
+        db.commit()
+        processadas += 1
+
+        if criado.get("prazo_id") or criado.get("tarefa_id"):
+            partes = [f"🤖 *Ação automática* — processo `{processo.numero_cnj}`"]
+            if criado.get("prazo_id"):
+                partes.append(f"📅 Prazo criado: {sugestao.get('peca_necessaria')} — vence {criado.get('prazo_data_limite')}")
+            if criado.get("tarefa_id"):
+                partes.append(f"✅ Tarefa criada: {sugestao.get('tarefa_titulo')}")
+            partes.append(f"_{sugestao.get('resumo_raciocinio', '')}_")
+            _notificar_telegram("\n".join(partes))
+
+    return processadas
+
+
+@router.post("/processar-automaticos")
+def processar_automaticos(db: Session = Depends(get_db)):
+    """Aciona manualmente o pipeline automático (útil pra ligar em um cron)."""
+    total = _processar_automaticos(db)
+    return {"processadas": total}
+
+
 @router.get("/pendentes")
 def listar_pendentes(db: Session = Depends(get_db)):
+    _processar_automaticos(db)
+
     pubs = (
         db.query(Publicacao)
-        .filter(Publicacao.lida.is_(False), Publicacao.rejeitada.is_(False))
+        .filter(
+            Publicacao.lida.is_(False),
+            Publicacao.rejeitada.is_(False),
+            Publicacao.texto_resumo != TEXTO_SEM_PUBLICACAO,
+        )
         .order_by(Publicacao.data_publicacao.desc())
         .limit(100)
         .all()
@@ -162,57 +348,17 @@ def aprovar_acao(publicacao_id: uuid.UUID, body: AprovarRequest, db: Session = D
     if not processo:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
 
-    resultado: dict = {}
-
-    if body.criar_prazo and body.peca_necessaria and body.dias_prazo:
-        from app.services.google_calendar import criar_evento
-        from app.services.prazo_calc import calcular_prazo
-
-        data_com, data_sem = calcular_prazo(
-            db=db,
-            data_publicacao=pub.data_publicacao,
-            dias=body.dias_prazo,
-            estado=processo.estado,
-            tipo_contagem=body.tipo_contagem,
-        )
-        prazo = Prazo(
-            processo_id=processo.id,
-            tipo=body.peca_necessaria,
-            descricao=pub.texto_resumo,
-            data_publicacao=pub.data_publicacao,
-            dias_prazo=body.dias_prazo,
-            tipo_contagem=body.tipo_contagem,
-            data_limite=data_com,
-            data_limite_sem_feriado=data_sem,
-            responsavel=body.tarefa_responsavel,
-        )
-        db.add(prazo)
-        db.commit()
-        db.refresh(prazo)
-
-        if prazo.data_limite:
-            titulo = f"[PRAZO] {prazo.tipo.upper()} — {processo.numero_cnj}"
-            event_id = criar_evento(titulo, prazo.data_limite, prazo.descricao or "")
-            if event_id:
-                prazo.google_event_id = event_id
-                db.commit()
-
-        pub.prazo_id = prazo.id
-        pub.gera_prazo = True
-        resultado["prazo_id"] = str(prazo.id)
-
-    if body.criar_tarefa and body.tarefa_titulo:
-        tarefa = Tarefa(
-            cliente_id=processo.cliente_id,
-            processo_id=processo.id,
-            titulo=body.tarefa_titulo,
-            responsavel=body.tarefa_responsavel,
-            status="pendente",
-        )
-        db.add(tarefa)
-        db.commit()
-        db.refresh(tarefa)
-        resultado["tarefa_id"] = str(tarefa.id)
+    resultado = _criar_prazo_tarefa(
+        db, pub, processo,
+        peca_necessaria=body.peca_necessaria,
+        dias_prazo=body.dias_prazo,
+        tipo_contagem=body.tipo_contagem,
+        tarefa_titulo=body.tarefa_titulo,
+        tarefa_responsavel=body.tarefa_responsavel,
+        criar_prazo=body.criar_prazo,
+        criar_tarefa=body.criar_tarefa,
+        automatico=False,
+    )
 
     pub.lida = True
     db.commit()

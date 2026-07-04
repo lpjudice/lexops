@@ -245,6 +245,12 @@ export default function PrazosPage() {
                     </div>
                     <div className={prazosStyles.cardBottom}>
                       <span className={`${styles.badge} ${prazosStyles[`tipo_${p.tipo}`]}`}>{p.tipo}</span>
+                      {p.criado_automaticamente && (
+                        <span title="Criado automaticamente pelo gestor jurídico (Despacho)"
+                          style={{ fontSize: 11, fontWeight: 700, color: '#7c3aed', background: '#f3e8ff', padding: '2px 8px', borderRadius: 999 }}>
+                          🤖 Automático
+                        </span>
+                      )}
                       {p.peca_necessaria && editando !== p.id && (
                         <span className={prazosStyles.pecaChip}>
                           {p.peca_necessaria}

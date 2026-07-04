@@ -1126,6 +1126,9 @@ export default function TarefasPage() {
                           {tarefa.tags?.split(',').map(t_ => t_.trim()).includes('telegram') && (
                             <span title="Criada via Telegram" style={{ fontSize: 11, background: '#e0f2fe', color: '#0369a1', borderRadius: 4, padding: '1px 6px', flexShrink: 0 }}>✈ telegram</span>
                           )}
+                          {tarefa.criado_automaticamente && (
+                            <span title="Criada automaticamente pelo gestor jurídico (Despacho)" style={{ fontSize: 11, background: '#f3e8ff', color: '#7c3aed', borderRadius: 4, padding: '1px 6px', flexShrink: 0 }}>🤖 automático</span>
+                          )}
                           <span className={t.titulo}>{tarefa.titulo}</span>
                           {tarefa.tags && !tarefa.tags.split(',').map(x => x.trim()).every(x => x === 'telegram') && (
                             <span className={t.tagChip}>{tarefa.tags.split(',').map(x => x.trim()).filter(x => x !== 'telegram').join(', ')}</span>
