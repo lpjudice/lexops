@@ -147,6 +147,8 @@ export const processosApi = {
   removerDocumento: (id: string, filename: string) =>
     api.delete(`/processos/${id}/documentos/${filename}`),
 
-  chat: (id: string, pergunta: string, historico: ChatMessage[]) =>
-    api.post<{ resposta: string }>(`/processos/${id}/chat`, { pergunta, historico }).then((r) => r.data),
+  chat: (id: string, pergunta: string, historico: ChatMessage[], modelo: string) =>
+    api.post<{ resposta: string }>(`/processos/${id}/chat`, { pergunta, historico, modelo }).then((r) => r.data),
+  obterContexto: (id: string) =>
+    api.get<{ contexto: string }>(`/processos/${id}/contexto`).then((r) => r.data),
 }

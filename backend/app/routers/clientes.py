@@ -430,23 +430,18 @@ def chat_cliente(
     cliente_id: uuid.UUID,
     body: ChatClienteRequest,
     db: Session = Depends(get_db),
+    current: Usuario = Depends(get_current_user),
 ):
     cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
 
-    n_processos = len(cliente.processos)
-    contexto = (
-        f"Nome: {cliente.nome}, Tipo: {cliente.tipo}"
-        + (f", Email: {cliente.email}" if cliente.email else "")
-        + (f", Telefone: {cliente.telefone}" if cliente.telefone else "")
-        + f", Processos vinculados: {n_processos}"
-        + (f", Observações: {cliente.observacoes}" if cliente.observacoes else "")
-    )
+    from app.services.contexto_service import montar_contexto_cliente
+    contexto = montar_contexto_cliente(db, cliente, current)
 
     from app.services.ia_cliente import chat
     resposta = chat(
-        modelo="gemini",
+        modelo=body.modelo,
         pergunta=body.pergunta,
         historico=body.historico,
         cliente_id=str(cliente_id),
@@ -454,6 +449,21 @@ def chat_cliente(
         nome_cliente=cliente.nome,
     )
     return {"resposta": resposta}
+
+
+@router.get("/{cliente_id}/contexto")
+def obter_contexto_cliente(
+    cliente_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current: Usuario = Depends(get_current_user),
+):
+    """Retorna o texto exato que o chat IA recebe como contexto deste cliente."""
+    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+    from app.services.contexto_service import montar_contexto_cliente
+    return {"contexto": montar_contexto_cliente(db, cliente, current)}
 
 
 # ── Emails ────────────────────────────────────────────────────────────────────

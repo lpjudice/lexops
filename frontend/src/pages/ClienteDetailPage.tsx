@@ -12,6 +12,8 @@ import { contratosApi } from '../api/contratos'
 import api from '../api/client'
 import type { AnotacaoCreate, TipoAnotacao } from '../api/anotacoes'
 import ClienteIA from '../components/ClienteIA'
+import MemoriaEstrategica from '../components/MemoriaEstrategica'
+import FontesContexto from '../components/FontesContexto'
 import AnamneseForm from '../components/AnamneseForm'
 import PropostaForm from '../components/PropostaForm'
 import RevisaoReuniaoModal from '../components/RevisaoReuniaoModal'
@@ -951,7 +953,11 @@ export default function ClienteDetailPage() {
 
       {/* ── IA & Docs ── */}
       {aba === 'ia' && (
-        <ClienteIA clienteId={id!} />
+        <div>
+          <MemoriaEstrategica clienteId={id!} />
+          <FontesContexto clienteId={id!} />
+          <ClienteIA clienteId={id!} />
+        </div>
       )}
 
       {/* ── NFS-e Histórico ── */}

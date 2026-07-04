@@ -91,6 +91,8 @@ export const clientesApi = {
   chat: (id: string, pergunta: string, historico: ChatMessage[], modelo: string) =>
     api.post<{ resposta: string }>(`/clientes/${id}/chat`, { pergunta, historico, modelo })
       .then((r) => r.data),
+  obterContexto: (id: string) =>
+    api.get<{ contexto: string }>(`/clientes/${id}/contexto`).then((r) => r.data),
 
   pastaArquivos: (clienteId: string) =>
     api.get<PastaArquivo[]>(`/clientes/${clienteId}/pasta-arquivos/refresh`).then(r => r.data),

@@ -6,6 +6,8 @@ import { andamentosApi } from '../api/andamentos'
 import type { ProcessoCreate, EstadoProcesso, FaseProcesso, StatusProcesso, PoloProcesso, SistemaJuridico, GrauProcesso, OrgaoJulgadorTipo, ProcessoClienteIn, ProcessoJusbrPrefill } from '../api/processos'
 import ClienteCombobox from '../components/ClienteCombobox'
 import ProcessoChat from '../components/ProcessoChat'
+import MemoriaEstrategica from '../components/MemoriaEstrategica'
+import FontesContexto from '../components/FontesContexto'
 import AndamentosSection from '../components/AndamentosSection'
 import SincronizarModal from '../components/SincronizarModal'
 import InstrucoesJusBRModal from '../components/InstrucoesJusBRModal'
@@ -905,6 +907,8 @@ export default function ProcessosPage() {
               {/* Painel de docs + chat + andamentos */}
               {docsChatAberto === p.id && (
                 <div className={ps.docsPanel}>
+                  <MemoriaEstrategica processoId={p.id} />
+                  <FontesContexto processoId={p.id} />
                   <ProcessoChat processoId={p.id} clienteId={p.cliente_id} processoNome={p.numero_cnj} />
                 </div>
               )}

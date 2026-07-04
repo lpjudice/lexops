@@ -20,8 +20,9 @@ from app.models import tarefa_projeto as _tarefa_projeto_model  # noqa: F401
 from app.models import pagante as _pagante_model  # noqa: F401 — ensures Pagante table is registered
 from app.models import conselho as _conselho_model  # noqa: F401 — ensures Conselho tables are registered
 from app.models import tarefa_card as _tarefa_card_model  # noqa: F401 — ensures TarefaCard tables are registered
+from app.models import memoria_estrategica as _memoria_estrategica_model  # noqa: F401 — ensures MemoriaEstrategica table is registered
 from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, fiscal, pagantes, config_fiscal, jurisprudencia, organizador, pje, prazos, processos, publico, reembolsos, reunioes, system, tarefas, telegram, telegram_andamentos, telegram_tasks, teses, usuarios, webhooks
-from app.routers import backoffice, precedentcheck, conselho, tarefa_projetos, tarefa_cards
+from app.routers import backoffice, precedentcheck, conselho, tarefa_projetos, tarefa_cards, memoria_estrategica
 
 # Cria as tabelas (Alembic gerencia em produção; aqui facilita o dev)
 Base.metadata.create_all(bind=engine)
@@ -892,6 +893,23 @@ def _run_migrations() -> None:
             "ALTER TABLE contratos ADD COLUMN IF NOT EXISTS drive_link_master VARCHAR(1000)"
         ))
 
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS memorias_estrategicas (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                cliente_id UUID REFERENCES clientes(id) ON DELETE CASCADE,
+                processo_id UUID REFERENCES processos(id) ON DELETE CASCADE,
+                texto TEXT NOT NULL,
+                autor_id UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_memorias_estrategicas_cliente ON memorias_estrategicas(cliente_id, created_at DESC)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_memorias_estrategicas_processo ON memorias_estrategicas(processo_id, created_at DESC)"
+        ))
+
         conn.commit()
 
 
@@ -1124,6 +1142,7 @@ app.include_router(precedentcheck.router)
 app.include_router(conselho.router)
 app.include_router(tarefa_projetos.router)
 app.include_router(tarefa_cards.router)
+app.include_router(memoria_estrategica.router)
 
 
 @app.on_event("startup")

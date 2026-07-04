@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.processo import Processo, processo_clientes as assoc_table
+from app.models.usuario import Usuario
 from app.schemas.processo import ProcessoClienteIn, ProcessoClienteOut, ProcessoCreate, ProcessoOut, ProcessoUpdate
 from app.services.consulta_processual.cnj import inferir_tribunal_pelo_cnj, normalizar_tribunal
 
@@ -434,6 +435,7 @@ def remover_documento(
 class ChatRequest(BaseModel):
     pergunta: str
     historico: list[dict] = []
+    modelo: str = "claude"
 
 
 @router.post("/{processo_id}/chat")
@@ -441,21 +443,46 @@ def chat_com_processo(
     processo_id: uuid.UUID,
     body: ChatRequest,
     db: Session = Depends(get_db),
+    current: Usuario = Depends(get_current_user),
 ):
-    """Chat com Gemini usando os PDFs do processo como contexto."""
+    """Chat multi-modelo (Claude/GPT-4o/Gemini) usando o contexto agregado do
+    processo (memória estratégica, andamentos, prazos, tarefas, anotações,
+    financeiro) + os PDFs do processo."""
     processo = db.query(Processo).filter(Processo.id == processo_id).first()
     if not processo:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
 
     pasta = UPLOADS_DIR / str(processo_id)
     pdf_paths = sorted(
-        [str(f) for f in pasta.iterdir() if f.suffix.lower() == ".pdf"]
+        [f for f in pasta.iterdir() if f.suffix.lower() == ".pdf"]
     ) if pasta.exists() else []
 
-    from app.services.gemini_chat import chat_processo
-    resposta = chat_processo(
+    from app.services.contexto_service import montar_contexto_processo
+    contexto = montar_contexto_processo(db, processo, current)
+
+    from app.services.ia_cliente import chat
+    resposta = chat(
+        modelo=body.modelo,
         pergunta=body.pergunta,
         historico=body.historico,
+        cliente_id=str(processo_id),
+        contexto=contexto,
+        nome_cliente=processo.cliente.nome if processo.cliente else "",
         pdf_paths=pdf_paths,
     )
     return {"resposta": resposta}
+
+
+@router.get("/{processo_id}/contexto")
+def obter_contexto_processo(
+    processo_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current: Usuario = Depends(get_current_user),
+):
+    """Retorna o texto exato que o chat IA recebe como contexto deste processo."""
+    processo = db.query(Processo).filter(Processo.id == processo_id).first()
+    if not processo:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+
+    from app.services.contexto_service import montar_contexto_processo
+    return {"contexto": montar_contexto_processo(db, processo, current)}

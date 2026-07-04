@@ -6,6 +6,14 @@ import type { ConversaIA } from '../api/conversas_ia'
 import type { ChatMessage } from '../api/processos'
 import styles from './ProcessoChat.module.css'
 
+type Modelo = 'claude' | 'gpt' | 'gemini'
+
+const MODELOS: { key: Modelo; label: string }[] = [
+  { key: 'claude', label: 'Claude' },
+  { key: 'gpt', label: 'GPT-4o' },
+  { key: 'gemini', label: 'Gemini' },
+]
+
 interface Props {
   processoId: string
   clienteId: string
@@ -33,6 +41,7 @@ export default function ProcessoChat({ processoId, clienteId, processoNome }: Pr
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [vistaHistorico, setVistaHistorico] = useState(false)
+  const [modelo, setModelo] = useState<Modelo>('claude')
 
   // Documentos do processo
   const { data: docs = [] } = useQuery({
@@ -51,7 +60,7 @@ export default function ProcessoChat({ processoId, clienteId, processoNome }: Pr
 
   const criarConversa = useMutation({
     mutationFn: (historico: ChatMessage[]) =>
-      conversasIaApi.criar(clienteId, 'gemini', historico, undefined, processoId),
+      conversasIaApi.criar(clienteId, modelo, historico, undefined, processoId),
     onSuccess: (nova) => {
       setConversaId(nova.id)
       qc.invalidateQueries({ queryKey: ['conversas-ia-processo', processoId] })
@@ -60,7 +69,7 @@ export default function ProcessoChat({ processoId, clienteId, processoNome }: Pr
 
   const atualizarConversa = useMutation({
     mutationFn: ({ id, historico }: { id: string; historico: ChatMessage[] }) =>
-      conversasIaApi.atualizar(id, { historico }),
+      conversasIaApi.atualizar(id, { historico, modelo }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['conversas-ia-processo', processoId] })
     },
@@ -92,6 +101,7 @@ export default function ProcessoChat({ processoId, clienteId, processoNome }: Pr
   const abrirConversa = (c: ConversaIA) => {
     setConversaId(c.id)
     setMessages(c.historico as ChatMessage[])
+    setModelo((c.modelo as Modelo) || 'claude')
     setVistaHistorico(false)
     setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
   }
@@ -125,7 +135,7 @@ export default function ProcessoChat({ processoId, clienteId, processoNome }: Pr
 
     try {
       const historico = novoHistorico.slice(0, -1)
-      const { resposta } = await processosApi.chat(processoId, pergunta, historico)
+      const { resposta } = await processosApi.chat(processoId, pergunta, historico, modelo)
       const historicoFinal: ChatMessage[] = [...novoHistorico, { role: 'model', content: resposta }]
       setMessages(historicoFinal)
       setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
@@ -137,7 +147,7 @@ export default function ProcessoChat({ processoId, clienteId, processoNome }: Pr
         atualizarConversa.mutate({ id: conversaId, historico: historicoFinal })
       }
     } catch {
-      setMessages([...novoHistorico, { role: 'model', content: '❌ Erro ao conectar com Gemini.' }])
+      setMessages([...novoHistorico, { role: 'model', content: '❌ Erro ao conectar com a IA.' }])
     } finally {
       setLoading(false)
     }
@@ -216,12 +226,22 @@ export default function ProcessoChat({ processoId, clienteId, processoNome }: Pr
         {/* Cabeçalho do chat */}
         <div className={styles.chatHeader}>
           <div className={styles.chatTitle}>
-            Chat Gemini {processoNome ? `· ${processoNome}` : ''}
+            Chat IA {processoNome ? `· ${processoNome}` : ''}
             {docs.length > 0 && (
               <span className={styles.chatContexto}>{docs.length} doc(s) no contexto</span>
             )}
           </div>
           <div className={styles.chatActions}>
+            {MODELOS.map((m) => (
+              <button
+                key={m.key}
+                className={`${styles.btnAcao} ${modelo === m.key ? styles.btnAcaoAtivo : ''}`}
+                onClick={() => setModelo(m.key)}
+                disabled={loading}
+              >
+                {m.label}
+              </button>
+            ))}
             {conversaId && (
               <>
                 <button
@@ -297,8 +317,8 @@ export default function ProcessoChat({ processoId, clienteId, processoNome }: Pr
 
         {docs.length === 0 && !vistaHistorico && (
           <div className={styles.chatAviso}>
-            Adicione PDFs do processo para o Gemini poder responder com contexto real.
-            Sem documentos, o chat funcionará como um assistente jurídico genérico.
+            Adicione PDFs do processo para a IA poder responder com contexto real.
+            Mesmo sem PDFs, o chat já usa andamentos, prazos, tarefas e anotações do processo.
           </div>
         )}
 
@@ -317,7 +337,9 @@ export default function ProcessoChat({ processoId, clienteId, processoNome }: Pr
               ))}
               {loading && (
                 <div className={`${styles.mensagem} ${styles.mensagemModel}`}>
-                  <div className={`${styles.mensagemBubble} ${styles.loading}`}>⏳ Gemini está lendo os documentos...</div>
+                  <div className={`${styles.mensagemBubble} ${styles.loading}`}>
+                    ⏳ {MODELOS.find(m => m.key === modelo)?.label} está processando...
+                  </div>
                 </div>
               )}
               <div ref={bottomRef} />

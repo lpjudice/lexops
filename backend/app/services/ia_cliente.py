@@ -19,14 +19,17 @@ def _carregar_pdfs(cliente_id: str) -> list[Path]:
     return sorted([f for f in pasta.iterdir() if f.suffix.lower() == ".pdf"])
 
 
-def chat_claude(pergunta: str, historico: list[dict], cliente_id: str, contexto: str, nome_cliente: str = "") -> str:
+def chat_claude(
+    pergunta: str, historico: list[dict], cliente_id: str, contexto: str,
+    nome_cliente: str = "", pdf_paths: list[Path] | None = None,
+) -> str:
     if not settings.anthropic_api_key:
         return "❌ ANTHROPIC_API_KEY não configurada."
     try:
         import anthropic
 
         client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-        pdfs = _carregar_pdfs(cliente_id)
+        pdfs = pdf_paths if pdf_paths is not None else _carregar_pdfs(cliente_id)
 
         system = (
             "Você é um assistente jurídico do escritório Pimenta Judice Advogados Associados.\n"
@@ -60,14 +63,17 @@ def chat_claude(pergunta: str, historico: list[dict], cliente_id: str, contexto:
         return f"❌ Erro Claude: {e}"
 
 
-def chat_gpt(pergunta: str, historico: list[dict], cliente_id: str, contexto: str, nome_cliente: str = "") -> str:
+def chat_gpt(
+    pergunta: str, historico: list[dict], cliente_id: str, contexto: str,
+    nome_cliente: str = "", pdf_paths: list[Path] | None = None,
+) -> str:
     if not settings.openai_api_key:
         return "❌ OPENAI_API_KEY não configurada."
     try:
         from openai import OpenAI
 
         client = OpenAI(api_key=settings.openai_api_key)
-        pdfs = _carregar_pdfs(cliente_id)
+        pdfs = pdf_paths if pdf_paths is not None else _carregar_pdfs(cliente_id)
         pdf_note = f" [{len(pdfs)} PDF(s) do cliente disponíveis no contexto]" if pdfs else ""
 
         system = (
@@ -88,7 +94,10 @@ def chat_gpt(pergunta: str, historico: list[dict], cliente_id: str, contexto: st
         return f"❌ Erro GPT-4o: {e}"
 
 
-def chat_gemini(pergunta: str, historico: list[dict], cliente_id: str, contexto: str, nome_cliente: str = "") -> str:
+def chat_gemini(
+    pergunta: str, historico: list[dict], cliente_id: str, contexto: str,
+    nome_cliente: str = "", pdf_paths: list[Path] | None = None,
+) -> str:
     if not settings.google_ai_api_key:
         return "❌ GOOGLE_AI_API_KEY não configurada."
     try:
@@ -105,16 +114,22 @@ def chat_gemini(pergunta: str, historico: list[dict], cliente_id: str, contexto:
             "Responda com precisão, citando documentos quando relevante. Use linguagem jurídica adequada."
         )
 
-        # Load from Dropbox folder first
-        arquivos_dropbox = carregar_contexto_gemini(nome_cliente) if nome_cliente else []
-
-        # Fallback to /app/uploads if Dropbox is empty
-        if not arquivos_dropbox:
-            pdfs_fallback = _carregar_pdfs(cliente_id)
+        if pdf_paths is not None:
             arquivos_dropbox = [
                 {"tipo": "pdf", "nome": p.name, "conteudo": p.read_bytes()}
-                for p in pdfs_fallback
+                for p in pdf_paths
             ]
+        else:
+            # Load from Dropbox folder first
+            arquivos_dropbox = carregar_contexto_gemini(nome_cliente) if nome_cliente else []
+
+            # Fallback to /app/uploads if Dropbox is empty
+            if not arquivos_dropbox:
+                pdfs_fallback = _carregar_pdfs(cliente_id)
+                arquivos_dropbox = [
+                    {"tipo": "pdf", "nome": p.name, "conteudo": p.read_bytes()}
+                    for p in pdfs_fallback
+                ]
 
         contents: list[dict] = []
         if arquivos_dropbox:
@@ -147,8 +162,11 @@ def chat_gemini(pergunta: str, historico: list[dict], cliente_id: str, contexto:
 CHAT_FNS = {"claude": chat_claude, "gpt": chat_gpt, "gemini": chat_gemini}
 
 
-def chat(modelo: str, pergunta: str, historico: list[dict], cliente_id: str, contexto: str, nome_cliente: str = "") -> str:
+def chat(
+    modelo: str, pergunta: str, historico: list[dict], cliente_id: str, contexto: str,
+    nome_cliente: str = "", pdf_paths: list[Path] | None = None,
+) -> str:
     fn = CHAT_FNS.get(modelo)
     if not fn:
         return f"❌ Modelo desconhecido: {modelo}"
-    return fn(pergunta, historico, cliente_id, contexto, nome_cliente)
+    return fn(pergunta, historico, cliente_id, contexto, nome_cliente, pdf_paths=pdf_paths)
