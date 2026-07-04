@@ -484,7 +484,7 @@ def classificar_emails_pendentes(
     if not pendentes:
         return {"classificados": 0}
 
-    LOTE = 30
+    LOTE = 20
     total = 0
     for i in range(0, len(pendentes), LOTE):
         chunk = pendentes[i:i + LOTE]

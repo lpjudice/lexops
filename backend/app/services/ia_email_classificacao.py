@@ -89,8 +89,13 @@ def classificar_lote(emails: list[dict]) -> list[str]:
         for idx, cat in zip(pendentes_idx, resultado):
             categorias[idx] = cat if cat in CATEGORIAS else "comercial"
     except Exception:
-        for i in pendentes_idx:
-            if categorias[i] is None:
-                categorias[i] = "comercial"
+        pass
+
+    # Defensivo: se o modelo devolveu uma lista mais curta (ou falhou), garante
+    # que nenhum índice fique sem categoria — melhor mostrar de mais do que
+    # perder e-mail relevante silenciosamente.
+    for i in pendentes_idx:
+        if categorias[i] is None:
+            categorias[i] = "comercial"
 
     return categorias  # type: ignore[return-value]
