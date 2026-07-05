@@ -20,8 +20,8 @@ Analise a publicação à luz desse contexto e retorne SOMENTE um JSON com este 
   "requer_prazo": true ou false,
   "opcoes_prazo": [
     {
-      "label": "nome curto do caminho (ex: 'Embargos de Declaração' ou 'Agravo de Instrumento')",
-      "peca_necessaria": "contestacao" | "recurso" | "contrarrazoes" | "manifestacao" | "audiencia" | "pericia" | "outro",
+      "label": "nome/descrição curta do caminho pro humano ler (ex: 'Embargos de Declaração' ou 'Manifestação sobre suspensão da exigibilidade') — aqui PODE ser descritivo",
+      "peca_necessaria": "EXATAMENTE um destes 7 valores, sem variação — NUNCA uma frase: contestacao | recurso | contrarrazoes | manifestacao | audiencia | pericia | outro. Se nenhum encaixar bem, use 'outro' (o texto descritivo vai em \"label\", não aqui).",
       "dias_prazo": número inteiro,
       "tipo_contagem": "uteis" | "corridos"
     }

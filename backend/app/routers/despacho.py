@@ -66,6 +66,21 @@ class TarefaSugerida(BaseModel):
     responsavel: str | None = None
 
 
+TIPOS_PRAZO_VALIDOS = {
+    "contestacao", "recurso", "contrarrazoes", "manifestacao", "audiencia", "pericia", "outro",
+}
+
+
+def _sanitizar_tipo_prazo(peca_necessaria: str | None) -> str | None:
+    """A IA às vezes devolve uma frase livre em vez de um dos valores fixos
+    do enum tipo_prazo — isso quebra o INSERT no banco. Normaliza pra 'outro'
+    quando não reconhece, em vez de deixar a exceção subir e travar tudo."""
+    if not peca_necessaria:
+        return None
+    valor = peca_necessaria.strip().lower()
+    return valor if valor in TIPOS_PRAZO_VALIDOS else "outro"
+
+
 def _criar_prazo_e_tarefas(
     db: Session,
     pub: Publicacao,
@@ -98,7 +113,9 @@ def _criar_prazo_e_tarefas(
         responsavel_prazo = tarefas[0].responsavel if tarefas else None
         prazo = Prazo(
             processo_id=processo.id,
-            tipo=peca_necessaria,
+            tipo=_sanitizar_tipo_prazo(peca_necessaria) or "outro",
+            # Guarda o rótulo original (livre) mesmo quando não bate com o enum fixo de "tipo".
+            peca_necessaria=peca_necessaria[:100] if peca_necessaria else None,
             descricao=pub.texto_resumo,
             data_publicacao=pub.data_publicacao,
             dias_prazo=dias_prazo,
