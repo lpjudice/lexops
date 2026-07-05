@@ -440,7 +440,8 @@ def gerar_peca(
     from app.services.google_docs import gerar_documento_peca
 
     nome_doc = f"{peca.get('titulo_peca', 'Peça')} - {processo.numero_cnj}"
-    doc = gerar_documento_peca(peca, nome_doc)
+    nome_cliente = processo.cliente.nome if processo.cliente else None
+    doc = gerar_documento_peca(peca, nome_doc, nome_cliente=nome_cliente, numero_cnj=processo.numero_cnj)
     if doc:
         pub.peca_doc_url = doc.get("webViewLink")
         db.commit()

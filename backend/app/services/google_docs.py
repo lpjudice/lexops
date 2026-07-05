@@ -118,10 +118,19 @@ def _com_refresh(fn):
             return None
 
 
-def gerar_documento_peca(peca: dict, nome_documento: str) -> dict | None:
-    """Copia o timbrado, escreve a peça no final do documento com formatação
-    real, e retorna {"id", "webViewLink"}. None se qualquer etapa falhar."""
-    copia = copiar_arquivo_por_id(TIMBRADO_TEMPLATE_ID, nome_documento)
+def gerar_documento_peca(
+    peca: dict, nome_documento: str,
+    nome_cliente: str | None = None, numero_cnj: str | None = None,
+) -> dict | None:
+    """Copia o timbrado pra dentro da pasta do cliente/processo no Drive
+    ({Cliente}/{numero_cnj}/Peças), escreve a peça com formatação real, e
+    retorna {"id", "webViewLink"}. None se qualquer etapa falhar."""
+    pasta_id = None
+    if nome_cliente and numero_cnj:
+        from app.services.google_drive import resolver_pasta_id
+        pasta_id = resolver_pasta_id(nome_cliente, numero_cnj, "Peças")
+
+    copia = copiar_arquivo_por_id(TIMBRADO_TEMPLATE_ID, nome_documento, parent_folder_id=pasta_id)
     if not copia:
         return None
     doc_id = copia["id"]
