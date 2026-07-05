@@ -365,6 +365,17 @@ def listar_tratadas(
     return [_pub_para_dict(db, p) for p in pubs]
 
 
+@router.get("/{publicacao_id}")
+def obter_publicacao(publicacao_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Estado atual de uma publicação — usado pelo front pra confirmar o que
+    realmente aconteceu quando uma chamada anterior (ex: gerar peça) demorou
+    demais e o cliente não esperou a resposta."""
+    pub = db.query(Publicacao).filter(Publicacao.id == publicacao_id).first()
+    if not pub:
+        raise HTTPException(status_code=404, detail="Publicação não encontrada")
+    return _pub_para_dict(db, pub)
+
+
 class ConfirmarRequest(BaseModel):
     processo_id: uuid.UUID | None = None
     confirmado: bool

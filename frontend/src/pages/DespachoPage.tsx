@@ -451,6 +451,15 @@ function SugestaoAcaoPainel({ publicacao: p }: { publicacao: PublicacaoPendente 
     try {
       await despachoApi.gerarPeca(p.id, opcaoParaPeca, promptExtra)
       qc.invalidateQueries({ queryKey: ['despacho-pendentes'] })
+    } catch {
+      // Mesma lógica do fluxo de aprovar: confere o estado real antes de
+      // avisar erro, pra não contradizer o que de fato aconteceu.
+      const atual = await despachoApi.obter(p.id).catch(() => null)
+      if (atual?.peca_doc_url) {
+        qc.invalidateQueries({ queryKey: ['despacho-pendentes'] })
+      } else {
+        alert('Não foi possível gerar a peça. Tente de novo.')
+      }
     } finally {
       setGerandoPeca(false)
     }
@@ -481,7 +490,17 @@ function SugestaoAcaoPainel({ publicacao: p }: { publicacao: PublicacaoPendente 
         try {
           await despachoApi.gerarPeca(p.id, opcaoParaPeca, promptExtra)
         } catch {
-          erroPeca = 'Não foi possível gerar a peça — prazo e tarefas foram criados mesmo assim.'
+          // A chamada pode ter estourado o timeout no cliente mas concluído
+          // no servidor (peça + Docs API somados são lentos) — antes de
+          // avisar erro, confere o estado real pra não dar mensagem falsa.
+          try {
+            const atual = await despachoApi.obter(p.id)
+            if (!atual.peca_doc_url) {
+              erroPeca = 'Não foi possível gerar a peça — prazo e tarefas foram criados mesmo assim.'
+            }
+          } catch {
+            erroPeca = 'Não foi possível gerar a peça — prazo e tarefas foram criados mesmo assim.'
+          }
         }
       }
       // Se sobrou texto digitado no campo "+ adicionar tarefa" sem ter clicado

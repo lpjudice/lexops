@@ -62,6 +62,8 @@ export const despachoApi = {
   listarTratadas: (params?: { data_inicio?: string; data_fim?: string; dias?: number }) =>
     api.get<PublicacaoPendente[]>('/despacho/tratadas', { params }).then((r) => r.data),
 
+  obter: (id: string) => api.get<PublicacaoPendente>(`/despacho/${id}`).then((r) => r.data),
+
   confirmar: (id: string, processoId: string | null, confirmado: boolean) =>
     api.post(`/despacho/${id}/confirmar`, { processo_id: processoId, confirmado }).then((r) => r.data),
 
