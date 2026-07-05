@@ -9,7 +9,7 @@ TipoPrazo = Literal[
     "audiencia", "pericia", "outro"
 ]
 TipoContagem = Literal["uteis", "corridos"]
-StatusPrazo = Literal["pendente", "cumprido", "perdido"]
+StatusPrazo = Literal["pendente", "cumprido", "perdido", "ignorado"]
 
 
 class PrazoBase(BaseModel):

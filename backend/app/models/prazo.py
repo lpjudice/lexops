@@ -47,7 +47,7 @@ class Prazo(Base):
     data_limite_sem_feriado: Mapped[date | None] = mapped_column(Date)  # sem feriados
 
     status: Mapped[str] = mapped_column(
-        Enum("pendente", "cumprido", "perdido", name="status_prazo"),
+        Enum("pendente", "cumprido", "perdido", "ignorado", name="status_prazo"),
         nullable=False,
         default="pendente",
     )

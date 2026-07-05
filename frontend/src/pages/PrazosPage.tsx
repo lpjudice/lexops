@@ -45,7 +45,7 @@ function formatDate(d?: string) {
   return new Date(d + 'T12:00:00').toLocaleDateString('pt-BR')
 }
 
-type TabStatus = 'todas' | 'ativo' | 'pendente' | 'cumprido' | 'perdido'
+type TabStatus = 'todas' | 'ativo' | 'pendente' | 'cumprido' | 'perdido' | 'ignorado'
 
 export default function PrazosPage() {
   const qc = useQueryClient()
@@ -94,6 +94,7 @@ export default function PrazosPage() {
   const deletar = useMutation({
     mutationFn: (id: string) => prazosApi.deletar(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['prazos'] }),
+    onError: () => alert('Não foi possível remover este prazo.'),
   })
 
   const getProcesso = (id: string) => processos.find((p) => p.id === id)
@@ -110,6 +111,7 @@ export default function PrazosPage() {
     pendente: prazos.filter(p => p.status === 'pendente').length,
     cumprido: prazos.filter(p => p.status === 'cumprido').length,
     perdido: prazos.filter(p => p.status === 'perdido').length,
+    ignorado: prazos.filter(p => p.status === 'ignorado').length,
   }
 
   const prazosVisiveis = prazos.filter(p => {
@@ -209,13 +211,13 @@ export default function PrazosPage() {
       {/* Status tabs */}
       {!isLoading && prazos.length > 0 && (
         <div className={prazosStyles.tabs}>
-          {(['todas', 'ativo', 'pendente', 'cumprido', 'perdido'] as TabStatus[]).map((tab) => (
+          {(['todas', 'ativo', 'pendente', 'cumprido', 'perdido', 'ignorado'] as TabStatus[]).map((tab) => (
             <button
               key={tab}
               className={`${prazosStyles.tab} ${tabStatus === tab ? prazosStyles.tabActive : ''}`}
               onClick={() => setTabStatus(tab)}
             >
-              {tab === 'todas' ? 'Todas' : tab === 'ativo' ? 'Ativo' : tab === 'pendente' ? 'Pendente' : tab === 'cumprido' ? 'Cumprido' : 'Perdido'}
+              {tab === 'todas' ? 'Todas' : tab === 'ativo' ? 'Ativo' : tab === 'pendente' ? 'Pendente' : tab === 'cumprido' ? 'Cumprido' : tab === 'perdido' ? 'Perdido' : 'Ignorado'}
               <span className={prazosStyles.tabCount}>{tabCounts[tab]}</span>
             </button>
           ))}
@@ -312,6 +314,7 @@ export default function PrazosPage() {
                       <option value="pendente">pendente</option>
                       <option value="cumprido">cumprido</option>
                       <option value="perdido">perdido</option>
+                      <option value="ignorado">ignorado</option>
                     </select>
                     <button className={styles.btnDanger}
                       onClick={() => { if (confirm('Remover prazo?')) deletar.mutate(p.id) }}>

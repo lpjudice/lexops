@@ -46,7 +46,7 @@ class Publicacao(Base):
     rejeitada: Mapped[bool] = mapped_column(Boolean, default=False)
     gera_prazo: Mapped[bool] = mapped_column(Boolean, default=False)
     prazo_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("prazos.id"), nullable=True
+        UUID(as_uuid=True), ForeignKey("prazos.id", ondelete="SET NULL"), nullable=True
     )
     # Confirmação humana do vínculo processo/cliente (tela Despacho) — o match
     # automático (CNJ/OAB/nome) só é tratado como certo depois disso.

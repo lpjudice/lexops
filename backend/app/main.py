@@ -932,6 +932,19 @@ def _run_migrations() -> None:
             "ALTER TABLE tarefas ADD COLUMN IF NOT EXISTS criado_automaticamente BOOLEAN NOT NULL DEFAULT false"
         ))
 
+        # Deletar um prazo não pode falhar por causa da publicação que o gerou.
+        conn.execute(text(
+            "ALTER TABLE publicacoes DROP CONSTRAINT IF EXISTS publicacoes_prazo_id_fkey"
+        ))
+        conn.execute(text(
+            "ALTER TABLE publicacoes ADD CONSTRAINT publicacoes_prazo_id_fkey "
+            "FOREIGN KEY (prazo_id) REFERENCES prazos(id) ON DELETE SET NULL"
+        ))
+
+        conn.execute(text(
+            "ALTER TYPE status_prazo ADD VALUE IF NOT EXISTS 'ignorado'"
+        ))
+
         conn.commit()
 
 

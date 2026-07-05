@@ -4,7 +4,7 @@ export type TipoPrazo =
   | 'contestacao' | 'recurso' | 'contrarrazoes' | 'manifestacao'
   | 'audiencia' | 'pericia' | 'outro'
 export type TipoContagem = 'uteis' | 'corridos'
-export type StatusPrazo = 'pendente' | 'cumprido' | 'perdido'
+export type StatusPrazo = 'pendente' | 'cumprido' | 'perdido' | 'ignorado'
 
 export interface Prazo {
   id: string

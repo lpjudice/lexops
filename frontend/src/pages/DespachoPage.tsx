@@ -116,6 +116,14 @@ export default function DespachoPage() {
           <div key={p.id} style={{ background: '#fff', border: '1px solid #eee', borderRadius: 8, padding: 16, marginBottom: 14 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
               <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--dark)', marginBottom: 4 }}>
+                  {p.cliente_nome || p.cliente_nome_pub || 'Cliente não identificado'}
+                  {(p.processo_numero_cnj || p.numero_cnj) && (
+                    <span style={{ fontWeight: 500, color: 'var(--teal)', marginLeft: 8 }}>
+                      {p.processo_numero_cnj || p.numero_cnj}
+                    </span>
+                  )}
+                </div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 11, fontWeight: 700, color: conf.cor, background: conf.bg, padding: '2px 8px', borderRadius: 999 }}>
                     {conf.texto}
