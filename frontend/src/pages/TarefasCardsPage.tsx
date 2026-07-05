@@ -5,7 +5,6 @@ import type { StatusTarefaCard, TarefaCard } from '../api/tarefaCards'
 import { tarefaProjetosApi } from '../api/tarefaProjetos'
 import { clientesApi } from '../api/clientes'
 import { processosApi } from '../api/processos'
-import { usuariosApi } from '../api/usuarios'
 import { useAuth } from '../contexts/AuthContext'
 import ClienteCombobox from '../components/ClienteCombobox'
 import ComboBox from '../components/ComboBox'
@@ -55,14 +54,14 @@ interface FormState {
   cliente_id: string
   processo_id: string
   projeto_id: string
-  responsavel: { nome: string; email: string }
+  responsavel: { nome: string; email: string; id?: string | null }
   data_limite: string
   confidencial: boolean
   subtasks: string[]
 }
 const emptyForm: FormState = {
   titulo: '', descricao: '', cliente_id: '', processo_id: '', projeto_id: '',
-  responsavel: { nome: '', email: '' }, data_limite: '', confidencial: false, subtasks: [''],
+  responsavel: { nome: '', email: '', id: null }, data_limite: '', confidencial: false, subtasks: [''],
 }
 
 export default function TarefasCardsPage() {
@@ -86,7 +85,6 @@ export default function TarefasCardsPage() {
   const { data: projetos = [] } = useQuery({ queryKey: ['tarefa-projetos'], queryFn: tarefaProjetosApi.listar })
   const { data: clientes = [] } = useQuery({ queryKey: ['clientes'], queryFn: () => clientesApi.listar() })
   const { data: processos = [] } = useQuery({ queryKey: ['processos'], queryFn: () => processosApi.listar() })
-  const { data: usuarios = [] } = useQuery({ queryKey: ['usuarios'], queryFn: usuariosApi.listar })
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['tarefa-cards'] })
 
@@ -177,6 +175,7 @@ export default function TarefasCardsPage() {
       projeto_id: form.projeto_id || null,
       responsavel: form.responsavel.nome || null,
       responsavel_email: form.responsavel.email || null,
+      responsavel_id: form.responsavel.id || null,
       data_limite: form.data_limite || null,
       confidencial: form.confidencial,
       subtasks: form.subtasks.filter((s) => s.trim()).map((texto, ordem) => ({ texto: texto.trim(), ordem })),
@@ -230,7 +229,7 @@ export default function TarefasCardsPage() {
       {showForm && (
         <div className={styles.form}>
           <CardFields
-            form={form} setForm={setForm} projetos={projetos} clientes={clientes} usuarios={usuarios}
+            form={form} setForm={setForm} projetos={projetos} clientes={clientes}
             processoOptions={processoOptions} criarProjetoRapido={criarProjetoRapido} criarClienteRapido={criarClienteRapido}
             showSubtasks
           />
@@ -436,7 +435,7 @@ export default function TarefasCardsPage() {
       {editCard && (
         <EditCardModal
           card={editCard} onClose={() => setEditCard(null)}
-          projetos={projetos} clientes={clientes} usuarios={usuarios} processoOptions={processoOptions}
+          projetos={projetos} clientes={clientes} processoOptions={processoOptions}
           criarProjetoRapido={criarProjetoRapido} criarClienteRapido={criarClienteRapido}
           onSave={(data) => atualizar.mutate({ id: editCard.id, data: data as never }, { onSuccess: () => setEditCard(null) })}
           saving={atualizar.isPending}
@@ -452,13 +451,12 @@ interface CardFieldsProps {
   setForm: (f: FormState) => void
   projetos: import('../api/tarefaProjetos').TarefaProjeto[]
   clientes: import('../api/clientes').Cliente[]
-  usuarios: import('../api/usuarios').Usuario[]
   processoOptions: { value: string; label: string; sublabel?: string }[]
   criarProjetoRapido: (nome: string, cor: string) => Promise<import('../api/tarefaProjetos').TarefaProjeto>
   criarClienteRapido: (nome: string) => Promise<string>
   showSubtasks?: boolean
 }
-function CardFields({ form, setForm, projetos, clientes, usuarios, processoOptions, criarProjetoRapido, criarClienteRapido, showSubtasks }: CardFieldsProps) {
+function CardFields({ form, setForm, projetos, clientes, processoOptions, criarProjetoRapido, criarClienteRapido, showSubtasks }: CardFieldsProps) {
   return (
     <>
       <div className={styles.formRow}>
@@ -483,7 +481,7 @@ function CardFields({ form, setForm, projetos, clientes, usuarios, processoOptio
       </div>
       <div className={styles.formRow}>
         <label className={styles.formLabel}>Responsável</label>
-        <ResponsavelComboBox value={form.responsavel} usuarios={usuarios} onChange={(v) => setForm({ ...form, responsavel: v })} />
+        <ResponsavelComboBox value={form.responsavel} onChange={(v) => setForm({ ...form, responsavel: v })} />
       </div>
       <div className={styles.formRow}>
         <label className={styles.formLabel}>Prazo</label>
@@ -522,19 +520,18 @@ interface EditModalProps {
   saving: boolean
   projetos: import('../api/tarefaProjetos').TarefaProjeto[]
   clientes: import('../api/clientes').Cliente[]
-  usuarios: import('../api/usuarios').Usuario[]
   processoOptions: { value: string; label: string; sublabel?: string }[]
   criarProjetoRapido: (nome: string, cor: string) => Promise<import('../api/tarefaProjetos').TarefaProjeto>
   criarClienteRapido: (nome: string) => Promise<string>
 }
-function EditCardModal({ card, onClose, onSave, saving, projetos, clientes, usuarios, processoOptions, criarProjetoRapido, criarClienteRapido }: EditModalProps) {
+function EditCardModal({ card, onClose, onSave, saving, projetos, clientes, processoOptions, criarProjetoRapido, criarClienteRapido }: EditModalProps) {
   const [form, setForm] = useState<FormState>({
     titulo: card.titulo,
     descricao: card.descricao || '',
     cliente_id: card.cliente_id || '',
     processo_id: card.processo_id || '',
     projeto_id: card.projeto_id || '',
-    responsavel: { nome: card.responsavel || '', email: card.responsavel_email || '' },
+    responsavel: { nome: card.responsavel || '', email: card.responsavel_email || '', id: card.responsavel_id || null },
     data_limite: card.data_limite || '',
     confidencial: card.confidencial,
     subtasks: [''],
@@ -542,7 +539,7 @@ function EditCardModal({ card, onClose, onSave, saving, projetos, clientes, usua
   return (
     <Modal title="Editar card" onClose={onClose} width={520}>
       <CardFields
-        form={form} setForm={setForm} projetos={projetos} clientes={clientes} usuarios={usuarios}
+        form={form} setForm={setForm} projetos={projetos} clientes={clientes}
         processoOptions={processoOptions} criarProjetoRapido={criarProjetoRapido} criarClienteRapido={criarClienteRapido}
       />
       <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
@@ -555,6 +552,7 @@ function EditCardModal({ card, onClose, onSave, saving, projetos, clientes, usua
             projeto_id: form.projeto_id || null,
             responsavel: form.responsavel.nome || null,
             responsavel_email: form.responsavel.email || null,
+            responsavel_id: form.responsavel.id || null,
             data_limite: form.data_limite || null,
             confidencial: form.confidencial,
           })}>

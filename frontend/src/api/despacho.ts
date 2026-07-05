@@ -12,6 +12,7 @@ export interface OpcaoPrazo {
 export interface TarefaSugerida {
   titulo: string
   responsavel: string | null
+  responsavel_id?: string | null
 }
 
 export interface SugestaoAcao {
@@ -86,6 +87,7 @@ export const despachoApi = {
     dias_prazo?: number | null
     tipo_contagem?: string
     responsavel_prazo?: string | null
+    responsavel_prazo_id?: string | null
     tarefas?: TarefaSugerida[]
   }) => api.post<{ prazo_id?: string; tarefa_ids?: string[]; ok: boolean }>(`/despacho/${id}/aprovar`, body).then((r) => r.data),
 }

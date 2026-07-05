@@ -18,6 +18,7 @@ class PrazoBase(BaseModel):
     descricao: str | None = None
     peca_necessaria: str | None = None
     responsavel: str | None = None
+    responsavel_id: uuid.UUID | None = None
     data_publicacao: date
     dias_prazo: int
     tipo_contagem: TipoContagem = "uteis"
@@ -33,6 +34,7 @@ class PrazoUpdate(BaseModel):
     descricao: str | None = None
     peca_necessaria: str | None = None
     responsavel: str | None = None
+    responsavel_id: uuid.UUID | None = None
     data_publicacao: date | None = None
     dias_prazo: int | None = None
     tipo_contagem: TipoContagem | None = None
@@ -50,6 +52,7 @@ class PrazoOut(PrazoBase):
     data_limite_sem_feriado: date | None
     peca_necessaria: str | None
     responsavel: str | None
+    responsavel_id: uuid.UUID | None = None
     google_event_id: str | None
     criado_automaticamente: bool = False
     tarefas_vinculadas: list[TarefaVinculada] = []

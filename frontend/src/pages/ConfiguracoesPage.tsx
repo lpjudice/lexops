@@ -5,6 +5,7 @@ import api from '../api/client'
 import { tarefasApi } from '../api/tarefas'
 import { reunioesApi } from '../api/reunioes'
 import { usuariosApi, type UsuarioCreate, type UsuarioUpdate } from '../api/usuarios'
+import { responsaveisApi, type CategoriaResponsavel, type Responsavel } from '../api/responsaveis'
 import { useAuth } from '../contexts/AuthContext'
 import styles from './Page.module.css'
 import cfg from './ConfiguracoesPage.module.css'
@@ -38,6 +39,161 @@ const EMPTY_CREATE: UsuarioCreate = {
   clientes_restritos: false,
 }
 
+const CATEGORIA_LABEL: Record<CategoriaResponsavel, string> = {
+  advogado: 'Advogado', terceiro: 'Terceiro', colaborador: 'Colaborador', financeiro: 'Financeiro',
+}
+
+function ResponsaveisTab() {
+  const qc = useQueryClient()
+  const { data: responsaveis = [] } = useQuery({
+    queryKey: ['responsaveis', 'todos'],
+    queryFn: () => responsaveisApi.listar({ apenas_ativos: false }),
+  })
+  const [criando, setCriando] = useState(false)
+  const [novo, setNovo] = useState({ nome: '', email: '', telefone: '', oab_numero: '', oab_uf: '', categoria: 'terceiro' as CategoriaResponsavel })
+  const [selecionados, setSelecionados] = useState<string[]>([])
+  const [sobrevivente, setSobrevivente] = useState<string | null>(null)
+
+  const atualizar = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<Responsavel> }) => responsaveisApi.atualizar(id, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['responsaveis'] }),
+  })
+  const criar = useMutation({
+    mutationFn: () => responsaveisApi.criar({
+      nome: novo.nome.trim(), email: novo.email.trim() || null, telefone: novo.telefone.trim() || null,
+      oab_numero: novo.oab_numero.trim() || null, oab_uf: novo.oab_uf.trim() || null, categoria: novo.categoria,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['responsaveis'] })
+      setCriando(false)
+      setNovo({ nome: '', email: '', telefone: '', oab_numero: '', oab_uf: '', categoria: 'terceiro' })
+    },
+  })
+  const mesclar = useMutation({
+    mutationFn: () => responsaveisApi.mesclar(sobrevivente!, selecionados.filter((id) => id !== sobrevivente)),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['responsaveis'] })
+      setSelecionados([])
+      setSobrevivente(null)
+    },
+    onError: () => alert('Não foi possível mesclar — um dos selecionados pode estar vinculado a um usuário do sistema.'),
+  })
+
+  const toggleSelecionado = (id: string) =>
+    setSelecionados((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <p className={cfg.secaoDesc} style={{ margin: 0 }}>
+          Usuários do sistema viram responsável automaticamente. Cadastre aqui advogados/terceiros sem login.
+        </p>
+        <button className={styles.btnPrimary} style={{ fontSize: 12, padding: '6px 14px' }} onClick={() => setCriando(true)}>
+          + Novo responsável
+        </button>
+      </div>
+
+      {criando && (
+        <div className={cfg.novoForm}>
+          <h3 className={cfg.novoFormTitulo}>Novo responsável</h3>
+          <div className={cfg.novoFormGrid}>
+            <div className={cfg.novoFormField}>
+              <label className={cfg.novoFormLabel}>Nome</label>
+              <input className={styles.input} value={novo.nome} onChange={(e) => setNovo({ ...novo, nome: e.target.value })} />
+            </div>
+            <div className={cfg.novoFormField}>
+              <label className={cfg.novoFormLabel}>Email</label>
+              <input className={styles.input} type="email" value={novo.email} onChange={(e) => setNovo({ ...novo, email: e.target.value })} />
+            </div>
+            <div className={cfg.novoFormField}>
+              <label className={cfg.novoFormLabel}>Telefone/WhatsApp</label>
+              <input className={styles.input} value={novo.telefone} onChange={(e) => setNovo({ ...novo, telefone: e.target.value })} />
+            </div>
+            <div className={cfg.novoFormField}>
+              <label className={cfg.novoFormLabel}>OAB</label>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input className={styles.input} placeholder="nº" value={novo.oab_numero} onChange={(e) => setNovo({ ...novo, oab_numero: e.target.value })} />
+                <input className={styles.input} placeholder="UF" maxLength={2} style={{ width: 60 }} value={novo.oab_uf} onChange={(e) => setNovo({ ...novo, oab_uf: e.target.value.toUpperCase() })} />
+              </div>
+            </div>
+            <div className={cfg.novoFormField}>
+              <label className={cfg.novoFormLabel}>Categoria</label>
+              <select className={styles.input} value={novo.categoria} onChange={(e) => setNovo({ ...novo, categoria: e.target.value as CategoriaResponsavel })}>
+                {(Object.keys(CATEGORIA_LABEL) as CategoriaResponsavel[]).map((c) => (
+                  <option key={c} value={c}>{CATEGORIA_LABEL[c]}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, padding: '0 24px 20px' }}>
+            <button className={styles.btnPrimary} style={{ fontSize: 12 }} onClick={() => criar.mutate()} disabled={!novo.nome.trim() || criar.isPending}>
+              Criar
+            </button>
+            <button className={styles.btnDanger} onClick={() => setCriando(false)}>Cancelar</button>
+          </div>
+        </div>
+      )}
+
+      {selecionados.length >= 2 && (
+        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: 12, marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+            Mesclar {selecionados.length} responsáveis selecionados — escolha quem sobrevive:
+          </div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
+            {selecionados.map((id) => {
+              const r = responsaveis.find((x) => x.id === id)
+              if (!r) return null
+              return (
+                <label key={id} style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <input type="radio" name="sobrevivente" checked={sobrevivente === id} onChange={() => setSobrevivente(id)} />
+                  {r.nome}
+                </label>
+              )
+            })}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className={styles.btnPrimary} style={{ fontSize: 12 }} disabled={!sobrevivente || mesclar.isPending} onClick={() => mesclar.mutate()}>
+              Mesclar
+            </button>
+            <button className={styles.btnDanger} onClick={() => { setSelecionados([]); setSobrevivente(null) }}>Cancelar</button>
+          </div>
+        </div>
+      )}
+
+      <div className={cfg.usuariosList}>
+        {responsaveis.map((r) => (
+          <div key={r.id} className={cfg.usuarioCard}>
+            <div className={cfg.usuarioHeader}>
+              <input type="checkbox" checked={selecionados.includes(r.id)} onChange={() => toggleSelecionado(r.id)} style={{ marginRight: 4 }} />
+              <div className={cfg.usuarioBadge}>
+                {r.nome.split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase()}
+              </div>
+              <div className={cfg.usuarioInfo}>
+                <div className={cfg.usuarioNome}>
+                  {r.nome}
+                  {r.eh_usuario_sistema && <span className={cfg.voceTag}>sistema</span>}
+                  {!r.ativo && <span className={cfg.inativoTag}>inativo</span>}
+                </div>
+                <div className={cfg.usuarioEmail}>{r.email || '—'}{r.telefone ? ` · ${r.telefone}` : ''}{r.oab_numero ? ` · OAB ${r.oab_numero}${r.oab_uf ? '/' + r.oab_uf : ''}` : ''}</div>
+              </div>
+              <select
+                className={styles.input}
+                style={{ width: 130, fontSize: 12 }}
+                value={r.categoria}
+                onChange={(e) => atualizar.mutate({ id: r.id, data: { categoria: e.target.value as CategoriaResponsavel } })}
+              >
+                {(Object.keys(CATEGORIA_LABEL) as CategoriaResponsavel[]).map((c) => (
+                  <option key={c} value={c}>{CATEGORIA_LABEL[c]}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function MembrosSection() {
   const qc = useQueryClient()
   const { usuario: me, isSuperAdmin, isAdmin } = useAuth()
@@ -49,6 +205,7 @@ function MembrosSection() {
   const [criando, setCriando] = useState(false)
   const [editando, setEditando] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<UsuarioUpdate>({})
+  const [aba, setAba] = useState<'usuarios' | 'responsaveis'>('usuarios')
 
   const criar = useMutation({
     mutationFn: (d: UsuarioCreate) => usuariosApi.criar(d),
@@ -75,17 +232,35 @@ function MembrosSection() {
           <div>
             <h2 className={cfg.secaoTitulo}>Controle de Acesso</h2>
             <p className={cfg.secaoDesc}>
-              Gerencie usuários e perfis de acesso ao sistema.
+              Gerencie usuários, perfis de acesso e responsáveis.
             </p>
           </div>
-          {isSuperAdmin && (
+          {aba === 'usuarios' && isSuperAdmin && (
             <button className={styles.btnPrimary} style={{ fontSize: 12, padding: '6px 14px' }} onClick={() => setCriando(true)}>
               + Novo membro
             </button>
           )}
         </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+          {(['usuarios', 'responsaveis'] as const).map((a) => (
+            <button key={a} onClick={() => setAba(a)}
+              style={{
+                fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 999, cursor: 'pointer',
+                border: aba === a ? 'none' : '1px solid #ddd',
+                background: aba === a ? 'var(--teal)' : '#fff',
+                color: aba === a ? '#fff' : 'var(--gray-mid)',
+              }}
+            >
+              {a === 'usuarios' ? 'Usuários' : 'Responsáveis'}
+            </button>
+          ))}
+        </div>
       </div>
 
+      {aba === 'responsaveis' ? (
+        <ResponsaveisTab />
+      ) : (
+      <>
       {/* Form de criação */}
       {criando && (
         <div className={cfg.novoForm}>
@@ -209,6 +384,8 @@ function MembrosSection() {
           )
         })}
       </div>
+      </>
+      )}
     </div>
   )
 }

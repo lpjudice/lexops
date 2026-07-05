@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.models.responsavel import Responsavel
 from app.models.usuario import Usuario
 from app.schemas.usuario import (
     AcceptInviteRequest,
@@ -22,6 +23,19 @@ from app.schemas.usuario import (
 from app.services.auth_service import criar_token, hash_senha, verificar_senha
 
 router = APIRouter(prefix="/usuarios", tags=["usuarios"])
+
+
+def _sync_responsavel(db: Session, u: Usuario) -> None:
+    """Todo usuário do sistema é também um Responsável (submenu Usuários →
+    Responsáveis). Mantém nome/email/ativo em dia com o cadastro."""
+    resp = db.query(Responsavel).filter(Responsavel.usuario_id == u.id).first()
+    if resp:
+        resp.nome = u.nome
+        resp.email = u.email
+        resp.ativo = u.ativo
+    else:
+        db.add(Responsavel(nome=u.nome, email=u.email, usuario_id=u.id, categoria="colaborador", ativo=u.ativo))
+    db.commit()
 
 
 def _usuario_to_out(u: Usuario, db: Session) -> UsuarioOut:
@@ -94,6 +108,7 @@ def aceitar_convite(token: str, body: AcceptInviteRequest, db: Session = Depends
     u.primeiro_acesso = True
     db.commit()
     db.refresh(u)
+    _sync_responsavel(db, u)
     jwt_token = criar_token(u.id, u.email, u.role)
     return TokenResponse(access_token=jwt_token, usuario=_usuario_to_out(u, db))
 
@@ -129,6 +144,7 @@ def criar_usuario(data: UsuarioCreate, background_tasks: BackgroundTasks, db: Se
     db.add(u)
     db.commit()
     db.refresh(u)
+    _sync_responsavel(db, u)
 
     invite_url = f"{settings.frontend_url}/aceitar-convite/{invite_token}"
 
@@ -162,6 +178,7 @@ def atualizar_usuario(usuario_id: uuid.UUID, data: UsuarioUpdate, db: Session = 
             setattr(u, field, value)
     db.commit()
     db.refresh(u)
+    _sync_responsavel(db, u)
     return _usuario_to_out(u, db)
 
 

@@ -62,6 +62,9 @@ class Prazo(Base):
     processo: Mapped["Processo"] = relationship("Processo", back_populates="prazos")  # noqa: F821
     peca_necessaria: Mapped[str | None] = mapped_column(String(100))
     responsavel: Mapped[str | None] = mapped_column(String(100))
+    responsavel_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("responsaveis.id", ondelete="SET NULL"), nullable=True
+    )
     google_event_id: Mapped[str | None] = mapped_column(String(255))
     # Criado automaticamente pelo gestor jurídico (Despacho), sem clique humano.
     criado_automaticamente: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")

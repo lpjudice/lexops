@@ -13,6 +13,7 @@ export interface Prazo {
   descricao?: string
   peca_necessaria?: string
   responsavel?: string | null
+  responsavel_id?: string | null
   data_publicacao: string
   dias_prazo: number
   tipo_contagem: TipoContagem
@@ -33,6 +34,7 @@ export interface PrazoCreate {
   descricao?: string
   peca_necessaria?: string
   responsavel?: string | null
+  responsavel_id?: string | null
   data_publicacao: string
   dias_prazo: number
   tipo_contagem?: TipoContagem

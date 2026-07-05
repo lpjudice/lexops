@@ -24,6 +24,9 @@ class Tarefa(Base):
     descricao: Mapped[str | None] = mapped_column(Text)
     responsavel: Mapped[str | None] = mapped_column(String(255))
     responsavel_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    responsavel_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("responsaveis.id", ondelete="SET NULL"), nullable=True
+    )
     tags: Mapped[str | None] = mapped_column(String(500))
     data_inicio: Mapped[date | None] = mapped_column(Date, nullable=True)
     data_fim: Mapped[date | None] = mapped_column(Date, nullable=True)

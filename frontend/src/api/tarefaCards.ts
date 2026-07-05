@@ -30,6 +30,7 @@ export interface TarefaCard {
   notas: string | null
   responsavel: string | null
   responsavel_email: string | null
+  responsavel_id?: string | null
   status: StatusTarefaCard
   data_limite: string | null
   google_event_id: string | null
@@ -54,6 +55,7 @@ export interface TarefaCardCreate {
   notas?: string | null
   responsavel?: string | null
   responsavel_email?: string | null
+  responsavel_id?: string | null
   status?: StatusTarefaCard
   data_limite?: string | null
   confidencial?: boolean

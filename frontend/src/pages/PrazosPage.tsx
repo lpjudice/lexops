@@ -5,7 +5,7 @@ import { prazosApi } from '../api/prazos'
 import type { PrazoCreate, TipoPrazo, StatusPrazo } from '../api/prazos'
 import { processosApi } from '../api/processos'
 import { clientesApi } from '../api/clientes'
-import { usuariosApi } from '../api/usuarios'
+import ResponsavelComboBox from '../components/ResponsavelComboBox'
 import styles from './Page.module.css'
 import prazosStyles from './PrazosPage.module.css'
 
@@ -54,7 +54,7 @@ export default function PrazosPage() {
   const [form, setForm] = useState<PrazoCreate>(EMPTY)
   const [editando, setEditando] = useState<string | null>(null)
   const [editPeca, setEditPeca] = useState('')
-  const [editResponsavel, setEditResponsavel] = useState('')
+  const [editResponsavel, setEditResponsavel] = useState<{ nome: string; email: string; id?: string | null }>({ nome: '', email: '', id: null })
   const [tabStatus, setTabStatus] = useState<TabStatus>('ativo')
   const [searchParams] = useSearchParams()
   const destaqueId = searchParams.get('destaque')
@@ -85,11 +85,6 @@ export default function PrazosPage() {
     queryKey: ['clientes'],
     queryFn: () => clientesApi.listar(),
   })
-  const { data: usuarios = [] } = useQuery({
-    queryKey: ['usuarios'],
-    queryFn: usuariosApi.listar,
-  })
-
   const criar = useMutation({
     mutationFn: prazosApi.criar,
     onSuccess: () => {
@@ -206,13 +201,10 @@ export default function PrazosPage() {
           </div>
           <div className={styles.formRow}>
             <label className={styles.formLabel}>Responsável</label>
-            <select className={styles.input} value={form.responsavel ?? ''} onChange={(e) => setForm({ ...form, responsavel: e.target.value || undefined })}>
-              <option value="">— Nenhum —</option>
-              {usuarios.filter(u => u.ativo).map(u => (
-                <option key={u.id} value={u.nome}>{u.nome}</option>
-              ))}
-              <option value="Terceiros">Terceiros</option>
-            </select>
+            <ResponsavelComboBox
+              value={{ nome: form.responsavel ?? '', email: '', id: form.responsavel_id ?? null }}
+              onChange={(v) => setForm({ ...form, responsavel: v.nome || undefined, responsavel_id: v.id ?? undefined })}
+            />
           </div>
           <div className={styles.formRow}>
             <label className={styles.formLabel}>Descrição</label>
@@ -290,13 +282,13 @@ export default function PrazosPage() {
                           <button
                             className={prazosStyles.pecaChipEdit}
                             title="Alterar peça"
-                            onClick={() => { setEditando(p.id); setEditPeca(p.peca_necessaria ?? ''); setEditResponsavel(p.responsavel ?? '') }}
+                            onClick={() => { setEditando(p.id); setEditPeca(p.peca_necessaria ?? ''); setEditResponsavel({ nome: p.responsavel ?? '', email: '', id: p.responsavel_id ?? null }) }}
                           >✎</button>
                         </span>
                       )}
                       {!p.peca_necessaria && editando !== p.id && (
                         <button className={prazosStyles.btnAddPeca}
-                          onClick={() => { setEditando(p.id); setEditPeca(''); setEditResponsavel(p.responsavel ?? '') }}>
+                          onClick={() => { setEditando(p.id); setEditPeca(''); setEditResponsavel({ nome: p.responsavel ?? '', email: '', id: p.responsavel_id ?? null }) }}>
                           + Peça
                         </button>
                       )}
@@ -322,16 +314,10 @@ export default function PrazosPage() {
                           <option value="">— Selecione —</option>
                           {PECAS.map((pc) => <option key={pc} value={pc}>{pc}</option>)}
                         </select>
-                        <select className={styles.input} value={editResponsavel} onChange={(e) => setEditResponsavel(e.target.value)}>
-                          <option value="">— Nenhum —</option>
-                          {usuarios.filter(u => u.ativo).map(u => (
-                            <option key={u.id} value={u.nome}>{u.nome}</option>
-                          ))}
-                          <option value="Terceiros">Terceiros</option>
-                        </select>
+                        <ResponsavelComboBox value={editResponsavel} onChange={setEditResponsavel} />
                         <button className={styles.btnPrimary} style={{ fontSize: '12px', padding: '6px 12px' }}
                           disabled={atualizar.isPending}
-                          onClick={() => atualizar.mutate({ id: p.id, data: { peca_necessaria: editPeca || undefined, responsavel: editResponsavel || undefined } })}>
+                          onClick={() => atualizar.mutate({ id: p.id, data: { peca_necessaria: editPeca || undefined, responsavel: editResponsavel.nome || undefined, responsavel_id: editResponsavel.id ?? undefined } })}>
                           Salvar
                         </button>
                         <button className={styles.btnDanger} onClick={() => setEditando(null)}>Cancelar</button>

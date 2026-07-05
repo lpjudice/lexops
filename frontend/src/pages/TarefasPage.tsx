@@ -24,7 +24,6 @@ import ProjetoCombobox from '../components/ProjetoCombobox'
 import { clientesApi } from '../api/clientes'
 import { processosApi } from '../api/processos'
 import { anotacoesApi } from '../api/anotacoes'
-import { usuariosApi } from '../api/usuarios'
 import { useAuth } from '../contexts/AuthContext'
 import ComboBox from '../components/ComboBox'
 import ClienteCombobox from '../components/ClienteCombobox'
@@ -96,6 +95,7 @@ interface EditForm {
   descricao: string
   responsavel: string
   responsavel_email: string
+  responsavel_id: string | null
   data_limite: string
   tags: string
   cliente_id: string
@@ -142,9 +142,9 @@ export default function TarefasPage() {
   // ── Card UI state ─────────────────────────────────────────────────────
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [batchResponsavel, setBatchResponsavel] = useState({ nome: '', email: '' })
+  const [batchResponsavel, setBatchResponsavel] = useState<{ nome: string; email: string; id?: string | null }>({ nome: '', email: '', id: null })
   const [editForm, setEditForm] = useState<EditForm>({
-    titulo: '', descricao: '', responsavel: '', responsavel_email: '', data_limite: '', tags: '',
+    titulo: '', descricao: '', responsavel: '', responsavel_email: '', responsavel_id: null, data_limite: '', tags: '',
     cliente_id: '', processo_id: '', projeto_id: '', status: 'pendente',
   })
 
@@ -167,11 +167,6 @@ export default function TarefasPage() {
   const { data: anotacoes = [] } = useQuery({
     queryKey: ['anotacoes'],
     queryFn: () => anotacoesApi.listar(),
-  })
-
-  const { data: usuarios = [] } = useQuery({
-    queryKey: ['usuarios'],
-    queryFn: usuariosApi.listar,
   })
 
   const { data: projetos = [] } = useQuery({
@@ -340,6 +335,7 @@ export default function TarefasPage() {
       descricao: tarefa.descricao ?? '',
       responsavel: tarefa.responsavel ?? '',
       responsavel_email: tarefa.responsavel_email ?? '',
+      responsavel_id: tarefa.responsavel_id ?? null,
       data_limite: tarefa.data_limite ?? '',
       tags: tarefa.tags ?? '',
       cliente_id: tarefa.cliente_id ?? '',
@@ -359,6 +355,7 @@ export default function TarefasPage() {
         descricao: editForm.descricao || null,
         responsavel: editForm.responsavel || null,
         responsavel_email: editForm.responsavel_email || null,
+        responsavel_id: editForm.responsavel_id || null,
         data_limite: editForm.data_limite || null,
         tags: editForm.tags || null,
         cliente_id: editForm.cliente_id || null,
@@ -380,6 +377,7 @@ export default function TarefasPage() {
         descricao: r.descricao || null,
         responsavel: batchResponsavel.nome || null,
         responsavel_email: batchResponsavel.email || null,
+        responsavel_id: batchResponsavel.id || null,
         data_limite: r.data_limite || null,
         tags: r.tag || null,
         cliente_id: batchCliente || null,
@@ -565,7 +563,6 @@ export default function TarefasPage() {
             <ResponsavelComboBox
               value={batchResponsavel}
               onChange={setBatchResponsavel}
-              usuarios={usuarios}
             />
           </div>
 
@@ -952,9 +949,8 @@ export default function TarefasPage() {
                     <div className={styles.formRow}>
                       <label className={styles.formLabel}>Responsável</label>
                       <ResponsavelComboBox
-                        value={{ nome: editForm.responsavel, email: editForm.responsavel_email }}
-                        onChange={(v) => setEditForm({ ...editForm, responsavel: v.nome, responsavel_email: v.email })}
-                        usuarios={usuarios}
+                        value={{ nome: editForm.responsavel, email: editForm.responsavel_email, id: editForm.responsavel_id }}
+                        onChange={(v) => setEditForm({ ...editForm, responsavel: v.nome, responsavel_email: v.email, responsavel_id: v.id ?? null })}
                       />
                     </div>
                     <div className={styles.formRow}>

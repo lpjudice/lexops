@@ -78,6 +78,7 @@ def _notificar_telegram(texto: str) -> None:
 class TarefaSugerida(BaseModel):
     titulo: str
     responsavel: str | None = None
+    responsavel_id: uuid.UUID | None = None
 
 
 TIPOS_PRAZO_VALIDOS = {
@@ -107,6 +108,7 @@ def _criar_prazo_e_tarefas(
     criar_prazo: bool,
     automatico: bool,
     responsavel_prazo: str | None = None,
+    responsavel_prazo_id: uuid.UUID | None = None,
 ) -> dict:
     """Cria Prazo (uma opção escolhida) + N Tarefas e retorna os ids criados.
     Compartilhado entre /aprovar e o pipeline automático."""
@@ -126,6 +128,7 @@ def _criar_prazo_e_tarefas(
             tipo_contagem=tipo_contagem,
         )
         responsavel_prazo = responsavel_prazo or (tarefas[0].responsavel if tarefas else None)
+        responsavel_prazo_id = responsavel_prazo_id or (tarefas[0].responsavel_id if tarefas else None)
         prazo = Prazo(
             processo_id=processo.id,
             tipo=_sanitizar_tipo_prazo(peca_necessaria) or "outro",
@@ -138,6 +141,7 @@ def _criar_prazo_e_tarefas(
             data_limite=data_com,
             data_limite_sem_feriado=data_sem,
             responsavel=responsavel_prazo,
+            responsavel_id=responsavel_prazo_id,
             criado_automaticamente=automatico,
         )
         db.add(prazo)
@@ -166,6 +170,7 @@ def _criar_prazo_e_tarefas(
             titulo=f"{prazo.tipo.capitalize()} — {processo.numero_cnj}",
             descricao=pub.texto_resumo,
             responsavel=responsavel_prazo,
+            responsavel_id=responsavel_prazo_id,
             status="pendente",
             data_limite=prazo.data_limite,
         )
@@ -187,6 +192,7 @@ def _criar_prazo_e_tarefas(
             processo_id=processo.id,
             titulo=t.titulo,
             responsavel=t.responsavel,
+            responsavel_id=t.responsavel_id,
             status="pendente",
             criado_automaticamente=automatico,
             prazo_id=prazo_criado_id,
@@ -523,6 +529,7 @@ class AprovarRequest(BaseModel):
     dias_prazo: int | None = None
     tipo_contagem: str = "uteis"
     responsavel_prazo: str | None = None
+    responsavel_prazo_id: uuid.UUID | None = None
     tarefas: list[TarefaSugerida] = []
 
 
@@ -547,6 +554,7 @@ def aprovar_acao(publicacao_id: uuid.UUID, body: AprovarRequest, db: Session = D
         criar_prazo=body.criar_prazo,
         automatico=False,
         responsavel_prazo=body.responsavel_prazo,
+        responsavel_prazo_id=body.responsavel_prazo_id,
     )
 
     pub.despacho_tratada = True

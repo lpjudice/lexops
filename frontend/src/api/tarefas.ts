@@ -22,6 +22,7 @@ export interface Tarefa {
   descricao: string | null
   responsavel: string | null
   responsavel_email: string | null
+  responsavel_id?: string | null
   tags: string | null
   data_limite: string | null
   status: StatusTarefa
@@ -49,6 +50,7 @@ export interface TarefaCreate {
   descricao?: string | null
   responsavel?: string | null
   responsavel_email?: string | null
+  responsavel_id?: string | null
   tags?: string | null
   data_limite?: string | null
   status?: StatusTarefa
