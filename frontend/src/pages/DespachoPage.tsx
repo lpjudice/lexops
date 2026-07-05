@@ -322,10 +322,17 @@ function SugestaoAcaoPainel({ publicacao: p }: { publicacao: PublicacaoPendente 
   )
   const [novaTarefa, setNovaTarefa] = useState('')
   const [promptExtra, setPromptExtra] = useState('')
+  const [tipoPecaManual, setTipoPecaManual] = useState('')
   const [gerandoPeca, setGerandoPeca] = useState(false)
   const [aprovando, setAprovando] = useState(false)
 
   const opcaoEscolhida = opcoes[opcaoIdx]
+  // Quando a IA não sugeriu nenhum caminho de prazo, ainda assim dá pra gerar
+  // uma peça avulsa (ex: uma tarefa manual "peticionar") a partir de um tipo
+  // digitado à mão — não cria prazo nenhum, só o documento.
+  const opcaoParaPeca = opcaoEscolhida || (tipoPecaManual.trim()
+    ? { label: tipoPecaManual.trim(), peca_necessaria: 'outro', dias_prazo: 0, tipo_contagem: 'uteis' as const }
+    : null)
 
   const toggleTarefa = (i: number) =>
     setTarefas((prev) => prev.map((t, idx) => idx === i ? { ...t, marcada: !t.marcada } : t))
@@ -337,10 +344,10 @@ function SugestaoAcaoPainel({ publicacao: p }: { publicacao: PublicacaoPendente 
   }
 
   const gerarPeca = async () => {
-    if (!opcaoEscolhida) return
+    if (!opcaoParaPeca) return
     setGerandoPeca(true)
     try {
-      await despachoApi.gerarPeca(p.id, opcaoEscolhida, promptExtra)
+      await despachoApi.gerarPeca(p.id, opcaoParaPeca, promptExtra)
       qc.invalidateQueries({ queryKey: ['despacho-pendentes'] })
     } finally {
       setGerandoPeca(false)
@@ -350,9 +357,9 @@ function SugestaoAcaoPainel({ publicacao: p }: { publicacao: PublicacaoPendente 
   const aprovar = async () => {
     setAprovando(true)
     try {
-      // Um clique só: se ainda não gerou a peça e há um caminho escolhido, gera agora.
-      if (opcaoEscolhida && !p.peca_doc_url) {
-        await despachoApi.gerarPeca(p.id, opcaoEscolhida, promptExtra)
+      // Um clique só: se ainda não gerou a peça e há o que gerar, gera agora.
+      if (opcaoParaPeca && !p.peca_doc_url) {
+        await despachoApi.gerarPeca(p.id, opcaoParaPeca, promptExtra)
       }
       await despachoApi.aprovar(p.id, {
         criar_prazo: sugestao.requer_prazo && !!opcaoEscolhida,
@@ -385,11 +392,18 @@ function SugestaoAcaoPainel({ publicacao: p }: { publicacao: PublicacaoPendente 
           ))}
         </div>
       ) : (
-        <p style={{ fontSize: 12, color: 'var(--gray-mid)', fontStyle: 'italic', margin: '0 0 10px' }}>
-          A IA entendeu que esta publicação não exige prazo/peça — por isso não há campo de instrução
-          nem botão de gerar peça aqui. Se achar que devia ter, use "Descartar" acima e trate manualmente,
-          ou peça sugestão de novo.
-        </p>
+        <div style={{ marginBottom: 10 }}>
+          <p style={{ fontSize: 12, color: 'var(--gray-mid)', fontStyle: 'italic', margin: '0 0 6px' }}>
+            A IA entendeu que esta publicação não exige prazo formal. Se mesmo assim quiser gerar uma
+            peça (ex: pra uma das tarefas abaixo), digite o tipo aqui:
+          </p>
+          <input
+            value={tipoPecaManual}
+            onChange={(e) => setTipoPecaManual(e.target.value)}
+            placeholder="Tipo de peça (ex: petição juntando documento, manifestação...)"
+            style={{ width: '100%', fontSize: 12, padding: '6px 8px', border: '1px solid #ddd', borderRadius: 6, boxSizing: 'border-box' }}
+          />
+        </div>
       )}
 
       {(tarefas.length > 0 || novaTarefa) && (
@@ -418,7 +432,7 @@ function SugestaoAcaoPainel({ publicacao: p }: { publicacao: PublicacaoPendente 
         </button>
       </div>
 
-      {opcaoEscolhida && (
+      {opcaoParaPeca && (
         <div style={{ marginBottom: 10 }}>
           <textarea
             placeholder="Prompt extra pra guiar a IA na redação da peça (opcional)..."

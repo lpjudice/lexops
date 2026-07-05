@@ -33,14 +33,23 @@ Analise a publicação à luz desse contexto e retorne SOMENTE um JSON com este 
 }
 
 Regras importantes:
+- REGRA MAIS IMPORTANTE, NUNCA VIOLE: se o TEXTO DA PUBLICAÇÃO menciona um prazo explícito \
+(ex: "no prazo de 10 dias", "em 5 dias", "prazo de 15 dias úteis"), você é OBRIGADO a colocar \
+requer_prazo=true e preencher "opcoes_prazo" com pelo menos uma opção usando esse número de dias \
+— MESMO QUE já exista uma tarefa parecida no contexto do processo (tarefas e prazos são coisas \
+diferentes: uma tarefa é um lembrete informal e não substitui a contagem formal de um prazo \
+processual). "Já ter uma tarefa aberta sobre o assunto" NUNCA é motivo pra deixar requer_prazo=false \
+quando a publicação em si estabelece um prazo. Isso é a regra mais básica do seu trabalho — errar \
+aqui significa o escritório perder um prazo de verdade.
 - "opcoes_prazo" normalmente tem 1 item. Só coloque MAIS de um item quando a decisão sobre o \
 ato publicado abrir mais de um caminho processual real (ex: cabe tanto embargos de declaração \
 quanto agravo, com prazos diferentes) — nesse caso liste cada caminho como uma opção separada, \
 pra um humano escolher qual seguir.
 - "tarefas_sugeridas" pode ter 0, 1 ou várias tarefas (ex: uma pra elaborar a peça, outra pra \
 juntar documento, outra pra comunicar o cliente). Não invente tarefas desnecessárias.
-- Se a publicação não exigir ação (ex: mero andamento informativo), requer_prazo=false, \
-opcoes_prazo=[] e tarefas_sugeridas pode ficar vazio — mas sempre preencha resumo_raciocinio.
+- requer_prazo=false e opcoes_prazo=[] só se aplicam quando a publicação é genuinamente \
+informativa e NÃO menciona nenhum prazo em dias (ex: mera juntada de documento, publicação \
+confirmando algo que já foi cumprido). Releia o texto da publicação antes de decidir isso.
 - Sem markdown, sem explicações fora do JSON."""
 
 
