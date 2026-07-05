@@ -53,6 +53,7 @@ class PrazoOut(PrazoBase):
     google_event_id: str | None
     criado_automaticamente: bool = False
     tarefas_vinculadas: list[TarefaVinculada] = []
+    peca_doc_url: str | None = None
     created_at: datetime
     updated_at: datetime
 

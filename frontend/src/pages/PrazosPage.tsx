@@ -259,6 +259,12 @@ export default function PrazosPage() {
                           🔗 {p.tarefas_vinculadas!.length} tarefa(s)
                         </a>
                       )}
+                      {p.peca_doc_url && (
+                        <a href={p.peca_doc_url} target="_blank" rel="noreferrer"
+                          style={{ fontSize: 11, fontWeight: 700, color: '#15803d', background: '#dcfce7', padding: '2px 8px', borderRadius: 999, textDecoration: 'none' }}>
+                          📄 peça
+                        </a>
+                      )}
                       {p.peca_necessaria && editando !== p.id && (
                         <span className={prazosStyles.pecaChip}>
                           {p.peca_necessaria}

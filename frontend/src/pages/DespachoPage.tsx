@@ -372,16 +372,30 @@ function SugestaoAcaoPainel({ publicacao: p }: { publicacao: PublicacaoPendente 
       const prazoParaCriar = opcaoEscolhida ?? (diasPrazoManual
         ? { peca_necessaria: tipoPecaManual.trim() || 'outro', dias_prazo: diasPrazoManual, tipo_contagem: tipoContagemManual }
         : null)
-      await despachoApi.aprovar(p.id, {
+      // Se sobrou texto digitado no campo "+ adicionar tarefa" sem ter clicado
+      // em Adicionar, inclui mesmo assim — não pode se perder silenciosamente.
+      const tarefasParaEnviar = tarefas.filter((t) => t.marcada).map(({ titulo, responsavel }) => ({ titulo, responsavel }))
+      if (novaTarefa.trim()) {
+        tarefasParaEnviar.push({ titulo: novaTarefa.trim(), responsavel: null })
+      }
+      const resposta = await despachoApi.aprovar(p.id, {
         criar_prazo: !!prazoParaCriar,
         peca_necessaria: prazoParaCriar?.peca_necessaria ?? null,
         dias_prazo: prazoParaCriar?.dias_prazo ?? null,
         tipo_contagem: prazoParaCriar?.tipo_contagem ?? 'uteis',
-        tarefas: tarefas.filter((t) => t.marcada).map(({ titulo, responsavel }) => ({ titulo, responsavel })),
+        tarefas: tarefasParaEnviar,
       })
+      setNovaTarefa('')
       qc.invalidateQueries({ queryKey: ['despacho-pendentes'] })
       qc.invalidateQueries({ queryKey: ['despacho-tratadas'] })
+      qc.invalidateQueries({ queryKey: ['prazos'] })
+      const criados = [
+        resposta.prazo_id ? '1 prazo' : null,
+        resposta.tarefa_ids?.length ? `${resposta.tarefa_ids.length} tarefa(s)` : null,
+      ].filter(Boolean).join(' + ')
       if (erroPeca) alert(erroPeca)
+      else if (criados) alert(`Criado: ${criados}.`)
+      else alert('Nada foi criado — confira se marcou alguma tarefa ou definiu um prazo.')
     } catch {
       alert('Erro ao aprovar. Prazo/tarefas podem não ter sido criados — confira em Prazos e Tarefas.')
     } finally {

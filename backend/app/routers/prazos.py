@@ -7,6 +7,7 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.prazo import Prazo
 from app.models.processo import Processo
+from app.models.publicacao import Publicacao
 from app.models.tarefa import Tarefa
 from app.schemas.prazo import PrazoCreate, PrazoOut, PrazoUpdate
 from app.services.google_calendar import criar_evento, deletar_evento
@@ -44,8 +45,14 @@ def listar_prazos(
     tarefas_por_prazo: dict = {}
     for t in db.query(Tarefa).filter(Tarefa.prazo_id.in_([p.id for p in prazos])).all():
         tarefas_por_prazo.setdefault(t.prazo_id, []).append({"id": t.id, "titulo": t.titulo})
+
+    peca_por_prazo: dict = {}
+    for pub in db.query(Publicacao).filter(Publicacao.prazo_id.in_([p.id for p in prazos]), Publicacao.peca_doc_url.isnot(None)).all():
+        peca_por_prazo[pub.prazo_id] = pub.peca_doc_url
+
     for p in prazos:
         p.tarefas_vinculadas = tarefas_por_prazo.get(p.id, [])
+        p.peca_doc_url = peca_por_prazo.get(p.id)
 
     return prazos
 

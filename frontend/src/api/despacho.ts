@@ -78,5 +78,5 @@ export const despachoApi = {
     dias_prazo?: number | null
     tipo_contagem?: string
     tarefas?: TarefaSugerida[]
-  }) => api.post(`/despacho/${id}/aprovar`, body).then((r) => r.data),
+  }) => api.post<{ prazo_id?: string; tarefa_ids?: string[]; ok: boolean }>(`/despacho/${id}/aprovar`, body).then((r) => r.data),
 }

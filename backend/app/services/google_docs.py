@@ -44,14 +44,20 @@ def _parse_markup(texto: str, start_offset: int) -> tuple[str, list[dict]]:
     return "".join(limpo), estilos
 
 
-def montar_texto_e_estilos(peca: dict) -> tuple[str, list[dict], dict]:
-    """Monta o texto final (parágrafos numerados só a partir do corpo, após
-    a qualificação) e a lista de estilos (negrito/vermelho) a aplicar depois
-    de inserir o texto. Retorna também o range do título (pra centralizar)."""
+_NUMERACAO_PROPRIA = re.compile(r"^\s*\d+[\.\)]\s*")
+
+
+def montar_texto_e_estilos(peca: dict) -> tuple[str, list[dict], dict, dict]:
+    """Monta o texto final e a lista de estilos (negrito/vermelho) a aplicar
+    depois de inserir o texto. A numeração dos parágrafos do corpo usa lista
+    numerada NATIVA do Docs (não texto "1. " manual) — se ajusta sozinha e
+    não duplica caso a IA já tenha incluído seu próprio número. Retorna
+    também os ranges do título (centralizar) e do corpo (aplicar numeração)."""
     blocos: list[str] = []
     estilos: list[dict] = []
     pos = 0
     titulo_range = {"start": 0, "end": 0}
+    corpo_range = {"start": 0, "end": 0}
 
     def add(texto: str, is_titulo: bool = False) -> None:
         nonlocal pos
@@ -69,11 +75,17 @@ def montar_texto_e_estilos(peca: dict) -> tuple[str, list[dict], dict]:
     add(peca["titulo_peca"], is_titulo=True)
     add(peca["enderecamento"])
     add(peca["qualificacao"])
-    for i, paragrafo in enumerate(peca.get("paragrafos") or []):
-        add(f"{i + 1}. {paragrafo}")
+
+    corpo_range["start"] = pos
+    for paragrafo in peca.get("paragrafos") or []:
+        # Remove numeração que a própria IA às vezes inclui — quem numera é o Docs.
+        texto_limpo = _NUMERACAO_PROPRIA.sub("", paragrafo)
+        add(texto_limpo)
+    corpo_range["end"] = pos - 2  # tira o \n\n final do último parágrafo
+
     add(peca["fechamento"])
 
-    return "".join(blocos), estilos, titulo_range
+    return "".join(blocos), estilos, titulo_range, corpo_range
 
 
 def _docs_request(method: str, path: str, tokens: dict, **kwargs):
@@ -109,7 +121,7 @@ def gerar_documento_peca(peca: dict, nome_documento: str) -> dict | None:
         return None
     doc_id = copia["id"]
 
-    texto, estilos, titulo_range = montar_texto_e_estilos(peca)
+    texto, estilos, titulo_range, corpo_range = montar_texto_e_estilos(peca)
 
     def _inserir(tokens: dict):
         doc = _docs_request("GET", f"/{doc_id}", tokens)
@@ -168,6 +180,17 @@ def gerar_documento_peca(peca: dict, nome_documento: str) -> dict | None:
                     "range": {"startIndex": t_start, "endIndex": t_end},
                     "paragraphStyle": {"alignment": "CENTER"},
                     "fields": "alignment",
+                }
+            })
+        # Numeração de verdade (nativa do Docs) só no corpo — depois da
+        # qualificação, antes do fechamento. Ajusta sozinha, não duplica.
+        c_start = insert_at + corpo_range["start"]
+        c_end = insert_at + corpo_range["end"]
+        if c_end > c_start:
+            requests.append({
+                "createParagraphBullets": {
+                    "range": {"startIndex": c_start, "endIndex": c_end},
+                    "bulletPreset": "NUMBERED_DECIMAL_ALPHA_ROMAN",
                 }
             })
         if requests:
