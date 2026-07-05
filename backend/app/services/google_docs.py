@@ -59,7 +59,7 @@ def montar_texto_e_estilos(peca: dict) -> tuple[str, list[dict], dict, dict]:
     titulo_range = {"start": 0, "end": 0}
     corpo_range = {"start": 0, "end": 0}
 
-    def add(texto: str, is_titulo: bool = False) -> None:
+    def add(texto: str, is_titulo: bool = False, separador: str = "\n\n") -> None:
         nonlocal pos
         limpo, est = _parse_markup(texto, pos)
         estilos.extend(est)
@@ -69,18 +69,23 @@ def montar_texto_e_estilos(peca: dict) -> tuple[str, list[dict], dict, dict]:
             estilos.append({"start": pos, "end": pos + len(limpo), "bold": True})
         blocos.append(limpo)
         pos += len(limpo)
-        blocos.append("\n\n")
-        pos += 2
+        blocos.append(separador)
+        pos += len(separador)
 
     add(peca["titulo_peca"], is_titulo=True)
     add(peca["enderecamento"])
     add(peca["qualificacao"])
 
     corpo_range["start"] = pos
-    for paragrafo in peca.get("paragrafos") or []:
+    paragrafos = peca.get("paragrafos") or []
+    for i, paragrafo in enumerate(paragrafos):
         # Remove numeração que a própria IA às vezes inclui — quem numera é o Docs.
         texto_limpo = _NUMERACAO_PROPRIA.sub("", paragrafo)
-        add(texto_limpo)
+        # Sem linha em branco entre itens da lista numerada — senão o Docs
+        # numera a linha vazia também (item fantasma). A última leva \n\n
+        # normal pra separar do fechamento.
+        ultimo = i == len(paragrafos) - 1
+        add(texto_limpo, separador="\n\n" if ultimo else "\n")
     corpo_range["end"] = pos - 2  # tira o \n\n final do último parágrafo
 
     add(peca["fechamento"])
