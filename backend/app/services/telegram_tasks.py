@@ -23,6 +23,8 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models.cliente import Cliente
 from app.models.tarefa import Tarefa
+from app.models.tarefa_card import TarefaCard, TarefaCardSubtask
+from app.models.tarefa_projeto import TarefaProjeto
 from app.models.telegram_task import TelegramChatSession, TelegramTaskBatch, TelegramTaskItem
 from app.models.usuario import Usuario
 
@@ -291,11 +293,22 @@ def create_batch_from_text(
         if default_user:
             tarefa.criado_por_id = default_user.id
         db.add(tarefa)
+
+        # Cria também no menu Tarefas em Cards (como card macro avulso)
+        card = TarefaCard(
+            titulo=title,
+            status="pendente",
+            cliente_id=inferred_client.id if inferred_client else None,
+        )
+        if default_user:
+            card.criado_por_id = default_user.id
+        db.add(card)
         db.flush()
 
         item = TelegramTaskItem(
             batch_id=batch.id,
             tarefa_id=tarefa.id,
+            card_id=card.id,
             titulo_original=title,
             titulo_normalizado=normalized_title,
             cliente_inferido_id=inferred_client.id if inferred_client else None,
@@ -367,12 +380,105 @@ def batch_actions_markup(batch: TelegramTaskBatch, has_duplicates: bool) -> dict
             {"text": "📅 Datas", "callback_data": f"tg:batch:{batch.id.hex}:dates"},
         ],
         [
+            {"text": "📌 Vincular a Macros", "callback_data": f"tg:batch:{batch.id.hex}:card_link"},
+        ],
+        [
             {"text": "✅ Deixar como está", "callback_data": f"tg:batch:{batch.id.hex}:done"},
         ]
     ]
     if has_duplicates:
         keyboard.append([{"text": "🔁 Revisar duplicadas", "callback_data": f"tg:batch:{batch.id.hex}:dupes"}])
     return {"inline_keyboard": keyboard}
+
+
+# ---------------------------------------------------------------------------
+# Fluxo de vínculo com Tarefa Macro (Tarefas em Cards)
+# ---------------------------------------------------------------------------
+
+def _active_projetos(db: Session) -> list[TarefaProjeto]:
+    return db.query(TarefaProjeto).filter(TarefaProjeto.oculto == False).order_by(TarefaProjeto.nome).all()  # noqa: E712
+
+
+def _open_macros(db: Session, projeto_id: uuid.UUID | None = None) -> list[TarefaCard]:
+    q = db.query(TarefaCard).filter(TarefaCard.status.in_(["pendente", "em_andamento"]))
+    if projeto_id:
+        q = q.filter(TarefaCard.projeto_id == projeto_id)
+    return q.order_by(TarefaCard.created_at.desc()).limit(20).all()
+
+
+def build_card_link_menu(db: Session, batch: TelegramTaskBatch) -> tuple[str, dict]:
+    """Mostra quais tarefas do lote ainda não foram vinculadas a uma macro."""
+    items = load_batch_items(db, batch.id)
+    # Tarefas já vinculadas ficam marcadas no payload da sessão (linked_item_ids)
+    lines = ["Selecione a tarefa para vincular a uma macro:"]
+    keyboard: list[list[dict]] = []
+    for item in items:
+        # callback: tg:item:{item_hex}:card_proj (pede projeto primeiro)
+        cb = f"tg:item:{item.id.hex}:card_proj"  # 3+1+4+1+32+1+8 = 50 bytes ✓
+        keyboard.append([{"text": item.titulo_original[:40], "callback_data": cb}])
+    keyboard.append([{"text": "✅ Pronto", "callback_data": f"tg:batch:{batch.id.hex}:done"}])
+    return "\n".join(lines), {"inline_keyboard": keyboard}
+
+
+def build_projeto_menu_for_item(db: Session, item_hex: str) -> tuple[str, dict]:
+    """Pergunta se quer filtrar por projeto antes de ver as macros."""
+    projetos = _active_projetos(db)
+    keyboard: list[list[dict]] = []
+    for idx, p in enumerate(projetos[:8]):  # máx 8 projetos
+        cb = f"tg:item:{item_hex}:card_p:{idx}"  # ~52 bytes ✓
+        keyboard.append([{"text": f"🎨 {p.nome}", "callback_data": cb}])
+    # Sem filtro de projeto
+    cb_all = f"tg:item:{item_hex}:card_p:all"  # ~52 bytes ✓
+    keyboard.append([{"text": "Sem filtro de projeto", "callback_data": cb_all}])
+    keyboard.append([{"text": "✖ Cancelar", "callback_data": f"tg:item:{item_hex}:card_cancel"}])
+    return "Filtrar por projeto?", {"inline_keyboard": keyboard}
+
+
+def build_macro_menu_for_item(db: Session, item_hex: str, projeto_id: uuid.UUID | None) -> tuple[str, dict]:
+    """Lista as macros abertas (opcionalmente filtradas por projeto)."""
+    macros = _open_macros(db, projeto_id)
+    keyboard: list[list[dict]] = []
+    for idx, macro in enumerate(macros[:10]):
+        cb = f"tg:item:{item_hex}:card_m:{idx}"  # ~52 bytes ✓
+        label = macro.titulo[:35]
+        if macro.projeto_id:
+            p = db.get(TarefaProjeto, macro.projeto_id)
+            if p:
+                label = f"[{p.nome[:10]}] {macro.titulo[:25]}"
+        keyboard.append([{"text": label, "callback_data": cb}])
+    if not macros:
+        return "Nenhuma macro aberta encontrada. A tarefa ficará como card avulso.", {"inline_keyboard": [
+            [{"text": "✅ Ok", "callback_data": f"tg:item:{item_hex}:card_cancel"}]
+        ]}
+    keyboard.append([{"text": "✖ Manter como card avulso", "callback_data": f"tg:item:{item_hex}:card_cancel"}])
+    return "Escolha a macro:", {"inline_keyboard": keyboard}
+
+
+def link_item_to_macro(db: Session, item: TelegramTaskItem, macro: TarefaCard) -> None:
+    """Converte o TarefaCard avulso em subtarefa da macro e remove o card avulso."""
+    # Busca o card avulso criado pelo bot
+    tarefa = db.query(Tarefa).filter(Tarefa.id == item.tarefa_id).first()
+
+    # Cria subtarefa na macro com dados do item
+    ordem = max((st.ordem for st in macro.subtasks), default=-1) + 1
+    subtask = TarefaCardSubtask(
+        card_id=macro.id,
+        texto=item.titulo_original,
+        ordem=ordem,
+        responsavel=tarefa.responsavel if tarefa else None,
+        responsavel_email=tarefa.responsavel_email if tarefa else None,
+        data_limite=tarefa.data_limite if tarefa else None,
+    )
+    db.add(subtask)
+
+    # Remove o card avulso que foi criado para esta tarefa
+    if item.card_id:
+        avulso = db.query(TarefaCard).filter(TarefaCard.id == item.card_id).first()
+        if avulso:
+            db.delete(avulso)
+        item.card_id = None
+
+    db.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -418,6 +524,13 @@ def apply_responsavel(db: Session, batch_id: uuid.UUID, responsavel: str, respon
         tarefa.responsavel = responsavel
         if responsavel_email is not None:
             tarefa.responsavel_email = responsavel_email  # type: ignore[assignment]
+        # Sincroniza no card avulso (se ainda existir como card avulso)
+        if item.card_id:
+            card = db.query(TarefaCard).filter(TarefaCard.id == item.card_id).first()
+            if card:
+                card.responsavel = responsavel
+                if responsavel_email is not None:
+                    card.responsavel_email = responsavel_email
         count += 1
     db.commit()
     return count
@@ -498,6 +611,14 @@ def _set_task_dates(tarefa: Tarefa, mode: str, value: date | tuple[date, date] |
         tarefa.data_limite = end
 
 
+def _sync_card_dates(db: Session, item: TelegramTaskItem, tarefa: Tarefa) -> None:
+    """Copia data_limite do item de tarefa para o card avulso correspondente."""
+    if item.card_id:
+        card = db.query(TarefaCard).filter(TarefaCard.id == item.card_id).first()
+        if card:
+            card.data_limite = tarefa.data_limite
+
+
 def apply_date_mode(
     db: Session, batch_id: uuid.UUID, mode: str, selected_item_ids: list[str] | None = None
 ) -> int:
@@ -518,6 +639,7 @@ def apply_date_mode(
             _set_task_dates(tarefa, "tomorrow", date.today() + timedelta(days=1))
         elif mode == "week":
             _set_task_dates(tarefa, "week", _week_range())
+        _sync_card_dates(db, item, tarefa)
         count += 1
     db.commit()
     return count
@@ -536,6 +658,7 @@ def apply_fixed_date(
         if not tarefa:
             continue
         _set_task_dates(tarefa, "fixed", fixed_date)
+        _sync_card_dates(db, item, tarefa)
         count += 1
     db.commit()
     return count
@@ -554,6 +677,7 @@ def apply_period(
         if not tarefa:
             continue
         _set_task_dates(tarefa, "period", (start, end))
+        _sync_card_dates(db, item, tarefa)
         count += 1
     db.commit()
     return count

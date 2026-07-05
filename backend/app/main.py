@@ -21,8 +21,9 @@ from app.models import pagante as _pagante_model  # noqa: F401 — ensures Pagan
 from app.models import conselho as _conselho_model  # noqa: F401 — ensures Conselho tables are registered
 from app.models import tarefa_card as _tarefa_card_model  # noqa: F401 — ensures TarefaCard tables are registered
 from app.models import memoria_estrategica as _memoria_estrategica_model  # noqa: F401 — ensures MemoriaEstrategica table is registered
+from app.models import responsavel as _responsavel_model  # noqa: F401 — ensures Responsavel table is registered
 from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, fiscal, pagantes, config_fiscal, jurisprudencia, organizador, pje, prazos, processos, publico, reembolsos, reunioes, system, tarefas, telegram, telegram_andamentos, telegram_tasks, teses, usuarios, webhooks
-from app.routers import backoffice, precedentcheck, conselho, tarefa_projetos, tarefa_cards, memoria_estrategica, despacho, conselho_juridico
+from app.routers import backoffice, precedentcheck, conselho, tarefa_projetos, tarefa_cards, memoria_estrategica, despacho, conselho_juridico, responsaveis
 
 # Cria as tabelas (Alembic gerencia em produção; aqui facilita o dev)
 Base.metadata.create_all(bind=engine)
@@ -822,6 +823,19 @@ def _run_migrations() -> None:
             "ALTER TABLE conselho_evento_convidados ADD COLUMN IF NOT EXISTS followup_data DATE"
         ))
 
+        # TelegramTaskItem: vínculo com TarefaCard
+        conn.execute(text(
+            "ALTER TABLE telegram_task_items ADD COLUMN IF NOT EXISTS card_id UUID REFERENCES tarefa_cards(id) ON DELETE SET NULL"
+        ))
+
+        # TarefaCardSubtask: responsável, email e prazo
+        for _col in [
+            "ALTER TABLE tarefa_card_subtasks ADD COLUMN IF NOT EXISTS responsavel VARCHAR(255)",
+            "ALTER TABLE tarefa_card_subtasks ADD COLUMN IF NOT EXISTS responsavel_email VARCHAR(255)",
+            "ALTER TABLE tarefa_card_subtasks ADD COLUMN IF NOT EXISTS data_limite DATE",
+        ]:
+            conn.execute(text(_col))
+
         # Tarefas: campo de ordenação manual
         conn.execute(text(
             "ALTER TABLE tarefas ADD COLUMN IF NOT EXISTS ordem INTEGER"
@@ -977,6 +991,16 @@ def _run_migrations() -> None:
             """
         ))
 
+        conn.execute(text(
+            "ALTER TABLE tarefas ADD COLUMN IF NOT EXISTS responsavel_id UUID REFERENCES responsaveis(id) ON DELETE SET NULL"
+        ))
+        conn.execute(text(
+            "ALTER TABLE prazos ADD COLUMN IF NOT EXISTS responsavel_id UUID REFERENCES responsaveis(id) ON DELETE SET NULL"
+        ))
+        conn.execute(text(
+            "ALTER TABLE tarefa_cards ADD COLUMN IF NOT EXISTS responsavel_id UUID REFERENCES responsaveis(id) ON DELETE SET NULL"
+        ))
+
         conn.commit()
 
 
@@ -1119,9 +1143,76 @@ def _seed_conselho_data() -> None:
         db.close()
 
 
+def _backfill_responsaveis() -> None:
+    """Cria a tabela de Responsáveis a partir do que já existe: um por
+    Usuário (sincronizado por usuario_id) e um "manual" pra cada nome livre
+    já usado em tarefas/prazos/cards que não bate com um usuário. Só roda
+    a parte de nomes livres se a tabela estiver vazia — depois disso quem
+    cria responsável novo é o combobox ou o cadastro de usuário."""
+    from app.database import SessionLocal
+    from app.models.prazo import Prazo
+    from app.models.responsavel import Responsavel
+    from app.models.tarefa import Tarefa
+    from app.models.tarefa_card import TarefaCard
+    from app.models.usuario import Usuario
+
+    db = SessionLocal()
+    try:
+        vazio = db.query(Responsavel).count() == 0
+
+        # Sincroniza um Responsavel por Usuario (idempotente sempre).
+        for u in db.query(Usuario).all():
+            resp = db.query(Responsavel).filter(Responsavel.usuario_id == u.id).first()
+            if not resp:
+                db.add(Responsavel(nome=u.nome, email=u.email, usuario_id=u.id, categoria="colaborador", ativo=u.ativo))
+        db.commit()
+
+        if not vazio:
+            return
+
+        nomes_usuario = {r.nome.strip().lower() for r in db.query(Responsavel).filter(Responsavel.usuario_id.isnot(None)).all()}
+
+        candidatos: dict[str, str | None] = {}
+        for nome, email in db.query(Tarefa.responsavel, Tarefa.responsavel_email).filter(Tarefa.responsavel.isnot(None)).all():
+            if nome and nome.strip():
+                candidatos.setdefault(nome.strip(), email)
+        for (nome,) in db.query(Prazo.responsavel).filter(Prazo.responsavel.isnot(None)).all():
+            if nome and nome.strip():
+                candidatos.setdefault(nome.strip(), candidatos.get(nome.strip()))
+        for nome, email in db.query(TarefaCard.responsavel, TarefaCard.responsavel_email).filter(TarefaCard.responsavel.isnot(None)).all():
+            if nome and nome.strip():
+                candidatos.setdefault(nome.strip(), email)
+
+        for nome, email in candidatos.items():
+            if nome.lower() in nomes_usuario:
+                continue
+            db.add(Responsavel(nome=nome, email=email, categoria="terceiro", ativo=True))
+        db.commit()
+
+        # Liga o que dá pra ligar por nome (case-insensitive) — só preenche
+        # o que ainda está null, nunca sobrescreve um vínculo já feito.
+        todos = {r.nome.strip().lower(): r.id for r in db.query(Responsavel).all()}
+        for tarefa in db.query(Tarefa).filter(Tarefa.responsavel.isnot(None), Tarefa.responsavel_id.is_(None)).all():
+            rid = todos.get(tarefa.responsavel.strip().lower())
+            if rid:
+                tarefa.responsavel_id = rid
+        for prazo in db.query(Prazo).filter(Prazo.responsavel.isnot(None), Prazo.responsavel_id.is_(None)).all():
+            rid = todos.get(prazo.responsavel.strip().lower())
+            if rid:
+                prazo.responsavel_id = rid
+        for card in db.query(TarefaCard).filter(TarefaCard.responsavel.isnot(None), TarefaCard.responsavel_id.is_(None)).all():
+            rid = todos.get(card.responsavel.strip().lower())
+            if rid:
+                card.responsavel_id = rid
+        db.commit()
+    finally:
+        db.close()
+
+
 _run_migrations()
 _seed_super_admin()
 _seed_conselho_data()
+_backfill_responsaveis()
 
 app = FastAPI(
     title="Sui",
@@ -1212,6 +1303,7 @@ app.include_router(tarefa_cards.router)
 app.include_router(memoria_estrategica.router)
 app.include_router(despacho.router)
 app.include_router(conselho_juridico.router)
+app.include_router(responsaveis.router)
 
 
 @app.on_event("startup")

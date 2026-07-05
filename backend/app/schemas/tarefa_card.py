@@ -13,6 +13,9 @@ class SubtaskCardCreate(BaseModel):
     texto: str
     concluida: bool = False
     ordem: int = 0
+    responsavel: str | None = None
+    responsavel_email: str | None = None
+    data_limite: date | None = None
 
 
 class SubtaskCardOut(BaseModel):
@@ -20,6 +23,9 @@ class SubtaskCardOut(BaseModel):
     texto: str
     concluida: bool
     ordem: int
+    responsavel: str | None = None
+    responsavel_email: str | None = None
+    data_limite: date | None = None
 
     model_config = {"from_attributes": True}
 
@@ -35,6 +41,7 @@ class TarefaCardCreate(BaseModel):
     notas: str | None = None
     responsavel: str | None = None
     responsavel_email: str | None = None
+    responsavel_id: uuid.UUID | None = None
     status: StatusTarefaCard = "pendente"
     data_limite: date | None = None
     confidencial: bool = False
@@ -51,6 +58,7 @@ class TarefaCardUpdate(BaseModel):
     notas: str | None = None
     responsavel: str | None = None
     responsavel_email: str | None = None
+    responsavel_id: uuid.UUID | None = None
     status: StatusTarefaCard | None = None
     data_limite: date | None = None
     confidencial: bool | None = None
@@ -78,6 +86,7 @@ class TarefaCardOut(BaseModel):
     notas: str | None = None
     responsavel: str | None = None
     responsavel_email: str | None = None
+    responsavel_id: uuid.UUID | None = None
     status: str
     data_limite: date | None = None
     google_event_id: str | None = None

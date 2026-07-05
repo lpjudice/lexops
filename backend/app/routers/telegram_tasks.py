@@ -176,26 +176,104 @@ def _handle_callback(db: Session, callback_query: dict) -> None:
     if ns != "tg":
         return
 
-    # ── Ações de item individual (toggle na seleção) ──────────────────────
-    if kind == "item" and action == "toggle":
-        session = tg.get_or_create_session(db, chat_id)
-        if not session.current_batch_id:
+    # ── Ações de item individual (toggle + vínculo com macro) ────────────
+    if kind == "item":
+        item_hex = ref_hex
+        # toggle de seleção (lógica existente)
+        if action == "toggle":
+            session = tg.get_or_create_session(db, chat_id)
+            if not session.current_batch_id:
+                return
+            payload = dict(session.payload or {})
+            selected = set(payload.get("selected_item_ids") or [])
+            if item_hex in selected:
+                selected.discard(item_hex)
+            else:
+                selected.add(item_hex)
+            payload["selected_item_ids"] = list(selected)
+            session.payload = payload
+            db.commit()
+            batch = db.query(TelegramTaskBatch).filter(TelegramTaskBatch.id == session.current_batch_id).first()
+            if batch:
+                text_out, markup = tg.build_selection_message(db, batch.id, selected)
+                tg.edit_message(chat_id, message_id, text_out, markup)
             return
-        payload = dict(session.payload or {})
-        selected = set(payload.get("selected_item_ids") or [])
-        if ref_hex in selected:
-            selected.discard(ref_hex)
-        else:
-            selected.add(ref_hex)
-        payload["selected_item_ids"] = list(selected)
-        session.payload = payload
-        db.commit()
 
-        batch = db.query(TelegramTaskBatch).filter(TelegramTaskBatch.id == session.current_batch_id).first()
-        if batch:
-            text_out, markup = tg.build_selection_message(db, batch.id, selected)
+        # card_proj — pede filtro de projeto para vincular a uma macro
+        if action == "card_proj":
+            try:
+                uuid.UUID(hex=item_hex)
+            except ValueError:
+                return
+            text_out, markup = tg.build_projeto_menu_for_item(db, item_hex)
             tg.edit_message(chat_id, message_id, text_out, markup)
-        return
+            return
+
+        # card_p:<idx|all> — escolheu projeto (ou sem filtro), mostra macros
+        if action.startswith("card_p:"):
+            proj_part = action[len("card_p:"):]
+            projeto_id = None
+            if proj_part != "all":
+                try:
+                    idx = int(proj_part)
+                    projetos = tg._active_projetos(db)
+                    if idx < len(projetos):
+                        projeto_id = projetos[idx].id
+                except ValueError:
+                    pass
+            try:
+                uuid.UUID(hex=item_hex)
+            except ValueError:
+                return
+            text_out, markup = tg.build_macro_menu_for_item(db, item_hex, projeto_id)
+            tg.edit_message(chat_id, message_id, text_out, markup)
+            return
+
+        # card_m:<idx> — escolheu macro, vincula e volta ao menu do lote
+        if action.startswith("card_m:"):
+            try:
+                macro_idx = int(action[len("card_m:"):])
+                item_id = uuid.UUID(hex=item_hex)
+            except ValueError:
+                tg.edit_message(chat_id, message_id, "Erro. Tente novamente.")
+                return
+            from app.models.telegram_task import TelegramTaskItem as _Item
+            from app.models.tarefa_card import TarefaCard as _Card
+            item = db.query(_Item).filter(_Item.id == item_id).first()
+            if not item:
+                tg.edit_message(chat_id, message_id, "Item não encontrado.")
+                return
+            # Busca macros da mesma seleção de projeto (sem filtro para simplicidade)
+            macros = tg._open_macros(db)
+            if macro_idx >= len(macros):
+                tg.edit_message(chat_id, message_id, "Macro não encontrada.")
+                return
+            macro = macros[macro_idx]
+            tg.link_item_to_macro(db, item, macro)
+            # Volta ao menu de vínculo do lote para continuar com outras tarefas
+            session = tg.get_or_create_session(db, chat_id)
+            if session.current_batch_id:
+                batch = db.query(TelegramTaskBatch).filter(TelegramTaskBatch.id == session.current_batch_id).first()
+                if batch:
+                    text_out, markup = tg.build_card_link_menu(db, batch)
+                    tg.edit_message(chat_id, message_id, f"✅ Vinculado a: {macro.titulo}\n\n{text_out}", markup)
+                    return
+            tg.edit_message(chat_id, message_id, f"✅ Vinculado a: {macro.titulo}")
+            return
+
+        # card_cancel — mantém como card avulso, volta ao menu do lote
+        if action == "card_cancel":
+            session = tg.get_or_create_session(db, chat_id)
+            if session.current_batch_id:
+                batch = db.query(TelegramTaskBatch).filter(TelegramTaskBatch.id == session.current_batch_id).first()
+                if batch:
+                    text_out, markup = tg.build_card_link_menu(db, batch)
+                    tg.edit_message(chat_id, message_id, text_out, markup)
+                    return
+            tg.edit_message(chat_id, message_id, "Ok, mantido como card avulso.")
+            return
+
+        return  # item action não reconhecida
 
     # ── Ações de lote ─────────────────────────────────────────────────────
     if kind != "batch":
@@ -204,7 +282,7 @@ def _handle_callback(db: Session, callback_query: dict) -> None:
     batch = _batch_or_404(db, ref_hex)
 
     if action == "done":
-        tg.edit_message(chat_id, message_id, "✅ Tarefas salvas! Veja no menu Tarefas do LexOps.")
+        tg.edit_message(chat_id, message_id, "✅ Tarefas salvas! Veja no menu Tarefas e Tarefas em Cards do LexOps.")
         batch.status = "concluido"
         db.commit()
         return
@@ -253,6 +331,11 @@ def _handle_callback(db: Session, callback_query: dict) -> None:
         session.current_batch_id = batch.id
         db.commit()
         tg.send_message(chat_id, "Digite o nome do responsável (e email se quiser notificação, ex: João Silva <joao@email.com>):", tg.default_reply_markup())
+        return
+
+    if action == "card_link":
+        text_out, markup = tg.build_card_link_menu(db, batch)
+        tg.edit_message(chat_id, message_id, text_out, markup)
         return
 
     if action == "dates":

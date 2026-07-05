@@ -19,6 +19,7 @@ from app.models.usuario import Usuario
 from app.schemas.tarefa_card import (
     PedidoAcessoCard,
     SolicitarAcessoCardResponse,
+    SubtaskCardCreate,
     TarefaCardCreate,
     TarefaCardOut,
     TarefaCardUpdate,
@@ -141,7 +142,11 @@ def criar_card(
         card.criado_por_id = usuario.id
     for idx, st in enumerate(data.subtasks):
         card.subtasks.append(
-            TarefaCardSubtask(texto=st.texto, concluida=st.concluida, ordem=st.ordem or idx)
+            TarefaCardSubtask(
+                texto=st.texto, concluida=st.concluida, ordem=st.ordem or idx,
+                responsavel=st.responsavel, responsavel_email=st.responsavel_email,
+                data_limite=st.data_limite,
+            )
         )
     db.add(card)
     db.commit()
@@ -218,7 +223,8 @@ def deletar_card(
 @router.post("/{card_id}/subtasks", response_model=TarefaCardOut)
 def add_subtask(
     card_id: uuid.UUID,
-    texto: str = Query(...),
+    data: SubtaskCardCreate | None = None,
+    texto: str | None = Query(None),
     db: Session = Depends(get_db),
     usuario: Usuario | None = Depends(get_optional_user),
 ):
@@ -228,7 +234,16 @@ def add_subtask(
     if not _pode_ver(card, usuario):
         raise HTTPException(status_code=403, detail="Acesso restrito a este card")
     ordem = max((st.ordem for st in card.subtasks), default=-1) + 1
-    card.subtasks.append(TarefaCardSubtask(texto=texto, ordem=ordem))
+    if data:
+        card.subtasks.append(TarefaCardSubtask(
+            texto=data.texto, concluida=data.concluida, ordem=data.ordem or ordem,
+            responsavel=data.responsavel, responsavel_email=data.responsavel_email,
+            data_limite=data.data_limite,
+        ))
+    elif texto:
+        card.subtasks.append(TarefaCardSubtask(texto=texto, ordem=ordem))
+    else:
+        raise HTTPException(status_code=422, detail="Forneça 'data' (body) ou 'texto' (query)")
     db.commit()
     db.refresh(card)
     return _enrich(card, db, usuario)

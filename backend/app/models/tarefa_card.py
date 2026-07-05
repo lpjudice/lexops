@@ -45,6 +45,9 @@ class TarefaCard(Base):
 
     responsavel: Mapped[str | None] = mapped_column(String(255), nullable=True)
     responsavel_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    responsavel_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("responsaveis.id", ondelete="SET NULL"), nullable=True
+    )
 
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="pendente")
     data_limite: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -76,5 +79,8 @@ class TarefaCardSubtask(Base):
     texto: Mapped[str] = mapped_column(String(500), nullable=False)
     concluida: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     ordem: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    responsavel: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    responsavel_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    data_limite: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     card: Mapped["TarefaCard"] = relationship("TarefaCard", back_populates="subtasks")
