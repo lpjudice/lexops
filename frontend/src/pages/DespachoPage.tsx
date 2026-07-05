@@ -132,8 +132,8 @@ export default function DespachoPage() {
             <p style={{ color: 'var(--gray-mid)' }}>Nenhuma publicação tratada ainda.</p>
           )}
           {tratadas.map((p) => (
-            <div key={p.id} style={{ background: '#fff', border: '1px solid #eee', borderRadius: 8, padding: 16, marginBottom: 14 }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--dark)', marginBottom: 4 }}>
+            <div key={p.id} style={{ background: '#fff', border: '1px solid #eee', borderRadius: 8, padding: 16, marginBottom: 14, maxWidth: '100%', boxSizing: 'border-box', overflow: 'hidden' }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--dark)', marginBottom: 4, overflowWrap: 'anywhere' }}>
                 {p.cliente_nome || p.cliente_nome_pub || 'Cliente não identificado'}
                 {(p.processo_numero_cnj || p.numero_cnj) && (
                   <span style={{ fontWeight: 500, color: 'var(--teal)', marginLeft: 8 }}>
@@ -144,13 +144,13 @@ export default function DespachoPage() {
               <p style={{ fontSize: 12, color: 'var(--gray-mid)', margin: '0 0 8px' }}>
                 {p.data_publicacao} · {p.tribunal || '?'} · {p.tipo_ato || 'ato n/d'}
               </p>
-              <p style={{ fontSize: 13, color: 'var(--dark)', margin: '0 0 8px' }}>{p.texto_resumo}</p>
+              <p style={{ fontSize: 13, color: 'var(--dark)', margin: '0 0 8px', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{p.texto_resumo}</p>
               {p.rejeitada ? (
                 <p style={{ fontSize: 12, color: '#b91c1c', margin: '0 0 8px' }}>✕ Descartada (não era do escritório)</p>
               ) : (
                 <>
                   {p.sugestao_acao && (
-                    <p style={{ fontSize: 12, color: 'var(--dark)', margin: '0 0 6px' }}>{p.sugestao_acao.resumo_raciocinio}</p>
+                    <p style={{ fontSize: 12, color: 'var(--dark)', margin: '0 0 6px', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{p.sugestao_acao.resumo_raciocinio}</p>
                   )}
                   {p.prazo_id ? (
                     <p style={{ fontSize: 12, margin: '0 0 4px' }}>
@@ -195,10 +195,10 @@ export default function DespachoPage() {
       {pendentes.map((p) => {
         const conf = CONFIANCA_LABEL[p.confianca]
         return (
-          <div key={p.id} style={{ background: '#fff', border: '1px solid #eee', borderRadius: 8, padding: 16, marginBottom: 14 }}>
+          <div key={p.id} style={{ background: '#fff', border: '1px solid #eee', borderRadius: 8, padding: 16, marginBottom: 14, maxWidth: '100%', boxSizing: 'border-box', overflow: 'hidden' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--dark)', marginBottom: 4 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--dark)', marginBottom: 4, overflowWrap: 'anywhere' }}>
                   {p.cliente_nome || p.cliente_nome_pub || 'Cliente não identificado'}
                   {(p.processo_numero_cnj || p.numero_cnj) && (
                     <span style={{ fontWeight: 500, color: 'var(--teal)', marginLeft: 8 }}>
@@ -214,8 +214,8 @@ export default function DespachoPage() {
                     {p.data_publicacao} · {p.tribunal || '?'} · {p.tipo_ato || 'ato n/d'}
                   </span>
                 </div>
-                <p style={{ fontSize: 13, color: 'var(--dark)', margin: '0 0 8px' }}>{p.texto_resumo}</p>
-                <p style={{ fontSize: 12, color: 'var(--gray-mid)', margin: 0 }}>
+                <p style={{ fontSize: 13, color: 'var(--dark)', margin: '0 0 8px', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{p.texto_resumo}</p>
+                <p style={{ fontSize: 12, color: 'var(--gray-mid)', margin: 0, overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
                   CNJ extraído: {p.numero_cnj || '—'} · Nome extraído: {p.cliente_nome_pub || '—'}
                 </p>
               </div>
@@ -421,8 +421,8 @@ function SugestaoAcaoPainel({ publicacao: p }: { publicacao: PublicacaoPendente 
   }
 
   return (
-    <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #f5f5f5', background: '#fafffe' }}>
-      <p style={{ fontSize: 13, color: 'var(--dark)', margin: '0 0 10px' }}>{sugestao.resumo_raciocinio}</p>
+    <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #f5f5f5', background: '#fafffe', maxWidth: '100%', boxSizing: 'border-box', overflow: 'hidden' }}>
+      <p style={{ fontSize: 13, color: 'var(--dark)', margin: '0 0 10px', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{sugestao.resumo_raciocinio}</p>
 
       {opcoes.length > 0 ? (
         <div style={{ marginBottom: 10 }}>
@@ -540,21 +540,21 @@ function SugestaoAcaoPainel({ publicacao: p }: { publicacao: PublicacaoPendente 
       )}
 
       {p.peca_gerada && (
-        <div style={{ background: '#fff', border: '1px solid #eee', borderRadius: 6, padding: 12, marginBottom: 10, fontSize: 12 }}>
+        <div style={{ background: '#fff', border: '1px solid #eee', borderRadius: 6, padding: 12, marginBottom: 10, fontSize: 12, maxWidth: '100%', boxSizing: 'border-box', overflow: 'hidden' }}>
           {p.peca_doc_url && (
             <p style={{ margin: '0 0 8px' }}>
               📄 <a href={p.peca_doc_url} target="_blank" rel="noreferrer" style={{ color: 'var(--teal)', fontWeight: 600 }}>Abrir peça no Google Docs</a>
             </p>
           )}
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>{p.peca_gerada.titulo_peca}</div>
-          <p style={{ margin: '0 0 6px' }}>{p.peca_gerada.enderecamento}</p>
-          <p style={{ margin: '0 0 6px' }}>{p.peca_gerada.qualificacao}</p>
+          <div style={{ fontWeight: 700, marginBottom: 6, overflowWrap: 'anywhere' }}>{p.peca_gerada.titulo_peca}</div>
+          <p style={{ margin: '0 0 6px', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{p.peca_gerada.enderecamento}</p>
+          <p style={{ margin: '0 0 6px', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{p.peca_gerada.qualificacao}</p>
           {p.peca_gerada.paragrafos.map((par, i) => (
-            <p key={i} style={{ margin: '0 0 6px' }}>
+            <p key={i} style={{ margin: '0 0 6px', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
               {i + 1}. <PecaTexto texto={par} />
             </p>
           ))}
-          <p style={{ margin: '0 0 6px' }}>{p.peca_gerada.fechamento}</p>
+          <p style={{ margin: '0 0 6px', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{p.peca_gerada.fechamento}</p>
           {p.peca_gerada.itens_faltantes.length > 0 && (
             <p style={{ color: '#b91c1c', fontWeight: 600, marginTop: 8 }}>
               ⚠ Faltam: {p.peca_gerada.itens_faltantes.join('; ')}
