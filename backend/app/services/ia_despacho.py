@@ -116,8 +116,12 @@ def gerar_peca(
     try:
         import anthropic
 
+        from datetime import date
+        hoje_extenso = date.today().strftime("%d/%m/%Y")
+
         client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
         mensagem = (
+            f"DATA DE HOJE (use no fechamento, por extenso — isso NÃO é item faltante): {hoje_extenso}\n\n"
             f"CONTEXTO DO PROCESSO:\n{contexto_processo[:12000]}\n\n"
             f"PUBLICAÇÃO:\n{texto_publicacao[:4000]}\n\n"
             f"PEÇA A REDIGIR: {opcao_prazo.get('label') or opcao_prazo.get('peca_necessaria')}\n"
