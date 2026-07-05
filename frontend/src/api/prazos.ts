@@ -21,6 +21,7 @@ export interface Prazo {
   status: StatusPrazo
   google_event_id?: string
   criado_automaticamente?: boolean
+  tarefas_vinculadas?: { id: string; titulo: string }[]
   created_at: string
   updated_at: string
 }

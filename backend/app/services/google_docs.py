@@ -114,13 +114,23 @@ def gerar_documento_peca(peca: dict, nome_documento: str) -> dict | None:
     def _inserir(tokens: dict):
         doc = _docs_request("GET", f"/{doc_id}", tokens)
         end_index = doc["body"]["content"][-1]["endIndex"]
-        insert_at = end_index - 1  # antes do parágrafo final vazio
-        _docs_request("POST", f"/{doc_id}:batchUpdate", tokens, json={
-            "requests": [
-                {"insertText": {"location": {"index": insert_at}, "text": texto}},
-            ]
+
+        requests = []
+        # O timbrado (logo/cabeçalho) fica num header próprio do Docs — o
+        # corpo é só texto de exemplo, seguro de apagar antes de escrever.
+        if end_index > 2:
+            requests.append({
+                "deleteContentRange": {"range": {"startIndex": 1, "endIndex": end_index - 1}}
+            })
+        requests.append({"insertText": {"location": {"index": 1}, "text": texto}})
+        # Remove qualquer formatação de lista numerada/bullet herdada, senão
+        # cada parágrafo (inclusive as linhas em branco) ganha um marcador.
+        requests.append({
+            "deleteParagraphBullets": {"range": {"startIndex": 1, "endIndex": 1 + len(texto)}}
         })
-        return insert_at
+
+        _docs_request("POST", f"/{doc_id}:batchUpdate", tokens, json={"requests": requests})
+        return 1
 
     insert_at = _com_refresh(_inserir)
     if insert_at is None:

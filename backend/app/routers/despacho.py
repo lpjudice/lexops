@@ -82,6 +82,7 @@ def _criar_prazo_e_tarefas(
     Compartilhado entre /aprovar e o pipeline automático."""
     resultado: dict = {"tarefa_ids": []}
     tarefas_criadas: list[dict] = []
+    prazo_criado_id = None
 
     if criar_prazo and peca_necessaria and dias_prazo:
         from app.services.google_calendar import criar_evento
@@ -120,6 +121,7 @@ def _criar_prazo_e_tarefas(
 
         pub.prazo_id = prazo.id
         pub.gera_prazo = True
+        prazo_criado_id = prazo.id
         resultado["prazo_id"] = str(prazo.id)
         resultado["prazo_data_limite"] = prazo.data_limite.isoformat() if prazo.data_limite else None
 
@@ -133,6 +135,7 @@ def _criar_prazo_e_tarefas(
             responsavel=t.responsavel,
             status="pendente",
             criado_automaticamente=automatico,
+            prazo_id=prazo_criado_id,
         )
         db.add(tarefa)
         db.commit()

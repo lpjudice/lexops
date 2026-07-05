@@ -1129,6 +1129,12 @@ export default function TarefasPage() {
                           {tarefa.criado_automaticamente && (
                             <span title="Criada automaticamente pelo gestor jurídico (Despacho)" style={{ fontSize: 11, background: '#f3e8ff', color: '#7c3aed', borderRadius: 4, padding: '1px 6px', flexShrink: 0 }}>🤖 automático</span>
                           )}
+                          {tarefa.prazo_id && (
+                            <a href="/prazos" title="Ver prazo vinculado" onClick={(e) => e.stopPropagation()}
+                              style={{ fontSize: 11, background: '#dbeafe', color: '#1d4ed8', borderRadius: 4, padding: '1px 6px', flexShrink: 0, textDecoration: 'none' }}>
+                              🔗 prazo
+                            </a>
+                          )}
                           <span className={t.titulo}>{tarefa.titulo}</span>
                           {tarefa.tags && !tarefa.tags.split(',').map(x => x.trim()).every(x => x === 'telegram') && (
                             <span className={t.tagChip}>{tarefa.tags.split(',').map(x => x.trim()).filter(x => x !== 'telegram').join(', ')}</span>

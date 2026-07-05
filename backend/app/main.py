@@ -955,6 +955,10 @@ def _run_migrations() -> None:
             "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS tarefas_criadas TEXT"
         ))
 
+        conn.execute(text(
+            "ALTER TABLE tarefas ADD COLUMN IF NOT EXISTS prazo_id UUID REFERENCES prazos(id) ON DELETE SET NULL"
+        ))
+
         conn.commit()
 
 

@@ -323,6 +323,8 @@ function SugestaoAcaoPainel({ publicacao: p }: { publicacao: PublicacaoPendente 
   const [novaTarefa, setNovaTarefa] = useState('')
   const [promptExtra, setPromptExtra] = useState('')
   const [tipoPecaManual, setTipoPecaManual] = useState('')
+  const [diasPrazoManual, setDiasPrazoManual] = useState<number | ''>('')
+  const [tipoContagemManual, setTipoContagemManual] = useState<'uteis' | 'corridos'>('uteis')
   const [gerandoPeca, setGerandoPeca] = useState(false)
   const [aprovando, setAprovando] = useState(false)
 
@@ -356,20 +358,32 @@ function SugestaoAcaoPainel({ publicacao: p }: { publicacao: PublicacaoPendente 
 
   const aprovar = async () => {
     setAprovando(true)
+    let erroPeca: string | null = null
     try {
-      // Um clique só: se ainda não gerou a peça e há o que gerar, gera agora.
+      // Um clique só: gera a peça (se houver o que gerar) e cria prazo/tarefas —
+      // mas uma falha na peça NUNCA pode impedir a criação de prazo/tarefas.
       if (opcaoParaPeca && !p.peca_doc_url) {
-        await despachoApi.gerarPeca(p.id, opcaoParaPeca, promptExtra)
+        try {
+          await despachoApi.gerarPeca(p.id, opcaoParaPeca, promptExtra)
+        } catch {
+          erroPeca = 'Não foi possível gerar a peça — prazo e tarefas foram criados mesmo assim.'
+        }
       }
+      const prazoParaCriar = opcaoEscolhida ?? (diasPrazoManual
+        ? { peca_necessaria: tipoPecaManual.trim() || 'outro', dias_prazo: diasPrazoManual, tipo_contagem: tipoContagemManual }
+        : null)
       await despachoApi.aprovar(p.id, {
-        criar_prazo: sugestao.requer_prazo && !!opcaoEscolhida,
-        peca_necessaria: opcaoEscolhida?.peca_necessaria ?? null,
-        dias_prazo: opcaoEscolhida?.dias_prazo ?? null,
-        tipo_contagem: opcaoEscolhida?.tipo_contagem ?? 'uteis',
+        criar_prazo: !!prazoParaCriar,
+        peca_necessaria: prazoParaCriar?.peca_necessaria ?? null,
+        dias_prazo: prazoParaCriar?.dias_prazo ?? null,
+        tipo_contagem: prazoParaCriar?.tipo_contagem ?? 'uteis',
         tarefas: tarefas.filter((t) => t.marcada).map(({ titulo, responsavel }) => ({ titulo, responsavel })),
       })
       qc.invalidateQueries({ queryKey: ['despacho-pendentes'] })
       qc.invalidateQueries({ queryKey: ['despacho-tratadas'] })
+      if (erroPeca) alert(erroPeca)
+    } catch {
+      alert('Erro ao aprovar. Prazo/tarefas podem não ter sido criados — confira em Prazos e Tarefas.')
     } finally {
       setAprovando(false)
     }
@@ -394,15 +408,34 @@ function SugestaoAcaoPainel({ publicacao: p }: { publicacao: PublicacaoPendente 
       ) : (
         <div style={{ marginBottom: 10 }}>
           <p style={{ fontSize: 12, color: 'var(--gray-mid)', fontStyle: 'italic', margin: '0 0 6px' }}>
-            A IA entendeu que esta publicação não exige prazo formal. Se mesmo assim quiser gerar uma
-            peça (ex: pra uma das tarefas abaixo), digite o tipo aqui:
+            A IA entendeu que esta publicação não exige prazo formal. Se discordar, defina um prazo
+            manualmente (fica visível em Prazos) e/ou gere uma peça:
           </p>
           <input
             value={tipoPecaManual}
             onChange={(e) => setTipoPecaManual(e.target.value)}
             placeholder="Tipo de peça (ex: petição juntando documento, manifestação...)"
-            style={{ width: '100%', fontSize: 12, padding: '6px 8px', border: '1px solid #ddd', borderRadius: 6, boxSizing: 'border-box' }}
+            style={{ width: '100%', fontSize: 12, padding: '6px 8px', border: '1px solid #ddd', borderRadius: 6, boxSizing: 'border-box', marginBottom: 6 }}
           />
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <span style={{ fontSize: 12, color: 'var(--gray-mid)' }}>Prazo:</span>
+            <input
+              type="number"
+              min={1}
+              value={diasPrazoManual}
+              onChange={(e) => setDiasPrazoManual(e.target.value ? Number(e.target.value) : '')}
+              placeholder="dias"
+              style={{ width: 70, fontSize: 12, padding: '5px 8px', border: '1px solid #ddd', borderRadius: 6 }}
+            />
+            <select
+              value={tipoContagemManual}
+              onChange={(e) => setTipoContagemManual(e.target.value as 'uteis' | 'corridos')}
+              style={{ fontSize: 12, padding: '5px 8px', border: '1px solid #ddd', borderRadius: 6 }}
+            >
+              <option value="uteis">dias úteis</option>
+              <option value="corridos">dias corridos</option>
+            </select>
+          </div>
         </div>
       )}
 

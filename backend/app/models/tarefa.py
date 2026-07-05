@@ -17,6 +17,8 @@ class Tarefa(Base):
     anotacao_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("anotacoes.id", ondelete="SET NULL"), nullable=True)
     criado_por_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("usuarios.id", ondelete="SET NULL"), nullable=True)
     projeto_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("tarefa_projetos.id", ondelete="SET NULL"), nullable=True)
+    # Prazo formal ligado a esta tarefa (ex: ambos criados juntos no Despacho).
+    prazo_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("prazos.id", ondelete="SET NULL"), nullable=True)
 
     titulo: Mapped[str] = mapped_column(String(500), nullable=False)
     descricao: Mapped[str | None] = mapped_column(Text)

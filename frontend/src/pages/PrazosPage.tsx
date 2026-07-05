@@ -253,6 +253,12 @@ export default function PrazosPage() {
                           🤖 Automático
                         </span>
                       )}
+                      {(p.tarefas_vinculadas?.length ?? 0) > 0 && (
+                        <a href="/tarefas" title={p.tarefas_vinculadas!.map(t => t.titulo).join('; ')}
+                          style={{ fontSize: 11, fontWeight: 700, color: '#1d4ed8', background: '#dbeafe', padding: '2px 8px', borderRadius: 999, textDecoration: 'none' }}>
+                          🔗 {p.tarefas_vinculadas!.length} tarefa(s)
+                        </a>
+                      )}
                       {p.peca_necessaria && editando !== p.id && (
                         <span className={prazosStyles.pecaChip}>
                           {p.peca_necessaria}

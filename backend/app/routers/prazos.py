@@ -7,6 +7,7 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.prazo import Prazo
 from app.models.processo import Processo
+from app.models.tarefa import Tarefa
 from app.schemas.prazo import PrazoCreate, PrazoOut, PrazoUpdate
 from app.services.google_calendar import criar_evento, deletar_evento
 from app.services.prazo_calc import calcular_prazo
@@ -38,7 +39,15 @@ def listar_prazos(
         q = q.filter(Prazo.processo_id == processo_id)
     if status:
         q = q.filter(Prazo.status == status)
-    return q.order_by(Prazo.data_limite.asc().nullslast()).all()
+    prazos = q.order_by(Prazo.data_limite.asc().nullslast()).all()
+
+    tarefas_por_prazo: dict = {}
+    for t in db.query(Tarefa).filter(Tarefa.prazo_id.in_([p.id for p in prazos])).all():
+        tarefas_por_prazo.setdefault(t.prazo_id, []).append({"id": t.id, "titulo": t.titulo})
+    for p in prazos:
+        p.tarefas_vinculadas = tarefas_por_prazo.get(p.id, [])
+
+    return prazos
 
 
 @router.post("/", response_model=PrazoOut, status_code=status.HTTP_201_CREATED)

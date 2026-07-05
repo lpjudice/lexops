@@ -73,6 +73,7 @@ class TarefaOut(BaseModel):
     confidencial: bool = False
     usuarios_com_acesso: list[str] | None = None
     criado_automaticamente: bool = False
+    prazo_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
     # Enriched

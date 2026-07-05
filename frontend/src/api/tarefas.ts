@@ -31,6 +31,7 @@ export interface Tarefa {
   confidencial: boolean
   usuarios_com_acesso: string[] | null
   criado_automaticamente?: boolean
+  prazo_id?: string | null
   acesso_restrito: boolean
   pedidos_acesso: PedidoAcessoTarefa[]
   ja_solicitou: boolean

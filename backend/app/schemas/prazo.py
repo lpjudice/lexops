@@ -39,6 +39,11 @@ class PrazoUpdate(BaseModel):
     status: StatusPrazo | None = None
 
 
+class TarefaVinculada(BaseModel):
+    id: uuid.UUID
+    titulo: str
+
+
 class PrazoOut(PrazoBase):
     id: uuid.UUID
     data_limite: date | None
@@ -47,6 +52,7 @@ class PrazoOut(PrazoBase):
     responsavel: str | None
     google_event_id: str | None
     criado_automaticamente: bool = False
+    tarefas_vinculadas: list[TarefaVinculada] = []
     created_at: datetime
     updated_at: datetime
 
