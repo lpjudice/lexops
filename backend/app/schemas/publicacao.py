@@ -1,6 +1,6 @@
 import uuid
 from datetime import date, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -51,6 +51,10 @@ class PublicacaoOut(PublicacaoBase):
     comunica_id: str | None = None
     match_oab: str | None = None
     created_at: datetime
+    # Preenchido (transiente, não é coluna) quando a publicação já passou
+    # pelo Despacho — ver app/services/despacho_status.py. None = nunca foi
+    # triada lá, então não tem nada a mostrar.
+    despacho_status: dict[str, Any] | None = None
 
     model_config = {"from_attributes": True}
 

@@ -4,6 +4,7 @@ import { diario2Api } from '../api/diario2'
 import type { Diario2Publicacao, Diario2Dia, Diario2PrazoCreate, StatusPrazoDiario2 } from '../api/diario2'
 import { processosApi } from '../api/processos'
 import { usuariosApi } from '../api/usuarios'
+import DespachoStatusResumo from '../components/DespachoStatusResumo'
 import styles from './Page.module.css'
 import diario2Styles from './Diario2Page.module.css'
 
@@ -257,6 +258,8 @@ export default function Diario2Page() {
                             </select>
                           </div>
                         )}
+                        <DespachoStatusResumo status={pub.despacho_status} />
+
                         {prazoPub === pub.id && prazoForm && (
                           <form
                             className={diario2Styles.prazoForm}

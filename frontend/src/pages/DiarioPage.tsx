@@ -6,6 +6,7 @@ import { processosApi } from '../api/processos'
 import type { Processo } from '../api/processos'
 import { clientesApi } from '../api/clientes'
 import type { Cliente } from '../api/clientes'
+import DespachoStatusResumo from '../components/DespachoStatusResumo'
 import styles from './Page.module.css'
 import diarioStyles from './DiarioPage.module.css'
 
@@ -1108,6 +1109,8 @@ export default function DiarioPage() {
                   )}
                 </div>
               )}
+
+              <DespachoStatusResumo status={pub.despacho_status} />
 
               {vincularId === pub.id && (
                 <div className={diarioStyles.vincularForm}>

@@ -1,4 +1,5 @@
 import api from './client'
+import type { DespachoStatus } from './diario'
 
 export type StatusPrazoDiario2 = 'pendente' | 'cumprido' | 'perdido'
 
@@ -49,6 +50,7 @@ export interface Diario2Publicacao {
   } | null
   prazo?: Diario2Prazo | null
   created_at?: string | null
+  despacho_status?: DespachoStatus | null
 }
 
 export interface Diario2Dia {

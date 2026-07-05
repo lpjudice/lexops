@@ -16,6 +16,7 @@ from app.models.publicacao import Publicacao
 from app.models.processo import Processo
 from app.models.tese import Tese
 from app.schemas.publicacao import PublicacaoOut, PublicacaoUpdate, SyncResult
+from app.services.despacho_status import enriquecer_status_despacho
 from app.services.gmail_diario import sincronizar_gmail
 from app.services.ia_diario import analisar_publicacao
 from app.services.scraping_tribunais import TRIBUNAIS_VALIDOS, scrape_todos
@@ -487,7 +488,9 @@ def listar_publicacoes(
         q = q.filter(Publicacao.data_publicacao >= data_inicio)
     if data_fim:
         q = q.filter(Publicacao.data_publicacao <= data_fim)
-    return q.order_by(Publicacao.data_publicacao.desc()).all()
+    pubs = q.order_by(Publicacao.data_publicacao.desc()).all()
+    enriquecer_status_despacho(db, pubs)
+    return pubs
 
 
 @router.get("/{pub_id}", response_model=PublicacaoOut)
@@ -495,6 +498,7 @@ def obter_publicacao(pub_id: uuid.UUID, db: Session = Depends(get_db)):
     pub = db.query(Publicacao).filter(Publicacao.id == pub_id).first()
     if not pub:
         raise HTTPException(status_code=404, detail="Publicação não encontrada")
+    enriquecer_status_despacho(db, [pub])
     return pub
 
 

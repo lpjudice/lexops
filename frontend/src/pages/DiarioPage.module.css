@@ -208,7 +208,6 @@
 .card:hover { border-color: #8b5cf6; }
 .cardLida {
   border-left-color: #d1d5db;
-  opacity: 0.75;
 }
 .cardRejeitada {
   border-left-color: #f87171;

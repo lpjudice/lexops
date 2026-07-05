@@ -49,6 +49,16 @@ class Publicacao(Base):
     lida: Mapped[bool] = mapped_column(Boolean, default=False)
     rejeitada: Mapped[bool] = mapped_column(Boolean, default=False)
     despacho_tratada: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Motivo de ter sido tratada sem gerar prazo/tarefa: "sem_acao" (revisada,
+    # não precisa de nada) ou "nao_e_nosso" (mesmo motivo de `rejeitada`,
+    # guardado aqui também pra ter um rótulo único em Tratadas).
+    disposicao: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Card macro (Tarefas Cards) criado junto com o prazo/tarefas no Despacho —
+    # guardado aqui pra dar pra achar o tratamento de volta a partir do menu
+    # de origem (Diário Oficial / Recorte Digital), sem depender de heurística.
+    tarefa_card_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tarefa_cards.id", ondelete="SET NULL"), nullable=True
+    )
     gera_prazo: Mapped[bool] = mapped_column(Boolean, default=False)
     prazo_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("prazos.id", ondelete="SET NULL"), nullable=True

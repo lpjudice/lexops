@@ -21,6 +21,16 @@ export interface AnaliseIA {
   erro?: string
 }
 
+export interface DespachoStatus {
+  tratada: boolean
+  rejeitada: boolean
+  disposicao: 'sem_acao' | 'nao_e_nosso' | null
+  prazo: { id: string; tipo: string; data_limite: string | null; status: string } | null
+  tarefa_card: { id: string; titulo: string; status: string; subtasks: { texto: string; concluida: boolean }[] } | null
+  tarefas: { id: string; titulo: string; responsavel: string | null }[]
+  peca_doc_url: string | null
+}
+
 export interface Publicacao {
   id: string
   fonte: FontePublicacao
@@ -42,6 +52,7 @@ export interface Publicacao {
   comunica_id?: string
   match_oab?: string       // ex.: "14477/ES" — match forte por OAB
   created_at: string
+  despacho_status?: DespachoStatus | null
 }
 
 export interface SyncResult {

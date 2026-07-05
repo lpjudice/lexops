@@ -53,6 +53,7 @@ export interface PublicacaoPendente {
   peca_gerada: PecaGerada | null
   peca_doc_url: string | null
   rejeitada: boolean
+  disposicao: 'sem_acao' | 'nao_e_nosso' | null
   prazo_id: string | null
   tarefas_criadas: { id: string; titulo: string; responsavel: string | null }[]
 }
@@ -69,6 +70,8 @@ export const despachoApi = {
     api.post(`/despacho/${id}/confirmar`, { processo_id: processoId, confirmado }).then((r) => r.data),
 
   rejeitar: (id: string) => api.post(`/despacho/${id}/rejeitar`).then((r) => r.data),
+
+  semAcao: (id: string) => api.post(`/despacho/${id}/sem-acao`).then((r) => r.data),
 
   reverter: (id: string) => api.post(`/despacho/${id}/reverter`).then((r) => r.data),
 

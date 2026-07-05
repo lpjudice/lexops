@@ -18,6 +18,7 @@ from app.models.cliente import Cliente
 from app.models.prazo import Prazo
 from app.models.processo import Processo
 from app.models.publicacao import Publicacao
+from app.services.despacho_status import enriquecer_status_despacho
 from app.services.gmail_diario import sincronizar_gmail
 from app.services.google_master_tokens import load_master_google_tokens, save_master_google_tokens
 from app.services.ia_diario import analisar_publicacao
@@ -627,6 +628,7 @@ def _publicacao_payload(pub: Publicacao) -> dict[str, Any]:
         "analise_ia": analise or None,
         "prazo": _prazo_payload(pub, pub.prazo),
         "created_at": pub.created_at.isoformat() if pub.created_at else None,
+        "despacho_status": getattr(pub, "despacho_status", None),
     }
 
 
@@ -729,6 +731,7 @@ def listar_diario2(
 ):
     inicio = date.today() - timedelta(days=days_back)
     publicacoes = _filtrar_publicacoes_visiveis(_query_publicacoes(db, data_inicio=inicio).all())
+    enriquecer_status_despacho(db, publicacoes)
     grupos: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for pub in publicacoes:
         grupos[pub.data_publicacao.isoformat()].append(_publicacao_payload(pub))
@@ -758,6 +761,7 @@ def analisar_diario2(pub_id: uuid.UUID, db: Session = Depends(get_db)):
             pub.processo_id = processo.id
     db.commit()
     db.refresh(pub)
+    enriquecer_status_despacho(db, [pub])
     return _publicacao_payload(pub)
 
 
@@ -799,6 +803,7 @@ def criar_prazo_diario2(pub_id: uuid.UUID, payload: Diario2PrazoRequest, db: Ses
     pub.gera_prazo = True
     db.commit()
     db.refresh(pub)
+    enriquecer_status_despacho(db, [pub])
     return _publicacao_payload(pub)
 
 
@@ -815,6 +820,7 @@ def atualizar_status_prazo_diario2(pub_id: uuid.UUID, payload: Diario2StatusPraz
     prazo.status = payload.status
     db.commit()
     db.refresh(pub)
+    enriquecer_status_despacho(db, [pub])
     return _publicacao_payload(pub)
 
 
@@ -826,6 +832,7 @@ def relembre_diario2(days_back: int = Query(7, ge=1, le=60), db: Session = Depen
         for pub in _filtrar_publicacoes_visiveis(_query_publicacoes(db, data_inicio=inicio).all())
         if _publicacao_tem_conteudo(pub)
     ]
+    enriquecer_status_despacho(db, publicacoes)
     itens = []
     for pub in publicacoes:
         if not pub.analise_ia:

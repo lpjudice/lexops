@@ -1000,6 +1000,12 @@ def _run_migrations() -> None:
         conn.execute(text(
             "ALTER TABLE tarefa_cards ADD COLUMN IF NOT EXISTS responsavel_id UUID REFERENCES responsaveis(id) ON DELETE SET NULL"
         ))
+        conn.execute(text(
+            "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS disposicao VARCHAR(20)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS tarefa_card_id UUID REFERENCES tarefa_cards(id) ON DELETE SET NULL"
+        ))
 
         conn.commit()
 

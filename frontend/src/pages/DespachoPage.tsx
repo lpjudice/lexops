@@ -242,7 +242,9 @@ export default function DespachoPage() {
               </div>
               <p style={{ fontSize: 13, color: 'var(--dark)', margin: '0 0 8px', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{p.texto_resumo}</p>
               {p.rejeitada ? (
-                <p style={{ fontSize: 12, color: '#b91c1c', margin: '0 0 8px' }}>✕ Descartada (não era do escritório)</p>
+                <p style={{ fontSize: 12, color: '#b91c1c', margin: '0 0 8px' }}>✕ Não é do escritório</p>
+              ) : p.disposicao === 'sem_acao' ? (
+                <p style={{ fontSize: 12, color: 'var(--gray-mid)', margin: '0 0 8px' }}>◯ Revisada — sem necessidade de ação</p>
               ) : (
                 <>
                   {p.sugestao_acao && (
@@ -425,6 +427,21 @@ function SugestaoAcaoPainel({ publicacao: p }: { publicacao: PublicacaoPendente 
   const [gerandoPeca, setGerandoPeca] = useState(false)
   const [aprovando, setAprovando] = useState(false)
   const [responsavelPrazo, setResponsavelPrazo] = useState<{ nome: string; email: string; id?: string | null }>({ nome: '', email: '', id: null })
+
+  const semAcao = useMutation({
+    mutationFn: () => despachoApi.semAcao(p.id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['despacho-pendentes'] })
+      qc.invalidateQueries({ queryKey: ['despacho-tratadas'] })
+    },
+  })
+  const rejeitarAqui = useMutation({
+    mutationFn: () => despachoApi.rejeitar(p.id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['despacho-pendentes'] })
+      qc.invalidateQueries({ queryKey: ['despacho-tratadas'] })
+    },
+  })
 
   const opcaoEscolhida = opcoes[opcaoIdx]
   // Quando a IA não sugeriu nenhum caminho de prazo, ainda assim dá pra gerar
@@ -677,13 +694,29 @@ function SugestaoAcaoPainel({ publicacao: p }: { publicacao: PublicacaoPendente 
         </div>
       )}
 
-      <button
-        onClick={aprovar}
-        disabled={aprovando}
-        style={{ fontSize: 12, fontWeight: 600, color: '#fff', background: 'var(--teal)', border: 'none', borderRadius: 6, padding: '6px 14px', cursor: 'pointer' }}
-      >
-        {aprovando ? 'Aplicando...' : 'Aprovar e criar prazo/tarefas'}
-      </button>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button
+          onClick={aprovar}
+          disabled={aprovando}
+          style={{ fontSize: 12, fontWeight: 600, color: '#fff', background: 'var(--teal)', border: 'none', borderRadius: 6, padding: '6px 14px', cursor: 'pointer' }}
+        >
+          {aprovando ? 'Aplicando...' : 'Aprovar e criar prazo/tarefas'}
+        </button>
+        <button
+          onClick={() => semAcao.mutate()}
+          disabled={semAcao.isPending}
+          style={{ fontSize: 12, fontWeight: 600, color: 'var(--gray-mid)', background: '#fff', border: '1px solid #ddd', borderRadius: 6, padding: '6px 14px', cursor: 'pointer' }}
+        >
+          {semAcao.isPending ? 'Marcando...' : '◯ Não fazer nada'}
+        </button>
+        <button
+          onClick={() => { if (confirm('Marcar como "não é do escritório"? Isso descarta a publicação.')) rejeitarAqui.mutate() }}
+          disabled={rejeitarAqui.isPending}
+          style={{ fontSize: 12, fontWeight: 600, color: '#b91c1c', background: '#fff', border: '1px solid #fca5a5', borderRadius: 6, padding: '6px 14px', cursor: 'pointer' }}
+        >
+          {rejeitarAqui.isPending ? 'Descartando...' : '✕ Não é do escritório'}
+        </button>
+      </div>
     </div>
   )
 }

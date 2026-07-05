@@ -181,6 +181,7 @@ def _criar_prazo_e_tarefas(
             if not t.titulo:
                 continue
             db.add(TarefaCardSubtask(card_id=card.id, texto=t.titulo, ordem=i))
+        pub.tarefa_card_id = card.id
         db.commit()
         resultado["tarefa_card_id"] = str(card.id)
 
@@ -315,6 +316,7 @@ def _pub_para_dict(db: Session, p: Publicacao) -> dict:
         "peca_gerada": json.loads(p.peca_gerada) if p.peca_gerada else None,
         "peca_doc_url": p.peca_doc_url,
         "rejeitada": p.rejeitada,
+        "disposicao": p.disposicao,
         "prazo_id": str(p.prazo_id) if p.prazo_id else None,
         "tarefas_criadas": json.loads(p.tarefas_criadas) if p.tarefas_criadas else [],
     }
@@ -424,6 +426,21 @@ def rejeitar_publicacao(publicacao_id: uuid.UUID, db: Session = Depends(get_db))
         raise HTTPException(status_code=404, detail="Publicação não encontrada")
     pub.rejeitada = True
     pub.despacho_tratada = True
+    pub.disposicao = "nao_e_nosso"
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/{publicacao_id}/sem-acao")
+def marcar_sem_acao(publicacao_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Publicação revisada (vínculo confirmado, sugestão vista) mas que não
+    precisa de prazo nem tarefa nenhuma — decisão explícita, pra não ficar
+    ambíguo com 'aprovei mas esqueci de marcar algo'."""
+    pub = db.query(Publicacao).filter(Publicacao.id == publicacao_id).first()
+    if not pub:
+        raise HTTPException(status_code=404, detail="Publicação não encontrada")
+    pub.despacho_tratada = True
+    pub.disposicao = "sem_acao"
     db.commit()
     return {"ok": True}
 
@@ -439,6 +456,7 @@ def reverter_para_pendente(publicacao_id: uuid.UUID, db: Session = Depends(get_d
         raise HTTPException(status_code=404, detail="Publicação não encontrada")
     pub.despacho_tratada = False
     pub.rejeitada = False
+    pub.disposicao = None
     db.commit()
     return {"ok": True}
 
