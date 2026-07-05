@@ -29,6 +29,7 @@ export interface PecaGerada {
   paragrafos: string[]
   fechamento: string
   itens_faltantes: string[]
+  doc_url?: string | null
 }
 
 export interface PublicacaoPendente {
@@ -48,10 +49,15 @@ export interface PublicacaoPendente {
   vinculo_confirmado: boolean
   sugestao_acao: SugestaoAcao | null
   peca_gerada: PecaGerada | null
+  peca_doc_url: string | null
+  rejeitada: boolean
+  prazo_id: string | null
 }
 
 export const despachoApi = {
   listarPendentes: () => api.get<PublicacaoPendente[]>('/despacho/pendentes').then((r) => r.data),
+
+  listarTratadas: () => api.get<PublicacaoPendente[]>('/despacho/tratadas').then((r) => r.data),
 
   confirmar: (id: string, processoId: string | null, confirmado: boolean) =>
     api.post(`/despacho/${id}/confirmar`, { processo_id: processoId, confirmado }).then((r) => r.data),

@@ -222,6 +222,32 @@ def processar_automaticos(db: Session = Depends(get_db)):
     return {"processadas": total}
 
 
+def _pub_para_dict(db: Session, p: Publicacao) -> dict:
+    processo = db.query(Processo).filter(Processo.id == p.processo_id).first() if p.processo_id else None
+    cliente = db.query(Cliente).filter(Cliente.id == processo.cliente_id).first() if processo else None
+    return {
+        "id": str(p.id),
+        "data_publicacao": p.data_publicacao.isoformat() if p.data_publicacao else None,
+        "tribunal": p.tribunal,
+        "tipo_ato": p.tipo_ato,
+        "texto_resumo": p.texto_resumo,
+        "numero_cnj": p.numero_cnj,
+        "cliente_nome_pub": p.cliente_nome_pub,
+        "match_oab": p.match_oab,
+        "confianca": _confianca(p),
+        "processo_id": str(processo.id) if processo else None,
+        "processo_numero_cnj": processo.numero_cnj if processo else None,
+        "cliente_id": str(cliente.id) if cliente else None,
+        "cliente_nome": cliente.nome if cliente else None,
+        "vinculo_confirmado": p.vinculo_confirmado,
+        "sugestao_acao": json.loads(p.sugestao_acao) if p.sugestao_acao else None,
+        "peca_gerada": json.loads(p.peca_gerada) if p.peca_gerada else None,
+        "peca_doc_url": p.peca_doc_url,
+        "rejeitada": p.rejeitada,
+        "prazo_id": str(p.prazo_id) if p.prazo_id else None,
+    }
+
+
 @router.get("/pendentes")
 def listar_pendentes(db: Session = Depends(get_db)):
     _processar_automaticos(db)
@@ -237,29 +263,21 @@ def listar_pendentes(db: Session = Depends(get_db)):
         .limit(100)
         .all()
     )
-    resultado = []
-    for p in pubs:
-        processo = db.query(Processo).filter(Processo.id == p.processo_id).first() if p.processo_id else None
-        cliente = db.query(Cliente).filter(Cliente.id == processo.cliente_id).first() if processo else None
-        resultado.append({
-            "id": str(p.id),
-            "data_publicacao": p.data_publicacao.isoformat() if p.data_publicacao else None,
-            "tribunal": p.tribunal,
-            "tipo_ato": p.tipo_ato,
-            "texto_resumo": p.texto_resumo,
-            "numero_cnj": p.numero_cnj,
-            "cliente_nome_pub": p.cliente_nome_pub,
-            "match_oab": p.match_oab,
-            "confianca": _confianca(p),
-            "processo_id": str(processo.id) if processo else None,
-            "processo_numero_cnj": processo.numero_cnj if processo else None,
-            "cliente_id": str(cliente.id) if cliente else None,
-            "cliente_nome": cliente.nome if cliente else None,
-            "vinculo_confirmado": p.vinculo_confirmado,
-            "sugestao_acao": json.loads(p.sugestao_acao) if p.sugestao_acao else None,
-            "peca_gerada": json.loads(p.peca_gerada) if p.peca_gerada else None,
-        })
-    return resultado
+    return [_pub_para_dict(db, p) for p in pubs]
+
+
+@router.get("/tratadas")
+def listar_tratadas(db: Session = Depends(get_db)):
+    """Histórico do que já foi decidido no Despacho — aprovado ou descartado
+    — pra não perder o registro do que aconteceu com cada publicação."""
+    pubs = (
+        db.query(Publicacao)
+        .filter(Publicacao.lida.is_(True))
+        .order_by(Publicacao.data_publicacao.desc())
+        .limit(200)
+        .all()
+    )
+    return [_pub_para_dict(db, p) for p in pubs]
 
 
 class ConfirmarRequest(BaseModel):
@@ -371,7 +389,16 @@ def gerar_peca(
 
     pub.peca_gerada = json.dumps(peca, ensure_ascii=False)
     db.commit()
-    return peca
+
+    from app.services.google_docs import gerar_documento_peca
+
+    nome_doc = f"{peca.get('titulo_peca', 'Peça')} - {processo.numero_cnj}"
+    doc = gerar_documento_peca(peca, nome_doc)
+    if doc:
+        pub.peca_doc_url = doc.get("webViewLink")
+        db.commit()
+
+    return {**peca, "doc_url": pub.peca_doc_url}
 
 
 class AprovarRequest(BaseModel):

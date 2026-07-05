@@ -55,6 +55,8 @@ class Publicacao(Base):
     sugestao_acao: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Conteúdo da peça gerada (JSON), antes de virar documento no Google Docs.
     peca_gerada: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Link do Google Doc real, gerado a partir do timbrado.
+    peca_doc_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # IA
     analise_ia: Mapped[str | None] = mapped_column(Text)          # JSON do Claude

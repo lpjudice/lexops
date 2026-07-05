@@ -18,11 +18,22 @@ export default function DespachoPage() {
   const [corrigindoId, setCorrigindoId] = useState<string | null>(null)
   const [buscaProcesso, setBuscaProcesso] = useState('')
   const [gerandoId, setGerandoId] = useState<string | null>(null)
+  const [aba, setAba] = useState<'pendentes' | 'tratadas'>('pendentes')
 
-  const { data: pendentes = [], isLoading } = useQuery({
+  const { data: pendentesRaw = [], isLoading: carregandoPendentes } = useQuery({
     queryKey: ['despacho-pendentes'],
     queryFn: () => despachoApi.listarPendentes(),
+    enabled: aba === 'pendentes',
   })
+
+  const { data: tratadas = [], isLoading: carregandoTratadas } = useQuery({
+    queryKey: ['despacho-tratadas'],
+    queryFn: () => despachoApi.listarTratadas(),
+    enabled: aba === 'tratadas',
+  })
+
+  const pendentes = pendentesRaw
+  const isLoading = aba === 'pendentes' ? carregandoPendentes : carregandoTratadas
 
   const { data: processos = [] } = useQuery({
     queryKey: ['processos-todos'],
@@ -81,11 +92,66 @@ export default function DespachoPage() {
       <div className={styles.pageHeader}>
         <h1 className={styles.pageTitle}>Despacho</h1>
       </div>
-      <p style={{ fontSize: 13, color: 'var(--gray-mid)', marginTop: -8, marginBottom: 16 }}>
+      <p style={{ fontSize: 13, color: 'var(--gray-mid)', marginTop: -8, marginBottom: 12 }}>
         Publicações novas do Diário aguardando confirmação de vínculo e sugestão de ação do gestor jurídico.
       </p>
 
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        {(['pendentes', 'tratadas'] as const).map((a) => (
+          <button key={a} onClick={() => setAba(a)}
+            style={{
+              fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 999, cursor: 'pointer',
+              border: aba === a ? 'none' : '1px solid #ddd',
+              background: aba === a ? 'var(--teal)' : '#fff',
+              color: aba === a ? '#fff' : 'var(--gray-mid)',
+            }}
+          >
+            {a === 'pendentes' ? 'Pendentes' : 'Tratadas'}
+          </button>
+        ))}
+      </div>
+
       {isLoading && <p>Carregando...</p>}
+
+      {aba === 'tratadas' ? (
+        <>
+          {!isLoading && tratadas.length === 0 && (
+            <p style={{ color: 'var(--gray-mid)' }}>Nenhuma publicação tratada ainda.</p>
+          )}
+          {tratadas.map((p) => (
+            <div key={p.id} style={{ background: '#fff', border: '1px solid #eee', borderRadius: 8, padding: 16, marginBottom: 14 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--dark)', marginBottom: 4 }}>
+                {p.cliente_nome || p.cliente_nome_pub || 'Cliente não identificado'}
+                {(p.processo_numero_cnj || p.numero_cnj) && (
+                  <span style={{ fontWeight: 500, color: 'var(--teal)', marginLeft: 8 }}>
+                    {p.processo_numero_cnj || p.numero_cnj}
+                  </span>
+                )}
+              </div>
+              <p style={{ fontSize: 12, color: 'var(--gray-mid)', margin: '0 0 8px' }}>
+                {p.data_publicacao} · {p.tribunal || '?'} · {p.tipo_ato || 'ato n/d'}
+              </p>
+              <p style={{ fontSize: 13, color: 'var(--dark)', margin: '0 0 8px' }}>{p.texto_resumo}</p>
+              {p.rejeitada ? (
+                <p style={{ fontSize: 12, color: '#b91c1c', margin: 0 }}>✕ Descartada (não era do escritório)</p>
+              ) : (
+                <>
+                  {p.sugestao_acao && (
+                    <p style={{ fontSize: 12, color: 'var(--dark)', margin: '0 0 6px' }}>{p.sugestao_acao.resumo_raciocinio}</p>
+                  )}
+                  {p.prazo_id && <p style={{ fontSize: 12, margin: '0 0 4px' }}>📅 Prazo criado (ver em Prazos)</p>}
+                  {p.peca_doc_url && (
+                    <p style={{ fontSize: 12, margin: '0 0 4px' }}>
+                      📄 <a href={p.peca_doc_url} target="_blank" rel="noreferrer" style={{ color: 'var(--teal)' }}>Abrir peça no Google Docs</a>
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          ))}
+        </>
+      ) : (
+      <>
       {!isLoading && pendentes.length === 0 && (
         <p style={{ color: 'var(--gray-mid)' }}>Nenhuma publicação pendente.</p>
       )}
@@ -195,6 +261,8 @@ export default function DespachoPage() {
           </div>
         )
       })}
+      </>
+      )}
     </div>
   )
 }
@@ -238,6 +306,10 @@ function SugestaoAcaoPainel({ publicacao: p }: { publicacao: PublicacaoPendente 
   const aprovar = async () => {
     setAprovando(true)
     try {
+      // Um clique só: se ainda não gerou a peça e há um caminho escolhido, gera agora.
+      if (opcaoEscolhida && !p.peca_doc_url) {
+        await despachoApi.gerarPeca(p.id, opcaoEscolhida, promptExtra)
+      }
       await despachoApi.aprovar(p.id, {
         criar_prazo: sugestao.requer_prazo && !!opcaoEscolhida,
         peca_necessaria: opcaoEscolhida?.peca_necessaria ?? null,
@@ -246,6 +318,7 @@ function SugestaoAcaoPainel({ publicacao: p }: { publicacao: PublicacaoPendente 
         tarefas: tarefas.filter((t) => t.marcada).map(({ titulo, responsavel }) => ({ titulo, responsavel })),
       })
       qc.invalidateQueries({ queryKey: ['despacho-pendentes'] })
+      qc.invalidateQueries({ queryKey: ['despacho-tratadas'] })
     } finally {
       setAprovando(false)
     }
@@ -309,13 +382,18 @@ function SugestaoAcaoPainel({ publicacao: p }: { publicacao: PublicacaoPendente 
             disabled={gerandoPeca}
             style={{ fontSize: 12, fontWeight: 600, color: 'var(--teal)', background: 'none', border: '1px solid var(--teal)', borderRadius: 6, padding: '6px 12px', cursor: 'pointer' }}
           >
-            {gerandoPeca ? 'Redigindo...' : p.peca_gerada ? 'Gerar peça de novo' : 'Gerar peça (rascunho)'}
+            {gerandoPeca ? 'Redigindo e gerando o documento...' : p.peca_doc_url ? 'Gerar peça de novo' : 'Gerar peça no Google Docs'}
           </button>
         </div>
       )}
 
       {p.peca_gerada && (
         <div style={{ background: '#fff', border: '1px solid #eee', borderRadius: 6, padding: 12, marginBottom: 10, fontSize: 12 }}>
+          {p.peca_doc_url && (
+            <p style={{ margin: '0 0 8px' }}>
+              📄 <a href={p.peca_doc_url} target="_blank" rel="noreferrer" style={{ color: 'var(--teal)', fontWeight: 600 }}>Abrir peça no Google Docs</a>
+            </p>
+          )}
           <div style={{ fontWeight: 700, marginBottom: 6 }}>{p.peca_gerada.titulo_peca}</div>
           <p style={{ margin: '0 0 6px' }}>{p.peca_gerada.enderecamento}</p>
           <p style={{ margin: '0 0 6px' }}>{p.peca_gerada.qualificacao}</p>
@@ -331,7 +409,7 @@ function SugestaoAcaoPainel({ publicacao: p }: { publicacao: PublicacaoPendente 
             </p>
           )}
           <p style={{ color: 'var(--gray-mid)', fontSize: 11, marginTop: 8 }}>
-            Rascunho de texto por enquanto — a versão em Google Docs (timbrado) vem na próxima etapa.
+            Prévia — revise no Google Docs antes de usar.
           </p>
         </div>
       )}

@@ -776,6 +776,42 @@ def baixar_arquivo_por_id(file_id: str) -> bytes | None:
             return None
 
 
+def copiar_arquivo_por_id(file_id: str, novo_nome: str, parent_folder_id: str | None = None) -> dict | None:
+    """Copia um arquivo do Drive (ex: um modelo/timbrado) pra um novo arquivo
+    com outro nome. Retorna {"id": ..., "webViewLink": ...} ou None."""
+    tokens = _load_tokens()
+    if not tokens:
+        return None
+
+    def _do(tkns: dict) -> dict:
+        h = _auth_headers(tkns)
+        body: dict = {"name": novo_nome}
+        if parent_folder_id:
+            body["parents"] = [parent_folder_id]
+        r = httpx.post(
+            f"{DRIVE_META}/files/{file_id}/copy",
+            headers=h,
+            params={"supportsAllDrives": True, "fields": "id,webViewLink"},
+            json=body,
+            timeout=30,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    try:
+        return _do(tokens)
+    except Exception as exc:
+        if not _is_unauthorized(exc):
+            logger.warning("Falha ao copiar arquivo %s do Drive: %s", file_id, exc)
+            return None
+        tokens2 = _refresh(tokens)
+        try:
+            return _do(tokens2)
+        except Exception as exc2:
+            logger.warning("Falha ao copiar arquivo %s do Drive apos refresh: %s", file_id, exc2)
+            return None
+
+
 def deletar_arquivo(nome_cliente: str, subfolder: str, nome_arquivo: str, sub_subfolder: str | None = None) -> bool:
     """Moves matching Drive file(s) in {nome_cliente}/{subfolder}[/{sub_subfolder}] to trash."""
     tokens = _load_tokens()
