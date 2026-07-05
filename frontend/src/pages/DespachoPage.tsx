@@ -77,6 +77,19 @@ export default function DespachoPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['despacho-pendentes'] }),
   })
 
+  const desfazerVinculo = useMutation({
+    mutationFn: (id: string) => despachoApi.confirmar(id, null, false),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['despacho-pendentes'] }),
+  })
+
+  const reverter = useMutation({
+    mutationFn: (id: string) => despachoApi.reverter(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['despacho-tratadas'] })
+      qc.invalidateQueries({ queryKey: ['despacho-pendentes'] })
+    },
+  })
+
   const gerarSugestao = async (id: string) => {
     setGerandoId(id)
     try {
@@ -133,20 +146,43 @@ export default function DespachoPage() {
               </p>
               <p style={{ fontSize: 13, color: 'var(--dark)', margin: '0 0 8px' }}>{p.texto_resumo}</p>
               {p.rejeitada ? (
-                <p style={{ fontSize: 12, color: '#b91c1c', margin: 0 }}>✕ Descartada (não era do escritório)</p>
+                <p style={{ fontSize: 12, color: '#b91c1c', margin: '0 0 8px' }}>✕ Descartada (não era do escritório)</p>
               ) : (
                 <>
                   {p.sugestao_acao && (
                     <p style={{ fontSize: 12, color: 'var(--dark)', margin: '0 0 6px' }}>{p.sugestao_acao.resumo_raciocinio}</p>
                   )}
-                  {p.prazo_id && <p style={{ fontSize: 12, margin: '0 0 4px' }}>📅 Prazo criado (ver em Prazos)</p>}
-                  {p.peca_doc_url && (
+                  {p.prazo_id ? (
                     <p style={{ fontSize: 12, margin: '0 0 4px' }}>
+                      📅 Prazo criado — <a href="/prazos" style={{ color: 'var(--teal)' }}>ver em Prazos</a>
+                    </p>
+                  ) : p.sugestao_acao && (
+                    <p style={{ fontSize: 12, color: 'var(--gray-mid)', margin: '0 0 4px' }}>— Sem prazo criado para esta publicação</p>
+                  )}
+                  {p.tarefas_criadas.length > 0 && (
+                    <div style={{ fontSize: 12, margin: '0 0 4px' }}>
+                      ✅ Tarefas criadas — <a href="/tarefas" style={{ color: 'var(--teal)' }}>ver em Tarefas</a>
+                      <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                        {p.tarefas_criadas.map((t) => (
+                          <li key={t.id}>{t.titulo}{t.responsavel ? ` (${t.responsavel})` : ''}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {p.peca_doc_url && (
+                    <p style={{ fontSize: 12, margin: '4px 0' }}>
                       📄 <a href={p.peca_doc_url} target="_blank" rel="noreferrer" style={{ color: 'var(--teal)' }}>Abrir peça no Google Docs</a>
                     </p>
                   )}
                 </>
               )}
+              <button
+                onClick={() => reverter.mutate(p.id)}
+                disabled={reverter.isPending}
+                style={{ fontSize: 12, color: 'var(--gray-mid)', background: 'none', border: '1px solid #ddd', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', marginTop: 8 }}
+              >
+                ↺ Voltar pra pendentes
+              </button>
             </div>
           ))}
         </>
@@ -192,15 +228,23 @@ export default function DespachoPage() {
                   <span style={{ fontSize: 13 }}>
                     ✓ Vinculado a <strong>{p.processo_numero_cnj}</strong> ({p.cliente_nome})
                   </span>
-                  {!p.sugestao_acao && (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    {!p.sugestao_acao && (
+                      <button
+                        onClick={() => gerarSugestao(p.id)}
+                        disabled={gerandoId === p.id}
+                        style={{ fontSize: 12, fontWeight: 600, color: '#fff', background: 'var(--teal)', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: 'pointer' }}
+                      >
+                        {gerandoId === p.id ? 'Analisando...' : 'Pedir sugestão de ação'}
+                      </button>
+                    )}
                     <button
-                      onClick={() => gerarSugestao(p.id)}
-                      disabled={gerandoId === p.id}
-                      style={{ fontSize: 12, fontWeight: 600, color: '#fff', background: 'var(--teal)', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: 'pointer' }}
+                      onClick={() => { if (confirm('Desfazer o vínculo com este processo? A sugestão/peça geradas serão descartadas.')) desfazerVinculo.mutate(p.id) }}
+                      style={{ fontSize: 12, color: '#b91c1c', background: 'none', border: 'none', cursor: 'pointer' }}
                     >
-                      {gerandoId === p.id ? 'Analisando...' : 'Pedir sugestão de ação'}
+                      desfazer vínculo
                     </button>
-                  )}
+                  </div>
                 </div>
               ) : corrigindoId === p.id ? (
                 <div>
@@ -328,7 +372,7 @@ function SugestaoAcaoPainel({ publicacao: p }: { publicacao: PublicacaoPendente 
     <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #f5f5f5', background: '#fafffe' }}>
       <p style={{ fontSize: 13, color: 'var(--dark)', margin: '0 0 10px' }}>{sugestao.resumo_raciocinio}</p>
 
-      {opcoes.length > 0 && (
+      {opcoes.length > 0 ? (
         <div style={{ marginBottom: 10 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gray-mid)', textTransform: 'uppercase', marginBottom: 4 }}>
             Caminho / prazo
@@ -340,6 +384,12 @@ function SugestaoAcaoPainel({ publicacao: p }: { publicacao: PublicacaoPendente 
             </label>
           ))}
         </div>
+      ) : (
+        <p style={{ fontSize: 12, color: 'var(--gray-mid)', fontStyle: 'italic', margin: '0 0 10px' }}>
+          A IA entendeu que esta publicação não exige prazo/peça — por isso não há campo de instrução
+          nem botão de gerar peça aqui. Se achar que devia ter, use "Descartar" acima e trate manualmente,
+          ou peça sugestão de novo.
+        </p>
       )}
 
       {(tarefas.length > 0 || novaTarefa) && (

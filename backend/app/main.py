@@ -951,6 +951,9 @@ def _run_migrations() -> None:
         conn.execute(text(
             "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS peca_doc_url TEXT"
         ))
+        conn.execute(text(
+            "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS tarefas_criadas TEXT"
+        ))
 
         conn.commit()
 

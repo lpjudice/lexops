@@ -81,6 +81,7 @@ def _criar_prazo_e_tarefas(
     """Cria Prazo (uma opção escolhida) + N Tarefas e retorna os ids criados.
     Compartilhado entre /aprovar e o pipeline automático."""
     resultado: dict = {"tarefa_ids": []}
+    tarefas_criadas: list[dict] = []
 
     if criar_prazo and peca_necessaria and dias_prazo:
         from app.services.google_calendar import criar_evento
@@ -137,6 +138,12 @@ def _criar_prazo_e_tarefas(
         db.commit()
         db.refresh(tarefa)
         resultado["tarefa_ids"].append(str(tarefa.id))
+        tarefas_criadas.append({"id": str(tarefa.id), "titulo": tarefa.titulo, "responsavel": tarefa.responsavel})
+
+    if tarefas_criadas:
+        existentes = json.loads(pub.tarefas_criadas) if pub.tarefas_criadas else []
+        pub.tarefas_criadas = json.dumps(existentes + tarefas_criadas, ensure_ascii=False)
+        db.commit()
 
     return resultado
 
@@ -245,6 +252,7 @@ def _pub_para_dict(db: Session, p: Publicacao) -> dict:
         "peca_doc_url": p.peca_doc_url,
         "rejeitada": p.rejeitada,
         "prazo_id": str(p.prazo_id) if p.prazo_id else None,
+        "tarefas_criadas": json.loads(p.tarefas_criadas) if p.tarefas_criadas else [],
     }
 
 
@@ -293,8 +301,12 @@ def confirmar_vinculo(publicacao_id: uuid.UUID, body: ConfirmarRequest, db: Sess
 
     if not body.confirmado:
         # Marca só pra revisão manual futura — não conta como rejeitada.
+        # Também limpa sugestão/peça geradas, já que pertenciam ao processo errado.
         pub.vinculo_confirmado = False
         pub.processo_id = None
+        pub.sugestao_acao = None
+        pub.peca_gerada = None
+        pub.peca_doc_url = None
         db.commit()
         return {"ok": True, "vinculo_confirmado": False}
 
@@ -318,6 +330,21 @@ def rejeitar_publicacao(publicacao_id: uuid.UUID, db: Session = Depends(get_db))
         raise HTTPException(status_code=404, detail="Publicação não encontrada")
     pub.rejeitada = True
     pub.lida = True
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/{publicacao_id}/reverter")
+def reverter_para_pendente(publicacao_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Volta uma publicação já tratada (aprovada ou descartada) pra fila de
+    pendentes. Não desfaz prazo/tarefas já criados — só reabre a publicação
+    pra revisão (o prazo/tarefa criados por engano se removem nas telas de
+    Prazos/Tarefas)."""
+    pub = db.query(Publicacao).filter(Publicacao.id == publicacao_id).first()
+    if not pub:
+        raise HTTPException(status_code=404, detail="Publicação não encontrada")
+    pub.lida = False
+    pub.rejeitada = False
     db.commit()
     return {"ok": True}
 

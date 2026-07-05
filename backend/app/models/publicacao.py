@@ -57,6 +57,9 @@ class Publicacao(Base):
     peca_gerada: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Link do Google Doc real, gerado a partir do timbrado.
     peca_doc_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Tarefas de fato criadas ao aprovar (JSON: [{"id":..,"titulo":..}]) — pra
+    # manter o registro do que foi decidido, visível na aba Tratadas.
+    tarefas_criadas: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # IA
     analise_ia: Mapped[str | None] = mapped_column(Text)          # JSON do Claude
