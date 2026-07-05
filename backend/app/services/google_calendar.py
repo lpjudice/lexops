@@ -17,7 +17,10 @@ SCOPES = " ".join([
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.send",
-    "https://www.googleapis.com/auth/drive.file",
+    # Full Drive (não só drive.file): precisa copiar/editar arquivos que já
+    # existem no Drive do usuário (ex: o timbrado), não só os criados pelo app.
+    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/documents",
 ])
 CALENDAR_API = "https://www.googleapis.com/calendar/v3"
 
