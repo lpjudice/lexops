@@ -3,7 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query'
 import { clientesApi } from '../api/clientes'
 import { processosApi } from '../api/processos'
 import { conselhoJuridicoApi } from '../api/conselhoJuridico'
-import type { RespostaEspecialista } from '../api/conselhoJuridico'
+import type { MensagemConselho } from '../api/conselhoJuridico'
 import styles from './Page.module.css'
 
 const CORES: Record<string, string> = {
@@ -13,11 +13,18 @@ const CORES: Record<string, string> = {
   recursal_processual: '#15803d',
 }
 
+interface ThreadEspecialista {
+  chave: string
+  nome: string
+  mensagens: MensagemConselho[]
+  carregando: boolean
+}
+
 export default function ConselhoJuridicoPage() {
   const [clienteId, setClienteId] = useState('')
   const [processoId, setProcessoId] = useState('')
   const [pergunta, setPergunta] = useState('')
-  const [respostas, setRespostas] = useState<RespostaEspecialista[] | null>(null)
+  const [threads, setThreads] = useState<ThreadEspecialista[] | null>(null)
 
   const { data: clientes = [] } = useQuery({
     queryKey: ['clientes-todos'],
@@ -34,16 +41,54 @@ export default function ConselhoJuridicoPage() {
     [processos, clienteId]
   )
 
-  const consultar = useMutation({
+  const iniciar = useMutation({
     mutationFn: () => conselhoJuridicoApi.consultar({
       cliente_id: clienteId || undefined,
       processo_id: processoId || undefined,
       pergunta,
     }),
-    onSuccess: (data) => setRespostas(data.respostas),
+    onSuccess: (data) => {
+      setThreads(data.respostas.map((r) => ({
+        chave: r.chave,
+        nome: r.nome,
+        mensagens: [
+          { role: 'user', content: pergunta },
+          { role: 'model', content: r.resposta },
+        ],
+        carregando: false,
+      })))
+    },
   })
 
-  const podeConsultar = pergunta.trim().length > 0 && (!!clienteId || !!processoId) && !consultar.isPending
+  const podeConsultar = pergunta.trim().length > 0 && (!!clienteId || !!processoId) && !iniciar.isPending
+
+  const perguntarMais = async (chave: string, novaPergunta: string) => {
+    if (!threads || !novaPergunta.trim()) return
+    const thread = threads.find((t) => t.chave === chave)
+    if (!thread) return
+
+    const historicoAtual = thread.mensagens
+    setThreads(threads.map((t) => t.chave === chave
+      ? { ...t, carregando: true, mensagens: [...t.mensagens, { role: 'user', content: novaPergunta }] }
+      : t))
+
+    try {
+      const resp = await conselhoJuridicoApi.perguntarUm({
+        cliente_id: clienteId || undefined,
+        processo_id: processoId || undefined,
+        chave,
+        pergunta: novaPergunta,
+        historico: historicoAtual,
+      })
+      setThreads((prev) => prev && prev.map((t) => t.chave === chave
+        ? { ...t, carregando: false, mensagens: [...t.mensagens, { role: 'model', content: resp.resposta }] }
+        : t))
+    } catch {
+      setThreads((prev) => prev && prev.map((t) => t.chave === chave
+        ? { ...t, carregando: false, mensagens: [...t.mensagens, { role: 'model', content: '❌ Erro ao consultar este especialista.' }] }
+        : t))
+    }
+  }
 
   return (
     <div>
@@ -52,7 +97,7 @@ export default function ConselhoJuridicoPage() {
       </div>
       <p style={{ fontSize: 13, color: 'var(--gray-mid)', marginTop: -8, marginBottom: 16 }}>
         Pergunte sobre um cliente ou processo e receba a opinião independente de cada especialista do escritório,
-        todos com o contexto real do caso.
+        todos com o contexto real do caso. Depois, aprofunde com cada um separadamente.
       </p>
 
       <div style={{ background: '#fff', border: '1px solid #eee', borderRadius: 8, padding: 16, marginBottom: 20 }}>
@@ -83,32 +128,85 @@ export default function ConselhoJuridicoPage() {
           style={{ width: '100%', padding: 10, fontSize: 13, border: '1px solid #ddd', borderRadius: 6, boxSizing: 'border-box', marginBottom: 10 }}
         />
         <button
-          onClick={() => consultar.mutate()}
+          onClick={() => iniciar.mutate()}
           disabled={!podeConsultar}
           style={{
             fontSize: 13, fontWeight: 600, color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px',
             cursor: podeConsultar ? 'pointer' : 'not-allowed', background: podeConsultar ? 'var(--teal)' : '#d1d5db',
           }}
         >
-          {consultar.isPending ? 'Consultando o conselho...' : 'Consultar conselho'}
+          {iniciar.isPending ? 'Consultando o conselho...' : 'Consultar conselho'}
         </button>
       </div>
 
-      {respostas && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
-          {respostas.map((r) => (
-            <div key={r.chave} style={{ background: '#fff', border: '1px solid #eee', borderRadius: 8, padding: 14 }}>
-              <div style={{
-                fontSize: 12, fontWeight: 700, color: CORES[r.chave] || '#374151',
-                marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.3,
-              }}>
-                {r.nome}
-              </div>
-              <p style={{ fontSize: 13, color: 'var(--dark)', margin: 0, whiteSpace: 'pre-wrap' }}>{r.resposta}</p>
-            </div>
+      {threads && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14 }}>
+          {threads.map((t) => (
+            <EspecialistaCard key={t.chave} thread={t} cor={CORES[t.chave] || '#374151'} onPerguntar={perguntarMais} />
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+function EspecialistaCard({
+  thread, cor, onPerguntar,
+}: {
+  thread: ThreadEspecialista
+  cor: string
+  onPerguntar: (chave: string, pergunta: string) => Promise<void>
+}) {
+  const [followUp, setFollowUp] = useState('')
+
+  const enviar = async () => {
+    const texto = followUp.trim()
+    if (!texto) return
+    setFollowUp('')
+    await onPerguntar(thread.chave, texto)
+  }
+
+  return (
+    <div style={{ background: '#fff', border: '1px solid #eee', borderRadius: 8, padding: 14, display: 'flex', flexDirection: 'column' }}>
+      <div style={{
+        fontSize: 12, fontWeight: 700, color: cor,
+        marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.3,
+      }}>
+        {thread.nome}
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
+        {thread.mensagens.map((m, i) => (
+          <p key={i} style={{
+            fontSize: 13, margin: 0, whiteSpace: 'pre-wrap',
+            color: m.role === 'user' ? 'var(--gray-mid)' : 'var(--dark)',
+            fontStyle: m.role === 'user' ? 'italic' : 'normal',
+          }}>
+            {m.role === 'user' ? `Você: ${m.content}` : m.content}
+          </p>
+        ))}
+        {thread.carregando && (
+          <p style={{ fontSize: 12, color: 'var(--gray-mid)', margin: 0 }}>⏳ pensando...</p>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', gap: 6, marginTop: 'auto' }}>
+        <input
+          value={followUp}
+          onChange={(e) => setFollowUp(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') enviar() }}
+          placeholder={`Aprofundar com ${thread.nome}...`}
+          disabled={thread.carregando}
+          style={{ flex: 1, padding: '6px 8px', fontSize: 12, border: '1px solid #ddd', borderRadius: 6 }}
+        />
+        <button
+          onClick={enviar}
+          disabled={thread.carregando || !followUp.trim()}
+          style={{ fontSize: 12, fontWeight: 600, color: '#fff', background: cor, border: 'none', borderRadius: 6, padding: '6px 12px', cursor: 'pointer' }}
+        >
+          ↑
+        </button>
+      </div>
     </div>
   )
 }

@@ -11,6 +11,14 @@ from app.config import settings
 
 UPLOADS_DIR = Path("/app/uploads/clientes")
 
+_INSTRUCAO_ANTI_DISCLAIMER = (
+    "\nVocê TEM acesso ao histórico e ao contexto do processo/cliente fornecido acima — "
+    "isso já foi extraído do sistema interno do escritório (andamentos, prazos, documentos, "
+    "memória estratégica). NUNCA diga que não tem acesso ao processo ou que precisaria consultar "
+    "o sistema/tribunal online — use o que foi fornecido. Se um dado específico não estiver no "
+    "contexto, diga isso pontualmente, mas não trate a ausência de UM dado como falta de acesso a tudo."
+)
+
 
 def _carregar_pdfs(cliente_id: str) -> list[Path]:
     pasta = UPLOADS_DIR / cliente_id
@@ -19,9 +27,29 @@ def _carregar_pdfs(cliente_id: str) -> list[Path]:
     return sorted([f for f in pasta.iterdir() if f.suffix.lower() == ".pdf"])
 
 
+def _texto_dos_pdfs(pdfs: list[Path]) -> str:
+    """Extrai texto real dos PDFs (cascata pypdf → pdfminer → Claude OCR) pra
+    injetar como texto simples — mais robusto que mandar o PDF bruto pro
+    modelo (evita limites/formatos específicos de cada provedor)."""
+    if not pdfs:
+        return ""
+    from app.services.pdf_extract import extrair_texto_pdf
+
+    blocos = []
+    for pdf in pdfs:
+        try:
+            texto = extrair_texto_pdf(pdf.read_bytes())
+        except Exception:
+            texto = ""
+        if texto:
+            blocos.append(f"--- Documento: {pdf.name} ---\n{texto[:6000]}")
+    return "\n\n".join(blocos)
+
+
 def chat_claude(
     pergunta: str, historico: list[dict], cliente_id: str, contexto: str,
     nome_cliente: str = "", pdf_paths: list[Path] | None = None,
+    model: str = "claude-opus-4-5", instrucao_extra: str = "",
 ) -> str:
     if not settings.anthropic_api_key:
         return "❌ ANTHROPIC_API_KEY não configurada."
@@ -30,30 +58,25 @@ def chat_claude(
 
         client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
         pdfs = pdf_paths if pdf_paths is not None else _carregar_pdfs(cliente_id)
+        texto_docs = _texto_dos_pdfs(pdfs)
 
         system = (
             "Você é um assistente jurídico do escritório Pimenta Judice Advogados Associados.\n"
-            f"Contexto do cliente: {contexto}\n"
-            "Responda com precisão, citando documentos quando relevante. Use linguagem jurídica adequada."
+            + instrucao_extra
+            + f"\nContexto do cliente: {contexto}\n"
+            + (f"\n{texto_docs}\n" if texto_docs else "")
+            + _INSTRUCAO_ANTI_DISCLAIMER
+            + "\nResponda com precisão, citando documentos quando relevante. Use linguagem jurídica adequada."
         )
 
         messages = []
         for h in historico:
             role = "assistant" if h["role"] == "model" else h["role"]
             messages.append({"role": role, "content": h["content"]})
-
-        content: list = []
-        for pdf in pdfs:
-            pdf_data = base64.b64encode(pdf.read_bytes()).decode()
-            content.append({
-                "type": "document",
-                "source": {"type": "base64", "media_type": "application/pdf", "data": pdf_data},
-            })
-        content.append({"type": "text", "text": pergunta})
-        messages.append({"role": "user", "content": content})
+        messages.append({"role": "user", "content": pergunta})
 
         msg = client.messages.create(
-            model="claude-opus-4-5",
+            model=model,
             max_tokens=2048,
             system=system,
             messages=messages,
@@ -66,6 +89,7 @@ def chat_claude(
 def chat_gpt(
     pergunta: str, historico: list[dict], cliente_id: str, contexto: str,
     nome_cliente: str = "", pdf_paths: list[Path] | None = None,
+    model: str = "gpt-4o", instrucao_extra: str = "",
 ) -> str:
     if not settings.openai_api_key:
         return "❌ OPENAI_API_KEY não configurada."
@@ -74,12 +98,15 @@ def chat_gpt(
 
         client = OpenAI(api_key=settings.openai_api_key)
         pdfs = pdf_paths if pdf_paths is not None else _carregar_pdfs(cliente_id)
-        pdf_note = f" [{len(pdfs)} PDF(s) do cliente disponíveis no contexto]" if pdfs else ""
+        texto_docs = _texto_dos_pdfs(pdfs)
 
         system = (
             "Você é um assistente jurídico do escritório Pimenta Judice Advogados Associados.\n"
-            f"Contexto do cliente: {contexto}{pdf_note}\n"
-            "Responda com precisão e use linguagem jurídica adequada."
+            + instrucao_extra
+            + f"\nContexto do cliente: {contexto}\n"
+            + (f"\n{texto_docs}\n" if texto_docs else "")
+            + _INSTRUCAO_ANTI_DISCLAIMER
+            + "\nResponda com precisão e use linguagem jurídica adequada."
         )
 
         messages: list[dict] = [{"role": "system", "content": system}]
@@ -88,7 +115,7 @@ def chat_gpt(
             messages.append({"role": role, "content": h["content"]})
         messages.append({"role": "user", "content": pergunta})
 
-        resp = client.chat.completions.create(model="gpt-4o", max_tokens=2048, messages=messages)
+        resp = client.chat.completions.create(model=model, max_tokens=2048, messages=messages)
         return resp.choices[0].message.content or ""
     except Exception as e:
         return f"❌ Erro GPT-4o: {e}"
@@ -97,6 +124,7 @@ def chat_gpt(
 def chat_gemini(
     pergunta: str, historico: list[dict], cliente_id: str, contexto: str,
     nome_cliente: str = "", pdf_paths: list[Path] | None = None,
+    model: str = "gemini-2.5-flash", instrucao_extra: str = "",
 ) -> str:
     if not settings.google_ai_api_key:
         return "❌ GOOGLE_AI_API_KEY não configurada."
@@ -105,13 +133,15 @@ def chat_gemini(
 
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/"
-            f"gemini-2.5-flash:generateContent?key={settings.google_ai_api_key}"
+            f"{model}:generateContent?key={settings.google_ai_api_key}"
         )
 
         system_text = (
             "Você é um assistente jurídico do escritório Pimenta Judice Advogados Associados.\n"
-            f"Contexto do cliente: {contexto}\n"
-            "Responda com precisão, citando documentos quando relevante. Use linguagem jurídica adequada."
+            + instrucao_extra
+            + f"\nContexto do cliente: {contexto}\n"
+            + _INSTRUCAO_ANTI_DISCLAIMER
+            + "\nResponda com precisão, citando documentos quando relevante. Use linguagem jurídica adequada."
         )
 
         if pdf_paths is not None:
