@@ -67,16 +67,21 @@ export const despachoApi = {
 
   reverter: (id: string) => api.post(`/despacho/${id}/reverter`).then((r) => r.data),
 
-  sugerir: (id: string) => api.post<SugestaoAcao>(`/despacho/${id}/sugerir`).then((r) => r.data),
+  sugerir: (id: string) =>
+    api.post<SugestaoAcao>(`/despacho/${id}/sugerir`, undefined, { timeout: 90000 }).then((r) => r.data),
 
   gerarPeca: (id: string, opcaoPrazo: OpcaoPrazo, promptExtra: string) =>
-    api.post<PecaGerada>(`/despacho/${id}/gerar-peca`, { opcao_prazo: opcaoPrazo, prompt_extra: promptExtra }).then((r) => r.data),
+    // IA (Opus) + cópia do timbrado + 2 chamadas ao Docs API somadas podem
+    // passar dos 30s padrão — isso já aconteceu e o front achou que tinha
+    // falhado quando na verdade só demorou (a peça foi criada normalmente).
+    api.post<PecaGerada>(`/despacho/${id}/gerar-peca`, { opcao_prazo: opcaoPrazo, prompt_extra: promptExtra }, { timeout: 90000 }).then((r) => r.data),
 
   aprovar: (id: string, body: {
     criar_prazo?: boolean
     peca_necessaria?: string | null
     dias_prazo?: number | null
     tipo_contagem?: string
+    responsavel_prazo?: string | null
     tarefas?: TarefaSugerida[]
   }) => api.post<{ prazo_id?: string; tarefa_ids?: string[]; ok: boolean }>(`/despacho/${id}/aprovar`, body).then((r) => r.data),
 }

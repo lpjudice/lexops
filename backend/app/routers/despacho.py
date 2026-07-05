@@ -23,6 +23,8 @@ from app.models.prazo import Prazo
 from app.models.processo import Processo
 from app.models.publicacao import Publicacao
 from app.models.tarefa import Tarefa
+from app.models.tarefa_card import TarefaCard, TarefaCardSubtask
+from app.models.tarefa_projeto import TarefaProjeto
 from app.models.usuario import Usuario
 
 router = APIRouter(prefix="/despacho", tags=["despacho"],
@@ -31,6 +33,17 @@ router = APIRouter(prefix="/despacho", tags=["despacho"],
 logger = logging.getLogger(__name__)
 
 TEXTO_SEM_PUBLICACAO = "Sem publicações nesta edição."
+NOME_PROJETO_DESPACHOS = "Despachos"
+
+
+def _projeto_despachos_id(db: Session) -> uuid.UUID:
+    projeto = db.query(TarefaProjeto).filter(TarefaProjeto.nome == NOME_PROJETO_DESPACHOS).first()
+    if not projeto:
+        projeto = TarefaProjeto(nome=NOME_PROJETO_DESPACHOS, cor="#0ea5e9")
+        db.add(projeto)
+        db.commit()
+        db.refresh(projeto)
+    return projeto.id
 
 
 def _confianca(pub: Publicacao) -> str:
@@ -92,6 +105,7 @@ def _criar_prazo_e_tarefas(
     tarefas: list[TarefaSugerida],
     criar_prazo: bool,
     automatico: bool,
+    responsavel_prazo: str | None = None,
 ) -> dict:
     """Cria Prazo (uma opção escolhida) + N Tarefas e retorna os ids criados.
     Compartilhado entre /aprovar e o pipeline automático."""
@@ -110,7 +124,7 @@ def _criar_prazo_e_tarefas(
             estado=processo.estado,
             tipo_contagem=tipo_contagem,
         )
-        responsavel_prazo = tarefas[0].responsavel if tarefas else None
+        responsavel_prazo = responsavel_prazo or (tarefas[0].responsavel if tarefas else None)
         prazo = Prazo(
             processo_id=processo.id,
             tipo=_sanitizar_tipo_prazo(peca_necessaria) or "outro",
@@ -141,6 +155,28 @@ def _criar_prazo_e_tarefas(
         prazo_criado_id = prazo.id
         resultado["prazo_id"] = str(prazo.id)
         resultado["prazo_data_limite"] = prazo.data_limite.isoformat() if prazo.data_limite else None
+
+        # Replica em Tarefas Cards: o prazo vira o card mestre, as tarefas
+        # sugeridas viram subtarefas dele — projeto padrão "Despachos".
+        card = TarefaCard(
+            projeto_id=_projeto_despachos_id(db),
+            cliente_id=processo.cliente_id,
+            processo_id=processo.id,
+            titulo=f"{prazo.tipo.capitalize()} — {processo.numero_cnj}",
+            descricao=pub.texto_resumo,
+            responsavel=responsavel_prazo,
+            status="pendente",
+            data_limite=prazo.data_limite,
+        )
+        db.add(card)
+        db.commit()
+        db.refresh(card)
+        for i, t in enumerate(tarefas):
+            if not t.titulo:
+                continue
+            db.add(TarefaCardSubtask(card_id=card.id, texto=t.titulo, ordem=i))
+        db.commit()
+        resultado["tarefa_card_id"] = str(card.id)
 
     for t in tarefas:
         if not t.titulo:
@@ -454,6 +490,7 @@ class AprovarRequest(BaseModel):
     peca_necessaria: str | None = None
     dias_prazo: int | None = None
     tipo_contagem: str = "uteis"
+    responsavel_prazo: str | None = None
     tarefas: list[TarefaSugerida] = []
 
 
@@ -477,6 +514,7 @@ def aprovar_acao(publicacao_id: uuid.UUID, body: AprovarRequest, db: Session = D
         tarefas=body.tarefas,
         criar_prazo=body.criar_prazo,
         automatico=False,
+        responsavel_prazo=body.responsavel_prazo,
     )
 
     pub.lida = True

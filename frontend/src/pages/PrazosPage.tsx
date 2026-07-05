@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { prazosApi } from '../api/prazos'
 import type { PrazoCreate, TipoPrazo, StatusPrazo } from '../api/prazos'
@@ -55,11 +56,27 @@ export default function PrazosPage() {
   const [editPeca, setEditPeca] = useState('')
   const [editResponsavel, setEditResponsavel] = useState('')
   const [tabStatus, setTabStatus] = useState<TabStatus>('ativo')
+  const [searchParams] = useSearchParams()
+  const destaqueId = searchParams.get('destaque')
+  const destaqueRef = useRef<HTMLDivElement | null>(null)
+  const [jaFocou, setJaFocou] = useState(false)
 
   const { data: prazos = [], isLoading } = useQuery({
     queryKey: ['prazos'],
     queryFn: () => prazosApi.listar(),
   })
+
+  // Veio de um link (ex: chip "🔗 prazo" em Tarefas) — pula pra aba certa e
+  // rola até o card, em vez de deixar o usuário procurar.
+  useEffect(() => {
+    if (!destaqueId || jaFocou || prazos.length === 0) return
+    const alvo = prazos.find((p) => p.id === destaqueId)
+    if (alvo) {
+      setTabStatus(alvo.status === 'pendente' ? 'pendente' : (alvo.status as TabStatus))
+      setJaFocou(true)
+      setTimeout(() => destaqueRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100)
+    }
+  }, [destaqueId, jaFocou, prazos])
   const { data: processos = [] } = useQuery({
     queryKey: ['processos'],
     queryFn: () => processosApi.listar(),
@@ -237,7 +254,9 @@ export default function PrazosPage() {
             const proc = getProcesso(p.processo_id)
             const cliente = getCliente(p.processo_id)
             return (
-              <div key={p.id} className={`${prazosStyles.card} ${urgenciaClass(dias)}`}>
+              <div key={p.id} ref={p.id === destaqueId ? destaqueRef : undefined}
+                className={`${prazosStyles.card} ${urgenciaClass(dias)}`}
+                style={p.id === destaqueId ? { outline: '2px solid var(--teal)', outlineOffset: 2 } : undefined}>
                 <div className={prazosStyles.cardHeader}>
                   <div className={prazosStyles.cardInfo}>
                     <div className={prazosStyles.cardTop}>

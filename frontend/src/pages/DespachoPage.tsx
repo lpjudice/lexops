@@ -327,6 +327,7 @@ function SugestaoAcaoPainel({ publicacao: p }: { publicacao: PublicacaoPendente 
   const [tipoContagemManual, setTipoContagemManual] = useState<'uteis' | 'corridos'>('uteis')
   const [gerandoPeca, setGerandoPeca] = useState(false)
   const [aprovando, setAprovando] = useState(false)
+  const [responsavelPrazo, setResponsavelPrazo] = useState('')
 
   const opcaoEscolhida = opcoes[opcaoIdx]
   // Quando a IA não sugeriu nenhum caminho de prazo, ainda assim dá pra gerar
@@ -338,6 +339,9 @@ function SugestaoAcaoPainel({ publicacao: p }: { publicacao: PublicacaoPendente 
 
   const toggleTarefa = (i: number) =>
     setTarefas((prev) => prev.map((t, idx) => idx === i ? { ...t, marcada: !t.marcada } : t))
+
+  const atualizarResponsavelTarefa = (i: number, responsavel: string) =>
+    setTarefas((prev) => prev.map((t, idx) => idx === i ? { ...t, responsavel: responsavel || null } : t))
 
   const adicionarTarefa = () => {
     if (!novaTarefa.trim()) return
@@ -357,6 +361,21 @@ function SugestaoAcaoPainel({ publicacao: p }: { publicacao: PublicacaoPendente 
   }
 
   const aprovar = async () => {
+    const prazoParaCriar = opcaoEscolhida ?? (diasPrazoManual
+      ? { peca_necessaria: tipoPecaManual.trim() || 'outro', dias_prazo: diasPrazoManual, tipo_contagem: tipoContagemManual }
+      : null)
+
+    // Pergunta o responsável antes de registrar — não deixa criar prazo/tarefa órfã.
+    if (prazoParaCriar && !responsavelPrazo.trim()) {
+      alert('Defina o responsável pelo prazo antes de aprovar.')
+      return
+    }
+    const semResponsavel = tarefas.find((t) => t.marcada && !t.responsavel?.trim())
+    if (semResponsavel) {
+      alert(`Defina o responsável pela tarefa "${semResponsavel.titulo}" antes de aprovar.`)
+      return
+    }
+
     setAprovando(true)
     let erroPeca: string | null = null
     try {
@@ -369,20 +388,18 @@ function SugestaoAcaoPainel({ publicacao: p }: { publicacao: PublicacaoPendente 
           erroPeca = 'Não foi possível gerar a peça — prazo e tarefas foram criados mesmo assim.'
         }
       }
-      const prazoParaCriar = opcaoEscolhida ?? (diasPrazoManual
-        ? { peca_necessaria: tipoPecaManual.trim() || 'outro', dias_prazo: diasPrazoManual, tipo_contagem: tipoContagemManual }
-        : null)
       // Se sobrou texto digitado no campo "+ adicionar tarefa" sem ter clicado
       // em Adicionar, inclui mesmo assim — não pode se perder silenciosamente.
       const tarefasParaEnviar = tarefas.filter((t) => t.marcada).map(({ titulo, responsavel }) => ({ titulo, responsavel }))
       if (novaTarefa.trim()) {
-        tarefasParaEnviar.push({ titulo: novaTarefa.trim(), responsavel: null })
+        tarefasParaEnviar.push({ titulo: novaTarefa.trim(), responsavel: responsavelPrazo.trim() || null })
       }
       const resposta = await despachoApi.aprovar(p.id, {
         criar_prazo: !!prazoParaCriar,
         peca_necessaria: prazoParaCriar?.peca_necessaria ?? null,
         dias_prazo: prazoParaCriar?.dias_prazo ?? null,
         tipo_contagem: prazoParaCriar?.tipo_contagem ?? 'uteis',
+        responsavel_prazo: responsavelPrazo.trim() || null,
         tarefas: tarefasParaEnviar,
       })
       setNovaTarefa('')
@@ -453,16 +470,40 @@ function SugestaoAcaoPainel({ publicacao: p }: { publicacao: PublicacaoPendente 
         </div>
       )}
 
+      {(opcaoEscolhida || diasPrazoManual) && (
+        <div style={{ marginBottom: 10, display: 'flex', gap: 6, alignItems: 'center' }}>
+          <span style={{ fontSize: 12, color: 'var(--gray-mid)' }}>Responsável pelo prazo:</span>
+          <input
+            value={responsavelPrazo}
+            onChange={(e) => setResponsavelPrazo(e.target.value)}
+            placeholder="nome"
+            style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, width: 180, border: !responsavelPrazo ? '1px solid #f59e0b' : '1px solid #ddd' }}
+          />
+        </div>
+      )}
+
       {(tarefas.length > 0 || novaTarefa) && (
         <div style={{ marginBottom: 10 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gray-mid)', textTransform: 'uppercase', marginBottom: 4 }}>
             Tarefas sugeridas
           </div>
           {tarefas.map((t, i) => (
-            <label key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, marginBottom: 4, cursor: 'pointer' }}>
-              <input type="checkbox" checked={t.marcada} onChange={() => toggleTarefa(i)} />
-              {t.titulo} {t.responsavel ? <span style={{ color: 'var(--gray-mid)' }}>({t.responsavel})</span> : null}
-            </label>
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, marginBottom: 4 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, cursor: 'pointer' }}>
+                <input type="checkbox" checked={t.marcada} onChange={() => toggleTarefa(i)} />
+                {t.titulo}
+              </label>
+              <input
+                value={t.responsavel ?? ''}
+                onChange={(e) => atualizarResponsavelTarefa(i, e.target.value)}
+                placeholder="responsável"
+                disabled={!t.marcada}
+                style={{
+                  fontSize: 12, padding: '3px 6px', borderRadius: 6, width: 140,
+                  border: t.marcada && !t.responsavel ? '1px solid #f59e0b' : '1px solid #ddd',
+                }}
+              />
+            </div>
           ))}
         </div>
       )}

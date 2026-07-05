@@ -1130,7 +1130,7 @@ export default function TarefasPage() {
                             <span title="Criada automaticamente pelo gestor jurídico (Despacho)" style={{ fontSize: 11, background: '#f3e8ff', color: '#7c3aed', borderRadius: 4, padding: '1px 6px', flexShrink: 0 }}>🤖 automático</span>
                           )}
                           {tarefa.prazo_id && (
-                            <a href="/prazos" title="Ver prazo vinculado" onClick={(e) => e.stopPropagation()}
+                            <a href={`/prazos?destaque=${tarefa.prazo_id}`} title="Ver prazo vinculado" onClick={(e) => e.stopPropagation()}
                               style={{ fontSize: 11, background: '#dbeafe', color: '#1d4ed8', borderRadius: 4, padding: '1px 6px', flexShrink: 0, textDecoration: 'none' }}>
                               🔗 prazo
                             </a>

@@ -207,6 +207,21 @@ def gerar_documento_peca(
                     "bulletPreset": "NUMBERED_DECIMAL_ALPHA_ROMAN",
                 }
             })
+            # Mesmo padrão do timbrado: justificado, espaçamento 150%, só a
+            # primeira linha de cada parágrafo com recuo (não o parágrafo
+            # inteiro encostado na numeração).
+            requests.append({
+                "updateParagraphStyle": {
+                    "range": {"startIndex": c_start, "endIndex": c_end},
+                    "paragraphStyle": {
+                        "alignment": "JUSTIFIED",
+                        "lineSpacing": 150,
+                        "indentFirstLine": {"magnitude": 31.5, "unit": "PT"},
+                        "indentStart": {"magnitude": 0, "unit": "PT"},
+                    },
+                    "fields": "alignment,lineSpacing,indentFirstLine,indentStart",
+                }
+            })
         if requests:
             _docs_request("POST", f"/{doc_id}:batchUpdate", tokens, json={"requests": requests})
 
