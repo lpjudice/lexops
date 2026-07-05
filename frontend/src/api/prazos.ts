@@ -22,6 +22,7 @@ export interface Prazo {
   google_event_id?: string
   criado_automaticamente?: boolean
   tarefas_vinculadas?: { id: string; titulo: string }[]
+  peca_doc_url?: string | null
   created_at: string
   updated_at: string
 }
