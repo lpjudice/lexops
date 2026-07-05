@@ -2,15 +2,33 @@ import api from './client'
 
 export type Confianca = 'alta' | 'media' | 'baixa' | 'sem_vinculo'
 
+export interface OpcaoPrazo {
+  label: string
+  peca_necessaria: string
+  dias_prazo: number
+  tipo_contagem: 'uteis' | 'corridos'
+}
+
+export interface TarefaSugerida {
+  titulo: string
+  responsavel: string | null
+}
+
 export interface SugestaoAcao {
   resumo_raciocinio: string
   requer_prazo: boolean
-  peca_necessaria: string | null
-  dias_prazo: number | null
-  tipo_contagem: 'uteis' | 'corridos'
-  tarefa_titulo: string | null
-  tarefa_responsavel: string | null
+  opcoes_prazo: OpcaoPrazo[]
+  tarefas_sugeridas: TarefaSugerida[]
   rascunho_sugerido: string | null
+}
+
+export interface PecaGerada {
+  titulo_peca: string
+  enderecamento: string
+  qualificacao: string
+  paragrafos: string[]
+  fechamento: string
+  itens_faltantes: string[]
 }
 
 export interface PublicacaoPendente {
@@ -29,6 +47,7 @@ export interface PublicacaoPendente {
   cliente_nome: string | null
   vinculo_confirmado: boolean
   sugestao_acao: SugestaoAcao | null
+  peca_gerada: PecaGerada | null
 }
 
 export const despachoApi = {
@@ -41,13 +60,14 @@ export const despachoApi = {
 
   sugerir: (id: string) => api.post<SugestaoAcao>(`/despacho/${id}/sugerir`).then((r) => r.data),
 
+  gerarPeca: (id: string, opcaoPrazo: OpcaoPrazo, promptExtra: string) =>
+    api.post<PecaGerada>(`/despacho/${id}/gerar-peca`, { opcao_prazo: opcaoPrazo, prompt_extra: promptExtra }).then((r) => r.data),
+
   aprovar: (id: string, body: {
     criar_prazo?: boolean
-    criar_tarefa?: boolean
     peca_necessaria?: string | null
     dias_prazo?: number | null
     tipo_contagem?: string
-    tarefa_titulo?: string | null
-    tarefa_responsavel?: string | null
+    tarefas?: TarefaSugerida[]
   }) => api.post(`/despacho/${id}/aprovar`, body).then((r) => r.data),
 }

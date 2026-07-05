@@ -945,6 +945,10 @@ def _run_migrations() -> None:
             "ALTER TYPE status_prazo ADD VALUE IF NOT EXISTS 'ignorado'"
         ))
 
+        conn.execute(text(
+            "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS peca_gerada TEXT"
+        ))
+
         conn.commit()
 
 

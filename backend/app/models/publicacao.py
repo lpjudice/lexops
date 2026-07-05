@@ -53,6 +53,8 @@ class Publicacao(Base):
     vinculo_confirmado: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     # Sugestão de ação da IA (JSON), gerada após a confirmação do vínculo.
     sugestao_acao: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Conteúdo da peça gerada (JSON), antes de virar documento no Google Docs.
+    peca_gerada: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # IA
     analise_ia: Mapped[str | None] = mapped_column(Text)          # JSON do Claude

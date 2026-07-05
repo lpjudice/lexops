@@ -5,7 +5,7 @@ Prazos, Tarefas) — não altera a lógica deles.
 
 Quando o vínculo é de altíssima confiança (CNJ exato batendo com um processo
 já cadastrado), o pipeline inteiro roda sozinho: confirma, pede sugestão à
-IA, cria prazo/tarefa e avisa por Telegram — sem esperar clique. Confiança
+IA, cria prazo/tarefas e avisa por Telegram — sem esperar clique. Confiança
 média/baixa continua exigindo confirmação humana antes de qualquer ação.
 """
 import json
@@ -61,7 +61,12 @@ def _notificar_telegram(texto: str) -> None:
         logger.warning("Falha ao notificar Telegram sobre ação automática", exc_info=True)
 
 
-def _criar_prazo_tarefa(
+class TarefaSugerida(BaseModel):
+    titulo: str
+    responsavel: str | None = None
+
+
+def _criar_prazo_e_tarefas(
     db: Session,
     pub: Publicacao,
     processo: Processo,
@@ -69,16 +74,13 @@ def _criar_prazo_tarefa(
     peca_necessaria: str | None,
     dias_prazo: int | None,
     tipo_contagem: str,
-    tarefa_titulo: str | None,
-    tarefa_responsavel: str | None,
+    tarefas: list[TarefaSugerida],
     criar_prazo: bool,
-    criar_tarefa: bool,
     automatico: bool,
 ) -> dict:
-    """Cria Prazo/Tarefa a partir de uma sugestão (manual ou automática) e
-    retorna um dict com os ids criados. Compartilhado entre /aprovar e o
-    pipeline automático pra não duplicar a lógica."""
-    resultado: dict = {}
+    """Cria Prazo (uma opção escolhida) + N Tarefas e retorna os ids criados.
+    Compartilhado entre /aprovar e o pipeline automático."""
+    resultado: dict = {"tarefa_ids": []}
 
     if criar_prazo and peca_necessaria and dias_prazo:
         from app.services.google_calendar import criar_evento
@@ -91,6 +93,7 @@ def _criar_prazo_tarefa(
             estado=processo.estado,
             tipo_contagem=tipo_contagem,
         )
+        responsavel_prazo = tarefas[0].responsavel if tarefas else None
         prazo = Prazo(
             processo_id=processo.id,
             tipo=peca_necessaria,
@@ -100,7 +103,7 @@ def _criar_prazo_tarefa(
             tipo_contagem=tipo_contagem,
             data_limite=data_com,
             data_limite_sem_feriado=data_sem,
-            responsavel=tarefa_responsavel,
+            responsavel=responsavel_prazo,
             criado_automaticamente=automatico,
         )
         db.add(prazo)
@@ -119,27 +122,31 @@ def _criar_prazo_tarefa(
         resultado["prazo_id"] = str(prazo.id)
         resultado["prazo_data_limite"] = prazo.data_limite.isoformat() if prazo.data_limite else None
 
-    if criar_tarefa and tarefa_titulo:
+    for t in tarefas:
+        if not t.titulo:
+            continue
         tarefa = Tarefa(
             cliente_id=processo.cliente_id,
             processo_id=processo.id,
-            titulo=tarefa_titulo,
-            responsavel=tarefa_responsavel,
+            titulo=t.titulo,
+            responsavel=t.responsavel,
             status="pendente",
             criado_automaticamente=automatico,
         )
         db.add(tarefa)
         db.commit()
         db.refresh(tarefa)
-        resultado["tarefa_id"] = str(tarefa.id)
+        resultado["tarefa_ids"].append(str(tarefa.id))
 
     return resultado
 
 
 def _processar_automaticos(db: Session) -> int:
     """Roda o pipeline inteiro (confirmar → sugerir → criar) para publicações
-    de confiança alta (CNJ exato) que ainda não foram tratadas. Retorna
-    quantas foram processadas."""
+    de confiança alta (CNJ exato) que ainda não foram tratadas. Usa a
+    primeira opção de prazo sugerida e todas as tarefas sugeridas — não há
+    humano pra escolher entre caminhos alternativos aqui. Retorna quantas
+    foram processadas."""
     candidatas = (
         db.query(Publicacao)
         .filter(
@@ -178,15 +185,17 @@ def _processar_automaticos(db: Session) -> int:
         pub.sugestao_acao = json.dumps(sugestao, ensure_ascii=False)
         db.commit()
 
-        criado = _criar_prazo_tarefa(
+        opcoes = sugestao.get("opcoes_prazo") or []
+        opcao = opcoes[0] if opcoes else {}
+        tarefas = [TarefaSugerida(**t) for t in (sugestao.get("tarefas_sugeridas") or [])]
+
+        criado = _criar_prazo_e_tarefas(
             db, pub, processo,
-            peca_necessaria=sugestao.get("peca_necessaria"),
-            dias_prazo=sugestao.get("dias_prazo"),
-            tipo_contagem=sugestao.get("tipo_contagem") or "uteis",
-            tarefa_titulo=sugestao.get("tarefa_titulo"),
-            tarefa_responsavel=sugestao.get("tarefa_responsavel"),
-            criar_prazo=bool(sugestao.get("requer_prazo")),
-            criar_tarefa=bool(sugestao.get("tarefa_titulo")),
+            peca_necessaria=opcao.get("peca_necessaria"),
+            dias_prazo=opcao.get("dias_prazo"),
+            tipo_contagem=opcao.get("tipo_contagem") or "uteis",
+            tarefas=tarefas,
+            criar_prazo=bool(sugestao.get("requer_prazo")) and bool(opcoes),
             automatico=True,
         )
 
@@ -194,12 +203,12 @@ def _processar_automaticos(db: Session) -> int:
         db.commit()
         processadas += 1
 
-        if criado.get("prazo_id") or criado.get("tarefa_id"):
+        if criado.get("prazo_id") or criado.get("tarefa_ids"):
             partes = [f"🤖 *Ação automática* — processo `{processo.numero_cnj}`"]
             if criado.get("prazo_id"):
-                partes.append(f"📅 Prazo criado: {sugestao.get('peca_necessaria')} — vence {criado.get('prazo_data_limite')}")
-            if criado.get("tarefa_id"):
-                partes.append(f"✅ Tarefa criada: {sugestao.get('tarefa_titulo')}")
+                partes.append(f"📅 Prazo criado: {opcao.get('label') or opcao.get('peca_necessaria')} — vence {criado.get('prazo_data_limite')}")
+            if criado.get("tarefa_ids"):
+                partes.append(f"✅ {len(criado['tarefa_ids'])} tarefa(s) criada(s)")
             partes.append(f"_{sugestao.get('resumo_raciocinio', '')}_")
             _notificar_telegram("\n".join(partes))
 
@@ -248,6 +257,7 @@ def listar_pendentes(db: Session = Depends(get_db)):
             "cliente_nome": cliente.nome if cliente else None,
             "vinculo_confirmado": p.vinculo_confirmado,
             "sugestao_acao": json.loads(p.sugestao_acao) if p.sugestao_acao else None,
+            "peca_gerada": json.loads(p.peca_gerada) if p.peca_gerada else None,
         })
     return resultado
 
@@ -325,15 +335,51 @@ def sugerir_acao(
     return sugestao
 
 
+class GerarPecaRequest(BaseModel):
+    opcao_prazo: dict
+    prompt_extra: str = ""
+
+
+@router.post("/{publicacao_id}/gerar-peca")
+def gerar_peca(
+    publicacao_id: uuid.UUID,
+    body: GerarPecaRequest,
+    db: Session = Depends(get_db),
+    current: Usuario = Depends(get_current_user),
+):
+    """Gera o conteúdo da peça (texto estruturado, sem inventar fatos — usa
+    XXX pro que faltar) pra uma das opções de prazo sugeridas."""
+    pub = db.query(Publicacao).filter(Publicacao.id == publicacao_id).first()
+    if not pub:
+        raise HTTPException(status_code=404, detail="Publicação não encontrada")
+    if not pub.vinculo_confirmado or not pub.processo_id:
+        raise HTTPException(status_code=400, detail="Vínculo com processo não confirmado")
+
+    processo = db.query(Processo).filter(Processo.id == pub.processo_id).first()
+    if not processo:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+
+    from app.services.contexto_service import montar_contexto_processo
+    from app.services.ia_despacho import gerar_peca as gerar_peca_ia
+
+    contexto = montar_contexto_processo(db, processo, current)
+    texto_publicacao = pub.texto_completo or pub.texto_resumo or ""
+    peca = gerar_peca_ia(contexto, texto_publicacao, body.opcao_prazo, body.prompt_extra)
+
+    if peca.get("erro"):
+        raise HTTPException(status_code=502, detail=peca["erro"])
+
+    pub.peca_gerada = json.dumps(peca, ensure_ascii=False)
+    db.commit()
+    return peca
+
+
 class AprovarRequest(BaseModel):
     criar_prazo: bool = True
-    criar_tarefa: bool = True
-    # Permite o usuário editar a sugestão antes de aprovar
     peca_necessaria: str | None = None
     dias_prazo: int | None = None
     tipo_contagem: str = "uteis"
-    tarefa_titulo: str | None = None
-    tarefa_responsavel: str | None = None
+    tarefas: list[TarefaSugerida] = []
 
 
 @router.post("/{publicacao_id}/aprovar")
@@ -348,15 +394,13 @@ def aprovar_acao(publicacao_id: uuid.UUID, body: AprovarRequest, db: Session = D
     if not processo:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
 
-    resultado = _criar_prazo_tarefa(
+    resultado = _criar_prazo_e_tarefas(
         db, pub, processo,
         peca_necessaria=body.peca_necessaria,
         dias_prazo=body.dias_prazo,
         tipo_contagem=body.tipo_contagem,
-        tarefa_titulo=body.tarefa_titulo,
-        tarefa_responsavel=body.tarefa_responsavel,
+        tarefas=body.tarefas,
         criar_prazo=body.criar_prazo,
-        criar_tarefa=body.criar_tarefa,
         automatico=False,
     )
 

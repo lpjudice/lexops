@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { despachoApi } from '../api/despacho'
-import type { PublicacaoPendente } from '../api/despacho'
+import type { PublicacaoPendente, TarefaSugerida } from '../api/despacho'
 import { processosApi } from '../api/processos'
 import { clientesApi } from '../api/clientes'
 import styles from './Page.module.css'
@@ -15,10 +15,9 @@ const CONFIANCA_LABEL: Record<string, { texto: string; cor: string; bg: string }
 
 export default function DespachoPage() {
   const qc = useQueryClient()
-  const [corrigindoId, setCorrigindoId] = useState<string | null>(null);
+  const [corrigindoId, setCorrigindoId] = useState<string | null>(null)
   const [buscaProcesso, setBuscaProcesso] = useState('')
   const [gerandoId, setGerandoId] = useState<string | null>(null)
-  const [aprovandoId, setAprovandoId] = useState<string | null>(null)
 
   const { data: pendentes = [], isLoading } = useQuery({
     queryKey: ['despacho-pendentes'],
@@ -74,25 +73,6 @@ export default function DespachoPage() {
       qc.invalidateQueries({ queryKey: ['despacho-pendentes'] })
     } finally {
       setGerandoId(null)
-    }
-  }
-
-  const aprovar = async (p: PublicacaoPendente) => {
-    if (!p.sugestao_acao) return
-    setAprovandoId(p.id)
-    try {
-      await despachoApi.aprovar(p.id, {
-        criar_prazo: p.sugestao_acao.requer_prazo,
-        criar_tarefa: !!p.sugestao_acao.tarefa_titulo,
-        peca_necessaria: p.sugestao_acao.peca_necessaria,
-        dias_prazo: p.sugestao_acao.dias_prazo,
-        tipo_contagem: p.sugestao_acao.tipo_contagem,
-        tarefa_titulo: p.sugestao_acao.tarefa_titulo,
-        tarefa_responsavel: p.sugestao_acao.tarefa_responsavel,
-      })
-      qc.invalidateQueries({ queryKey: ['despacho-pendentes'] })
-    } finally {
-      setAprovandoId(null)
     }
   }
 
@@ -211,37 +191,175 @@ export default function DespachoPage() {
               )}
             </div>
 
-            {/* Sugestão de ação */}
-            {p.sugestao_acao && (
-              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #f5f5f5', background: '#fafffe' }}>
-                <p style={{ fontSize: 13, color: 'var(--dark)', margin: '0 0 8px' }}>{p.sugestao_acao.resumo_raciocinio}</p>
-                {p.sugestao_acao.requer_prazo && (
-                  <p style={{ fontSize: 12, margin: '0 0 4px' }}>
-                    📅 Prazo sugerido: <strong>{p.sugestao_acao.peca_necessaria}</strong> — {p.sugestao_acao.dias_prazo} dias {p.sugestao_acao.tipo_contagem}
-                  </p>
-                )}
-                {p.sugestao_acao.tarefa_titulo && (
-                  <p style={{ fontSize: 12, margin: '0 0 4px' }}>
-                    ✅ Tarefa sugerida: {p.sugestao_acao.tarefa_titulo} {p.sugestao_acao.tarefa_responsavel ? `(${p.sugestao_acao.tarefa_responsavel})` : ''}
-                  </p>
-                )}
-                {p.sugestao_acao.rascunho_sugerido && (
-                  <p style={{ fontSize: 12, margin: '0 0 8px', fontStyle: 'italic', color: 'var(--gray-mid)' }}>
-                    "{p.sugestao_acao.rascunho_sugerido}"
-                  </p>
-                )}
-                <button
-                  onClick={() => aprovar(p)}
-                  disabled={aprovandoId === p.id}
-                  style={{ fontSize: 12, fontWeight: 600, color: '#fff', background: 'var(--teal)', border: 'none', borderRadius: 6, padding: '6px 14px', cursor: 'pointer' }}
-                >
-                  {aprovandoId === p.id ? 'Aplicando...' : 'Aprovar e criar prazo/tarefa'}
-                </button>
-              </div>
-            )}
+            {p.sugestao_acao && <SugestaoAcaoPainel publicacao={p} />}
           </div>
         )
       })}
     </div>
+  )
+}
+
+function SugestaoAcaoPainel({ publicacao: p }: { publicacao: PublicacaoPendente }) {
+  const qc = useQueryClient()
+  const sugestao = p.sugestao_acao!
+  const opcoes = sugestao.opcoes_prazo || []
+
+  const [opcaoIdx, setOpcaoIdx] = useState(0)
+  const [tarefas, setTarefas] = useState<(TarefaSugerida & { marcada: boolean })[]>(
+    (sugestao.tarefas_sugeridas || []).map((t) => ({ ...t, marcada: true }))
+  )
+  const [novaTarefa, setNovaTarefa] = useState('')
+  const [promptExtra, setPromptExtra] = useState('')
+  const [gerandoPeca, setGerandoPeca] = useState(false)
+  const [aprovando, setAprovando] = useState(false)
+
+  const opcaoEscolhida = opcoes[opcaoIdx]
+
+  const toggleTarefa = (i: number) =>
+    setTarefas((prev) => prev.map((t, idx) => idx === i ? { ...t, marcada: !t.marcada } : t))
+
+  const adicionarTarefa = () => {
+    if (!novaTarefa.trim()) return
+    setTarefas((prev) => [...prev, { titulo: novaTarefa.trim(), responsavel: null, marcada: true }])
+    setNovaTarefa('')
+  }
+
+  const gerarPeca = async () => {
+    if (!opcaoEscolhida) return
+    setGerandoPeca(true)
+    try {
+      await despachoApi.gerarPeca(p.id, opcaoEscolhida, promptExtra)
+      qc.invalidateQueries({ queryKey: ['despacho-pendentes'] })
+    } finally {
+      setGerandoPeca(false)
+    }
+  }
+
+  const aprovar = async () => {
+    setAprovando(true)
+    try {
+      await despachoApi.aprovar(p.id, {
+        criar_prazo: sugestao.requer_prazo && !!opcaoEscolhida,
+        peca_necessaria: opcaoEscolhida?.peca_necessaria ?? null,
+        dias_prazo: opcaoEscolhida?.dias_prazo ?? null,
+        tipo_contagem: opcaoEscolhida?.tipo_contagem ?? 'uteis',
+        tarefas: tarefas.filter((t) => t.marcada).map(({ titulo, responsavel }) => ({ titulo, responsavel })),
+      })
+      qc.invalidateQueries({ queryKey: ['despacho-pendentes'] })
+    } finally {
+      setAprovando(false)
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #f5f5f5', background: '#fafffe' }}>
+      <p style={{ fontSize: 13, color: 'var(--dark)', margin: '0 0 10px' }}>{sugestao.resumo_raciocinio}</p>
+
+      {opcoes.length > 0 && (
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gray-mid)', textTransform: 'uppercase', marginBottom: 4 }}>
+            Caminho / prazo
+          </div>
+          {opcoes.map((o, i) => (
+            <label key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, marginBottom: 4, cursor: 'pointer' }}>
+              <input type="radio" checked={opcaoIdx === i} onChange={() => setOpcaoIdx(i)} />
+              📅 <strong>{o.label}</strong> — {o.dias_prazo} dias {o.tipo_contagem}
+            </label>
+          ))}
+        </div>
+      )}
+
+      {(tarefas.length > 0 || novaTarefa) && (
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gray-mid)', textTransform: 'uppercase', marginBottom: 4 }}>
+            Tarefas sugeridas
+          </div>
+          {tarefas.map((t, i) => (
+            <label key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, marginBottom: 4, cursor: 'pointer' }}>
+              <input type="checkbox" checked={t.marcada} onChange={() => toggleTarefa(i)} />
+              {t.titulo} {t.responsavel ? <span style={{ color: 'var(--gray-mid)' }}>({t.responsavel})</span> : null}
+            </label>
+          ))}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+        <input
+          value={novaTarefa}
+          onChange={(e) => setNovaTarefa(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') adicionarTarefa() }}
+          placeholder="+ adicionar outra tarefa..."
+          style={{ flex: 1, fontSize: 12, padding: '5px 8px', border: '1px solid #ddd', borderRadius: 6 }}
+        />
+        <button onClick={adicionarTarefa} style={{ fontSize: 12, color: 'var(--teal)', background: 'none', border: '1px solid var(--teal)', borderRadius: 6, padding: '5px 10px', cursor: 'pointer' }}>
+          Adicionar
+        </button>
+      </div>
+
+      {opcaoEscolhida && (
+        <div style={{ marginBottom: 10 }}>
+          <textarea
+            placeholder="Prompt extra pra guiar a IA na redação da peça (opcional)..."
+            value={promptExtra}
+            onChange={(e) => setPromptExtra(e.target.value)}
+            rows={2}
+            style={{ width: '100%', fontSize: 12, padding: 8, border: '1px solid #ddd', borderRadius: 6, boxSizing: 'border-box', marginBottom: 6 }}
+          />
+          <button
+            onClick={gerarPeca}
+            disabled={gerandoPeca}
+            style={{ fontSize: 12, fontWeight: 600, color: 'var(--teal)', background: 'none', border: '1px solid var(--teal)', borderRadius: 6, padding: '6px 12px', cursor: 'pointer' }}
+          >
+            {gerandoPeca ? 'Redigindo...' : p.peca_gerada ? 'Gerar peça de novo' : 'Gerar peça (rascunho)'}
+          </button>
+        </div>
+      )}
+
+      {p.peca_gerada && (
+        <div style={{ background: '#fff', border: '1px solid #eee', borderRadius: 6, padding: 12, marginBottom: 10, fontSize: 12 }}>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>{p.peca_gerada.titulo_peca}</div>
+          <p style={{ margin: '0 0 6px' }}>{p.peca_gerada.enderecamento}</p>
+          <p style={{ margin: '0 0 6px' }}>{p.peca_gerada.qualificacao}</p>
+          {p.peca_gerada.paragrafos.map((par, i) => (
+            <p key={i} style={{ margin: '0 0 6px' }}>
+              {i + 1}. <PecaTexto texto={par} />
+            </p>
+          ))}
+          <p style={{ margin: '0 0 6px' }}>{p.peca_gerada.fechamento}</p>
+          {p.peca_gerada.itens_faltantes.length > 0 && (
+            <p style={{ color: '#b91c1c', fontWeight: 600, marginTop: 8 }}>
+              ⚠ Faltam: {p.peca_gerada.itens_faltantes.join('; ')}
+            </p>
+          )}
+          <p style={{ color: 'var(--gray-mid)', fontSize: 11, marginTop: 8 }}>
+            Rascunho de texto por enquanto — a versão em Google Docs (timbrado) vem na próxima etapa.
+          </p>
+        </div>
+      )}
+
+      <button
+        onClick={aprovar}
+        disabled={aprovando}
+        style={{ fontSize: 12, fontWeight: 600, color: '#fff', background: 'var(--teal)', border: 'none', borderRadius: 6, padding: '6px 14px', cursor: 'pointer' }}
+      >
+        {aprovando ? 'Aplicando...' : 'Aprovar e criar prazo/tarefas'}
+      </button>
+    </div>
+  )
+}
+
+function PecaTexto({ texto }: { texto: string }) {
+  const partes = texto.split(/(\*\*[^*]+\*\*|XXX[^X]*XXX)/g)
+  return (
+    <>
+      {partes.map((parte, i) => {
+        if (parte.startsWith('**') && parte.endsWith('**')) {
+          return <strong key={i}>{parte.slice(2, -2)}</strong>
+        }
+        if (parte.startsWith('XXX')) {
+          return <span key={i} style={{ color: '#dc2626', fontWeight: 700 }}>{parte}</span>
+        }
+        return <span key={i}>{parte}</span>
+      })}
+    </>
   )
 }
