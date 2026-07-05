@@ -42,8 +42,13 @@ class Publicacao(Base):
     )
 
     # Controle
+    # "lida" é do inbox do menu Diário Oficial (marcar como vista lá) — não
+    # tem relação com o Despacho. O Despacho usa `despacho_tratada` pra não
+    # colidir com esse fluxo (publicação lida no Diário sumia do Despacho
+    # sem nunca ter passado por triagem).
     lida: Mapped[bool] = mapped_column(Boolean, default=False)
     rejeitada: Mapped[bool] = mapped_column(Boolean, default=False)
+    despacho_tratada: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     gera_prazo: Mapped[bool] = mapped_column(Boolean, default=False)
     prazo_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("prazos.id", ondelete="SET NULL"), nullable=True

@@ -959,6 +959,24 @@ def _run_migrations() -> None:
             "ALTER TABLE tarefas ADD COLUMN IF NOT EXISTS prazo_id UUID REFERENCES prazos(id) ON DELETE SET NULL"
         ))
 
+        # despacho_tratada é separado do `lida` do menu Diário Oficial (ver
+        # comentário no model). Backfill só roda na primeira vez que a coluna
+        # é criada — depois disso cada fluxo cuida do próprio campo.
+        conn.execute(text(
+            """
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='publicacoes' AND column_name='despacho_tratada'
+                ) THEN
+                    ALTER TABLE publicacoes ADD COLUMN despacho_tratada BOOLEAN NOT NULL DEFAULT false;
+                    UPDATE publicacoes SET despacho_tratada = true WHERE lida = true OR rejeitada = true;
+                END IF;
+            END $$;
+            """
+        ))
+
         conn.commit()
 
 

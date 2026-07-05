@@ -11,6 +11,7 @@ média/baixa continua exigindo confirmação humana antes de qualquer ação.
 import json
 import logging
 import uuid
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -213,7 +214,7 @@ def _processar_automaticos(db: Session) -> int:
     candidatas = (
         db.query(Publicacao)
         .filter(
-            Publicacao.lida.is_(False),
+            Publicacao.despacho_tratada.is_(False),
             Publicacao.rejeitada.is_(False),
             Publicacao.vinculo_confirmado.is_(False),
             Publicacao.processo_id.isnot(None),
@@ -262,7 +263,7 @@ def _processar_automaticos(db: Session) -> int:
             automatico=True,
         )
 
-        pub.lida = True
+        pub.despacho_tratada = True
         db.commit()
         processadas += 1
 
@@ -290,6 +291,7 @@ def _pub_para_dict(db: Session, p: Publicacao) -> dict:
     cliente = db.query(Cliente).filter(Cliente.id == processo.cliente_id).first() if processo else None
     return {
         "id": str(p.id),
+        "fonte": p.fonte,
         "data_publicacao": p.data_publicacao.isoformat() if p.data_publicacao else None,
         "tribunal": p.tribunal,
         "tipo_ato": p.tipo_ato,
@@ -319,7 +321,7 @@ def listar_pendentes(db: Session = Depends(get_db)):
     pubs = (
         db.query(Publicacao)
         .filter(
-            Publicacao.lida.is_(False),
+            Publicacao.despacho_tratada.is_(False),
             Publicacao.rejeitada.is_(False),
             Publicacao.texto_resumo != TEXTO_SEM_PUBLICACAO,
         )
@@ -331,16 +333,35 @@ def listar_pendentes(db: Session = Depends(get_db)):
 
 
 @router.get("/tratadas")
-def listar_tratadas(db: Session = Depends(get_db)):
+def listar_tratadas(
+    data_inicio: date | None = None,
+    data_fim: date | None = None,
+    dias: int | None = None,
+    db: Session = Depends(get_db),
+):
     """Histórico do que já foi decidido no Despacho — aprovado ou descartado
-    — pra não perder o registro do que aconteceu com cada publicação."""
-    pubs = (
-        db.query(Publicacao)
-        .filter(Publicacao.lida.is_(True))
-        .order_by(Publicacao.data_publicacao.desc())
-        .limit(200)
-        .all()
-    )
+    — pra não perder o registro do que aconteceu com cada publicação.
+
+    Sem filtro, mostra só o mês corrente. `dias` (30/60/90) ou
+    `data_inicio`/`data_fim` (seleção manual) trazem períodos maiores."""
+    if data_inicio or data_fim:
+        inicio = data_inicio
+        fim = data_fim or date.today()
+    elif dias:
+        fim = date.today()
+        inicio = fim - timedelta(days=dias)
+    else:
+        hoje = date.today()
+        inicio = hoje.replace(day=1)
+        fim = hoje
+
+    query = db.query(Publicacao).filter(Publicacao.despacho_tratada.is_(True))
+    if inicio:
+        query = query.filter(Publicacao.data_publicacao >= inicio)
+    if fim:
+        query = query.filter(Publicacao.data_publicacao <= fim)
+
+    pubs = query.order_by(Publicacao.data_publicacao.desc()).limit(500).all()
     return [_pub_para_dict(db, p) for p in pubs]
 
 
@@ -385,7 +406,7 @@ def rejeitar_publicacao(publicacao_id: uuid.UUID, db: Session = Depends(get_db))
     if not pub:
         raise HTTPException(status_code=404, detail="Publicação não encontrada")
     pub.rejeitada = True
-    pub.lida = True
+    pub.despacho_tratada = True
     db.commit()
     return {"ok": True}
 
@@ -399,7 +420,7 @@ def reverter_para_pendente(publicacao_id: uuid.UUID, db: Session = Depends(get_d
     pub = db.query(Publicacao).filter(Publicacao.id == publicacao_id).first()
     if not pub:
         raise HTTPException(status_code=404, detail="Publicação não encontrada")
-    pub.lida = False
+    pub.despacho_tratada = False
     pub.rejeitada = False
     db.commit()
     return {"ok": True}
@@ -517,7 +538,7 @@ def aprovar_acao(publicacao_id: uuid.UUID, body: AprovarRequest, db: Session = D
         responsavel_prazo=body.responsavel_prazo,
     )
 
-    pub.lida = True
+    pub.despacho_tratada = True
     db.commit()
     resultado["ok"] = True
     return resultado

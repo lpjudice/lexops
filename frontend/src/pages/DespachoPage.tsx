@@ -13,12 +13,46 @@ const CONFIANCA_LABEL: Record<string, { texto: string; cor: string; bg: string }
   sem_vinculo: { texto: 'sem vínculo', cor: '#6b7280', bg: '#f3f4f6' },
 }
 
+const FONTE_LABEL: Record<string, { texto: string; icone: string }> = {
+  gmail: { texto: 'Recorte Digital OAB', icone: '📧' },
+  scraping_djen: { texto: 'Diário Oficial (DJEN)', icone: '📰' },
+  scraping_tjes: { texto: 'Diário Oficial (TJES)', icone: '📰' },
+  scraping_tjsp: { texto: 'Diário Oficial (TJSP)', icone: '📰' },
+  scraping_tjam: { texto: 'Diário Oficial (TJAM)', icone: '📰' },
+  scraping_tjrj: { texto: 'Diário Oficial (TJRJ)', icone: '📰' },
+  pje_comunica: { texto: 'PJe Comunica', icone: '⚖️' },
+  manual: { texto: 'Manual', icone: '✍️' },
+}
+
+function ChipFonte({ fonte }: { fonte: string }) {
+  const f = FONTE_LABEL[fonte] || { texto: fonte, icone: '•' }
+  return (
+    <span style={{ fontSize: 11, fontWeight: 600, color: '#3730a3', background: '#e0e7ff', padding: '2px 8px', borderRadius: 999, whiteSpace: 'nowrap' }}>
+      {f.icone} {f.texto}
+    </span>
+  )
+}
+
+const PRESETS_DIAS = [30, 60, 90] as const
+
 export default function DespachoPage() {
   const qc = useQueryClient()
   const [corrigindoId, setCorrigindoId] = useState<string | null>(null)
   const [buscaProcesso, setBuscaProcesso] = useState('')
   const [gerandoId, setGerandoId] = useState<string | null>(null)
   const [aba, setAba] = useState<'pendentes' | 'tratadas'>('pendentes')
+  const [filtroTratadasAberto, setFiltroTratadasAberto] = useState(false)
+  const [diasFiltro, setDiasFiltro] = useState<number | null>(null)
+  const [dataInicioManual, setDataInicioManual] = useState('')
+  const [dataFimManual, setDataFimManual] = useState('')
+
+  const filtroTratadasParams = useMemo(() => {
+    if (dataInicioManual || dataFimManual) {
+      return { data_inicio: dataInicioManual || undefined, data_fim: dataFimManual || undefined }
+    }
+    if (diasFiltro) return { dias: diasFiltro }
+    return undefined
+  }, [diasFiltro, dataInicioManual, dataFimManual])
 
   const { data: pendentesRaw = [], isLoading: carregandoPendentes } = useQuery({
     queryKey: ['despacho-pendentes'],
@@ -27,8 +61,8 @@ export default function DespachoPage() {
   })
 
   const { data: tratadas = [], isLoading: carregandoTratadas } = useQuery({
-    queryKey: ['despacho-tratadas'],
-    queryFn: () => despachoApi.listarTratadas(),
+    queryKey: ['despacho-tratadas', filtroTratadasParams],
+    queryFn: () => despachoApi.listarTratadas(filtroTratadasParams),
     enabled: aba === 'tratadas',
   })
 
@@ -128,6 +162,64 @@ export default function DespachoPage() {
 
       {aba === 'tratadas' ? (
         <>
+          <div style={{ marginBottom: 14 }}>
+            {!filtroTratadasAberto ? (
+              <button
+                onClick={() => setFiltroTratadasAberto(true)}
+                style={{ fontSize: 12, fontWeight: 600, color: 'var(--teal)', background: '#fff', border: '1px solid var(--teal)', borderRadius: 999, padding: '5px 12px', cursor: 'pointer' }}
+              >
+                {diasFiltro || dataInicioManual || dataFimManual ? '📅 Filtro ativo — ajustar' : '📅 Ver meses anteriores'}
+              </button>
+            ) : (
+              <div style={{ background: '#fafafa', border: '1px solid #eee', borderRadius: 8, padding: 12, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                <button
+                  onClick={() => { setDiasFiltro(null); setDataInicioManual(''); setDataFimManual('') }}
+                  style={{
+                    fontSize: 12, fontWeight: 600, padding: '5px 10px', borderRadius: 6, cursor: 'pointer',
+                    border: !diasFiltro && !dataInicioManual && !dataFimManual ? 'none' : '1px solid #ddd',
+                    background: !diasFiltro && !dataInicioManual && !dataFimManual ? 'var(--teal)' : '#fff',
+                    color: !diasFiltro && !dataInicioManual && !dataFimManual ? '#fff' : 'var(--dark)',
+                  }}
+                >
+                  Mês corrente
+                </button>
+                {PRESETS_DIAS.map((d) => (
+                  <button
+                    key={d}
+                    onClick={() => { setDiasFiltro(d); setDataInicioManual(''); setDataFimManual('') }}
+                    style={{
+                      fontSize: 12, fontWeight: 600, padding: '5px 10px', borderRadius: 6, cursor: 'pointer',
+                      border: diasFiltro === d ? 'none' : '1px solid #ddd',
+                      background: diasFiltro === d ? 'var(--teal)' : '#fff',
+                      color: diasFiltro === d ? '#fff' : 'var(--dark)',
+                    }}
+                  >
+                    últimos {d} dias
+                  </button>
+                ))}
+                <span style={{ fontSize: 12, color: 'var(--gray-mid)' }}>ou:</span>
+                <input
+                  type="date"
+                  value={dataInicioManual}
+                  onChange={(e) => { setDataInicioManual(e.target.value); setDiasFiltro(null) }}
+                  style={{ fontSize: 12, padding: '5px 8px', border: '1px solid #ddd', borderRadius: 6 }}
+                />
+                <span style={{ fontSize: 12, color: 'var(--gray-mid)' }}>até</span>
+                <input
+                  type="date"
+                  value={dataFimManual}
+                  onChange={(e) => { setDataFimManual(e.target.value); setDiasFiltro(null) }}
+                  style={{ fontSize: 12, padding: '5px 8px', border: '1px solid #ddd', borderRadius: 6 }}
+                />
+                <button
+                  onClick={() => setFiltroTratadasAberto(false)}
+                  style={{ fontSize: 12, color: 'var(--gray-mid)', background: 'none', border: 'none', cursor: 'pointer', marginLeft: 'auto' }}
+                >
+                  fechar
+                </button>
+              </div>
+            )}
+          </div>
           {!isLoading && tratadas.length === 0 && (
             <p style={{ color: 'var(--gray-mid)' }}>Nenhuma publicação tratada ainda.</p>
           )}
@@ -141,9 +233,12 @@ export default function DespachoPage() {
                   </span>
                 )}
               </div>
-              <p style={{ fontSize: 12, color: 'var(--gray-mid)', margin: '0 0 8px' }}>
-                {p.data_publicacao} · {p.tribunal || '?'} · {p.tipo_ato || 'ato n/d'}
-              </p>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
+                <ChipFonte fonte={p.fonte} />
+                <span style={{ fontSize: 12, color: 'var(--gray-mid)' }}>
+                  {p.data_publicacao} · {p.tribunal || '?'} · {p.tipo_ato || 'ato n/d'}
+                </span>
+              </div>
               <p style={{ fontSize: 13, color: 'var(--dark)', margin: '0 0 8px', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{p.texto_resumo}</p>
               {p.rejeitada ? (
                 <p style={{ fontSize: 12, color: '#b91c1c', margin: '0 0 8px' }}>✕ Descartada (não era do escritório)</p>
@@ -210,6 +305,7 @@ export default function DespachoPage() {
                   <span style={{ fontSize: 11, fontWeight: 700, color: conf.cor, background: conf.bg, padding: '2px 8px', borderRadius: 999 }}>
                     {conf.texto}
                   </span>
+                  <ChipFonte fonte={p.fonte} />
                   <span style={{ fontSize: 12, color: 'var(--gray-mid)' }}>
                     {p.data_publicacao} · {p.tribunal || '?'} · {p.tipo_ato || 'ato n/d'}
                   </span>

@@ -34,6 +34,7 @@ export interface PecaGerada {
 
 export interface PublicacaoPendente {
   id: string
+  fonte: string
   data_publicacao: string | null
   tribunal: string | null
   tipo_ato: string | null
@@ -58,7 +59,8 @@ export interface PublicacaoPendente {
 export const despachoApi = {
   listarPendentes: () => api.get<PublicacaoPendente[]>('/despacho/pendentes').then((r) => r.data),
 
-  listarTratadas: () => api.get<PublicacaoPendente[]>('/despacho/tratadas').then((r) => r.data),
+  listarTratadas: (params?: { data_inicio?: string; data_fim?: string; dias?: number }) =>
+    api.get<PublicacaoPendente[]>('/despacho/tratadas', { params }).then((r) => r.data),
 
   confirmar: (id: string, processoId: string | null, confirmado: boolean) =>
     api.post(`/despacho/${id}/confirmar`, { processo_id: processoId, confirmado }).then((r) => r.data),
