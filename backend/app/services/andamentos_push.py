@@ -38,6 +38,14 @@ _ultimo_sync_falhou: bool = False
 _JANELA_HORAS = 24
 
 
+def marcar_sync_falhou() -> None:
+    """Chamado de fora (scheduler.py) quando o sync 18h45 explode com uma
+    exceção não prevista — pra o push das 19h não mentir dizendo que não
+    houve andamento novo."""
+    global _ultimo_sync_falhou
+    _ultimo_sync_falhou = True
+
+
 # ── Alerta de sessão caída ────────────────────────────────────────────────────
 
 async def _alert_sessao_caida(motivo: str) -> None:

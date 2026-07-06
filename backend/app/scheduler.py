@@ -76,12 +76,25 @@ def _refresh_jusbr_session() -> None:
 
 
 def _sync_jusbr_notificaveis() -> None:
-    """18h45 BRT — sincroniza jus.br dos processos com push ativo."""
+    """18h45 BRT — sincroniza jus.br dos processos com push ativo.
+
+    Qualquer exceção NÃO prevista aqui (fora dos casos já tratados dentro de
+    sync_jusbr_notificaveis, como sessão caída) antes só virava um warning de
+    log que ninguém via — o job "sumia" sem avisar. Agora também dispara o
+    alerta no Telegram, senão o usuário não sabe que a varredura falhou.
+    """
     try:
         from app.services.andamentos_push import sync_jusbr_notificaveis
         sync_jusbr_notificaveis()
     except Exception as exc:
-        logger.warning("Scheduler: sync_jusbr_notificaveis falhou: %s", exc)
+        logger.exception("Scheduler: sync_jusbr_notificaveis falhou de forma inesperada")
+        try:
+            import asyncio
+            from app.services.andamentos_push import _alert_sessao_caida, marcar_sync_falhou
+            marcar_sync_falhou()
+            asyncio.run(_alert_sessao_caida(f"Erro inesperado na varredura 18h45: {exc}"))
+        except Exception:
+            logger.exception("Scheduler: falha ao alertar sobre erro inesperado")
 
 
 def _push_andamentos_telegram() -> None:
