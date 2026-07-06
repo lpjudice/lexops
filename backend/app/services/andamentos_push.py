@@ -30,9 +30,67 @@ from app.models.processo_telegram_extra import ProcessoTelegramExtra
 logger = logging.getLogger(__name__)
 
 _BRT = ZoneInfo("America/Sao_Paulo")
+# Estado do último sync (18h45) — lido pelo push das 19h pra não mentir
+# "nenhum andamento novo" quando na verdade a coleta nem rodou.
+_ultimo_sync_falhou: bool = False
 # Janela: andamentos "novos hoje" → criados nas últimas 24h. Larga o bastante
 # pra não perder se o cron das 3h coletar coisa retroativa.
 _JANELA_HORAS = 24
+
+
+# ── Alerta de sessão caída ────────────────────────────────────────────────────
+
+async def _alert_sessao_caida(motivo: str) -> None:
+    """Sessão gov.br morta na hora do sync: manda link de login PKCE no PRIVADO
+    do admin (fluxo já comprovado em DM — em grupo o bot pode nem receber a URL
+    colada, por causa do privacy mode) + aviso curto no grupo do push."""
+    bot_token = settings.andamentos_bot_token
+    if not bot_token:
+        logger.warning("alerta sessão caída: bot_token não configurado — só log. Motivo: %s", motivo)
+        return
+
+    admin_id: int | None = None
+    for x in settings.andamentos_allowed_user_ids.split(","):
+        if x.strip():
+            admin_id = int(x.strip())
+            break
+    if not admin_id:
+        logger.error("alerta sessão caída: nenhum user id em andamentos_allowed_user_ids.")
+        return
+
+    from aiogram import Bot
+    from app.services import andamentos_auth
+
+    url = andamentos_auth.build_login_url(admin_id)  # pending keyed no DM
+    bot = Bot(token=bot_token)
+    try:
+        try:
+            await bot.send_message(
+                admin_id,
+                "⚠️ *Sessão gov.br caiu — sync das 18h45 não vai rodar.*\n\n"
+                f"_{motivo}_\n\n"
+                "1. Abra o link abaixo e faça login no gov.br normalmente.\n"
+                "2. Copie a URL INTEIRA da barra de endereço (contém `code=`) e cole AQUI neste chat.\n"
+                "3. O próximo ciclo das 18h45 volta a rodar sozinho (ou teste com `/busca <CNJ>`).",
+                parse_mode="Markdown",
+            )
+            await bot.send_message(admin_id, url, disable_web_page_preview=True)
+        except Exception:
+            logger.exception("alerta sessão caída: falha ao enviar DM ao admin %s", admin_id)
+
+        # Aviso curto no grupo do push, se configurado
+        chat_id_raw = (settings.andamentos_push_chat_id or "").strip()
+        if chat_id_raw:
+            try:
+                await bot.send_message(
+                    int(chat_id_raw),
+                    "⚠️ Sessão gov.br caiu — a coleta das 18h45 não rodou. "
+                    "Mandei o link de revalidação no privado.",
+                )
+            except Exception:
+                logger.exception("alerta sessão caída: falha ao avisar o grupo")
+    finally:
+        await bot.session.close()
 
 
 # ── Sync 18h45 ────────────────────────────────────────────────────────────────
@@ -52,14 +110,24 @@ async def _async_sync() -> None:
     from app.services.consulta_processual.orchestrator import sincronizar_processo_jusbr
     from app.services.andamento_extra_collector import sincronizar_extra
 
-    sess = load_bot_session() or load_lexops_session()
+    global _ultimo_sync_falhou
+    _ultimo_sync_falhou = False
+
+    sess_bot = load_bot_session()
+    sess = sess_bot or load_lexops_session()
     if not sess:
-        logger.warning("push_18h45: nem id=2 (bot) nem id=1 (lexops) ativa — pulando sync.")
+        logger.warning("push_18h45: nem id=2 (bot) nem id=1 (lexops) ativa — alertando no Telegram.")
+        _ultimo_sync_falhou = True
+        await _alert_sessao_caida(
+            "Nem a sessão do bot (id=2) nem a do lexops (id=1) estão ativas ou renováveis."
+        )
         return
-    fonte = "id=2 (bot, perene)" if load_bot_session() else "id=1 (lexops, fallback)"
+    fonte = "id=2 (bot, perene)" if sess_bot else "id=1 (lexops, fallback)"
     logger.info("push_18h45: usando sessão %s", fonte)
 
     token = sess.get("token")
+    ok_count = 0
+    fail_count = 0
 
     # Processos do escritório (lógica travada, intocada)
     db = SessionLocal()
@@ -74,9 +142,11 @@ async def _async_sync() -> None:
         for p in procs:
             try:
                 await sincronizar_processo_jusbr(p, db, token=token, session_data=sess)
+                ok_count += 1
             except Exception:
                 logger.exception("push_18h45 sync processo %s falhou", p.numero_cnj)
                 db.rollback()
+                fail_count += 1
     finally:
         db.close()
 
@@ -92,13 +162,26 @@ async def _async_sync() -> None:
         for e in extras:
             try:
                 novos = await sincronizar_extra(db, e, token)
+                ok_count += 1
                 if novos:
                     logger.info("push_18h45: extra %s +%d", e.cnj, novos)
             except Exception:
                 logger.exception("push_18h45 sync extra %s falhou", e.cnj)
                 db.rollback()
+                fail_count += 1
     finally:
         db.close()
+
+    # Sessão "parecia" viva mas TODAS as consultas falharam → provável token
+    # rejeitado pelo PDPJ. Alerta com link de login em vez de fingir dia limpo.
+    if fail_count > 0 and ok_count == 0:
+        logger.warning("push_18h45: %d falha(s), 0 sucesso — sessão provavelmente inválida.", fail_count)
+        _ultimo_sync_falhou = True
+        await _alert_sessao_caida(
+            f"A sessão ({fonte}) parecia ativa, mas todas as {fail_count} consultas ao jus.br falharam."
+        )
+    else:
+        logger.info("push_18h45: concluído — %d ok, %d falha(s).", ok_count, fail_count)
 
 
 # ── Push 19h ──────────────────────────────────────────────────────────────────
@@ -231,7 +314,14 @@ async def _async_push() -> None:
     hoje_br = datetime.now(_BRT).strftime("%d/%m/%Y")
     try:
         if not grupos:
-            await bot.send_message(chat_id, f"✅ Nenhum andamento novo hoje, {hoje_br}.")
+            if _ultimo_sync_falhou:
+                await bot.send_message(
+                    chat_id,
+                    f"⚠️ Sem push hoje, {hoje_br} — a coleta das 18h45 NÃO rodou "
+                    "(sessão gov.br caída). Revalide pelo link enviado no privado.",
+                )
+            else:
+                await bot.send_message(chat_id, f"✅ Nenhum andamento novo hoje, {hoje_br}.")
             return
 
         await bot.send_message(
