@@ -16,6 +16,7 @@ Comandos: /manual /pendentes /resumo /cancelar /ajuda
 """
 from __future__ import annotations
 
+import asyncio
 import copy
 import difflib
 import re
@@ -363,15 +364,19 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         return {"ok": True}
 
     if "callback_query" in update:
-        # Botões: sempre síncronos — devem ser <1s
-        _run(update)
+        # Botões: processamento continua síncrono e rápido (<1s), mas despachado
+        # para uma worker thread — _run faz queries SQLAlchemy sync e chamadas
+        # HTTP bloqueantes ao Telegram; rodar isso direto num "async def" travaria
+        # o event loop inteiro (toda outra requisição do LexOps ficaria parada
+        # até terminar). asyncio.to_thread libera o loop imediatamente.
+        await asyncio.to_thread(_run, update)
     elif "message" in update:
         has_media = bool(update["message"].get("photo") or update["message"].get("document"))
         if has_media:
             # Fotos: enfileira SINCRONAMENTE (fast), visão IA em background
             background_tasks.add_task(_run_vision, update)
         else:
-            _run(update)
+            await asyncio.to_thread(_run, update)
     return {"ok": True}
 
 
