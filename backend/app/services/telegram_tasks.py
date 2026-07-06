@@ -373,6 +373,15 @@ def build_batch_summary(db: Session, batch: TelegramTaskBatch) -> str:
     return "\n".join(lines)
 
 
+def build_post_responsavel_prompt(batch: TelegramTaskBatch) -> tuple[str, dict]:
+    """Pergunta, após definir o responsável, se quer vincular a uma macro ou deixar como está."""
+    keyboard = [
+        [{"text": "📌 Vincular a Macros", "callback_data": f"tg:batch:{batch.id.hex}:card_link"}],
+        [{"text": "✅ Deixar como está", "callback_data": f"tg:batch:{batch.id.hex}:done"}],
+    ]
+    return "Quer vincular alguma dessas tarefas a uma macro (Tarefa mãe), ou deixar como está?", {"inline_keyboard": keyboard}
+
+
 def batch_actions_markup(batch: TelegramTaskBatch, has_duplicates: bool) -> dict:
     keyboard: list[list[dict]] = [
         [

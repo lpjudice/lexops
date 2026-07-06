@@ -109,7 +109,8 @@ def _handle_pending_input(db: Session, chat_id: str, text: str) -> bool:
         msg = f"✅ Responsável: {nome} ({count} tarefa(s))."
         if email:
             msg += f"\nNotificação será enviada para {email}."
-        tg.send_message(chat_id, msg)
+        prompt_text, prompt_markup = tg.build_post_responsavel_prompt(batch)
+        tg.send_message(chat_id, f"{msg}\n\n{prompt_text}", prompt_markup)
         return True
 
     return False
@@ -305,7 +306,6 @@ def _handle_callback(db: Session, callback_query: dict) -> None:
             return
         u = usuarios[idx]
         count = tg.apply_responsavel(db, batch.id, u.nome, u.email)
-        tg.edit_message(chat_id, message_id, f"✅ Responsável: {u.nome} ({count} tarefa(s)).\nEmail de notificação será enviado para {u.email}.")
         # Dispara emails em background para cada tarefa do lote
         import threading
         from app.services.tarefa_email import notificar_responsavel
@@ -323,6 +323,13 @@ def _handle_callback(db: Session, callback_query: dict) -> None:
             finally:
                 _db.close()
         threading.Thread(target=_enviar_lote, daemon=True).start()
+
+        prompt_text, prompt_markup = tg.build_post_responsavel_prompt(batch)
+        tg.edit_message(
+            chat_id, message_id,
+            f"✅ Responsável: {u.nome} ({count} tarefa(s)).\nEmail de notificação será enviado para {u.email}.\n\n{prompt_text}",
+            prompt_markup,
+        )
         return
 
     if action == "resp_custom":
