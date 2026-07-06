@@ -125,7 +125,7 @@ export default function FinanceiroPage() {
   // Anti-duplicação reversa: ao registrar recebimento, achar NF de mesmo valor
   // (não paga) e sugerir vincular, em vez de a NF virar outra entrada depois.
   const [vincNfPrompt, setVincNfPrompt] = useState<
-    { recId: string; valor: number; matches: { id: string; numero_nfse?: string; tomador_nome: string; valor: number; competencia: string }[] } | null
+    { recId: string; valor: number; matches: { id: string; numero_nfse?: string; tomador_nome: string; valor: number; competencia: string; data_emissao?: string }[] } | null
   >(null)
   const conciliarNfRec = useMutation({
     mutationFn: ({ nfId, recId }: { nfId: string; recId: string }) => fiscalApi.conciliar(nfId, recId),
@@ -881,7 +881,10 @@ export default function FinanceiroPage() {
                   <span style={{ fontWeight: 700, color: '#15803d' }}>
                     {n.numero_nfse ? `NF #${n.numero_nfse}` : 'NF'} · {fmtVal(n.valor)}
                   </span>
-                  <div style={{ fontSize: 11, color: '#6b7280' }}>{n.tomador_nome} · {n.competencia}</div>
+                  <div style={{ fontSize: 11, color: '#6b7280' }}>
+                    {n.tomador_nome} · comp. {n.competencia}
+                    {n.data_emissao && ` · emitida ${fmtData(n.data_emissao)}`}
+                  </div>
                 </button>
               ))}
             </div>

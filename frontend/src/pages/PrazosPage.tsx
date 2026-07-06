@@ -6,6 +6,7 @@ import type { PrazoCreate, TipoPrazo, StatusPrazo } from '../api/prazos'
 import { processosApi } from '../api/processos'
 import { clientesApi } from '../api/clientes'
 import ResponsavelComboBox from '../components/ResponsavelComboBox'
+import { useFiltroMes } from '../components/useFiltroMes'
 import styles from './Page.module.css'
 import prazosStyles from './PrazosPage.module.css'
 
@@ -61,6 +62,7 @@ export default function PrazosPage() {
   const destaqueRef = useRef<HTMLDivElement | null>(null)
   const [jaFocou, setJaFocou] = useState(false)
 
+  const filtroMes = useFiltroMes()  // filtra por data do prazo (cumpridos/perdidos/ignorados)
   const { data: prazos = [], isLoading } = useQuery({
     queryKey: ['prazos'],
     queryFn: () => prazosApi.listar(),
@@ -127,6 +129,7 @@ export default function PrazosPage() {
   }
 
   const prazosVisiveis = prazos.filter(p => {
+    if (filtroMes.aplicar && !filtroMes.dentro(p.data_limite)) return false
     if (tabStatus === 'todas') return true
     if (tabStatus === 'ativo') return p.status === 'pendente' && p.data_limite && new Date(p.data_limite + 'T00:00:00') >= hoje
     if (tabStatus === 'pendente') return p.status === 'pendente'
@@ -232,6 +235,8 @@ export default function PrazosPage() {
           ))}
         </div>
       )}
+
+      {filtroMes.node}
 
       {isLoading ? (
         <p className={styles.empty}>Carregando...</p>

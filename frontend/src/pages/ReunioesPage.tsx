@@ -4,6 +4,7 @@ import { Video, RefreshCw, Plus, Trash2, Upload, Lock } from 'lucide-react'
 import { reunioesApi } from '../api/reunioes'
 import type { Reuniao, ReuniaoCreate } from '../api/reunioes'
 import RevisaoReuniaoModal from '../components/RevisaoReuniaoModal'
+import { useFiltroMes } from '../components/useFiltroMes'
 import { useAuth } from '../contexts/AuthContext'
 import styles from './Page.module.css'
 
@@ -49,6 +50,7 @@ export default function ReunioesPage() {
   const [uploadingId, setUploadingId] = useState<string | null>(null)
   const [uploadTargetId, setUploadTargetId] = useState<string | null>(null)
 
+  const filtroMes = useFiltroMes()  // filtra por data da reunião
   const { data: reunioes = [], isLoading } = useQuery({
     queryKey: ['reunioes'],
     queryFn: () => reunioesApi.listar(),
@@ -243,13 +245,17 @@ export default function ReunioesPage() {
         </form>
       )}
 
+      {filtroMes.node}
+
       <div className={styles.tableCard}>
-        {isLoading ? (
+        {(() => {
+        const reunioesFiltradas = filtroMes.aplicar ? reunioes.filter((r) => filtroMes.dentro(r.data_reuniao)) : reunioes
+        return isLoading ? (
           <div className={styles.empty}>Carregando...</div>
-        ) : reunioes.length === 0 ? (
+        ) : reunioesFiltradas.length === 0 ? (
           <div className={styles.empty}>
             <Video size={28} />
-            Nenhuma reunião ainda. Importe do Drive ou cole uma transcrição.
+            {filtroMes.aplicar ? 'Nenhuma reunião no período selecionado.' : 'Nenhuma reunião ainda. Importe do Drive ou cole uma transcrição.'}
           </div>
         ) : (
           <table className={styles.table}>
@@ -264,7 +270,7 @@ export default function ReunioesPage() {
               </tr>
             </thead>
             <tbody>
-              {reunioes.map((r) => {
+              {reunioesFiltradas.map((r) => {
                 const isCreator = usuario && r.criado_por_id === usuario.id
                 const canEdit = !r.acesso_restrito
                 return (
@@ -332,7 +338,8 @@ export default function ReunioesPage() {
               })}
             </tbody>
           </table>
-        )}
+        )
+        })()}
       </div>
 
       {/* Input oculto global para upload de transcrição de reunião existente */}

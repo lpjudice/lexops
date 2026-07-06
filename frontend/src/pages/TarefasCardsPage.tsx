@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { tarefaCardsApi } from '../api/tarefaCards'
 import type { StatusTarefaCard, TarefaCard } from '../api/tarefaCards'
@@ -11,6 +11,7 @@ import ComboBox from '../components/ComboBox'
 import Modal from '../components/Modal'
 import ProjetoCombobox from '../components/ProjetoCombobox'
 import ResponsavelComboBox from '../components/ResponsavelComboBox'
+import { useFiltroMes } from '../components/useFiltroMes'
 import styles from './Page.module.css'
 import cs from './TarefasCardsPage.module.css'
 
@@ -77,6 +78,7 @@ export default function TarefasCardsPage() {
   const [filtroResp, setFiltroResp] = useState<string[]>([])
   const [filtroProjetos, setFiltroProjetos] = useState<string[]>([])
   const [filtroCriador, setFiltroCriador] = useState<string[]>([])
+  const filtroMes = useFiltroMes()  // filtra por mês (prazo do card)
 
   const [novaSubtask, setNovaSubtask] = useState<Record<string, string>>({})
   const [editSub, setEditSub] = useState<{ id: string; texto: string } | null>(null)
@@ -110,6 +112,10 @@ export default function TarefasCardsPage() {
     onSuccess: () => { invalidate(); setEditSub(null) },
   })
   const delSubtask = useMutation({ mutationFn: tarefaCardsApi.deletarSubtask, onSuccess: invalidate })
+  const setPrazoSub = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: string | null }) => tarefaCardsApi.setSubtaskPrazo(id, data),
+    onSuccess: invalidate,
+  })
   const agendar = useMutation({
     mutationFn: tarefaCardsApi.agendarCalendario,
     onSuccess: () => { invalidate(); alert('Agendado no Google Calendar ✅') },
@@ -188,6 +194,7 @@ export default function TarefasCardsPage() {
     if (filtroResp.length > 0 && !filtroResp.includes(c.responsavel || '__none__')) return false
     if (filtroCriador.length > 0 && !filtroCriador.includes(c.criado_por_id || '__sistema__')) return false
     if (filtroProjetos.length > 0 && !filtroProjetos.includes(c.projeto_id || '__none__')) return false
+    if (filtroMes.aplicar && !filtroMes.dentro(c.data_limite)) return false
     if (filtroVenc) {
       const d = c.data_limite
       if (filtroVenc === 'sem_prazo' && d) return false
@@ -212,7 +219,8 @@ export default function TarefasCardsPage() {
       return a[1].nome.localeCompare(b[1].nome)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cards, filtroStatus, filtroVenc, filtroResp, filtroCriador, filtroProjetos])
+  }, [cards, filtroStatus, filtroVenc, filtroResp, filtroCriador, filtroProjetos,
+      filtroMes.aplicar, filtroMes.range.de?.getTime(), filtroMes.range.ate?.getTime()])
 
   const podeGerenciar = (c: TarefaCard) => isSuperAdmin || (c.criado_por_id && usuario?.id === c.criado_por_id)
   const totalFiltrado = grupos.reduce((n, [, g]) => n + g.cards.length, 0)
@@ -251,6 +259,9 @@ export default function TarefasCardsPage() {
           {VENC_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
       </div>
+
+      {/* Filtro por mês (prazo do card) — padrão Despacho */}
+      {filtroMes.node}
 
       {/* Filtro multi-responsável (chips) */}
       {(responsaveis.length > 0 || cards.some((c) => !c.responsavel)) && (
@@ -381,6 +392,12 @@ export default function TarefasCardsPage() {
                                 <span className={`${cs.subtaskText} ${st.concluida ? cs.subtaskDone : ''}`}
                                   onDoubleClick={() => setEditSub({ id: st.id, texto: st.texto })}>{st.texto}</span>
                               )}
+                              <SubtaskPrazo
+                                value={st.data_limite || null}
+                                max={c.data_limite || null}
+                                vencido={vencido(st.data_limite) && !st.concluida}
+                                onChange={(d) => setPrazoSub.mutate({ id: st.id, data: d })}
+                              />
                               <button className={cs.subEdit} title="Editar" onClick={() => setEditSub({ id: st.id, texto: st.texto })}>✎</button>
                               <button className={cs.subtaskDel} title="Excluir" onClick={() => delSubtask.mutate(st.id)}>×</button>
                             </div>
@@ -442,6 +459,44 @@ export default function TarefasCardsPage() {
         />
       )}
     </div>
+  )
+}
+
+// ─────────────────── Prazo interno da subtarefa (discreto) ──────────────────
+function SubtaskPrazo({ value, max, vencido, onChange }: {
+  value: string | null
+  max: string | null                // prazo do card macro — limite superior
+  vencido: boolean
+  onChange: (d: string | null) => void
+}) {
+  const ref = useRef<HTMLInputElement>(null)
+  const abrir = () => {
+    const el = ref.current
+    if (!el) return
+    // showPicker abre o calendário nativo; fallback para focus
+    if (typeof el.showPicker === 'function') el.showPicker()
+    else el.focus()
+  }
+  const curta = value ? new Date(value + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) : null
+  return (
+    <span className={cs.subPrazoWrap}>
+      <button
+        type="button"
+        className={`${cs.subPrazoBtn} ${value ? cs.subPrazoSet : ''} ${vencido ? cs.subPrazoVencido : ''}`}
+        title={value ? `Prazo interno: ${new Date(value + 'T12:00:00').toLocaleDateString('pt-BR')} (clique p/ alterar)` : 'Definir prazo interno (≤ prazo do card)'}
+        onClick={abrir}
+      >
+        {curta || '📅'}
+      </button>
+      <input
+        ref={ref}
+        type="date"
+        className={cs.subPrazoInput}
+        value={value || ''}
+        max={max || undefined}
+        onChange={(e) => onChange(e.target.value || null)}
+      />
+    </span>
   )
 }
 

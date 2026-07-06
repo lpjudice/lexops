@@ -371,6 +371,11 @@ export default function ReembolsosPage() {
                   <div className={cs.cardMeta}>
                     {clienteNome(r.cliente_id)} · Emissão {fmtData(r.data_emissao)}
                     {r.data_vencimento && ` · Vence ${fmtData(r.data_vencimento)}`}
+                    {r.ultimo_lembrete_em && (
+                      <span title={r.email_destinatario ? `Enviado para ${r.email_destinatario}` : undefined}>
+                        {' · '}📧 Cobrança enviada {fmtData(r.ultimo_lembrete_em.slice(0, 10))}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className={cs.cardActions}>

@@ -5,6 +5,7 @@ não compartilha registros com o módulo Tarefas atual.
 """
 
 import uuid
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
@@ -179,8 +180,14 @@ def atualizar_card(
     if not _pode_ver(card, usuario):
         raise HTTPException(status_code=403, detail="Acesso restrito a este card")
 
-    for field, value in data.model_dump(exclude_unset=True).items():
+    updates = data.model_dump(exclude_unset=True)
+    for field, value in updates.items():
         setattr(card, field, value)
+    # Se o prazo do card mudou, nenhuma subtarefa pode ter prazo maior que ele
+    if "data_limite" in updates and card.data_limite:
+        for st in card.subtasks:
+            if st.data_limite and st.data_limite > card.data_limite:
+                st.data_limite = card.data_limite
     db.commit()
     db.refresh(card)
     return _enrich(card, db, usuario)
@@ -254,6 +261,8 @@ def toggle_subtask(
     subtask_id: uuid.UUID,
     concluida: bool | None = Query(None),
     texto: str | None = Query(None),
+    data_limite: date | None = Query(None),
+    limpar_data: bool = Query(False),
     db: Session = Depends(get_db),
     usuario: Usuario | None = Depends(get_optional_user),
 ):
@@ -267,6 +276,13 @@ def toggle_subtask(
         st.concluida = concluida
     if texto is not None and texto.strip():
         st.texto = texto.strip()
+    if limpar_data:
+        st.data_limite = None
+    elif data_limite is not None:
+        # Prazo interno da subtarefa nunca pode passar do prazo da tarefa macro
+        if card.data_limite and data_limite > card.data_limite:
+            data_limite = card.data_limite
+        st.data_limite = data_limite
     db.commit()
     db.refresh(card)
     return _enrich(card, db, usuario)

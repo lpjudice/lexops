@@ -443,6 +443,8 @@ def emitir_nota(
                         from app.services.nfse.email_nota_cliente import enviar_nf_ao_cliente
                         master = cfg.email_master if cfg else None
                         enviar_nf_ao_cliente(nf, pdf, master)
+                        nf.email_enviado_em = datetime.now(tz=BRT)
+                        db.commit()
                     except Exception as exc:
                         log.warning("Envio NF ao cliente: %s", exc)
         except Exception as exc:

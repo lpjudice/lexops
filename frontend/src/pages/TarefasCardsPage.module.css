@@ -280,6 +280,41 @@
 }
 .subEdit:hover { color: #2563eb; }
 
+/* Prazo interno da subtarefa — discreto, ao lado de editar/excluir */
+.subPrazoWrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.subPrazoBtn {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 10.5px;
+  line-height: 1;
+  padding: 1px 3px;
+  color: #c7c9cc;              /* apagado quando sem prazo (só o 📅) */
+  border-radius: 4px;
+  font-family: inherit;
+}
+.subPrazoBtn:hover { color: #2563eb; background: #eff6ff; }
+.subPrazoSet {
+  color: #6b7280;             /* data definida */
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.subPrazoVencido { color: #dc2626; }
+/* input nativo escondido; abre via showPicker() no clique do botão */
+.subPrazoInput {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .subEditInput {
   flex: 1;
   min-width: 0;

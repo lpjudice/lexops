@@ -7,6 +7,9 @@ export interface SubtaskCard {
   texto: string
   concluida: boolean
   ordem: number
+  responsavel?: string | null
+  responsavel_email?: string | null
+  data_limite?: string | null
 }
 
 export interface PedidoAcessoCard {
@@ -82,6 +85,10 @@ export const tarefaCardsApi = {
     api.patch<TarefaCard>(`/tarefa-cards/subtasks/${subtaskId}`, null, { params: { concluida } }).then((r) => r.data),
   editarSubtask: (subtaskId: string, texto: string) =>
     api.patch<TarefaCard>(`/tarefa-cards/subtasks/${subtaskId}`, null, { params: { texto } }).then((r) => r.data),
+  setSubtaskPrazo: (subtaskId: string, data_limite: string | null) =>
+    api.patch<TarefaCard>(`/tarefa-cards/subtasks/${subtaskId}`, null, {
+      params: data_limite ? { data_limite } : { limpar_data: true },
+    }).then((r) => r.data),
   deletarSubtask: (subtaskId: string) => api.delete(`/tarefa-cards/subtasks/${subtaskId}`),
 
   agendarCalendario: (id: string) =>

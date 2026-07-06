@@ -125,6 +125,7 @@ class NotaFiscalOut(BaseModel):
     retroativa: Optional[bool] = False
     pago: Optional[bool] = False
     data_pagamento: Optional[date] = None
+    email_enviado_em: Optional[datetime] = None
     origem: Optional[str] = "sistema"
     erro_mensagem: Optional[str]
     xml_nfse: Optional[str]

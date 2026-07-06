@@ -28,6 +28,7 @@ import { useAuth } from '../contexts/AuthContext'
 import ComboBox from '../components/ComboBox'
 import ClienteCombobox from '../components/ClienteCombobox'
 import ResponsavelComboBox from '../components/ResponsavelComboBox'
+import { useFiltroMes } from '../components/useFiltroMes'
 import styles from './Page.module.css'
 import t from './TarefasPage.module.css'
 
@@ -132,7 +133,7 @@ export default function TarefasPage() {
   const [filtroStatus, setFiltroStatus] = useState<StatusTarefa | ''>('pendente')
   const [filtroCliente, setFiltroCliente] = useState('')
   const [filtroResponsavel, setFiltroResponsavel] = useState('')
-  const [filtroMes, setFiltroMes] = useState('') // 'YYYY-MM' — só para concluídos
+  const filtroPeriodo = useFiltroMes() // filtro por mês (padrão Despacho) — visão de concluídas
   const [sortBy, setSortBy] = useState<'manual' | 'recente' | 'prazo_asc' | 'prazo_desc' | 'titulo_az' | 'cliente_az' | 'responsavel_az'>('recente')
   const [orderedIds, setOrderedIds] = useState<string[]>([])
 
@@ -277,8 +278,8 @@ export default function TarefasPage() {
     if (filtroCliente) arr = arr.filter((t) => t.cliente_id === filtroCliente)
     if (filtroResponsavel) arr = arr.filter((t) => t.responsavel === filtroResponsavel)
     if (filtroProjeto) arr = arr.filter((t) => t.projeto_id === filtroProjeto)
-    if (filtroMes && filtroStatus === 'concluido') {
-      arr = arr.filter((t) => t.updated_at?.startsWith(filtroMes) || t.created_at?.startsWith(filtroMes))
+    if (filtroStatus === 'concluido' && filtroPeriodo.aplicar) {
+      arr = arr.filter((t) => filtroPeriodo.dentro(t.data_limite || t.updated_at))
     }
 
     if (sortBy === 'manual') {
@@ -317,7 +318,8 @@ export default function TarefasPage() {
       arr.sort((a, b) => (a.responsavel ?? '').localeCompare(b.responsavel ?? '', 'pt-BR'))
     }
     return arr
-  }, [tarefas, filtroCliente, filtroResponsavel, filtroProjeto, filtroMes, filtroStatus, sortBy, orderedIds, clientes]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tarefas, filtroCliente, filtroResponsavel, filtroProjeto, filtroStatus, sortBy, orderedIds, clientes,
+      filtroPeriodo.aplicar, filtroPeriodo.range.de?.getTime(), filtroPeriodo.range.ate?.getTime()]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const processoOptions = processos.map((p) => {
     const cliente = clientes.find((c) => c.id === p.cliente_id)
@@ -675,23 +677,9 @@ export default function TarefasPage() {
                 ))}
               </select>
             )}
-            {filtroStatus === 'concluido' && (
-              <select
-                value={filtroMes}
-                onChange={(e) => setFiltroMes(e.target.value)}
-                style={{ fontSize: 12, padding: '5px 10px', borderRadius: 999, border: '1px solid #e5e7eb', background: '#fff', color: filtroMes ? '#1d1e20' : '#9ca3af', cursor: 'pointer', fontFamily: 'inherit' }}
-              >
-                <option value="">Mês (todos)</option>
-                {Array.from({ length: 12 }, (_, i) => {
-                  const d = new Date(new Date().getFullYear(), i, 1)
-                  const val = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
-                  return <option key={val} value={val}>{d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}</option>
-                })}
-              </select>
-            )}
-            {(filtroCliente || filtroResponsavel || filtroProjeto || filtroMes) && (
+            {(filtroCliente || filtroResponsavel || filtroProjeto) && (
               <button
-                onClick={() => { setFiltroCliente(''); setFiltroResponsavel(''); setFiltroProjeto(''); setFiltroMes('') }}
+                onClick={() => { setFiltroCliente(''); setFiltroResponsavel(''); setFiltroProjeto('') }}
                 style={{ fontSize: 11, color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
               >
                 Limpar filtros
@@ -706,6 +694,9 @@ export default function TarefasPage() {
           </div>
         </div>
       )}
+
+      {/* Filtro por mês — visão de tarefas concluídas (padrão Despacho) */}
+      {viewMode === 'list' && filtroStatus === 'concluido' && filtroPeriodo.node}
 
       {/* ── Modal: Gerenciar Projetos ────────────────────────────────── */}
       {showGerenciarProjetos && (

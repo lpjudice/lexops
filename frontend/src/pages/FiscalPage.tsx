@@ -1143,6 +1143,10 @@ function DetalheModal({ nf, onClose, onSubstituir }: { nf: NotaFiscalOut; onClos
           <span>{fmtCompetencia(nf.competencia)}</span>
           <span className={cs.detailLabel}>Emissão</span>
           <span>{fmtData(nf.data_emissao)}</span>
+          {nf.email_enviado_em && (
+            <><span className={cs.detailLabel}>Enviada ao cliente</span>
+            <span>📧 {new Date(nf.email_enviado_em).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</span></>
+          )}
           <span className={cs.detailLabel}>Tomador</span>
           <span>{nf.tomador_nome}</span>
           <span className={cs.detailLabel}>CPF/CNPJ</span>
@@ -1480,7 +1484,7 @@ function SugestoesNFSection({ onEmitir }: { onEmitir: (s: SugestaoNF) => void })
                       <option value="">+ escolher NFS-e emitida…</option>
                       {nfsEmitidas.map(n => (
                         <option key={n.id} value={n.id}>
-                          {(n.numero_nfse ? `#${n.numero_nfse} · ` : '')}{n.tomador_nome} · {fmt(n.valor_servicos)} · {n.competencia}
+                          {(n.numero_nfse ? `#${n.numero_nfse} · ` : '')}{n.tomador_nome} · {fmt(n.valor_servicos)} · comp. {n.competencia}{n.data_emissao ? ` · emitida ${fmtData(n.data_emissao)}` : ''}
                         </option>
                       ))}
                     </select>

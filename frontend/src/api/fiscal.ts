@@ -112,6 +112,7 @@ export interface NotaFiscalOut {
   retroativa?: boolean
   pago?: boolean
   data_pagamento?: string
+  email_enviado_em?: string
   origem?: string
   created_at: string
   updated_at: string

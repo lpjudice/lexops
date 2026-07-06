@@ -73,6 +73,8 @@ class NotaFiscal(Base):
     retroativa: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
     pago: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
     data_pagamento: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Quando a NF foi enviada por e-mail ao tomador (automático na emissão).
+    email_enviado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     origem: Mapped[str] = mapped_column(String(20), nullable=False, default="sistema", server_default="sistema")  # sistema|dfe
 
     # ── Status ────────────────────────────────────────────────────────────

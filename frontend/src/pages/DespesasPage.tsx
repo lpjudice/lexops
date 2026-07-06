@@ -1258,6 +1258,14 @@ function LinhaDespesa({
               <button className={styles.btnSmall} onClick={() => setEditId(null)}>Cancelar</button>
             </div>
           </div>
+          <div style={{ marginTop: 8 }}>
+            <input
+              value={editForm.descricao ?? ''}
+              onChange={e => setEditForm((f: any) => ({ ...f, descricao: e.target.value }))}
+              placeholder="Descrição / nome detalhado da despesa (opcional)"
+              style={{ width: '100%', padding: '6px 10px', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }}
+            />
+          </div>
           {/* Upload da NF / comprovante na edição */}
           {editForm.tem_nota && (
             <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', fontSize: 11 }}>
@@ -1401,7 +1409,7 @@ function TabelaDespesas({ mes }: { mes: string }) {
   const allCats = Array.from(new Set([...CATEGORIAS_PADRAO, ...categoriasDb]))
 
   const [editId, setEditId] = useState<string | null>(null)
-  const [editForm, setEditForm] = useState<{ fornecedor: string; categoria: string; valor: number; data: string; tem_nota: boolean; elegivel: boolean; drive_link?: string }>({
+  const [editForm, setEditForm] = useState<{ fornecedor: string; categoria: string; valor: number; data: string; tem_nota: boolean; elegivel: boolean; drive_link?: string; descricao?: string }>({
     fornecedor: '', categoria: '', valor: 0, data: '', tem_nota: true, elegivel: false,
   })
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
@@ -1433,6 +1441,7 @@ function TabelaDespesas({ mes }: { mes: string }) {
   function iniciarEdit(d: Despesa) {
     setEditForm({
       fornecedor: d.fornecedor, categoria: d.categoria, valor: d.valor,
+      descricao: d.descricao ?? '',
       data: d.data ?? '', tem_nota: d.tem_nota, elegivel: d.elegivel,
       drive_link: d.drive_link ?? undefined,
     })

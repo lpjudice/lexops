@@ -414,18 +414,15 @@ def start_scheduler() -> None:
         id="sync_diario_monitorado",
         replace_existing=True,
     )
-    scheduler.add_job(
-        _sync_diario2_gmail,
-        trigger=CronTrigger(day_of_week="mon-fri", hour=9, minute=0),
-        id="sync_diario2_gmail_0900",
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        _sync_diario2_gmail,
-        trigger=CronTrigger(day_of_week="mon-fri", hour=11, minute=0),
-        id="sync_diario2_gmail_1100",
-        replace_existing=True,
-    )
+    # Recorte Digital OAB (Diário 2 via Gmail): 07h/09h/11h/15h seg-sex.
+    # Várias tentativas porque o diário às vezes não sai no horário certo.
+    for _h in (7, 9, 11, 15):
+        scheduler.add_job(
+            _sync_diario2_gmail,
+            trigger=CronTrigger(day_of_week="mon-fri", hour=_h, minute=0),
+            id=f"sync_diario2_gmail_{_h:02d}00",
+            replace_existing=True,
+        )
     scheduler.add_job(
         _renovar_drive_watch,
         trigger=CronTrigger(hour=6, minute=0),
@@ -446,7 +443,7 @@ def start_scheduler() -> None:
         replace_existing=True,
     )
     scheduler.start()
-    logger.info("Scheduler iniciado — DataJud 03:00, Diário Oficial 08:00, Diário 2 Gmail 09:00/11:00, Drive watch 06:00, lembretes de reembolso 09:10")
+    logger.info("Scheduler iniciado — DataJud 03:00, Diário Oficial 08:00, Recorte Digital (Diário 2) 07/09/11/15h, Drive watch 06:00, lembretes de reembolso 09:10")
 
 
 def stop_scheduler() -> None:
