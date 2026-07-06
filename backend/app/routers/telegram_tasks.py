@@ -7,6 +7,7 @@ Endpoints:
 """
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -451,15 +452,8 @@ def _handle_callback(db: Session, callback_query: dict) -> None:
 # Endpoints
 # ---------------------------------------------------------------------------
 
-@router.post("/webhook")
-async def webhook(
-    request: Request,
-    x_telegram_bot_api_secret_token: str | None = Header(default=None),
-) -> dict:
-    _validate_secret(x_telegram_bot_api_secret_token)
-    body = await request.json()
-    update = _TelegramUpdate(**body)
-
+def _process_update(update: _TelegramUpdate) -> None:
+    """Processamento síncrono (DB + chamadas HTTP ao Telegram) rodado fora do event loop."""
     db: Session = SessionLocal()
     try:
         if update.message:
@@ -471,6 +465,25 @@ async def webhook(
         logging.getLogger(__name__).exception("Erro no webhook de tarefas: %s", exc)
     finally:
         db.close()
+
+
+@router.post("/webhook")
+async def webhook(
+    request: Request,
+    x_telegram_bot_api_secret_token: str | None = Header(default=None),
+) -> dict:
+    _validate_secret(x_telegram_bot_api_secret_token)
+    body = await request.json()
+    update = _TelegramUpdate(**body)
+
+    # _process_update faz DB queries síncronas e chamadas HTTP bloqueantes ao
+    # Telegram (answer_callback + edit_message, cada uma até 20s de timeout).
+    # Rodar isso direto num "async def" travaria o event loop inteiro — toda
+    # outra requisição ao LexOps (inclusive o frontend) ficaria parada até
+    # terminar. asyncio.to_thread despacha para uma worker thread e libera
+    # o loop imediatamente, evitando o travamento que fazia parecer necessário
+    # clicar 2x no bot.
+    await asyncio.to_thread(_process_update, update)
 
     return {"ok": True}
 
