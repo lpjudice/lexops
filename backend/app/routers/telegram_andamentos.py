@@ -412,8 +412,9 @@ def _fmt_processo(p: dict, idx: int) -> str:
     elif p.get("litisconsorcio"):
         linhas.append(f"   👥 {p['litisconsorcio']}")
 
-    if p.get("objeto"):
-        linhas.append(f"   📝 {p['objeto'].strip()[:300]}")
+    # Matéria em vez de objeto — sempre cadastrada e mais curta.
+    if p.get("materia"):
+        linhas.append(f"   📝 {p['materia'].strip()[:300]}")
     return "\n".join(linhas)
 
 
@@ -485,7 +486,7 @@ def _listar_monitorados(offset: int, soh_silenciados: bool = False) -> tuple[lis
                 "tribunal": p.tribunal or "",
                 "vara": p.vara or "",
                 "comarca": p.comarca or "",
-                "descricao": (p.objeto or "").strip(),
+                "descricao": (p.materia or "").strip(),
                 "notificar": bool(getattr(p, "notificar_telegram", True)),
                 "partes_por_polo": partes_p.get(p.id, {}),
             })

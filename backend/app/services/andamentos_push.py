@@ -387,8 +387,9 @@ def _cabecalho_proc(p: Processo, nome_cliente: str) -> str:
     meta = " · ".join(x for x in [(p.tribunal or ""), (p.vara or ""), (p.comarca or "")] if x)
     if meta:
         linhas.append(f"🏛️ {meta}")
-    if p.objeto:
-        linhas.append(f"📝 {p.objeto.strip()[:240]}")
+    # Matéria no lugar de Objeto — sempre cadastrada e mais curta.
+    if p.materia:
+        linhas.append(f"📝 {p.materia.strip()[:240]}")
     return "\n".join(linhas)
 
 
