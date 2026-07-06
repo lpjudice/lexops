@@ -382,10 +382,34 @@ def atualizar_reembolso(
             status_code=400,
             detail="Só é possível tratar como perda enquanto o reembolso está em rascunho.",
         )
+
+    # Detecta troca de cliente para mover a pasta no Drive depois.
+    # Captura o nome ATUAL da pasta (com título/data atuais) ANTES de aplicar as
+    # mudanças — é assim que a pasta existe hoje no Drive.
+    from app.models.cliente import Cliente
+    cliente_antigo_nome = None
+    pasta_atual = _reembolso_folder_name(r)
+    novo_cliente_id = campos.get("cliente_id")
+    if novo_cliente_id and str(novo_cliente_id) != str(r.cliente_id):
+        c_old = db.query(Cliente).filter(Cliente.id == r.cliente_id).first()
+        cliente_antigo_nome = c_old.nome if c_old else None
+
     for field, value in campos.items():
         setattr(r, field, value)
     db.commit()
     db.refresh(r)
+
+    # Troca de cliente → move a pasta do reembolso no Drive (o link é preservado)
+    if cliente_antigo_nome:
+        try:
+            c_new = db.query(Cliente).filter(Cliente.id == r.cliente_id).first()
+            if c_new and c_new.nome != cliente_antigo_nome:
+                from app.services.google_drive import mover_subpasta
+                mover_subpasta(cliente_antigo_nome, c_new.nome, "Reembolsos", pasta_atual)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("Falha ao mover pasta de reembolso no Drive: %s", exc)
+
     return r
 
 

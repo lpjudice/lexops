@@ -992,5 +992,54 @@ def deletar_pasta(nome_cliente: str, subfolder: str, sub_subfolder: str) -> bool
             return False
 
 
+def mover_subpasta(nome_cliente_antigo: str, nome_cliente_novo: str,
+                   subfolder: str, sub_subfolder: str) -> bool:
+    """Move uma subpasta de um cliente para outro no Drive:
+    {antigo}/{subfolder}/{sub_subfolder}  ->  {novo}/{subfolder}/{sub_subfolder}.
+    O ID (e o link) da pasta é preservado — muda só o pai. Best-effort."""
+    tokens = _load_tokens()
+    if not tokens:
+        return False
+
+    def _do(tkns: dict) -> bool:
+        h = _auth_headers(tkns)
+        old_cli = _resolver_pasta_cliente_existente(nome_cliente_antigo, h)
+        if not old_cli:
+            return False
+        old_sub = _find_subfolder(subfolder, old_cli, h)
+        if not old_sub:
+            return False
+        folder_id = _find_subfolder(sub_subfolder, old_sub, h)
+        if not folder_id:
+            return False
+        # Destino: garante {novo}/{subfolder}
+        new_cli = _resolver_pasta_cliente(nome_cliente_novo, h)
+        new_sub = _get_or_create_subfolder(subfolder, new_cli, h)
+        if new_sub == old_sub:
+            return True  # mesmo destino, nada a fazer
+        resp = httpx.patch(
+            f"{DRIVE_META}/files/{folder_id}",
+            headers=h,
+            params={"supportsAllDrives": True, "addParents": new_sub,
+                    "removeParents": old_sub, "fields": "id,parents"},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        _cache_evict(old_sub, sub_subfolder)
+        return True
+
+    try:
+        return _do(tokens)
+    except Exception as exc:
+        if not _is_unauthorized(exc):
+            logger.warning("Falha ao mover subpasta no Drive: %s", exc)
+            return False
+        try:
+            return _do(_refresh(tokens))
+        except Exception as exc2:
+            logger.warning("Falha ao mover subpasta no Drive apos refresh: %s", exc2)
+            return False
+
+
 def drive_disponivel() -> bool:
     return _load_tokens() is not None
