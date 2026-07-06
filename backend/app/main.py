@@ -509,6 +509,7 @@ def _run_migrations() -> None:
             "ALTER TABLE notas_fiscais ADD COLUMN IF NOT EXISTS substitui_chave VARCHAR(200)",
             "ALTER TABLE pagantes ADD COLUMN IF NOT EXISTS cidade VARCHAR(100)",
             "ALTER TABLE pagantes ADD COLUMN IF NOT EXISTS estado VARCHAR(2)",
+            "ALTER TABLE reembolsos ADD COLUMN IF NOT EXISTS descricao VARCHAR(1000)",
             "ALTER TABLE notas_fiscais ADD COLUMN IF NOT EXISTS honorario_compensacao_id UUID",
             "ALTER TABLE notas_fiscais ADD COLUMN IF NOT EXISTS email_enviado_em TIMESTAMPTZ",
             "ALTER TABLE config_fiscal ADD COLUMN IF NOT EXISTS nbs_codigo VARCHAR(9)",

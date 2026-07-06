@@ -22,6 +22,7 @@ class Reembolso(Base):
     )
 
     titulo: Mapped[str] = mapped_column(String(255), nullable=False)
+    descricao: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     data_emissao: Mapped[date] = mapped_column(Date, nullable=False)
     data_vencimento: Mapped[date | None] = mapped_column(Date, nullable=True)
 

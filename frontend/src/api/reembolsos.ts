@@ -19,6 +19,7 @@ export interface Reembolso {
   cliente_id: string
   processo_id?: string
   titulo: string
+  descricao?: string | null
   data_emissao: string
   data_vencimento?: string
   status: StatusReembolso
@@ -56,7 +57,7 @@ export const reembolsosApi = {
   criar: (data: ReembolsoCreate) =>
     api.post<Reembolso>('/reembolsos/', data).then((r) => r.data),
 
-  atualizar: (id: string, data: Partial<ReembolsoCreate & { status: StatusReembolso; tratar_como_perda: boolean }>) =>
+  atualizar: (id: string, data: Partial<ReembolsoCreate & { status: StatusReembolso; tratar_como_perda: boolean; descricao: string }>) =>
     api.patch<Reembolso>(`/reembolsos/${id}`, data).then((r) => r.data),
 
   deletar: (id: string) => api.delete(`/reembolsos/${id}`),

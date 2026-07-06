@@ -47,6 +47,8 @@ class ItemReembolsoUpdate(BaseModel):
 
 class ReembolsoUpdate(BaseModel):
     titulo: str | None = None
+    descricao: str | None = None
+    cliente_id: uuid.UUID | None = None
     data_emissao: date | None = None
     data_vencimento: date | None = None
     status: StatusReembolso | None = None
@@ -58,6 +60,7 @@ class ReembolsoOut(BaseModel):
     cliente_id: uuid.UUID
     processo_id: uuid.UUID | None
     titulo: str
+    descricao: str | None = None
     data_emissao: date
     data_vencimento: date | None
     status: StatusReembolso

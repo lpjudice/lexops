@@ -199,6 +199,21 @@ export default function ReembolsosPage() {
     onError: (e: any) => alert(`Erro: ${e?.response?.data?.detail || e?.message}`),
   })
 
+  // Edição do card: título (nome), descrição e cliente vinculado
+  const [editandoId, setEditandoId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState<{ titulo: string; descricao: string; cliente_id: string }>({ titulo: '', descricao: '', cliente_id: '' })
+  const salvarEdicao = useMutation({
+    mutationFn: (id: string) => reembolsosApi.atualizar(id, {
+      titulo: editForm.titulo, descricao: editForm.descricao || undefined, cliente_id: editForm.cliente_id,
+    }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['reembolsos'] }); setEditandoId(null) },
+    onError: (e: any) => alert(`Erro ao salvar: ${e?.response?.data?.detail || e?.message}`),
+  })
+  function abrirEdicao(r: { id: string; titulo: string; descricao?: string | null; cliente_id: string }) {
+    setEditForm({ titulo: r.titulo, descricao: r.descricao ?? '', cliente_id: r.cliente_id })
+    setEditandoId(r.id)
+  }
+
   const handleCancelarEDuplicar = async (id: string) => {
     if (!confirm('Cancelar esta nota e criar uma cópia em rascunho?')) return
     setCancelDupPending(id)
@@ -366,17 +381,52 @@ export default function ReembolsosPage() {
             <div key={r.id} className={`${cs.card} ${r.status === 'cancelado' ? cs.cardCancelado : ''}`}>
               {/* Cabeçalho */}
               <div className={cs.cardTop}>
-                <div>
-                  <div className={cs.cardTitulo}>{r.titulo}</div>
-                  <div className={cs.cardMeta}>
-                    {clienteNome(r.cliente_id)} · Emissão {fmtData(r.data_emissao)}
-                    {r.data_vencimento && ` · Vence ${fmtData(r.data_vencimento)}`}
-                    {r.ultimo_lembrete_em && (
-                      <span title={r.email_destinatario ? `Enviado para ${r.email_destinatario}` : undefined}>
-                        {' · '}📧 Cobrança enviada {fmtData(r.ultimo_lembrete_em.slice(0, 10))}
-                      </span>
-                    )}
-                  </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  {editandoId === r.id ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 460 }}>
+                      <input value={editForm.titulo} onChange={(e) => setEditForm(f => ({ ...f, titulo: e.target.value }))}
+                        placeholder="Nome / título da cobrança"
+                        style={{ padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14, fontWeight: 600 }} />
+                      <input value={editForm.descricao} onChange={(e) => setEditForm(f => ({ ...f, descricao: e.target.value }))}
+                        placeholder="Descrição (opcional)"
+                        style={{ padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13 }} />
+                      <ComboBox
+                        value={editForm.cliente_id}
+                        onChange={(v) => setEditForm(f => ({ ...f, cliente_id: v }))}
+                        options={clientes.map(c => ({ value: c.id, label: c.nome }))}
+                        placeholder="Cliente vinculado"
+                      />
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button className={styles.btnPrimary} style={{ padding: '5px 12px', fontSize: 12 }}
+                          disabled={!editForm.titulo || !editForm.cliente_id || salvarEdicao.isPending}
+                          onClick={() => salvarEdicao.mutate(r.id)}>
+                          {salvarEdicao.isPending ? '…' : 'Salvar'}
+                        </button>
+                        <button className={cs.btnExpand} style={{ fontSize: 12 }} onClick={() => setEditandoId(null)}>Cancelar</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className={cs.cardTitulo}>
+                        {r.titulo}
+                        {r.status !== 'cancelado' && (
+                          <button title="Editar nome, descrição e cliente"
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gray-mid)', fontSize: 13, marginLeft: 8 }}
+                            onClick={() => abrirEdicao(r)}>✎</button>
+                        )}
+                      </div>
+                      {r.descricao && <div style={{ fontSize: 12, color: 'var(--gray-mid)', marginTop: 2 }}>{r.descricao}</div>}
+                      <div className={cs.cardMeta}>
+                        {clienteNome(r.cliente_id)} · Emissão {fmtData(r.data_emissao)}
+                        {r.data_vencimento && ` · Vence ${fmtData(r.data_vencimento)}`}
+                        {r.ultimo_lembrete_em && (
+                          <span title={r.email_destinatario ? `Enviado para ${r.email_destinatario}` : undefined}>
+                            {' · '}📧 Cobrança enviada {fmtData(r.ultimo_lembrete_em.slice(0, 10))}
+                          </span>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
                 <div className={cs.cardActions}>
                   <span className={cs.cardTotal}>{fmtValor(r.total)}</span>
