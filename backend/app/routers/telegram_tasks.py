@@ -226,6 +226,13 @@ def _handle_callback(db: Session, callback_query: dict) -> None:
                 uuid.UUID(hex=item_hex)
             except ValueError:
                 return
+            # Guarda o projeto escolhido na sessão para o handler card_m reconstruir
+            # exatamente a mesma lista filtrada (senão os índices não batem).
+            session = tg.get_or_create_session(db, chat_id)
+            payload = dict(session.payload or {})
+            payload["card_link_projeto_id"] = str(projeto_id) if projeto_id else None
+            session.payload = payload
+            db.commit()
             text_out, markup = tg.build_macro_menu_for_item(db, item_hex, projeto_id)
             tg.edit_message(chat_id, message_id, text_out, markup)
             return
@@ -239,13 +246,16 @@ def _handle_callback(db: Session, callback_query: dict) -> None:
                 tg.edit_message(chat_id, message_id, "Erro. Tente novamente.")
                 return
             from app.models.telegram_task import TelegramTaskItem as _Item
-            from app.models.tarefa_card import TarefaCard as _Card
             item = db.query(_Item).filter(_Item.id == item_id).first()
             if not item:
                 tg.edit_message(chat_id, message_id, "Item não encontrado.")
                 return
-            # Busca macros da mesma seleção de projeto (sem filtro para simplicidade)
-            macros = tg._open_macros(db)
+            # Reconstrói a MESMA lista filtrada que foi mostrada ao usuário
+            session = tg.get_or_create_session(db, chat_id)
+            payload = session.payload or {}
+            projeto_id_str = payload.get("card_link_projeto_id")
+            projeto_id = uuid.UUID(projeto_id_str) if projeto_id_str else None
+            macros = tg._open_macros(db, projeto_id)
             if macro_idx >= len(macros):
                 tg.edit_message(chat_id, message_id, "Macro não encontrada.")
                 return
