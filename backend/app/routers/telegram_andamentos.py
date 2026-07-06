@@ -7,6 +7,7 @@ See app.services.andamentos_auth.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
@@ -77,6 +78,8 @@ _HELP_TEXT = (
     "• `/add <cnj>` — adiciona um CNJ avulso (fora da carteira do escritório).\n"
     "• `/silenciar <cnj>` · `/ativar <cnj>` — controla o push individualmente.\n"
     "• `/silenciados` — lista só os que estão silenciados.\n"
+    "• `/sincronizar` — força AGORA a varredura de todos os processos cadastrados "
+    "no jus.br (a mesma coisa que roda sozinha às 18h45) e envia o push na hora.\n"
     "• `/cancelar` — aborta um cadastro em andamento.\n\n"
     "*Sessão jus.br (login gov.br):*\n"
     "• `/login` — revalida o acesso (gera o link de login gov.br).\n"
@@ -1176,6 +1179,29 @@ def create_dispatcher() -> Dispatcher:
         else:
             await msg.answer("Nada em andamento pra cancelar.")
 
+    @dp.message(Command("sincronizar"))
+    async def cmd_sincronizar(msg: Message) -> None:
+        """Dispara na hora a mesma varredura de TODOS os processos cadastrados
+        (escritório + avulsos) que roda sozinha às 18h45, e já manda o push
+        em seguida — sem esperar o cron das 19h."""
+        if not _allowed(msg.from_user.id):
+            return
+        from app.services.andamentos_push import sync_jusbr_notificaveis, push_andamentos_telegram
+
+        await msg.answer("🔄 Sincronizando todos os processos cadastrados no jus.br...")
+        try:
+            await asyncio.to_thread(sync_jusbr_notificaveis)
+        except Exception as exc:
+            logger.exception("cmd_sincronizar: sync falhou")
+            await msg.answer(f"❌ Sync falhou: {str(exc)[:200]}")
+            return
+        await msg.answer("✅ Sync concluída. Enviando o push...")
+        try:
+            await asyncio.to_thread(push_andamentos_telegram)
+        except Exception as exc:
+            logger.exception("cmd_sincronizar: push falhou")
+            await msg.answer(f"❌ Push falhou: {str(exc)[:200]}")
+
     @dp.message(Command("lista"))
     async def cmd_lista(msg: Message) -> None:
         if not _allowed(msg.from_user.id):
@@ -1480,6 +1506,7 @@ _BOT_COMMANDS = [
     ("silenciar", "Silenciar push diário de um CNJ"),
     ("ativar", "Reativar push diário de um CNJ"),
     ("silenciados", "Ver só os processos com push desligado"),
+    ("sincronizar", "Forçar varredura de todos os processos agora + push"),
     ("login", "Revalidar o acesso jus.br (gov.br)"),
     ("sessao", "Status da sessão jus.br"),
     ("chatid", "Mostra o id do chat atual (setup do grupo)"),
