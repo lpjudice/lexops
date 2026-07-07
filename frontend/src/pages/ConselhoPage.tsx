@@ -911,6 +911,7 @@ function EventosSubTab() {
                       <span className={cs.guestCardName}>{cv.contato.primeiro_nome} {cv.contato.sobrenome || ''}</span>
                       <span style={{ fontSize: 10, color: '#9ca3af' }}>{isExpanded ? '▲' : '▼'}</span>
                     </div>
+                    <ContatoInlineInfo contato={cv.contato} onSaved={() => qc.invalidateQueries({ queryKey: ['conselho-eventos'] })} />
                     {/* Linha 2: badges + ações */}
                     <div className={cs.guestCardBottomRow} onClick={(e) => e.stopPropagation()}>
                       <div className={cs.guestCardBadges}>
@@ -1038,6 +1039,58 @@ function EventosSubTab() {
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+function ContatoInlineInfo({ contato, onSaved }: { contato: Contato; onSaved: () => void }) {
+  const [editando, setEditando] = useState(false)
+  const [primeiroNome, setPrimeiroNome] = useState(contato.primeiro_nome)
+  const [sobrenome, setSobrenome] = useState(contato.sobrenome || '')
+  const [empresa, setEmpresa] = useState(contato.empresa || '')
+  const [email, setEmail] = useState(contato.email || '')
+  const [whatsapp, setWhatsapp] = useState(contato.whatsapp || '')
+
+  const salvar = useMutation({
+    mutationFn: () => conselhoApi.atualizarContato(contato.id, {
+      primeiro_nome: primeiroNome.trim(),
+      sobrenome: sobrenome.trim() || undefined,
+      empresa: empresa.trim() || undefined,
+      email: email.trim() || undefined,
+      whatsapp: whatsapp.trim() || undefined,
+    }),
+    onSuccess: () => { onSaved(); setEditando(false) },
+  })
+
+  const faltando = !contato.sobrenome || !contato.empresa || !contato.email || !contato.whatsapp
+
+  if (!editando) {
+    return (
+      <div
+        onClick={(e) => { e.stopPropagation(); setEditando(true) }}
+        style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 11, color: '#6b7280', cursor: 'pointer', padding: '2px 0' }}
+        title="Clique para completar/editar dados de contato"
+      >
+        <span>🏢 {contato.empresa || <strong style={{ color: '#f59e0b' }}>--</strong>}</span>
+        <span>✉️ {contato.email || <strong style={{ color: '#f59e0b' }}>--</strong>}</span>
+        <span>📱 {contato.whatsapp || <strong style={{ color: '#f59e0b' }}>--</strong>}</span>
+        {!contato.sobrenome && <span>👤 sobrenome <strong style={{ color: '#f59e0b' }}>--</strong></span>}
+        {faltando && <span title="Dados incompletos" style={{ color: '#f59e0b' }}>✏️</span>}
+      </div>
+    )
+  }
+
+  return (
+    <div onClick={(e) => e.stopPropagation()} style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: '4px 0' }}>
+      <input className={styles.input} style={{ width: 110, fontSize: 12 }} value={primeiroNome} onChange={(e) => setPrimeiroNome(e.target.value)} placeholder="Nome *" />
+      <input className={styles.input} style={{ width: 110, fontSize: 12 }} value={sobrenome} onChange={(e) => setSobrenome(e.target.value)} placeholder="Sobrenome" />
+      <input className={styles.input} style={{ width: 130, fontSize: 12 }} value={empresa} onChange={(e) => setEmpresa(e.target.value)} placeholder="Empresa" />
+      <input className={styles.input} style={{ width: 150, fontSize: 12 }} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="E-mail" />
+      <input className={styles.input} style={{ width: 130, fontSize: 12 }} value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} placeholder="Celular/WhatsApp" />
+      <button className={styles.btnPrimary} style={{ fontSize: 11, padding: '3px 8px' }} disabled={salvar.isPending || !primeiroNome.trim()} onClick={() => salvar.mutate()}>
+        Salvar
+      </button>
+      <button className={styles.btnSmall} style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => setEditando(false)}>Cancelar</button>
     </div>
   )
 }
