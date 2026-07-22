@@ -486,7 +486,17 @@ def _handle_message(db: Session, message: dict) -> None:
     if c.state == "cliente_busca":
         clientes = _match_clientes(db, texto)
         if not clientes:
-            telegram_api.send_message(chat_id, "Nenhum cliente encontrado. Tente outro nome.")
+            # Guarda o nome digitado para poder criar o cliente novo
+            _draft(data)["_nome_busca"] = texto.strip()
+            _save(db, c, "cliente_busca", data)
+            telegram_api.send_message(
+                chat_id,
+                f'Nenhum cliente encontrado para *"{texto.strip()}"*.\n\nO que deseja fazer?',
+                [
+                    [("📝 Cadastrar como novo cliente", "cli:novo")],
+                    [("🔄 Tentar de novo", "cli:tentar_novo")],
+                ],
+            )
             return
         _save(db, c, "cliente", data)
         telegram_api.send_message(chat_id, "Selecione o cliente:", _botoes_clientes(clientes))
@@ -644,6 +654,32 @@ def _handle_callback(db: Session, cq: dict) -> None:
         if valor == "busca":
             _save(db, c, "cliente_busca", data)
             telegram_api.send_message(chat_id, "Digite parte do nome do cliente:")
+            return
+        if valor == "tentar_novo":
+            _save(db, c, "cliente_busca", data)
+            telegram_api.send_message(chat_id, "Digite novamente o nome do cliente:")
+            return
+        if valor == "novo":
+            nome = (_draft(data).pop("_nome_busca", None) or "").strip()
+            if not nome:
+                telegram_api.send_message(chat_id, "Nome não encontrado. Digite o nome do cliente:")
+                _save(db, c, "cliente_busca", data)
+                return
+            novo_cli = Cliente(nome=nome, tipo="PF", incompleto=True)
+            db.add(novo_cli)
+            db.commit()
+            db.refresh(novo_cli)
+            draft["cliente_id"] = str(novo_cli.id)
+            draft["cliente_nome"] = novo_cli.nome
+            telegram_api.send_message(
+                chat_id,
+                f"✅ Cliente *{novo_cli.nome}* cadastrado como incompleto.\n"
+                "Lembre de completar o cadastro no LexOps.",
+            )
+            if draft.get("mode") == "add":
+                _passo_add_despesa(db, c, data, chat_id)
+            else:
+                _passo_natureza(db, c, data, chat_id)
             return
         cliente = db.query(Cliente).filter(Cliente.id == uuid.UUID(valor)).first()
         if not cliente:
