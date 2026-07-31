@@ -60,6 +60,34 @@ class CadeiaEloOut(CadeiaEloBase):
     model_config = {"from_attributes": True}
 
 
+# ── Sócios (bem móvel = cota social) ─────────────────────────────────────────
+class SocioBase(BaseModel):
+    ordem: int = 0
+    nome: str
+    cpf: str | None = None
+    percentual: float | None = None
+    integralizar: bool = False
+
+
+class SocioCreate(SocioBase):
+    pass
+
+
+class SocioUpdate(BaseModel):
+    ordem: int | None = None
+    nome: str | None = None
+    cpf: str | None = None
+    percentual: float | None = None
+    integralizar: bool | None = None
+
+
+class SocioOut(SocioBase):
+    id: uuid.UUID
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 # ── Bem ─────────────────────────────────────────────────────────────────────
 class BemBase(BaseModel):
     tipo_bem: TipoBem = "imovel"
@@ -80,6 +108,12 @@ class BemBase(BaseModel):
     tem_gravame: bool = False
     gravame_descricao: str | None = None
     observacoes: str | None = None
+    # Cota social / participação societária (bem móvel)
+    empresa_nome: str | None = None
+    empresa_cnpj: str | None = None
+    capital_social: float | None = None
+    valor_balanco: float | None = None
+    data_balanco: date | None = None
 
 
 class BemCreate(BemBase):
@@ -105,6 +139,11 @@ class BemUpdate(BaseModel):
     tem_gravame: bool | None = None
     gravame_descricao: str | None = None
     observacoes: str | None = None
+    empresa_nome: str | None = None
+    empresa_cnpj: str | None = None
+    capital_social: float | None = None
+    valor_balanco: float | None = None
+    data_balanco: date | None = None
 
 
 class BemOut(BemBase):
@@ -112,6 +151,7 @@ class BemOut(BemBase):
     cliente_id: uuid.UUID
     anexos: list[AnexoOut] = []
     cadeia: list[CadeiaEloOut] = []
+    socios: list[SocioOut] = []
     created_at: datetime
     updated_at: datetime
 

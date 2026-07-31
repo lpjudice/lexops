@@ -1135,6 +1135,27 @@ def _run_migrations() -> None:
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """))
+        # Patrimônio: bem móvel do tipo cota social (empresa + quadro de sócios)
+        for _col in [
+            "ALTER TABLE patrimonio_bens ADD COLUMN IF NOT EXISTS empresa_nome VARCHAR(255)",
+            "ALTER TABLE patrimonio_bens ADD COLUMN IF NOT EXISTS empresa_cnpj VARCHAR(18)",
+            "ALTER TABLE patrimonio_bens ADD COLUMN IF NOT EXISTS capital_social NUMERIC(15,2)",
+            "ALTER TABLE patrimonio_bens ADD COLUMN IF NOT EXISTS valor_balanco NUMERIC(15,2)",
+            "ALTER TABLE patrimonio_bens ADD COLUMN IF NOT EXISTS data_balanco DATE",
+        ]:
+            conn.execute(text(_col))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS patrimonio_socios (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                bem_id UUID NOT NULL REFERENCES patrimonio_bens(id) ON DELETE CASCADE,
+                ordem INTEGER NOT NULL DEFAULT 0,
+                nome VARCHAR(255) NOT NULL,
+                cpf VARCHAR(18),
+                percentual NUMERIC(6,3),
+                integralizar BOOLEAN NOT NULL DEFAULT false,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
 
         conn.commit()
 

@@ -32,6 +32,16 @@ export interface CadeiaElo {
   created_at: string
 }
 
+export interface Socio {
+  id: string
+  ordem: number
+  nome: string
+  cpf?: string | null
+  percentual?: number | null
+  integralizar: boolean
+  created_at: string
+}
+
 export interface Bem {
   id: string
   cliente_id: string
@@ -53,8 +63,14 @@ export interface Bem {
   tem_gravame: boolean
   gravame_descricao?: string | null
   observacoes?: string | null
+  empresa_nome?: string | null
+  empresa_cnpj?: string | null
+  capital_social?: number | null
+  valor_balanco?: number | null
+  data_balanco?: string | null
   anexos: Anexo[]
   cadeia: CadeiaElo[]
+  socios: Socio[]
   created_at: string
   updated_at: string
 }
@@ -64,6 +80,9 @@ export type BemUpdate = Partial<Omit<Bem, 'id' | 'cliente_id' | 'anexos' | 'cade
 
 export type CadeiaEloCreate = Partial<Omit<CadeiaElo, 'id' | 'arquivo_nome' | 'drive_link' | 'created_at'>>
 export type CadeiaEloUpdate = CadeiaEloCreate
+
+export type SocioCreate = Partial<Omit<Socio, 'id' | 'created_at'>> & { nome: string }
+export type SocioUpdate = Partial<Omit<Socio, 'id' | 'created_at'>>
 
 export const patrimonioApi = {
   listar: (clienteId: string) =>
@@ -99,6 +118,15 @@ export const patrimonioApi = {
     form.append('file', file)
     return api.post<CadeiaElo>(`/patrimonio/${bemId}/cadeia/${eloId}/anexo`, form).then((r) => r.data)
   },
+
+  criarSocio: (bemId: string, data: SocioCreate) =>
+    api.post<Socio>(`/patrimonio/${bemId}/socios`, data).then((r) => r.data),
+
+  atualizarSocio: (bemId: string, socioId: string, data: SocioUpdate) =>
+    api.patch<Socio>(`/patrimonio/${bemId}/socios/${socioId}`, data).then((r) => r.data),
+
+  deletarSocio: (bemId: string, socioId: string) =>
+    api.delete(`/patrimonio/${bemId}/socios/${socioId}`),
 
   exportXls: (clienteId: string) =>
     api.get(`/patrimonio/export/xls`, { params: { cliente_id: clienteId }, responseType: 'blob' })

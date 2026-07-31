@@ -71,6 +71,13 @@ class PatrimonioBem(Base):
 
     observacoes: Mapped[str | None] = mapped_column(Text)
 
+    # ── Bem móvel do tipo cota social / participação societária (opcional) ──
+    empresa_nome: Mapped[str | None] = mapped_column(String(255))
+    empresa_cnpj: Mapped[str | None] = mapped_column(String(18))
+    capital_social: Mapped[float | None] = mapped_column(Numeric(15, 2))
+    valor_balanco: Mapped[float | None] = mapped_column(Numeric(15, 2))
+    data_balanco: Mapped[date | None] = mapped_column(Date)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -90,6 +97,12 @@ class PatrimonioBem(Base):
         back_populates="bem",
         cascade="all, delete-orphan",
         order_by="PatrimonioCadeiaElo.ordem",
+    )
+    socios: Mapped[list["PatrimonioSocio"]] = relationship(
+        "PatrimonioSocio",
+        back_populates="bem",
+        cascade="all, delete-orphan",
+        order_by="PatrimonioSocio.ordem",
     )
 
 
@@ -148,3 +161,32 @@ class PatrimonioCadeiaElo(Base):
     )
 
     bem: Mapped["PatrimonioBem"] = relationship("PatrimonioBem", back_populates="cadeia")
+
+
+class PatrimonioSocio(Base):
+    """Sócio do quadro societário de um bem móvel do tipo cota social.
+
+    Registra o sócio (nome/CPF), o percentual de participação e se aquela
+    participação será ou não integralizada na holding.
+    """
+
+    __tablename__ = "patrimonio_socios"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    bem_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("patrimonio_bens.id", ondelete="CASCADE"), nullable=False
+    )
+    ordem: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    nome: Mapped[str] = mapped_column(String(255), nullable=False)
+    cpf: Mapped[str | None] = mapped_column(String(18))
+    percentual: Mapped[float | None] = mapped_column(Numeric(6, 3))
+    integralizar: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    bem: Mapped["PatrimonioBem"] = relationship("PatrimonioBem", back_populates="socios")
