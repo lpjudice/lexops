@@ -58,6 +58,7 @@ export default function CadastroPublicoPage() {
   const [ctx, setCtx] = useState<FormContexto | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY)
   const [files, setFiles] = useState<File[]>([])
+  const [website, setWebsite] = useState('') // honeypot anti-bot (invisível)
   const [consentimento, setConsentimento] = useState(false)
   const [erroEnvio, setErroEnvio] = useState<string>('')
   const [ehUpdate, setEhUpdate] = useState(false)
@@ -119,7 +120,7 @@ export default function CadastroPublicoPage() {
     if (!consentimento) { setErroEnvio('É necessário aceitar o termo de consentimento.'); return }
 
     setEstado('enviando')
-    const payload = { ...form, consentimento: true }
+    const payload = { ...form, website, consentimento: true }
     const fd = new FormData()
     fd.append('payload', JSON.stringify(payload))
     files.forEach((f) => fd.append('files', f))
@@ -176,6 +177,12 @@ export default function CadastroPublicoPage() {
   return (
     <div className={cs.wrap}>
       <form className={cs.card} onSubmit={enviar}>
+        {/* Honeypot anti-bot: invisível para humanos; se preenchido, descartamos. */}
+        <input
+          type="text" name="website" tabIndex={-1} autoComplete="off" aria-hidden="true"
+          value={website} onChange={(e) => setWebsite(e.target.value)}
+          style={{ position: 'absolute', left: '-9999px', width: 1, height: 1, opacity: 0 }}
+        />
         <h1 className={cs.titulo}>Cadastro</h1>
         <p className={cs.muted}>
           {ctx?.is_update

@@ -141,7 +141,9 @@ def _build_invite_html(invite_url: str, inviter_name: str, to_email: str) -> str
 </html>"""
 
 
-def _send_via_gmail_oauth(to_email: str, subject: str, html: str) -> None:
+def _send_via_gmail_oauth(
+    to_email: str, subject: str, html: str, cc: list[str] | None = None
+) -> None:
     """Send using the same stored Google OAuth tokens as the reembolsos flow."""
     import httpx
     from app.services.google_calendar import _load_tokens, _refresh_token
@@ -161,6 +163,8 @@ def _send_via_gmail_oauth(to_email: str, subject: str, html: str) -> None:
 
     msg = mime_multi.MIMEMultipart("alternative")
     msg["to"] = to_email
+    if cc:
+        msg["cc"] = ", ".join(cc)
     msg["from"] = "me"
     msg["subject"] = subject
     msg.attach(mime_text.MIMEText(html, "html", "utf-8"))
@@ -174,6 +178,68 @@ def _send_via_gmail_oauth(to_email: str, subject: str, html: str) -> None:
     )
     if resp.status_code not in (200, 201):
         raise RuntimeError(f"Gmail API retornou {resp.status_code}: {resp.text}")
+
+
+def _build_cadastro_html(cadastro_url: str, nome: str | None, is_update: bool) -> str:
+    saudacao = f"Olá{(' ' + nome) if nome else ''},"
+    intro = (
+        "Para mantermos seu cadastro atualizado, preencha ou confira seus dados "
+        "no formulário seguro abaixo."
+        if is_update else
+        "Para darmos início ao seu atendimento, preencha seus dados no formulário "
+        "seguro abaixo."
+    )
+    return f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Cadastro — Pimenta Judice</title></head>
+<body style="margin:0;padding:0;background:#111111;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#111111;">
+    <tr><td align="center" style="padding:48px 16px;">
+      <table width="100%" cellpadding="0" cellspacing="0" role="presentation"
+             style="max-width:480px;background:#1a1a1a;border-radius:16px;border:1px solid #2a2a2a;overflow:hidden;">
+        <tr><td style="background:#141414;padding:24px 32px;border-bottom:1px solid #2a2a2a;">
+          <p style="margin:0;font-size:13px;font-weight:800;letter-spacing:0.14em;text-transform:uppercase;color:#f5f5f5;">PIMENTA JUDICE</p>
+          <p style="margin:2px 0 0;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:#555;">Advogados</p>
+        </td></tr>
+        <tr><td style="padding:36px 32px 28px;">
+          <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#f5f5f5;line-height:1.3;">{saudacao}</h1>
+          <p style="margin:0 0 28px;font-size:14px;color:#888;line-height:1.6;">{intro}</p>
+          <table cellpadding="0" cellspacing="0" role="presentation" style="margin-bottom:28px;">
+            <tr><td style="border-radius:10px;background:{TEAL};">
+              <a href="{cadastro_url}" style="display:inline-block;padding:14px 32px;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:10px;">
+                {"Atualizar meus dados" if is_update else "Preencher meu cadastro"} →
+              </a>
+            </td></tr>
+          </table>
+          <p style="margin:0 0 6px;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#555;">Ou copie este link</p>
+          <p style="margin:0;font-size:11px;color:#555;word-break:break-all;line-height:1.6;background:#141414;padding:10px 12px;border-radius:8px;border:1px solid #2a2a2a;font-family:'Courier New',monospace;">{cadastro_url}</p>
+        </td></tr>
+        <tr><td style="padding:20px 32px 28px;border-top:1px solid #2a2a2a;">
+          <p style="margin:0;font-size:11px;color:#444;line-height:1.6;text-align:center;">
+            Seus dados são tratados conforme a LGPD (Lei nº 13.709/2018).<br/>
+            Se você não esperava este e-mail, pode ignorá-lo.
+          </p>
+        </td></tr>
+      </table>
+      <p style="margin:20px 0 0;font-size:11px;color:#444;text-align:center;">Pimenta Judice Advogados</p>
+    </td></tr>
+  </table>
+</body></html>"""
+
+
+def send_cadastro_email(
+    to_email: str, cadastro_url: str, nome: str | None = None,
+    cc: list[str] | None = None, is_update: bool = False,
+) -> None:
+    """Envia o link de autocadastro com a identidade visual do escritório.
+
+    Levanta exceção em falha (o router traduz em HTTP) — diferente do convite,
+    aqui queremos que o usuário saiba se não foi enviado.
+    """
+    subject = "Atualização de cadastro — Pimenta Judice" if is_update else "Seu cadastro — Pimenta Judice"
+    html = _build_cadastro_html(cadastro_url, nome, is_update)
+    _send_via_gmail_oauth(to_email, subject, html, cc=cc)
 
 
 async def send_invite_email(to_email: str, invite_url: str, inviter_name: str) -> bool:
