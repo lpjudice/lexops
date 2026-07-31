@@ -12,6 +12,7 @@ import { contratosApi } from '../api/contratos'
 import api from '../api/client'
 import type { AnotacaoCreate, TipoAnotacao } from '../api/anotacoes'
 import ClienteIA from '../components/ClienteIA'
+import PatrimonioSection from '../components/PatrimonioSection'
 import MemoriaEstrategica from '../components/MemoriaEstrategica'
 import FontesContexto from '../components/FontesContexto'
 import AnamneseForm from '../components/AnamneseForm'
@@ -47,7 +48,7 @@ function formatDate(d: string) {
   return new Date(d).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-type Aba = 'timeline' | 'anotacoes' | 'emails' | 'processos' | 'financeiro' | 'contratos' | 'reunioes' | 'ia' | 'fiscal'
+type Aba = 'timeline' | 'anotacoes' | 'emails' | 'processos' | 'financeiro' | 'contratos' | 'patrimonio' | 'reunioes' | 'ia' | 'fiscal'
 
 export default function ClienteDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -277,7 +278,7 @@ export default function ClienteDetailPage() {
 
       {/* Abas */}
       <div className={detailStyles.abas}>
-        {(['timeline', 'anotacoes', 'emails', 'processos', 'financeiro', 'contratos', 'reunioes', 'ia', 'fiscal'] as Aba[]).map((a) => (
+        {(['timeline', 'anotacoes', 'emails', 'processos', 'financeiro', 'contratos', 'patrimonio', 'reunioes', 'ia', 'fiscal'] as Aba[]).map((a) => (
           <button
             key={a}
             className={`${detailStyles.aba} ${aba === (a as Aba) ? detailStyles.abaAtiva : ''}`}
@@ -289,6 +290,7 @@ export default function ClienteDetailPage() {
              a === 'processos' ? 'Processos' :
              a === 'financeiro' ? `Financeiro${honorarios.length ? ` (${honorarios.length})` : ''}` :
              a === 'contratos' ? `Contratos${contratos.length ? ` (${contratos.length})` : ''}` :
+             a === 'patrimonio' ? '🏛️ Patrimônio' :
              a === 'reunioes' ? (
                <>
                  Reuniões
@@ -875,6 +877,9 @@ export default function ClienteDetailPage() {
           )}
         </div>
       )}
+
+      {/* ── Patrimônio ── */}
+      {aba === 'patrimonio' && <PatrimonioSection clienteId={id!} />}
 
       {/* ── Reuniões ── */}
       {aba === 'reunioes' && (

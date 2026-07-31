@@ -22,8 +22,9 @@ from app.models import conselho as _conselho_model  # noqa: F401 — ensures Con
 from app.models import tarefa_card as _tarefa_card_model  # noqa: F401 — ensures TarefaCard tables are registered
 from app.models import memoria_estrategica as _memoria_estrategica_model  # noqa: F401 — ensures MemoriaEstrategica table is registered
 from app.models import responsavel as _responsavel_model  # noqa: F401 — ensures Responsavel table is registered
+from app.models import patrimonio as _patrimonio_model  # noqa: F401 — ensures Patrimonio tables are registered
 from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, fiscal, pagantes, config_fiscal, jurisprudencia, organizador, pje, prazos, processos, publico, reembolsos, reunioes, system, tarefas, telegram, telegram_andamentos, telegram_tasks, teses, usuarios, webhooks
-from app.routers import backoffice, precedentcheck, conselho, tarefa_projetos, tarefa_cards, memoria_estrategica, despacho, conselho_juridico, responsaveis
+from app.routers import backoffice, precedentcheck, conselho, tarefa_projetos, tarefa_cards, memoria_estrategica, despacho, conselho_juridico, responsaveis, patrimonio
 
 # Cria as tabelas (Alembic gerencia em produção; aqui facilita o dev)
 Base.metadata.create_all(bind=engine)
@@ -1009,6 +1010,62 @@ def _run_migrations() -> None:
             "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS tarefa_card_id UUID REFERENCES tarefa_cards(id) ON DELETE SET NULL"
         ))
 
+        # Patrimônio: inventário de bens do cliente (diagnóstico de holding)
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS patrimonio_bens (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                cliente_id UUID NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+                tipo_bem VARCHAR(20) NOT NULL DEFAULT 'imovel',
+                nome VARCHAR(255) NOT NULL,
+                descricao TEXT,
+                valor_compra NUMERIC(15,2),
+                valor_mercado NUMERIC(15,2),
+                valor_ir NUMERIC(15,2),
+                data_compra DATE,
+                objetivo VARCHAR(20),
+                descricao_matricula TEXT,
+                numero_matricula VARCHAR(100),
+                cartorio VARCHAR(255),
+                status VARCHAR(20) NOT NULL DEFAULT 'em_validacao',
+                integralizar_holding BOOLEAN NOT NULL DEFAULT false,
+                proprietario_real VARCHAR(255),
+                proprietario_matricula VARCHAR(255),
+                tem_gravame BOOLEAN NOT NULL DEFAULT false,
+                gravame_descricao TEXT,
+                observacoes TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_patrimonio_bens_cliente ON patrimonio_bens(cliente_id)"
+        ))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS patrimonio_anexos (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                bem_id UUID NOT NULL REFERENCES patrimonio_bens(id) ON DELETE CASCADE,
+                filename VARCHAR(500) NOT NULL,
+                drive_link VARCHAR(1000),
+                mime VARCHAR(100),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS patrimonio_cadeia_elos (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                bem_id UUID NOT NULL REFERENCES patrimonio_bens(id) ON DELETE CASCADE,
+                ordem INTEGER NOT NULL DEFAULT 0,
+                tipo_documento VARCHAR(50) NOT NULL DEFAULT 'outro',
+                de_quem VARCHAR(255),
+                para_quem VARCHAR(255),
+                data DATE,
+                descricao TEXT,
+                arquivo_nome VARCHAR(500),
+                drive_link VARCHAR(1000),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+
         conn.commit()
 
 
@@ -1312,6 +1369,7 @@ app.include_router(memoria_estrategica.router)
 app.include_router(despacho.router)
 app.include_router(conselho_juridico.router)
 app.include_router(responsaveis.router)
+app.include_router(patrimonio.router)
 
 
 @app.on_event("startup")

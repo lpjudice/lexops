@@ -44,6 +44,7 @@ SUBPASTAS: dict[str, str] = {
     "teses":           "Teses",
     "uploads":         "Uploads",
     "jurisprudencia":  "Jurisprudência",
+    "patrimonio":      "Patrimônio",
 }
 
 
