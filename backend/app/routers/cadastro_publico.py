@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import uuid
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -37,6 +39,23 @@ CAMPOS_PJ = {"nome_fantasia", "responsavel_nome", "responsavel_cpf",
              "responsavel_email", "responsavel_telefone"}
 MAX_ANEXOS = 5
 MAX_ANEXO_BYTES = 15 * 1024 * 1024  # 15 MB por arquivo
+
+# Nome do campo honeypot: invisível no form, bots preenchem → descartamos.
+HONEYPOT_FIELD = "website"
+# Rate-limit leve por IP (in-memory, por worker): N envios por janela.
+RATE_MAX = 6
+RATE_JANELA_S = 600  # 10 min
+_rate_hits: dict[str, list[float]] = defaultdict(list)
+
+
+def _rate_limit_ok(ip: str | None) -> bool:
+    if not ip:
+        return True
+    agora = time.time()
+    hits = [t for t in _rate_hits[ip] if agora - t < RATE_JANELA_S]
+    hits.append(agora)
+    _rate_hits[ip] = hits
+    return len(hits) <= RATE_MAX
 
 
 def _so_digitos(v: str | None) -> str:
@@ -97,12 +116,21 @@ async def _processar_submissao(
     files: list[UploadFile],
     db: Session,
 ) -> dict:
+    ip = request.client.host if request.client else None
+
     try:
         raw = json.loads(payload)
     except (json.JSONDecodeError, TypeError):
         raise HTTPException(400, "Dados inválidos")
     if not isinstance(raw, dict):
         raise HTTPException(400, "Dados inválidos")
+
+    # Honeypot: campo invisível preenchido = bot. Fingimos sucesso e não gravamos.
+    if (raw.get(HONEYPOT_FIELD) or "").strip():
+        return {"ok": True, "is_update": False}
+
+    if not _rate_limit_ok(ip):
+        raise HTTPException(429, "Muitos envios. Tente novamente em alguns minutos.")
 
     tipo = (raw.get("tipo") or "").upper()
     if tipo not in ("PF", "PJ"):
@@ -153,7 +181,7 @@ async def _processar_submissao(
         consentimento=True,
         consentimento_texto=CONSENTIMENTO_TEXTO,
         consentimento_em=datetime.now(timezone.utc),
-        ip=(request.client.host if request.client else None),
+        ip=ip,
         user_agent=request.headers.get("user-agent"),
         status="pendente",
     )

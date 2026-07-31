@@ -6,12 +6,13 @@ staging na Fase 3.
 """
 import secrets
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.cadastro_link import ClienteCadastroLink, ClienteCadastroSubmissao
@@ -73,7 +74,6 @@ def criar_link(
         cliente_id = cliente.id
         reutilizavel = False  # convite de atualização = uso único
 
-    from datetime import timedelta, timezone
     expira_em = None
     if data.expira_em_dias:
         expira_em = datetime.now(timezone.utc) + timedelta(days=data.expira_em_dias)
@@ -101,3 +101,101 @@ def revogar_link(link_id: uuid.UUID, db: Session = Depends(get_db)):
     link.revogado = True
     db.commit()
     return {"ok": True}
+
+
+# ── Envio do link de convite por e-mail / Telegram (Fase 4) ───────────────────
+
+def _base_url(request: Request) -> str:
+    """Host pelo qual o painel foi acessado (ex.: cadastro.pimentajudice.com.br)."""
+    return str(request.base_url).rstrip("/")
+
+
+def _get_or_create_invite(db: Session, cliente: Cliente, user: Usuario) -> ClienteCadastroLink:
+    """Reaproveita um convite válido do cliente, ou cria um novo."""
+    agora = datetime.now(timezone.utc)
+    link = (
+        db.query(ClienteCadastroLink)
+        .filter(
+            ClienteCadastroLink.cliente_id == cliente.id,
+            ClienteCadastroLink.revogado.is_(False),
+        )
+        .order_by(ClienteCadastroLink.created_at.desc())
+        .first()
+    )
+    if link and (link.expira_em is None or link.expira_em > agora):
+        return link
+    link = ClienteCadastroLink(
+        token=secrets.token_urlsafe(9),
+        cliente_id=cliente.id,
+        rotulo=cliente.nome,
+        reutilizavel=False,
+        created_by_id=user.id,
+    )
+    db.add(link)
+    db.commit()
+    db.refresh(link)
+    return link
+
+
+def _cliente_ou_404(db: Session, cliente_id: uuid.UUID) -> Cliente:
+    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    if not cliente:
+        raise HTTPException(404, "Cliente não encontrado")
+    return cliente
+
+
+class EnviarEmailPayload(BaseModel):
+    cliente_id: uuid.UUID
+    destinatario: str | None = None  # sobrescreve o e-mail do cliente
+    copia_para_mim: bool = True
+
+
+@router.post("/enviar-email")
+def enviar_email(
+    payload: EnviarEmailPayload,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: Usuario = Depends(get_current_user),
+):
+    cliente = _cliente_ou_404(db, payload.cliente_id)
+    dest = (payload.destinatario or cliente.email or "").strip()
+    if not dest:
+        raise HTTPException(400, "Cliente sem e-mail. Informe um destinatário.")
+    link = _get_or_create_invite(db, cliente, user)
+    url = f"{_base_url(request)}/cadastro/{link.token}"
+    cc = None
+    if payload.copia_para_mim and user.email and user.email.lower() != dest.lower():
+        cc = [user.email]
+    from app.services.email_service import send_cadastro_email
+    try:
+        send_cadastro_email(dest, url, cliente.nome, cc=cc, is_update=True)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(503, f"Não foi possível enviar o e-mail: {exc}")
+    return {"ok": True, "destinatario": dest, "url": url}
+
+
+class EnviarTelegramPayload(BaseModel):
+    cliente_id: uuid.UUID
+
+
+@router.post("/enviar-telegram")
+def enviar_telegram(
+    payload: EnviarTelegramPayload,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: Usuario = Depends(get_current_user),
+):
+    cliente = _cliente_ou_404(db, payload.cliente_id)
+    ids_raw = (settings.telegram_allowed_user_ids or "").split(",")
+    chat_ids = [int(x) for x in (i.strip() for i in ids_raw) if x.strip().isdigit()]
+    if not chat_ids:
+        raise HTTPException(503, "Nenhum Telegram configurado (telegram_allowed_user_ids).")
+    link = _get_or_create_invite(db, cliente, user)
+    url = f"{_base_url(request)}/cadastro/{link.token}"
+    from app.services import telegram_api
+    texto = f"🔗 Link de cadastro de *{cliente.nome}*:\n{url}"
+    # Envia só pro primeiro id (você), pra não vazar pros demais autorizados.
+    ok = telegram_api.send_message(chat_ids[0], texto) is not None
+    if not ok:
+        raise HTTPException(503, "Falha ao enviar pelo Telegram.")
+    return {"ok": True, "url": url}

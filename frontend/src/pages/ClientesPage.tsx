@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { clientesApi, cadastroLinksApi } from '../api/clientes'
+import { clientesApi } from '../api/clientes'
 import type { ClienteCreate } from '../api/clientes'
 import CadastrosPendentes from '../components/CadastrosPendentes'
+import EnviarLinkModal from '../components/EnviarLinkModal'
 import {
   applyDocMask, buscarCep, ESTADO_CIVIL_OPCOES, maskCEP, maskCPF, maskTelefone,
 } from '../utils/masks'
@@ -20,34 +21,16 @@ export default function ClientesPage() {
   const [editForm, setEditForm] = useState<Partial<ClienteCreate>>({})
   const [busca, setBusca] = useState('')
   const [linkMsg, setLinkMsg] = useState<string | null>(null)
-  const [gerandoLink, setGerandoLink] = useState(false)
+  const [enviarPara, setEnviarPara] = useState<{ id: string; nome: string; email?: string } | null>(null)
 
-  async function copiarUrl(url: string) {
+  // Link genérico de captação: URL fixa e curta, sem token nem chamada de API.
+  async function linkGenerico() {
+    const url = `${window.location.origin}/cadastro`
     try {
       await navigator.clipboard.writeText(url)
       setLinkMsg(`Link copiado: ${url}`)
     } catch {
       setLinkMsg(`Link: ${url}`)
-    }
-  }
-
-  // Link genérico de captação: URL fixa e curta, sem token nem chamada de API.
-  function linkGenerico() {
-    setLinkMsg(null)
-    copiarUrl(`${window.location.origin}/cadastro`)
-  }
-
-  // Convite por cliente: cria um link com token (curto) atrelado ao cliente.
-  async function gerarLinkConvite(clienteId: string, rotulo?: string) {
-    setGerandoLink(true)
-    setLinkMsg(null)
-    try {
-      const link = await cadastroLinksApi.criar({ cliente_id: clienteId, rotulo })
-      await copiarUrl(`${window.location.origin}${link.caminho}`)
-    } catch {
-      setLinkMsg('Erro ao gerar o link.')
-    } finally {
-      setGerandoLink(false)
     }
   }
 
@@ -122,6 +105,10 @@ export default function ClientesPage() {
 
       <CadastrosPendentes />
 
+      {enviarPara && (
+        <EnviarLinkModal cliente={enviarPara} onClose={() => setEnviarPara(null)} />
+      )}
+
       <div className={cs.buscaRow}>
         <input
           className={cs.buscaInput}
@@ -184,10 +171,10 @@ export default function ClientesPage() {
                   >
                     {c.monitorar_diario ? '◎ Monitorando' : '○ Monitorar Diário'}
                   </button>
-                  <button className={styles.btnTable} disabled={gerandoLink}
-                    title="Gera um link para o cliente atualizar os próprios dados"
-                    onClick={() => gerarLinkConvite(c.id, c.nome)}>
-                    🔗 Link
+                  <button className={styles.btnTable}
+                    title="Enviar link para o cliente atualizar os próprios dados"
+                    onClick={() => setEnviarPara({ id: c.id, nome: c.nome, email: c.email })}>
+                    🔗 Enviar link
                   </button>
                   <Link to={`/clientes/${c.id}`} className={styles.btnTable}>Ver</Link>
                   <button className={styles.btnTable}
