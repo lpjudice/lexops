@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { clientesApi } from '../api/clientes'
+import { clientesApi, cadastroLinksApi } from '../api/clientes'
 import type { ClienteCreate } from '../api/clientes'
+import CadastrosPendentes from '../components/CadastrosPendentes'
 import {
   applyDocMask, buscarCep, ESTADO_CIVIL_OPCOES, maskCEP, maskCPF, maskTelefone,
 } from '../utils/masks'
@@ -18,6 +19,29 @@ export default function ClientesPage() {
   const [editando, setEditando] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<Partial<ClienteCreate>>({})
   const [busca, setBusca] = useState('')
+  const [linkMsg, setLinkMsg] = useState<string | null>(null)
+  const [gerandoLink, setGerandoLink] = useState(false)
+
+  async function gerarLink(clienteId?: string, rotulo?: string) {
+    setGerandoLink(true)
+    setLinkMsg(null)
+    try {
+      const link = await cadastroLinksApi.criar(
+        clienteId ? { cliente_id: clienteId, rotulo } : {},
+      )
+      const url = `${window.location.origin}${link.caminho}`
+      try {
+        await navigator.clipboard.writeText(url)
+        setLinkMsg(`Link copiado: ${url}`)
+      } catch {
+        setLinkMsg(`Link gerado: ${url}`)
+      }
+    } catch {
+      setLinkMsg('Erro ao gerar o link.')
+    } finally {
+      setGerandoLink(false)
+    }
+  }
 
   const { data: clientes = [], isLoading } = useQuery({
     queryKey: ['clientes'],
@@ -70,10 +94,25 @@ export default function ClientesPage() {
     <div>
       <div className={styles.pageHeader}>
         <h1 className={styles.pageTitle}>Clientes</h1>
-        <button className={styles.btnPrimary} onClick={() => setShowForm(!showForm)}>
-          {showForm ? 'Cancelar' : '+ Novo Cliente'}
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className={styles.btnTable} disabled={gerandoLink}
+            title="Cria um link público de autocadastro para captação de cliente novo"
+            onClick={() => gerarLink()}>
+            🔗 Link de cadastro
+          </button>
+          <button className={styles.btnPrimary} onClick={() => setShowForm(!showForm)}>
+            {showForm ? 'Cancelar' : '+ Novo Cliente'}
+          </button>
+        </div>
       </div>
+
+      {linkMsg && (
+        <div className={cs.linkMsg} onClick={() => setLinkMsg(null)} title="Clique para dispensar">
+          {linkMsg}
+        </div>
+      )}
+
+      <CadastrosPendentes />
 
       <div className={cs.buscaRow}>
         <input
@@ -136,6 +175,11 @@ export default function ClientesPage() {
                     onClick={() => toggleMonitorar.mutate({ id: c.id, monitorar_diario: !c.monitorar_diario })}
                   >
                     {c.monitorar_diario ? '◎ Monitorando' : '○ Monitorar Diário'}
+                  </button>
+                  <button className={styles.btnTable} disabled={gerandoLink}
+                    title="Gera um link para o cliente atualizar os próprios dados"
+                    onClick={() => gerarLink(c.id, c.nome)}>
+                    🔗 Link
                   </button>
                   <Link to={`/clientes/${c.id}`} className={styles.btnTable}>Ver</Link>
                   <button className={styles.btnTable}

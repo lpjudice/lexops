@@ -162,3 +162,46 @@ export const cadastroLinksApi = {
     api.post<CadastroLink>('/cadastro-links', data).then((r) => r.data),
   revogar: (id: string) => api.post(`/cadastro-links/${id}/revogar`),
 }
+
+// ── Submissões de autocadastro (Fase 3 — revisão/aprovação) ───────────────────
+
+export interface CadastroSubmissaoResumo {
+  id: string
+  tipo: 'PF' | 'PJ'
+  status: string
+  is_update: boolean
+  cliente_alvo_id: string | null
+  cliente_alvo_nome: string | null
+  nome_enviado?: string
+  cpf_cnpj_enviado?: string
+  qtd_anexos: number
+  consentimento_em: string | null
+  created_at: string | null
+}
+
+export interface CadastroDiffLinha {
+  campo: string
+  atual: string | null
+  novo: string | null
+  mudou: boolean
+}
+
+export interface CadastroSubmissaoDetalhe extends CadastroSubmissaoResumo {
+  diff: CadastroDiffLinha[]
+  anexos: { filename: string; mime?: string }[]
+  consentimento_texto: string | null
+  ip: string | null
+}
+
+export const cadastroSubmissoesApi = {
+  listar: (status = 'pendente') =>
+    api.get<CadastroSubmissaoResumo[]>('/cadastro-submissoes', { params: { status } }).then((r) => r.data),
+  obter: (id: string) =>
+    api.get<CadastroSubmissaoDetalhe>(`/cadastro-submissoes/${id}`).then((r) => r.data),
+  aprovar: (id: string, campos?: string[]) =>
+    api.post<{ ok: boolean; cliente_id: string; criado: boolean }>(
+      `/cadastro-submissoes/${id}/aprovar`, { campos: campos ?? null },
+    ).then((r) => r.data),
+  rejeitar: (id: string) =>
+    api.post<{ ok: boolean }>(`/cadastro-submissoes/${id}/rejeitar`).then((r) => r.data),
+}

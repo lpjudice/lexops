@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useParams } from 'react-router-dom'
 import {
   applyDocMask, buscarCep, ESTADO_CIVIL_OPCOES, maskCEP, maskCPF, maskTelefone,
@@ -109,7 +109,7 @@ export default function CadastroPublicoPage() {
     [isPF],
   )
 
-  async function enviar(e: React.FormEvent) {
+  async function enviar(e: FormEvent) {
     e.preventDefault()
     setErroEnvio('')
     if (!form.nome.trim()) { setErroEnvio('Informe o nome.'); return }

@@ -25,7 +25,7 @@ from app.models import responsavel as _responsavel_model  # noqa: F401 — ensur
 from app.models import cadastro_link as _cadastro_link_model  # noqa: F401 — ensures ClienteCadastroLink/Submissao tables are registered
 from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, fiscal, pagantes, config_fiscal, jurisprudencia, organizador, pje, prazos, processos, publico, reembolsos, reunioes, system, tarefas, telegram, telegram_andamentos, telegram_tasks, teses, usuarios, webhooks
 from app.routers import backoffice, precedentcheck, conselho, tarefa_projetos, tarefa_cards, memoria_estrategica, despacho, conselho_juridico, responsaveis
-from app.routers import cadastro_links, cadastro_publico
+from app.routers import cadastro_links, cadastro_publico, cadastro_submissoes
 
 # Cria as tabelas (Alembic gerencia em produção; aqui facilita o dev)
 Base.metadata.create_all(bind=engine)
@@ -1318,6 +1318,7 @@ app.include_router(config_fiscal.router)
 app.include_router(publico.router)
 app.include_router(cadastro_publico.router)
 app.include_router(cadastro_links.router)
+app.include_router(cadastro_submissoes.router)
 app.include_router(tarefas.router)
 app.include_router(conversas_ia.router)
 app.include_router(organizador.router)
