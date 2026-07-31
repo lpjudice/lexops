@@ -1,7 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { cadastroSubmissoesApi } from '../api/clientes'
-import type { CadastroSubmissaoDetalhe } from '../api/clientes'
+import { cadastroSubmissoesApi, clientesApi } from '../api/clientes'
+import {
+  applyDocMask, brParaIso, ESTADO_CIVIL_OPCOES, isoParaBr,
+  maskCEP, maskCPF, maskDataBr, maskTelefone,
+} from '../utils/masks'
 import cs from './CadastrosPendentes.module.css'
 
 const LABELS: Record<string, string> = {
@@ -91,80 +94,144 @@ export default function CadastrosPendentes() {
   )
 }
 
+type Tipo = 'PF' | 'PJ'
+
+// Ordem de exibição dos campos editáveis por tipo.
+const CAMPOS_TIPO: Record<Tipo, string[]> = {
+  PF: ['nome', 'cpf_cnpj', 'rg', 'data_nascimento', 'estado_civil', 'profissao',
+    'email', 'telefone', 'whatsapp',
+    'cep', 'logradouro', 'numero', 'complemento', 'bairro', 'cidade', 'uf',
+    'empresas_vinculadas', 'observacoes'],
+  PJ: ['nome', 'nome_fantasia', 'cpf_cnpj', 'email', 'telefone', 'whatsapp',
+    'cep', 'logradouro', 'numero', 'complemento', 'bairro', 'cidade', 'uf',
+    'responsavel_nome', 'responsavel_cpf', 'responsavel_email', 'responsavel_telefone',
+    'observacoes'],
+}
+
+function labelCampo(campo: string, tipo: Tipo): string {
+  if (campo === 'nome') return tipo === 'PF' ? 'Nome completo' : 'Razão social'
+  if (campo === 'cpf_cnpj') return tipo === 'PF' ? 'CPF' : 'CNPJ'
+  return LABELS[campo] ?? campo
+}
+
 function RevisaoModal({ id, onClose, onDone }: { id: string; onClose: () => void; onDone: () => void }) {
   const { data: sub, isLoading } = useQuery({
     queryKey: ['cadastro-submissao', id],
     queryFn: () => cadastroSubmissoesApi.obter(id),
   })
+  const { data: clientes = [] } = useQuery({ queryKey: ['clientes'], queryFn: clientesApi.listar })
 
-  const [selecionados, setSelecionados] = useState<Set<string> | null>(null)
+  const [tipo, setTipo] = useState<Tipo | null>(null)
+  const [destino, setDestino] = useState<string>('') // 'novo' | cliente_id
+  const [campos, setCampos] = useState<Record<string, string> | null>(null)
 
-  // Inicializa a seleção com os campos que mudaram (uma vez, quando carrega).
-  const selecao = useMemo<Set<string>>(() => {
-    if (selecionados) return selecionados
-    if (!sub) return new Set()
-    return new Set(sub.diff.filter((d) => d.mudou).map((d) => d.campo))
-  }, [sub, selecionados])
+  // Pré-preenche quando a submissão carrega (data em DD/MM/AAAA para edição).
+  useEffect(() => {
+    if (!sub) return
+    setTipo((t) => t ?? sub.tipo)
+    setDestino((d) => d || (sub.cliente_alvo_id ?? 'novo'))
+    setCampos((c) => c ?? { ...sub.dados, data_nascimento: isoParaBr(sub.dados?.data_nascimento) })
+  }, [sub])
 
   const aprovar = useMutation({
-    mutationFn: (s: CadastroSubmissaoDetalhe) =>
-      cadastroSubmissoesApi.aprovar(s.id, Array.from(selecao)),
+    mutationFn: () => cadastroSubmissoesApi.aprovar(id, {
+      tipo: tipo!,
+      criar_novo: destino === 'novo',
+      cliente_id_alvo: destino === 'novo' ? null : destino,
+      dados: { ...(campos ?? {}), data_nascimento: brParaIso(campos?.data_nascimento) },
+    }),
     onSuccess: onDone,
   })
-  const rejeitar = useMutation({
-    mutationFn: () => cadastroSubmissoesApi.rejeitar(id),
-    onSuccess: onDone,
-  })
+  const rejeitar = useMutation({ mutationFn: () => cadastroSubmissoesApi.rejeitar(id), onSuccess: onDone })
 
-  const toggle = (campo: string) => {
-    const novo = new Set(selecao)
-    novo.has(campo) ? novo.delete(campo) : novo.add(campo)
-    setSelecionados(novo)
+  const set = (campo: string, valor: string) => setCampos((c) => ({ ...(c ?? {}), [campo]: valor }))
+
+  function inputPara(campo: string, t: Tipo) {
+    const v = campos?.[campo] ?? ''
+    if (campo === 'estado_civil') {
+      return (
+        <select className={cs.campoInput} value={v} onChange={(e) => set(campo, e.target.value)}>
+          <option value="">—</option>
+          {ESTADO_CIVIL_OPCOES.map((o) => <option key={o} value={o}>{o}</option>)}
+        </select>
+      )
+    }
+    if (campo === 'data_nascimento') {
+      return <input className={cs.campoInput} placeholder="DD/MM/AAAA" inputMode="numeric" maxLength={10}
+        value={v} onChange={(e) => set(campo, maskDataBr(e.target.value))} />
+    }
+    if (campo === 'observacoes' || campo === 'empresas_vinculadas') {
+      return <textarea className={cs.campoInput} rows={2} value={v} onChange={(e) => set(campo, e.target.value)} />
+    }
+    const mask =
+      campo === 'cpf_cnpj' ? (val: string) => applyDocMask(val, t) :
+      campo === 'responsavel_cpf' ? maskCPF :
+      (campo === 'telefone' || campo === 'whatsapp' || campo === 'responsavel_telefone') ? maskTelefone :
+      campo === 'cep' ? maskCEP :
+      (val: string) => val
+    return <input className={cs.campoInput} value={v} onChange={(e) => set(campo, mask(e.target.value))} />
   }
+
+  const pronto = !isLoading && sub && tipo && campos
 
   return (
     <div className={cs.overlay} onClick={onClose}>
       <div className={cs.modal} onClick={(e) => e.stopPropagation()}>
-        {isLoading || !sub ? (
+        {!pronto ? (
           <p className={cs.muted}>Carregando…</p>
         ) : (
           <>
             <div className={cs.modalHead}>
               <div>
-                <h2 className={cs.modalTitulo}>{sub.nome_enviado || '(sem nome)'}</h2>
+                <h2 className={cs.modalTitulo}>Revisar cadastro</h2>
                 <p className={cs.muted}>
-                  {sub.tipo} · {sub.is_update ? `atualização de ${sub.cliente_alvo_nome ?? ''}` : 'cliente novo'}
-                  {' · '}enviado {fmtData(sub.created_at)}
+                  Enviado {fmtData(sub.created_at)}
+                  {sub.qtd_anexos > 0 ? ` · 📎 ${sub.qtd_anexos} anexo(s)` : ''}
                 </p>
               </div>
               <button className={cs.fechar} onClick={onClose}>×</button>
             </div>
 
             <p className={cs.instrucao}>
-              Marque os campos que deseja aplicar. Realçados = mudaram em relação ao cadastro atual.
+              Confira e corrija os dados, escolha o tipo e o destino, e aprove.
             </p>
 
-            <div className={cs.tabela}>
-              <div className={cs.thead}>
-                <span></span><span>Campo</span><span>Atual</span><span>Enviado</span>
-              </div>
-              {sub.diff.map((d) => (
-                <label key={d.campo} className={`${cs.linha} ${d.mudou ? cs.linhaMudou : ''}`}>
-                  <input type="checkbox" checked={selecao.has(d.campo)} onChange={() => toggle(d.campo)} />
-                  <span className={cs.campo}>{LABELS[d.campo] ?? d.campo}</span>
-                  <span className={cs.atual}>{d.atual || '—'}</span>
-                  <span className={cs.novo}>{d.novo || '—'}</span>
-                </label>
+            {/* Tipo */}
+            <div className={cs.tipoRow}>
+              {(['PF', 'PJ'] as Tipo[]).map((t) => (
+                <button key={t} type="button"
+                  className={tipo === t ? cs.tipoAtivo : cs.tipoBtn}
+                  onClick={() => setTipo(t)}>
+                  {t === 'PF' ? 'Pessoa Física' : 'Pessoa Jurídica'}
+                </button>
               ))}
             </div>
 
+            {/* Destino */}
+            <label className={cs.campoLinha}>
+              <span className={cs.campoLabel}>Destino</span>
+              <select className={cs.campoInput} value={destino} onChange={(e) => setDestino(e.target.value)}>
+                <option value="novo">➕ Criar cliente novo</option>
+                {clientes.map((c) => (
+                  <option key={c.id} value={c.id}>{c.nome} ({c.tipo})</option>
+                ))}
+              </select>
+            </label>
+
+            {/* Campos editáveis */}
+            {CAMPOS_TIPO[tipo].map((campo) => (
+              <label key={campo} className={cs.campoLinha}>
+                <span className={cs.campoLabel}>{labelCampo(campo, tipo)}</span>
+                {inputPara(campo, tipo)}
+              </label>
+            ))}
+
             {sub.anexos.length > 0 && (
               <p className={cs.anexos}>
-                📎 {sub.anexos.length} anexo(s): {sub.anexos.map((a) => a.filename).join(', ')}
-                <span className={cs.muted}> — vão pro Drive do cliente na aprovação.</span>
+                📎 {sub.anexos.map((a) => a.filename).join(', ')}
+                <span className={cs.muted}> — vão pro Drive na aprovação.</span>
               </p>
             )}
-
             {sub.consentimento_texto && (
               <p className={cs.consent}>
                 ✔ Consentimento LGPD em {fmtData(sub.consentimento_em)} (IP {sub.ip || '—'})
@@ -180,9 +247,9 @@ function RevisaoModal({ id, onClose, onDone }: { id: string; onClose: () => void
                 onClick={() => rejeitar.mutate()}>
                 {rejeitar.isPending ? '…' : 'Rejeitar'}
               </button>
-              <button className={cs.btnAprovar} disabled={aprovar.isPending || selecao.size === 0}
-                onClick={() => aprovar.mutate(sub)}>
-                {aprovar.isPending ? 'Aplicando…' : `Aprovar (${selecao.size})`}
+              <button className={cs.btnAprovar} disabled={aprovar.isPending || !(campos?.nome ?? '').trim()}
+                onClick={() => aprovar.mutate()}>
+                {aprovar.isPending ? 'Aplicando…' : destino === 'novo' ? 'Aprovar e criar' : 'Aprovar e atualizar'}
               </button>
             </div>
           </>

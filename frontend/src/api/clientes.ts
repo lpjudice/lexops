@@ -200,10 +200,18 @@ export interface CadastroDiffLinha {
 }
 
 export interface CadastroSubmissaoDetalhe extends CadastroSubmissaoResumo {
+  dados: Record<string, string>
   diff: CadastroDiffLinha[]
   anexos: { filename: string; mime?: string }[]
   consentimento_texto: string | null
   ip: string | null
+}
+
+export interface AprovarPayload {
+  tipo: 'PF' | 'PJ'
+  criar_novo: boolean
+  cliente_id_alvo: string | null
+  dados: Record<string, string>
 }
 
 export const cadastroSubmissoesApi = {
@@ -211,9 +219,9 @@ export const cadastroSubmissoesApi = {
     api.get<CadastroSubmissaoResumo[]>('/cadastro-submissoes', { params: { status } }).then((r) => r.data),
   obter: (id: string) =>
     api.get<CadastroSubmissaoDetalhe>(`/cadastro-submissoes/${id}`).then((r) => r.data),
-  aprovar: (id: string, campos?: string[]) =>
+  aprovar: (id: string, payload: AprovarPayload) =>
     api.post<{ ok: boolean; cliente_id: string; criado: boolean }>(
-      `/cadastro-submissoes/${id}/aprovar`, { campos: campos ?? null },
+      `/cadastro-submissoes/${id}/aprovar`, payload,
     ).then((r) => r.data),
   rejeitar: (id: string) =>
     api.post<{ ok: boolean }>(`/cadastro-submissoes/${id}/rejeitar`).then((r) => r.data),
