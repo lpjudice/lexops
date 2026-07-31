@@ -60,6 +60,7 @@ const OBJETOS_DISPONIVEIS = [
 export default function ContratosPage() {
   const qc = useQueryClient()
   const fileRefs = useRef<Record<string, HTMLInputElement | null>>({})
+  const autoSyncRef = useRef<Set<string>>(new Set())
 
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<ContratoCreate>(EMPTY_CONTRATO)
@@ -190,7 +191,37 @@ export default function ContratosPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['contratos'] }),
   })
 
+  const sincronizar = useMutation({
+    mutationFn: ({ id }: { id: string; manual: boolean }) => contratosApi.sincronizarStatus(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['contratos'] })
+      qc.invalidateQueries({ queryKey: ['honorarios'] })
+      qc.invalidateQueries({ queryKey: ['honorarios-pendentes-assinatura'] })
+      qc.invalidateQueries({ queryKey: ['financeiro-resumo'] })
+    },
+    onError: (e: any, vars) => {
+      // Só alerta quando o usuário clicou explicitamente; o auto-sync ao abrir falha em silêncio.
+      if (vars.manual)
+        alert(`Erro ao atualizar status no ClickSign:\n${e?.response?.data?.detail || e?.message || 'Erro desconhecido'}`)
+    },
+  })
+
   const clientePorId = (cid: string) => clientes.find((c) => c.id === cid)
+
+  // Sincroniza automaticamente ao abrir um contrato em andamento (uma vez por sessão).
+  const toggleExpandido = (c: (typeof contratos)[0]) => {
+    const abrindo = expandido !== c.id
+    setExpandido(abrindo ? c.id : null)
+    if (
+      abrindo &&
+      c.clicksign_document_key &&
+      ['aguardando_assinatura', 'parcialmente_assinado'].includes(c.status) &&
+      !autoSyncRef.current.has(c.id)
+    ) {
+      autoSyncRef.current.add(c.id)
+      sincronizar.mutate({ id: c.id, manual: false })
+    }
+  }
 
   const abrirGerar = (cid: string, clienteId: string) => {
     const cliente = clientePorId(clienteId)
@@ -227,6 +258,13 @@ export default function ContratosPage() {
     adicionarSig.mutate({
       id: cid,
       data: { nome: cliente.nome, email: cliente.email, papel: 'contratante' },
+    })
+  }
+
+  const adicionarTestemunhaMonielly = (cid: string) => {
+    adicionarSig.mutate({
+      id: cid,
+      data: { nome: 'Monielly Moreira Vieira', email: 'moni@pimentajudice.com.br', papel: 'testemunha' },
     })
   }
 
@@ -315,7 +353,7 @@ export default function ContratosPage() {
                       <span className={cs.badgeManual}>Ass. Manual</span>
                     )}
                     <button className={cs.btnExpand}
-                      onClick={() => setExpandido(isOpen ? null : c.id)}>
+                      onClick={() => toggleExpandido(c)}>
                       {isOpen ? '▲' : '▼'}
                     </button>
                     <button className={styles.btnDanger}
@@ -564,6 +602,10 @@ export default function ContratosPage() {
                               + {cliente.nome} (Contratante)
                             </button>
                           )}
+                          <button className={cs.btnAtalho}
+                            onClick={() => adicionarTestemunhaMonielly(c.id)}>
+                            + Monielly Moreira Vieira (Testemunha)
+                          </button>
                         </div>
                       )}
 
@@ -644,6 +686,14 @@ export default function ContratosPage() {
                       )}
                       {['aguardando_assinatura', 'parcialmente_assinado'].includes(c.status) && (
                         <>
+                          {c.clicksign_document_key && (
+                            <button className={styles.btnTable}
+                              onClick={() => sincronizar.mutate({ id: c.id, manual: true })}
+                              disabled={sincronizar.isPending}
+                              title="Puxa o status real das assinaturas direto do ClickSign">
+                              {sincronizar.isPending ? '⏳ Atualizando...' : '🔄 Atualizar status'}
+                            </button>
+                          )}
                           <button className={styles.btnTable}
                             onClick={() => { if (confirm('Confirmar assinatura manual? Isso marca o contrato como Assinado e remove a tag "Pendente" do financeiro.')) confirmarAssinatura.mutate(c.id) }}
                             title="Para contratos assinados fora do ClickSign">

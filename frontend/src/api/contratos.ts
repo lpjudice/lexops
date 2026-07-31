@@ -126,6 +126,9 @@ export const contratosApi = {
   finalizarAssinadoManual: (id: string) =>
     api.post<Contrato>(`/contratos/${id}/finalizar-assinado-manual`).then((r) => r.data),
 
+  sincronizarStatus: (id: string) =>
+    api.post<Contrato>(`/contratos/${id}/sincronizar-status`).then((r) => r.data),
+
   pastaMestra: () =>
     api.get<{ link: string | null }>('/contratos/pasta-mestra').then((r) => r.data),
 }
