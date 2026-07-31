@@ -47,6 +47,60 @@ def _duplicar_assinado_para_drive(db: Session, contrato: Contrato, pdf_bytes: by
     return link_cliente, link_master
 
 
+def _parse_iso(ts: str | None):
+    """Converte um timestamp ISO do ClickSign em datetime (tolerante ao sufixo 'Z')."""
+    if not ts:
+        return None
+    from datetime import datetime
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _extrair_assinados(doc: dict) -> tuple[dict, dict]:
+    """
+    A partir da resposta do GET documento do ClickSign, retorna dois mapas
+    (por signer_key e por email minúsculo) apontando para o timestamp de
+    assinatura (ISO string) — a presença da chave já indica que assinou.
+
+    Combina dois sinais para robustez: o objeto ``signature`` presente em cada
+    signer que já assinou e os eventos ``name == "sign"``.
+    """
+    por_key: dict[str, str | None] = {}
+    por_email: dict[str, str | None] = {}
+
+    for s in doc.get("signers") or []:
+        if s.get("signature"):
+            sig_obj = s.get("signature") or {}
+            ts = sig_obj.get("signed_at") or sig_obj.get("created_at")
+            if s.get("key"):
+                por_key[s["key"]] = ts
+            if s.get("email"):
+                por_email[s["email"].lower()] = ts
+
+    for ev in doc.get("events") or []:
+        if (ev.get("name") or "").lower() != "sign":
+            continue
+        ts = ev.get("occurred_at")
+        data = ev.get("data") or {}
+        candidatos = []
+        if isinstance(data.get("signer"), dict):
+            candidatos.append(data["signer"])
+        for sg in data.get("signers") or []:
+            if isinstance(sg, dict):
+                candidatos.append(sg)
+        if isinstance(data.get("user"), dict):
+            candidatos.append(data["user"])
+        for cand in candidatos:
+            if cand.get("key"):
+                por_key.setdefault(cand["key"], ts)
+            if cand.get("email"):
+                por_email.setdefault(cand["email"].lower(), ts)
+
+    return por_key, por_email
+
+
 # ── CRUD básico ───────────────────────────────────────────────────────────────
 
 @router.get("/", response_model=list[ContratoOut])
@@ -543,6 +597,73 @@ def cancelar_contrato_clicksign(contrato_id: uuid.UUID, db: Session = Depends(ge
     if c.clicksign_document_key:
         clicksign.cancelar_documento(c.clicksign_document_key)
     c.status = "cancelado"
+    db.commit()
+    db.refresh(c)
+    return c
+
+
+@router.post("/{contrato_id}/sincronizar-status", response_model=ContratoOut)
+def sincronizar_status_clicksign(contrato_id: uuid.UUID, db: Session = Depends(get_db)):
+    """
+    Consulta o status REAL do documento no ClickSign e reconcilia o estado local
+    (útil quando o webhook não chegou: contrato assinado no ClickSign mas ainda
+    "Pendente" no sistema). Atualiza cada signatário e o status do contrato; se
+    já estiver fechado, baixa/arquiva o PDF assinado e limpa a pendência do
+    honorário vinculado.
+    """
+    from datetime import datetime, timezone
+
+    c = db.query(Contrato).filter(Contrato.id == contrato_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Contrato não encontrado")
+    if not c.clicksign_document_key:
+        raise HTTPException(status_code=400, detail="Contrato não foi enviado ao ClickSign (sem documento vinculado).")
+
+    doc = clicksign.status_documento(c.clicksign_document_key)
+    if doc is None:
+        raise HTTPException(status_code=502, detail="Não foi possível consultar o status no ClickSign.")
+
+    doc_status = (doc.get("status") or "").lower()
+
+    if doc_status == "canceled":
+        c.status = "cancelado"
+        db.commit()
+        db.refresh(c)
+        return c
+
+    por_key, por_email = _extrair_assinados(doc)
+
+    for sig in c.signatarios:
+        assinou = False
+        ts = None
+        if sig.clicksign_signer_key and sig.clicksign_signer_key in por_key:
+            assinou, ts = True, por_key[sig.clicksign_signer_key]
+        elif sig.email and sig.email.lower() in por_email:
+            assinou, ts = True, por_email[sig.email.lower()]
+        elif doc_status == "closed":
+            assinou = True
+        if assinou and sig.status_assinatura != "assinado":
+            sig.status_assinatura = "assinado"
+            sig.assinado_em = _parse_iso(ts) or datetime.now(timezone.utc)
+
+    signatarios = list(c.signatarios)
+    todos_assinaram = bool(signatarios) and all(s.status_assinatura == "assinado" for s in signatarios)
+    algum_assinou = any(s.status_assinatura == "assinado" for s in signatarios)
+
+    if doc_status == "closed" or todos_assinaram:
+        c.status = "assinado"
+        if doc_status == "closed":
+            _baixar_e_arquivar_assinado_clicksign(db, c, c.clicksign_document_key)
+        try:
+            from app.models.financeiro import Honorario
+            h = db.query(Honorario).filter(Honorario.contrato_id == contrato_id).first()
+            if h:
+                h.pendente_assinatura = False
+        except Exception:
+            pass
+    elif algum_assinou:
+        c.status = "parcialmente_assinado"
+
     db.commit()
     db.refresh(c)
     return c
