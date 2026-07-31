@@ -8,7 +8,12 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.cliente import Cliente
-from app.models.patrimonio import PatrimonioAnexo, PatrimonioBem, PatrimonioCadeiaElo
+from app.models.patrimonio import (
+    PatrimonioAnexo,
+    PatrimonioBem,
+    PatrimonioCadeiaElo,
+    PatrimonioSocio,
+)
 from app.schemas.patrimonio import (
     AnexoOut,
     BemCreate,
@@ -17,6 +22,9 @@ from app.schemas.patrimonio import (
     CadeiaEloCreate,
     CadeiaEloOut,
     CadeiaEloUpdate,
+    SocioCreate,
+    SocioOut,
+    SocioUpdate,
 )
 
 router = APIRouter(
@@ -296,3 +304,45 @@ def upload_anexo_elo(
     db.commit()
     db.refresh(elo)
     return elo
+
+
+# ── Sócios (bem móvel = cota social) ─────────────────────────────────────────
+@router.post("/{bem_id}/socios", response_model=SocioOut, status_code=status.HTTP_201_CREATED)
+def criar_socio(bem_id: uuid.UUID, data: SocioCreate, db: Session = Depends(get_db)):
+    bem = _get_bem(bem_id, db)
+    socio = PatrimonioSocio(bem_id=bem.id, **data.model_dump())
+    db.add(socio)
+    db.commit()
+    db.refresh(socio)
+    return socio
+
+
+@router.patch("/{bem_id}/socios/{socio_id}", response_model=SocioOut)
+def atualizar_socio(
+    bem_id: uuid.UUID, socio_id: uuid.UUID, data: SocioUpdate, db: Session = Depends(get_db)
+):
+    socio = (
+        db.query(PatrimonioSocio)
+        .filter(PatrimonioSocio.id == socio_id, PatrimonioSocio.bem_id == bem_id)
+        .first()
+    )
+    if not socio:
+        raise HTTPException(status_code=404, detail="Sócio não encontrado")
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(socio, field, value)
+    db.commit()
+    db.refresh(socio)
+    return socio
+
+
+@router.delete("/{bem_id}/socios/{socio_id}", status_code=status.HTTP_204_NO_CONTENT)
+def deletar_socio(bem_id: uuid.UUID, socio_id: uuid.UUID, db: Session = Depends(get_db)):
+    socio = (
+        db.query(PatrimonioSocio)
+        .filter(PatrimonioSocio.id == socio_id, PatrimonioSocio.bem_id == bem_id)
+        .first()
+    )
+    if not socio:
+        raise HTTPException(status_code=404, detail="Sócio não encontrado")
+    db.delete(socio)
+    db.commit()

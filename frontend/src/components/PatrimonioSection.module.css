@@ -323,3 +323,97 @@
   color: var(--white);
   filter: brightness(1.05);
 }
+
+/* Matrícula no título */
+.matriculaTag {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gray-mid);
+  background: var(--light);
+  border: 1px solid var(--gray-border);
+  border-radius: 6px;
+  padding: 1px 7px;
+}
+
+/* Bloco de cota social no form */
+.cotaBox {
+  border: 1px dashed var(--gray-border);
+  border-radius: 10px;
+  padding: 12px;
+  background: #fafbfc;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cotaTitle { font-size: 12.5px; font-weight: 700; color: var(--dark); }
+.cotaHint { font-size: 11.5px; color: var(--gray-mid); margin: 0; }
+
+/* Calculadora de Ganho de Capital */
+.gcBox {
+  margin-top: 10px;
+  background: var(--light);
+  border: 1px solid var(--gray-border);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.gcInputs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+.gcGanho { font-size: 16px; font-weight: 700; color: var(--dark); }
+.gcCenarios {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+}
+.gcCard {
+  background: var(--white);
+  border: 1px solid var(--gray-border);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gcCardBest {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 2px var(--teal-glow);
+}
+.gcCardTop { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.gcCardNome { font-size: 12.5px; font-weight: 700; color: var(--dark); }
+.gcBadge {
+  font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
+  background: var(--teal); color: var(--white); border-radius: 999px; padding: 2px 7px;
+}
+.gcCardTaxa { font-size: 12px; color: var(--teal); font-weight: 700; }
+.gcCardTaxa span { color: var(--gray-mid); font-weight: 500; font-size: 10.5px; }
+.gcCardImposto { font-size: 19px; font-weight: 800; color: var(--dark); }
+.gcCardEfetiva { font-size: 11px; color: var(--gray-mid); }
+.gcCardNota { font-size: 10.5px; color: var(--gray-mid); line-height: 1.35; margin-top: 4px; }
+.gcDisclaimer {
+  font-size: 10.5px; color: var(--gray-mid); line-height: 1.4; margin: 0;
+  padding: 8px 10px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;
+}
+
+/* Quadro de sócios */
+.socioList { display: flex; flex-direction: column; gap: 6px; }
+.socioRow {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--light); border-radius: 8px; padding: 8px 12px;
+}
+.socioNome { font-size: 13px; font-weight: 600; color: var(--dark); }
+.socioMeta { font-size: 11.5px; color: var(--gray-mid); margin-top: 1px; }
+.socioIntegr {
+  display: flex; align-items: center; gap: 6px; font-size: 11.5px;
+  color: var(--dark); cursor: pointer; white-space: nowrap;
+}
+.socioTotal {
+  font-size: 12px; font-weight: 700; color: var(--dark);
+  padding: 4px 12px; text-align: right;
+}
+.socioAlerta { color: #b45309; font-weight: 700; }

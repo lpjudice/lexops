@@ -6,6 +6,7 @@ import {
   type BemCreate,
   type CadeiaElo,
   type ObjetivoBem,
+  type Socio,
   type StatusBem,
   type TipoBem,
   type TipoDocumentoElo,
@@ -67,6 +68,8 @@ function emptyForm(): FormState {
     status: 'em_validacao', integralizar_holding: false,
     proprietario_real: '', proprietario_matricula: '',
     tem_gravame: false, gravame_descricao: '', observacoes: '',
+    empresa_nome: '', empresa_cnpj: '', capital_social: undefined,
+    valor_balanco: undefined, data_balanco: '',
   }
 }
 
@@ -163,6 +166,45 @@ function BemForm({
               onChange={(e) => set({ descricao_matricula: e.target.value })} />
           </div>
         </>
+      )}
+
+      {!isImovel && (
+        <div className={s.cotaBox}>
+          <div className={s.cotaTitle}>🏢 Cota social / participação societária (opcional)</div>
+          <div className={s.grid}>
+            <div className={styles.formRow}>
+              <label className={styles.formLabel}>Nome da empresa</label>
+              <input className={styles.input} value={f.empresa_nome ?? ''}
+                onChange={(e) => set({ empresa_nome: e.target.value })} />
+            </div>
+            <div className={styles.formRow}>
+              <label className={styles.formLabel}>CNPJ</label>
+              <input className={styles.input} value={f.empresa_cnpj ?? ''}
+                onChange={(e) => set({ empresa_cnpj: e.target.value })} placeholder="00.000.000/0001-00" />
+            </div>
+          </div>
+          <div className={s.grid}>
+            <div className={styles.formRow}>
+              <label className={styles.formLabel}>Capital social</label>
+              <input type="number" step="0.01" min="0" className={styles.input}
+                value={f.capital_social ?? ''} onChange={(e) => set({ capital_social: num(e.target.value) })} />
+            </div>
+            <div className={styles.formRow}>
+              <label className={styles.formLabel}>Valor do balanço (PL)</label>
+              <input type="number" step="0.01" min="0" className={styles.input}
+                value={f.valor_balanco ?? ''} onChange={(e) => set({ valor_balanco: num(e.target.value) })} />
+            </div>
+            <div className={styles.formRow}>
+              <label className={styles.formLabel}>Data do balanço</label>
+              <input type="date" className={styles.input} value={f.data_balanco ?? ''}
+                onChange={(e) => set({ data_balanco: e.target.value })} />
+            </div>
+          </div>
+          <p className={s.cotaHint}>
+            O quadro de sócios (nome, CPF, %, integralização) e o anexo do balanço
+            são gerenciados no card do bem após salvar.
+          </p>
+        </div>
       )}
 
       <div className={s.grid}>
@@ -356,6 +398,205 @@ function CadeiaSection({ bem }: { bem: Bem }) {
   )
 }
 
+// ── Calculadora de Ganho de Capital (imóvel) ──────────────────────────────────
+function irpfProgressivo(ganho: number): number {
+  // Lei 13.259/2016 — faixas progressivas sobre o ganho
+  const faixas: [number, number][] = [
+    [5_000_000, 0.15],
+    [10_000_000, 0.175],
+    [30_000_000, 0.20],
+    [Infinity, 0.225],
+  ]
+  let imposto = 0
+  let anterior = 0
+  for (const [teto, aliq] of faixas) {
+    if (ganho <= anterior) break
+    const base = Math.min(ganho, teto) - anterior
+    imposto += base * aliq
+    anterior = teto
+  }
+  return imposto
+}
+
+function CalculadoraGC({ bem }: { bem: Bem }) {
+  const [aberto, setAberto] = useState(false)
+  const [aquisicao, setAquisicao] = useState<number>(bem.valor_compra ?? bem.valor_ir ?? 0)
+  const [venda, setVenda] = useState<number>(bem.valor_mercado ?? 0)
+
+  const ganho = Math.max(0, venda - aquisicao)
+  const impPF = irpfProgressivo(ganho)
+  const impPJ = ganho * 0.34
+  const impHolding = venda * 0.0673
+
+  const cenarios = [
+    {
+      key: 'holding', nome: 'PJ Holding Imobiliária', base: 'sobre a venda',
+      taxa: '6,73%', imposto: impHolding,
+      nota: 'Lucro Presumido, imóvel como estoque e atividade imobiliária no objeto social. IRPJ 1,2% + adic. ~0,8% + CSLL 1,08% + PIS 0,65% + COFINS 3%.',
+    },
+    {
+      key: 'pf', nome: 'Pessoa Física', base: 'sobre o ganho',
+      taxa: '15%–22,5%', imposto: impPF,
+      nota: 'Alíquotas progressivas (Lei 13.259/2016): 15% até R$5M · 17,5% R$5–10M · 20% R$10–30M · 22,5% acima. Não considera isenções nem fator de redução.',
+    },
+    {
+      key: 'pj', nome: 'PJ não imobiliária', base: 'sobre o ganho',
+      taxa: '34%', imposto: impPJ,
+      nota: 'Lucro Real ou Presumido: IRPJ 15% + adicional 10% + CSLL 9% sobre o ganho de capital (venda de imobilizado não usa presunção). No Simples, o ganho é tributado fora do DAS pelas faixas da PF.',
+    },
+  ]
+  const menor = Math.min(...cenarios.map((c) => c.imposto))
+
+  return (
+    <div>
+      <button className={s.cadeiaToggle} onClick={() => setAberto(!aberto)}>
+        <span>{aberto ? '▾' : '▸'}</span>
+        🧮 Calculadora de Ganho de Capital
+        <span style={{ color: 'var(--gray-mid)', fontWeight: 600 }}>
+          (ganho estimado: {brl(ganho)})
+        </span>
+      </button>
+
+      {aberto && (
+        <div className={s.gcBox}>
+          <div className={s.gcInputs}>
+            <div className={s.field}>
+              <span className={s.fieldLabel}>Valor de aquisição</span>
+              <input type="number" step="0.01" min="0" className={s.miniInput}
+                value={aquisicao || ''} onChange={(e) => setAquisicao(parseFloat(e.target.value) || 0)} />
+            </div>
+            <div className={s.field}>
+              <span className={s.fieldLabel}>Valor estimado de venda</span>
+              <input type="number" step="0.01" min="0" className={s.miniInput}
+                value={venda || ''} onChange={(e) => setVenda(parseFloat(e.target.value) || 0)} />
+            </div>
+            <div className={s.field}>
+              <span className={s.fieldLabel}>Ganho de capital</span>
+              <span className={s.gcGanho}>{brl(ganho)}</span>
+            </div>
+          </div>
+
+          <div className={s.gcCenarios}>
+            {cenarios.map((c) => {
+              const isMenor = c.imposto === menor && venda > 0
+              const efetiva = venda > 0 ? (c.imposto / venda) * 100 : 0
+              return (
+                <div key={c.key} className={`${s.gcCard} ${isMenor ? s.gcCardBest : ''}`}>
+                  <div className={s.gcCardTop}>
+                    <span className={s.gcCardNome}>{c.nome}</span>
+                    {isMenor && <span className={s.gcBadge}>Menor carga</span>}
+                  </div>
+                  <div className={s.gcCardTaxa}>{c.taxa} <span>{c.base}</span></div>
+                  <div className={s.gcCardImposto}>{brl(c.imposto)}</div>
+                  <div className={s.gcCardEfetiva}>
+                    {efetiva.toFixed(2).replace('.', ',')}% da venda · líquido {brl(venda - c.imposto)}
+                  </div>
+                  <div className={s.gcCardNota}>{c.nota}</div>
+                </div>
+              )
+            })}
+          </div>
+          <p className={s.gcDisclaimer}>
+            ⚠️ Estimativa para comparação. Não considera isenções (imóvel único, reinvestimento em 180 dias),
+            fator de redução, ITBI, adicional de IRPJ variável por faturamento nem custos da operação.
+            Confirme sempre no caso concreto.
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Quadro de sócios (bem móvel = cota social) ────────────────────────────────
+function SociosSection({ bem }: { bem: Bem }) {
+  const qc = useQueryClient()
+  const [novoAberto, setNovoAberto] = useState(false)
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['patrimonio', bem.cliente_id] })
+  const [nf, setNf] = useState<{ nome: string; cpf: string; percentual: string; integralizar: boolean }>(
+    { nome: '', cpf: '', percentual: '', integralizar: false }
+  )
+
+  const criar = useMutation({
+    mutationFn: () => patrimonioApi.criarSocio(bem.id, {
+      nome: nf.nome, cpf: nf.cpf || undefined,
+      percentual: nf.percentual ? parseFloat(nf.percentual) : undefined,
+      integralizar: nf.integralizar, ordem: bem.socios?.length ?? 0,
+    }),
+    onSuccess: () => { invalidate(); setNovoAberto(false); setNf({ nome: '', cpf: '', percentual: '', integralizar: false }) },
+  })
+  const toggle = useMutation({
+    mutationFn: ({ socioId, integralizar }: { socioId: string; integralizar: boolean }) =>
+      patrimonioApi.atualizarSocio(bem.id, socioId, { integralizar }),
+    onSuccess: invalidate,
+  })
+  const deletar = useMutation({
+    mutationFn: (socioId: string) => patrimonioApi.deletarSocio(bem.id, socioId),
+    onSuccess: invalidate,
+  })
+
+  const totalPct = (bem.socios ?? []).reduce((sum, so) => sum + (so.percentual ?? 0), 0)
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <span className={s.sectionTitle}>👥 Quadro de sócios ({bem.socios?.length ?? 0})</span>
+      {(bem.socios?.length ?? 0) > 0 && (
+        <div className={s.socioList}>
+          {bem.socios.map((so: Socio) => (
+            <div key={so.id} className={s.socioRow}>
+              <div className={s.grow}>
+                <div className={s.socioNome}>{so.nome}</div>
+                <div className={s.socioMeta}>
+                  {so.cpf || 'sem CPF'}{so.percentual != null && <> · {so.percentual}%</>}
+                </div>
+              </div>
+              <label className={s.socioIntegr} title="Integralizar esta participação na holding">
+                <input type="checkbox" checked={so.integralizar}
+                  onChange={(e) => toggle.mutate({ socioId: so.id, integralizar: e.target.checked })} />
+                Integralizar
+              </label>
+              <button className={s.anexoDel} title="Remover sócio"
+                onClick={() => { if (confirm(`Remover ${so.nome}?`)) deletar.mutate(so.id) }}>×</button>
+            </div>
+          ))}
+          <div className={s.socioTotal}>
+            Total: {totalPct.toLocaleString('pt-BR', { maximumFractionDigits: 3 })}%
+            {Math.abs(totalPct - 100) > 0.01 && totalPct > 0 && (
+              <span className={s.socioAlerta}> ⚠ não soma 100%</span>
+            )}
+          </div>
+        </div>
+      )}
+      {novoAberto ? (
+        <div style={{ background: 'var(--light)', borderRadius: 10, padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <input className={s.miniInput} style={{ flex: 2, minWidth: 140 }} placeholder="Nome do sócio"
+              value={nf.nome} onChange={(e) => setNf({ ...nf, nome: e.target.value })} />
+            <input className={s.miniInput} style={{ flex: 1, minWidth: 120 }} placeholder="CPF"
+              value={nf.cpf} onChange={(e) => setNf({ ...nf, cpf: e.target.value })} />
+            <input type="number" step="0.001" min="0" max="100" className={s.miniInput} style={{ width: 90 }} placeholder="%"
+              value={nf.percentual} onChange={(e) => setNf({ ...nf, percentual: e.target.value })} />
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, cursor: 'pointer' }}>
+            <input type="checkbox" checked={nf.integralizar}
+              onChange={(e) => setNf({ ...nf, integralizar: e.target.checked })} />
+            Integralizar esta participação na holding
+          </label>
+          <div className={s.rowBtns}>
+            <button className={styles.btnPrimary} disabled={!nf.nome || criar.isPending} onClick={() => criar.mutate()}>
+              {criar.isPending ? 'Adicionando...' : '+ Adicionar sócio'}
+            </button>
+            <button className={styles.btnTable} onClick={() => setNovoAberto(false)}>Cancelar</button>
+          </div>
+        </div>
+      ) : (
+        <button className={styles.btnTable} style={{ alignSelf: 'flex-start' }} onClick={() => setNovoAberto(true)}>
+          + Adicionar sócio
+        </button>
+      )}
+    </div>
+  )
+}
+
 // ── Card de bem ───────────────────────────────────────────────────────────────
 function BemCard({ bem }: { bem: Bem }) {
   const qc = useQueryClient()
@@ -400,10 +641,13 @@ function BemCard({ bem }: { bem: Bem }) {
               proprietario_real: bem.proprietario_real ?? '', proprietario_matricula: bem.proprietario_matricula ?? '',
               tem_gravame: bem.tem_gravame, gravame_descricao: bem.gravame_descricao ?? '',
               observacoes: bem.observacoes ?? '',
+              empresa_nome: bem.empresa_nome ?? '', empresa_cnpj: bem.empresa_cnpj ?? '',
+              capital_social: bem.capital_social ?? undefined, valor_balanco: bem.valor_balanco ?? undefined,
+              data_balanco: bem.data_balanco ?? '',
             }}
             saving={atualizar.isPending}
             onCancel={() => setEditando(false)}
-            onSave={(data) => atualizar.mutate({ ...data, data_compra: data.data_compra || null } as Partial<Bem>)}
+            onSave={(data) => atualizar.mutate({ ...data, data_compra: data.data_compra || null, data_balanco: data.data_balanco || null } as Partial<Bem>)}
           />
         </div>
       </div>
@@ -417,13 +661,14 @@ function BemCard({ bem }: { bem: Bem }) {
         <div className={s.grow}>
           <div className={s.bemTitulo}>
             {bem.nome}
+            {bem.numero_matricula && <span className={s.matriculaTag}>Matrícula {bem.numero_matricula}</span>}
             {bem.integralizar_holding && <span className={`${s.tag} ${s.tagHolding}`}>Holding</span>}
             {bem.tem_gravame && <span className={`${s.tag} ${s.tagGravame}`}>Gravame</span>}
           </div>
           <div className={s.bemMeta}>
             {bem.objetivo && <span>🎯 {OBJETIVO_LABEL[bem.objetivo]}</span>}
             <span>💰 Mercado: {brl(bem.valor_mercado)}</span>
-            {bem.numero_matricula && <span>📄 Mat. {bem.numero_matricula}</span>}
+            {bem.tipo_bem === 'movel' && bem.empresa_nome && <span>🏢 {bem.empresa_nome}</span>}
           </div>
         </div>
         <span className={`${s.badgeStatus} ${s[`st_${bem.status}`]}`}>{STATUS_LABEL[bem.status]}</span>
@@ -514,8 +759,23 @@ function BemCard({ bem }: { bem: Bem }) {
             </label>
           </div>
 
+          {/* Calculadora de Ganho de Capital (só imóvel) */}
+          {bem.tipo_bem === 'imovel' && <CalculadoraGC bem={bem} />}
+
           {/* Cadeia sucessória (só imóvel) */}
           {bem.tipo_bem === 'imovel' && <CadeiaSection bem={bem} />}
+
+          {/* Cota social / participação societária (só móvel) */}
+          {bem.tipo_bem === 'movel' && (bem.empresa_nome || bem.empresa_cnpj || bem.capital_social != null || bem.valor_balanco != null) && (
+            <div className={s.grid}>
+              {bem.empresa_nome && <div className={s.field}><span className={s.fieldLabel}>Empresa</span><span className={s.fieldValue}>{bem.empresa_nome}</span></div>}
+              {bem.empresa_cnpj && <div className={s.field}><span className={s.fieldLabel}>CNPJ</span><span className={s.fieldValue}>{bem.empresa_cnpj}</span></div>}
+              {bem.capital_social != null && <div className={s.field}><span className={s.fieldLabel}>Capital social</span><span className={s.fieldValue}>{brl(bem.capital_social)}</span></div>}
+              {bem.valor_balanco != null && <div className={s.field}><span className={s.fieldLabel}>Valor do balanço (PL)</span><span className={s.fieldValue}>{brl(bem.valor_balanco)}</span></div>}
+              {bem.data_balanco && <div className={s.field}><span className={s.fieldLabel}>Data do balanço</span><span className={s.fieldValue}>{fmtDate(bem.data_balanco)}</span></div>}
+            </div>
+          )}
+          {bem.tipo_bem === 'movel' && <SociosSection bem={bem} />}
 
           {/* Ações do bem */}
           <div className={s.rowBtns} style={{ marginTop: 4, borderTop: '1px solid var(--gray-border)', paddingTop: 12 }}>
