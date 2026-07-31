@@ -37,6 +37,35 @@ export function applyDocMask(v: string, tipo: 'PF' | 'PJ') {
   return tipo === 'PF' ? maskCPF(v) : maskCNPJ(v)
 }
 
+// ── Data no formato brasileiro DD/MM/AAAA (independente do locale do navegador) ──
+
+export function maskDataBr(v: string) {
+  const d = v.replace(/\D/g, '').slice(0, 8)
+  if (d.length <= 2) return d
+  if (d.length <= 4) return `${d.slice(0, 2)}/${d.slice(2)}`
+  return `${d.slice(0, 2)}/${d.slice(2, 4)}/${d.slice(4)}`
+}
+
+/** "DD/MM/AAAA" → "AAAA-MM-DD" (ISO), ou '' se incompleto/inválido. */
+export function brParaIso(br: string | null | undefined): string {
+  if (!br) return ''
+  const m = br.match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
+  if (!m) return ''
+  const [, dd, mm, aaaa] = m
+  const dia = +dd, mes = +mm
+  if (mes < 1 || mes > 12 || dia < 1 || dia > 31) return ''
+  return `${aaaa}-${mm}-${dd}`
+}
+
+/** "AAAA-MM-DD" (ISO) → "DD/MM/AAAA", ou '' se vazio/inválido. */
+export function isoParaBr(iso: string | null | undefined): string {
+  if (!iso) return ''
+  const m = iso.slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!m) return ''
+  const [, aaaa, mm, dd] = m
+  return `${dd}/${mm}/${aaaa}`
+}
+
 export const ESTADO_CIVIL_OPCOES = [
   'Solteiro(a)',
   'Casado(a)',

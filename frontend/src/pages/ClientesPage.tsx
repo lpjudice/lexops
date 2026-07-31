@@ -6,12 +6,18 @@ import type { ClienteCreate } from '../api/clientes'
 import CadastrosPendentes from '../components/CadastrosPendentes'
 import EnviarLinkModal from '../components/EnviarLinkModal'
 import {
-  applyDocMask, buscarCep, ESTADO_CIVIL_OPCOES, maskCEP, maskCPF, maskTelefone,
+  applyDocMask, brParaIso, buscarCep, ESTADO_CIVIL_OPCOES, isoParaBr,
+  maskCEP, maskCPF, maskDataBr, maskTelefone,
 } from '../utils/masks'
 import styles from './Page.module.css'
 import cs from './ClientesPage.module.css'
 
 const EMPTY: ClienteCreate = { nome: '', tipo: 'PF', cpf_cnpj: '', email: '', telefone: '', observacoes: '' }
+
+/** Converte a data de nascimento (DD/MM/AAAA no form) para ISO antes de enviar. */
+function comDataIso<T extends { data_nascimento?: string | null }>(obj: T): T {
+  return { ...obj, data_nascimento: brParaIso(obj.data_nascimento) || null }
+}
 
 export default function ClientesPage() {
   const qc = useQueryClient()
@@ -108,7 +114,7 @@ export default function ClientesPage() {
       </div>
 
       {showForm && (
-        <form onSubmit={(e) => { e.preventDefault(); criar.mutate(form) }} className={styles.form}>
+        <form onSubmit={(e) => { e.preventDefault(); criar.mutate(comDataIso(form)) }} className={styles.form}>
           <ClienteFormFields
             form={form}
             onChange={(f) => { criar.reset(); setForm(f) }}
@@ -171,7 +177,7 @@ export default function ClientesPage() {
                         telefone: c.telefone, whatsapp: c.whatsapp, observacoes: c.observacoes,
                         cep: c.cep, logradouro: c.logradouro, numero: c.numero, complemento: c.complemento,
                         bairro: c.bairro, cidade: c.cidade, uf: c.uf,
-                        data_nascimento: c.data_nascimento, rg: c.rg, estado_civil: c.estado_civil,
+                        data_nascimento: isoParaBr(c.data_nascimento), rg: c.rg, estado_civil: c.estado_civil,
                         profissao: c.profissao, empresas_vinculadas: c.empresas_vinculadas,
                         nome_fantasia: c.nome_fantasia, responsavel_nome: c.responsavel_nome,
                         responsavel_cpf: c.responsavel_cpf, responsavel_email: c.responsavel_email,
@@ -194,7 +200,7 @@ export default function ClientesPage() {
                     onChange={(f) => setEditForm(f)}
                   />
                   <button className={styles.btnPrimary} disabled={atualizar.isPending}
-                    onClick={() => atualizar.mutate({ id: c.id, data: { ...editForm, incompleto: false } })}>
+                    onClick={() => atualizar.mutate({ id: c.id, data: comDataIso({ ...editForm, incompleto: false }) })}>
                     {atualizar.isPending ? 'Salvando...' : 'Salvar alterações'}
                   </button>
                 </div>
@@ -302,8 +308,9 @@ function ClienteFormFields({ form, onChange }: { form: ClienteCreate; onChange: 
           </div>
           <div className={styles.formRow}>
             <label className={styles.formLabel}>Data de nascimento</label>
-            <input type="date" className={styles.input} value={form.data_nascimento ?? ''}
-              onChange={(e) => onChange({ ...form, data_nascimento: e.target.value || null })} />
+            <input className={styles.input} inputMode="numeric" placeholder="DD/MM/AAAA" maxLength={10}
+              value={form.data_nascimento ?? ''}
+              onChange={(e) => onChange({ ...form, data_nascimento: maskDataBr(e.target.value) })} />
           </div>
           <div className={styles.formRow}>
             <label className={styles.formLabel}>Estado civil</label>

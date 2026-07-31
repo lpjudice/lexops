@@ -65,25 +65,22 @@ def criar_link(
     db: Session = Depends(get_db),
     user: Usuario = Depends(get_current_user),
 ):
-    cliente_id = None
-    reutilizavel = True  # genérico por padrão
+    # Convite atrelado a cliente: reaproveita um válido ou cria (expira em 5 dias).
     if data.cliente_id:
         cliente = db.query(Cliente).filter(Cliente.id == data.cliente_id).first()
         if not cliente:
             raise HTTPException(404, "Cliente não encontrado")
-        cliente_id = cliente.id
-        reutilizavel = False  # convite de atualização = uso único
+        return _link_to_dict(_get_or_create_invite(db, cliente, user))
 
+    # Link genérico (reutilizável, sem expiração por padrão).
     expira_em = None
     if data.expira_em_dias:
         expira_em = datetime.now(timezone.utc) + timedelta(days=data.expira_em_dias)
-
     link = ClienteCadastroLink(
-        # Token curto (~12 chars, ~72 bits) — link enxuto mas imprevisível.
         token=secrets.token_urlsafe(9),
-        cliente_id=cliente_id,
+        cliente_id=None,
         rotulo=data.rotulo,
-        reutilizavel=reutilizavel,
+        reutilizavel=True,
         expira_em=expira_em,
         created_by_id=user.id,
     )
@@ -113,8 +110,11 @@ def _base_url(request: Request) -> str:
     return str(request.base_url).rstrip("/")
 
 
+INVITE_EXPIRA_DIAS = 5
+
+
 def _get_or_create_invite(db: Session, cliente: Cliente, user: Usuario) -> ClienteCadastroLink:
-    """Reaproveita um convite válido do cliente, ou cria um novo."""
+    """Reaproveita um convite ainda válido do cliente, ou cria um novo (expira em 5 dias)."""
     agora = datetime.now(timezone.utc)
     link = (
         db.query(ClienteCadastroLink)
@@ -125,13 +125,14 @@ def _get_or_create_invite(db: Session, cliente: Cliente, user: Usuario) -> Clien
         .order_by(ClienteCadastroLink.created_at.desc())
         .first()
     )
-    if link and (link.expira_em is None or link.expira_em > agora):
+    if link and link.expira_em is not None and link.expira_em > agora:
         return link
     link = ClienteCadastroLink(
         token=secrets.token_urlsafe(9),
         cliente_id=cliente.id,
         rotulo=cliente.nome,
         reutilizavel=False,
+        expira_em=agora + timedelta(days=INVITE_EXPIRA_DIAS),
         created_by_id=user.id,
     )
     db.add(link)

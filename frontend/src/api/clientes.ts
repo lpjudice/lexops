@@ -169,6 +169,11 @@ export const cadastroLinksApi = {
     api.post<{ ok: boolean; url: string }>(
       '/cadastro-links/enviar-telegram', { cliente_id },
     ).then((r) => r.data),
+  // Base pública dos links (domínio customizado, se configurado no backend).
+  baseUrl: () =>
+    api.get<{ cadastro_base_url: string }>('/publico/config')
+      .then((r) => r.data.cadastro_base_url || window.location.origin)
+      .catch(() => window.location.origin),
 }
 
 // ── Submissões de autocadastro (Fase 3 — revisão/aprovação) ───────────────────
