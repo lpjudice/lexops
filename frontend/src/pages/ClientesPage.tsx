@@ -20,19 +20,8 @@ export default function ClientesPage() {
   const [editando, setEditando] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<Partial<ClienteCreate>>({})
   const [busca, setBusca] = useState('')
-  const [linkMsg, setLinkMsg] = useState<string | null>(null)
   const [enviarPara, setEnviarPara] = useState<{ id: string; nome: string; email?: string } | null>(null)
-
-  // Link genérico de captação: URL fixa e curta, sem token nem chamada de API.
-  async function linkGenerico() {
-    const url = `${window.location.origin}/cadastro`
-    try {
-      await navigator.clipboard.writeText(url)
-      setLinkMsg(`Link copiado: ${url}`)
-    } catch {
-      setLinkMsg(`Link: ${url}`)
-    }
-  }
+  const [enviarGenerico, setEnviarGenerico] = useState(false)
 
   const { data: clientes = [], isLoading } = useQuery({
     queryKey: ['clientes'],
@@ -87,8 +76,8 @@ export default function ClientesPage() {
         <h1 className={styles.pageTitle}>Clientes</h1>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className={styles.btnTable}
-            title="Copia o link público de autocadastro (captação de cliente novo)"
-            onClick={() => linkGenerico()}>
+            title="Copiar ou enviar o link público de autocadastro (cliente novo)"
+            onClick={() => setEnviarGenerico(true)}>
             🔗 Link de cadastro
           </button>
           <button className={styles.btnPrimary} onClick={() => setShowForm(!showForm)}>
@@ -97,16 +86,13 @@ export default function ClientesPage() {
         </div>
       </div>
 
-      {linkMsg && (
-        <div className={cs.linkMsg} onClick={() => setLinkMsg(null)} title="Clique para dispensar">
-          {linkMsg}
-        </div>
-      )}
-
       <CadastrosPendentes />
 
       {enviarPara && (
         <EnviarLinkModal cliente={enviarPara} onClose={() => setEnviarPara(null)} />
+      )}
+      {enviarGenerico && (
+        <EnviarLinkModal onClose={() => setEnviarGenerico(false)} />
       )}
 
       <div className={cs.buscaRow}>

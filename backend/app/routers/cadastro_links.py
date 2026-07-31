@@ -147,9 +147,19 @@ def _cliente_ou_404(db: Session, cliente_id: uuid.UUID) -> Cliente:
     return cliente
 
 
+def _url_para(request: Request, db: Session, cliente_id: uuid.UUID | None, user: Usuario):
+    """Resolve (url, cliente, is_update). cliente_id nulo => link genérico /cadastro."""
+    base = _base_url(request)
+    if cliente_id:
+        cliente = _cliente_ou_404(db, cliente_id)
+        link = _get_or_create_invite(db, cliente, user)
+        return f"{base}/cadastro/{link.token}", cliente, True
+    return f"{base}/cadastro", None, False
+
+
 class EnviarEmailPayload(BaseModel):
-    cliente_id: uuid.UUID
-    destinatario: str | None = None  # sobrescreve o e-mail do cliente
+    cliente_id: uuid.UUID | None = None  # nulo => link genérico
+    destinatario: str | None = None      # obrigatório no genérico; sobrescreve o do cliente
     copia_para_mim: bool = True
 
 
@@ -160,25 +170,23 @@ def enviar_email(
     db: Session = Depends(get_db),
     user: Usuario = Depends(get_current_user),
 ):
-    cliente = _cliente_ou_404(db, payload.cliente_id)
-    dest = (payload.destinatario or cliente.email or "").strip()
+    url, cliente, is_update = _url_para(request, db, payload.cliente_id, user)
+    dest = (payload.destinatario or (cliente.email if cliente else "") or "").strip()
     if not dest:
-        raise HTTPException(400, "Cliente sem e-mail. Informe um destinatário.")
-    link = _get_or_create_invite(db, cliente, user)
-    url = f"{_base_url(request)}/cadastro/{link.token}"
+        raise HTTPException(400, "Informe o e-mail do destinatário.")
     cc = None
     if payload.copia_para_mim and user.email and user.email.lower() != dest.lower():
         cc = [user.email]
     from app.services.email_service import send_cadastro_email
     try:
-        send_cadastro_email(dest, url, cliente.nome, cc=cc, is_update=True)
+        send_cadastro_email(dest, url, cliente.nome if cliente else None, cc=cc, is_update=is_update)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(503, f"Não foi possível enviar o e-mail: {exc}")
     return {"ok": True, "destinatario": dest, "url": url}
 
 
 class EnviarTelegramPayload(BaseModel):
-    cliente_id: uuid.UUID
+    cliente_id: uuid.UUID | None = None  # nulo => link genérico
 
 
 @router.post("/enviar-telegram")
@@ -188,15 +196,14 @@ def enviar_telegram(
     db: Session = Depends(get_db),
     user: Usuario = Depends(get_current_user),
 ):
-    cliente = _cliente_ou_404(db, payload.cliente_id)
     ids_raw = (settings.telegram_allowed_user_ids or "").split(",")
     chat_ids = [int(x) for x in (i.strip() for i in ids_raw) if x.strip().isdigit()]
     if not chat_ids:
         raise HTTPException(503, "Nenhum Telegram configurado (telegram_allowed_user_ids).")
-    link = _get_or_create_invite(db, cliente, user)
-    url = f"{_base_url(request)}/cadastro/{link.token}"
+    url, cliente, _ = _url_para(request, db, payload.cliente_id, user)
+    alvo = f"de *{cliente.nome}*" if cliente else "(genérico)"
     from app.services import telegram_api
-    texto = f"🔗 Link de cadastro de *{cliente.nome}*:\n{url}"
+    texto = f"🔗 Link de cadastro {alvo}:\n{url}"
     # Envia só pro primeiro id (você), pra não vazar pros demais autorizados.
     ok = telegram_api.send_message(chat_ids[0], texto) is not None
     if not ok:
