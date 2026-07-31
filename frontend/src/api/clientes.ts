@@ -161,11 +161,11 @@ export const cadastroLinksApi = {
   criar: (data: { cliente_id?: string | null; rotulo?: string; expira_em_dias?: number | null }) =>
     api.post<CadastroLink>('/cadastro-links', data).then((r) => r.data),
   revogar: (id: string) => api.post(`/cadastro-links/${id}/revogar`),
-  enviarEmail: (cliente_id: string, destinatario?: string, copia_para_mim = true) =>
+  enviarEmail: (cliente_id: string | null, destinatario?: string, copia_para_mim = true) =>
     api.post<{ ok: boolean; destinatario: string; url: string }>(
       '/cadastro-links/enviar-email', { cliente_id, destinatario, copia_para_mim },
     ).then((r) => r.data),
-  enviarTelegram: (cliente_id: string) =>
+  enviarTelegram: (cliente_id: string | null) =>
     api.post<{ ok: boolean; url: string }>(
       '/cadastro-links/enviar-telegram', { cliente_id },
     ).then((r) => r.data),

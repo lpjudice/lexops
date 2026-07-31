@@ -3,7 +3,7 @@ import { cadastroLinksApi } from '../api/clientes'
 import cs from './EnviarLinkModal.module.css'
 
 interface Props {
-  cliente: { id: string; nome: string; email?: string }
+  cliente?: { id: string; nome: string; email?: string } // ausente => link genérico
   onClose: () => void
 }
 
@@ -15,10 +15,11 @@ function waLink(numero: string, texto: string) {
 }
 
 export default function EnviarLinkModal({ cliente, onClose }: Props) {
+  const clienteId = cliente?.id ?? null
   const [url, setUrl] = useState<string>('')
   const [erroLink, setErroLink] = useState(false)
 
-  const [emailDest, setEmailDest] = useState(cliente.email ?? '')
+  const [emailDest, setEmailDest] = useState(cliente?.email ?? '')
   const [copiaPraMim, setCopiaPraMim] = useState(true)
   const [emailMsg, setEmailMsg] = useState<string | null>(null)
   const [emailEnviando, setEmailEnviando] = useState(false)
@@ -28,14 +29,18 @@ export default function EnviarLinkModal({ cliente, onClose }: Props) {
   const [tgEnviando, setTgEnviando] = useState(false)
   const [copiado, setCopiado] = useState(false)
 
-  // Cria (ou reaproveita) um link de convite ao abrir, pra exibir a URL.
+  // Genérico: URL fixa /cadastro. Cliente: cria (ou reaproveita) um convite.
   useEffect(() => {
     let ativo = true
+    if (!cliente) {
+      setUrl(`${window.location.origin}/cadastro`)
+      return
+    }
     cadastroLinksApi.criar({ cliente_id: cliente.id, rotulo: cliente.nome })
       .then((l) => { if (ativo) setUrl(`${window.location.origin}${l.caminho}`) })
       .catch(() => { if (ativo) setErroLink(true) })
     return () => { ativo = false }
-  }, [cliente.id, cliente.nome])
+  }, [cliente])
 
   async function copiar() {
     try { await navigator.clipboard.writeText(url); setCopiado(true); setTimeout(() => setCopiado(false), 2000) } catch { /* noop */ }
@@ -44,7 +49,7 @@ export default function EnviarLinkModal({ cliente, onClose }: Props) {
   async function enviarEmail() {
     setEmailEnviando(true); setEmailMsg(null)
     try {
-      const r = await cadastroLinksApi.enviarEmail(cliente.id, emailDest || undefined, copiaPraMim)
+      const r = await cadastroLinksApi.enviarEmail(clienteId, emailDest || undefined, copiaPraMim)
       setEmailMsg(`✓ Enviado para ${r.destinatario}${copiaPraMim ? ' (com cópia para você)' : ''}.`)
     } catch (e: any) {
       setEmailMsg(`⚠ ${e?.response?.data?.detail ?? 'Falha ao enviar o e-mail.'}`)
@@ -54,7 +59,7 @@ export default function EnviarLinkModal({ cliente, onClose }: Props) {
   async function enviarTelegram() {
     setTgEnviando(true); setTgMsg(null)
     try {
-      await cadastroLinksApi.enviarTelegram(cliente.id)
+      await cadastroLinksApi.enviarTelegram(clienteId)
       setTgMsg('✓ Link enviado ao seu Telegram.')
     } catch (e: any) {
       setTgMsg(`⚠ ${e?.response?.data?.detail ?? 'Falha ao enviar pelo Telegram.'}`)
@@ -68,7 +73,7 @@ export default function EnviarLinkModal({ cliente, onClose }: Props) {
     <div className={cs.overlay} onClick={onClose}>
       <div className={cs.modal} onClick={(e) => e.stopPropagation()}>
         <div className={cs.head}>
-          <h2 className={cs.titulo}>Enviar link — {cliente.nome}</h2>
+          <h2 className={cs.titulo}>{cliente ? `Enviar link — ${cliente.nome}` : 'Enviar link de cadastro'}</h2>
           <button className={cs.fechar} onClick={onClose}>×</button>
         </div>
 
