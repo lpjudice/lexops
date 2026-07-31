@@ -29,16 +29,21 @@ export default function EnviarLinkModal({ cliente, onClose }: Props) {
   const [tgEnviando, setTgEnviando] = useState(false)
   const [copiado, setCopiado] = useState(false)
 
-  // Genérico: URL fixa /cadastro. Cliente: cria (ou reaproveita) um convite.
+  // Monta a URL usando o domínio customizado (se configurado) como base.
+  // Genérico: /cadastro. Cliente: cria (ou reaproveita) um convite.
   useEffect(() => {
     let ativo = true
-    if (!cliente) {
-      setUrl(`${window.location.origin}/cadastro`)
-      return
-    }
-    cadastroLinksApi.criar({ cliente_id: cliente.id, rotulo: cliente.nome })
-      .then((l) => { if (ativo) setUrl(`${window.location.origin}${l.caminho}`) })
-      .catch(() => { if (ativo) setErroLink(true) })
+    ;(async () => {
+      const base = await cadastroLinksApi.baseUrl()
+      if (!ativo) return
+      if (!cliente) { setUrl(`${base}/cadastro`); return }
+      try {
+        const l = await cadastroLinksApi.criar({ cliente_id: cliente.id, rotulo: cliente.nome })
+        if (ativo) setUrl(`${base}${l.caminho}`)
+      } catch {
+        if (ativo) setErroLink(true)
+      }
+    })()
     return () => { ativo = false }
   }, [cliente])
 

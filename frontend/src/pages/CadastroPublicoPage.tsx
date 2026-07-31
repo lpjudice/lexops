@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useParams } from 'react-router-dom'
 import {
-  applyDocMask, buscarCep, ESTADO_CIVIL_OPCOES, maskCEP, maskCPF, maskTelefone,
+  applyDocMask, brParaIso, buscarCep, ESTADO_CIVIL_OPCOES, isoParaBr,
+  maskCEP, maskCPF, maskDataBr, maskTelefone,
 } from '../utils/masks'
 import cs from './CadastroPublicoPage.module.css'
 
@@ -82,6 +83,8 @@ export default function CadastroPublicoPage() {
         setForm((f) => ({
           ...f,
           ...(data.prefill as Partial<FormState>),
+          // Backend manda a data em ISO; exibimos em DD/MM/AAAA.
+          data_nascimento: isoParaBr(data.prefill?.data_nascimento) || f.data_nascimento,
           tipo: data.tipo_sugerido ?? f.tipo,
         }))
         setEstado('form')
@@ -120,7 +123,8 @@ export default function CadastroPublicoPage() {
     if (!consentimento) { setErroEnvio('É necessário aceitar o termo de consentimento.'); return }
 
     setEstado('enviando')
-    const payload = { ...form, website, consentimento: true }
+    // Converte a data BR → ISO pro backend (fica '' se incompleta → descartada).
+    const payload = { ...form, data_nascimento: brParaIso(form.data_nascimento), website, consentimento: true }
     const fd = new FormData()
     fd.append('payload', JSON.stringify(payload))
     files.forEach((f) => fd.append('files', f))
@@ -221,8 +225,9 @@ export default function CadastroPublicoPage() {
                 <input className={cs.input} value={form.rg} onChange={(e) => set({ rg: e.target.value })} />
               </label>
               <label className={cs.label}>Data de nascimento
-                <input type="date" className={cs.input} value={form.data_nascimento}
-                  onChange={(e) => set({ data_nascimento: e.target.value })} />
+                <input className={cs.input} inputMode="numeric" placeholder="DD/MM/AAAA" maxLength={10}
+                  value={form.data_nascimento}
+                  onChange={(e) => set({ data_nascimento: maskDataBr(e.target.value) })} />
               </label>
             </div>
             <div className={cs.row2}>

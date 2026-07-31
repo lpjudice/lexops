@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { clientesApi, type EmailCliente } from '../api/clientes'
+import { clientesApi, type Cliente, type EmailCliente } from '../api/clientes'
+import { isoParaBr } from '../utils/masks'
 import { useAuth } from '../contexts/AuthContext'
 import { processosApi } from '../api/processos'
 import { anotacoesApi } from '../api/anotacoes'
@@ -48,7 +49,7 @@ function formatDate(d: string) {
   return new Date(d).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-type Aba = 'timeline' | 'anotacoes' | 'emails' | 'processos' | 'financeiro' | 'contratos' | 'patrimonio' | 'reunioes' | 'ia' | 'fiscal'
+type Aba = 'dados' | 'timeline' | 'anotacoes' | 'emails' | 'processos' | 'financeiro' | 'contratos' | 'patrimonio' | 'reunioes' | 'ia' | 'fiscal'
 
 export default function ClienteDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -288,13 +289,14 @@ export default function ClienteDetailPage() {
 
       {/* Abas */}
       <div className={detailStyles.abas}>
-        {(['timeline', 'anotacoes', 'emails', 'processos', 'financeiro', 'contratos', 'patrimonio', 'reunioes', 'ia', 'fiscal'] as Aba[]).map((a) => (
+        {(['dados', 'timeline', 'anotacoes', 'emails', 'processos', 'financeiro', 'contratos', 'patrimonio', 'reunioes', 'ia', 'fiscal'] as Aba[]).map((a) => (
           <button
             key={a}
             className={`${detailStyles.aba} ${aba === (a as Aba) ? detailStyles.abaAtiva : ''}`}
             onClick={() => setAba(a)}
           >
-            {a === 'timeline' ? 'Timeline' :
+            {a === 'dados' ? 'Dados' :
+             a === 'timeline' ? 'Timeline' :
              a === 'anotacoes' ? 'Anotações' :
              a === 'emails' ? `Emails${visibleEmails.length ? ` (${visibleEmails.length})` : ''}` :
              a === 'processos' ? 'Processos' :
@@ -316,6 +318,9 @@ export default function ClienteDetailPage() {
           </button>
         ))}
       </div>
+
+      {/* ── Dados cadastrais (read-only) ── */}
+      {aba === 'dados' && <DadosCadastraisAba cliente={cliente} />}
 
       {/* ── Timeline ── */}
       {aba === 'timeline' && (
@@ -1058,6 +1063,57 @@ export default function ClienteDetailPage() {
             qc.invalidateQueries({ queryKey: ['reunioes-cliente', id] })
           }}
         />
+      )}
+    </div>
+  )
+}
+
+function DadosCadastraisAba({ cliente }: { cliente: Cliente }) {
+  const endereco = [
+    cliente.logradouro,
+    cliente.numero,
+    cliente.complemento,
+    cliente.bairro,
+    [cliente.cidade, cliente.uf].filter(Boolean).join('/'),
+    cliente.cep ? `CEP ${cliente.cep}` : '',
+  ].filter(Boolean).join(', ')
+
+  const isPF = cliente.tipo === 'PF'
+  const linhas: [string, string | null | undefined][] = [
+    ['Tipo', isPF ? 'Pessoa Física' : 'Pessoa Jurídica'],
+    [isPF ? 'CPF' : 'CNPJ', cliente.cpf_cnpj],
+    ['Nome fantasia', cliente.nome_fantasia],
+    ['RG', cliente.rg],
+    ['Data de nascimento', isoParaBr(cliente.data_nascimento)],
+    ['Estado civil', cliente.estado_civil],
+    ['Profissão', cliente.profissao],
+    ['E-mail', cliente.email],
+    ['Telefone', cliente.telefone],
+    ['WhatsApp', cliente.whatsapp],
+    ['Endereço', endereco],
+    ['Empresas vinculadas', cliente.empresas_vinculadas],
+    ['Responsável', cliente.responsavel_nome],
+    ['CPF do responsável', cliente.responsavel_cpf],
+    ['E-mail do responsável', cliente.responsavel_email],
+    ['Telefone do responsável', cliente.responsavel_telefone],
+    ['Observações', cliente.observacoes],
+    ['Origem', cliente.origem_cadastro === 'autocadastro' ? 'Autocadastro (cliente)' : null],
+  ]
+  const visiveis = linhas.filter(([, v]) => v && String(v).trim())
+
+  return (
+    <div style={{ padding: '8px 0' }}>
+      {visiveis.length === 0 ? (
+        <p style={{ color: '#94a3b8', fontSize: 14 }}>Nenhum dado cadastral preenchido ainda.</p>
+      ) : (
+        <div style={{ display: 'grid', gap: 1, background: 'var(--border, #e2e8f0)', borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border, #e2e8f0)' }}>
+          {visiveis.map(([label, valor]) => (
+            <div key={label} style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 12, padding: '11px 16px', background: 'var(--card-bg, #fff)' }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#64748b' }}>{label}</span>
+              <span style={{ fontSize: 14, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{valor}</span>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   )

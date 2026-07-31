@@ -16,11 +16,18 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
 from app.models.cadastro_link import ClienteCadastroLink, ClienteCadastroSubmissao
 from app.models.cliente import Cliente
 
 router = APIRouter(prefix="/publico", tags=["publico-cadastro"])
+
+
+@router.get("/config")
+def config_publico():
+    """Base pública dos links (domínio customizado), pro frontend montar as URLs."""
+    return {"cadastro_base_url": (settings.cadastro_base_url or "").strip()}
 
 STAGING_DIR = Path("/app/uploads/cadastro_submissoes")
 
