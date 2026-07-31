@@ -29,6 +29,8 @@ class Cliente(Base):
     # ID estável da pasta-raiz do cliente no Google Drive. Vínculo imune a renome:
     # quando preenchido, os uploads usam este ID em vez de procurar pela string do nome.
     drive_folder_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Código curto único da entidade (base36), replicado no final das pastas/arquivos do Drive.
+    codigo: Mapped[str | None] = mapped_column(String(12), nullable=True)
     # Quando True, o nome deste cliente entra na busca automática do Diário Oficial.
     # Seletivo de propósito — evita ruído de homônimo ao buscar todos os clientes por nome.
     monitorar_diario: Mapped[bool] = mapped_column(

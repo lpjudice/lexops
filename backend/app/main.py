@@ -901,6 +901,51 @@ def _run_migrations() -> None:
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_tarefa_card_subtasks_card ON tarefa_card_subtasks(card_id)"
         ))
+        # Arquivamento de tarefas (menu original e cards)
+        conn.execute(text("ALTER TABLE tarefas ADD COLUMN IF NOT EXISTS arquivada BOOLEAN NOT NULL DEFAULT FALSE"))
+        conn.execute(text("ALTER TABLE tarefas ADD COLUMN IF NOT EXISTS arquivada_em TIMESTAMPTZ"))
+        conn.execute(text("ALTER TABLE tarefa_cards ADD COLUMN IF NOT EXISTS arquivada BOOLEAN NOT NULL DEFAULT FALSE"))
+        conn.execute(text("ALTER TABLE tarefa_cards ADD COLUMN IF NOT EXISTS arquivada_em TIMESTAMPTZ"))
+        # Código único por entidade + anexos no Drive
+        conn.execute(text("ALTER TABLE tarefas ADD COLUMN IF NOT EXISTS codigo VARCHAR(12)"))
+        conn.execute(text("ALTER TABLE tarefa_cards ADD COLUMN IF NOT EXISTS codigo VARCHAR(12)"))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS tarefa_anexos (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                tarefa_id UUID NOT NULL REFERENCES tarefas(id) ON DELETE CASCADE,
+                nome_arquivo VARCHAR(500) NOT NULL,
+                drive_link VARCHAR(1000),
+                drive_file_id VARCHAR(200),
+                content_type VARCHAR(150),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tarefa_anexos_tarefa ON tarefa_anexos(tarefa_id)"))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS tarefa_card_anexos (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                card_id UUID NOT NULL REFERENCES tarefa_cards(id) ON DELETE CASCADE,
+                subtask_id UUID REFERENCES tarefa_card_subtasks(id) ON DELETE CASCADE,
+                nome_arquivo VARCHAR(500) NOT NULL,
+                drive_link VARCHAR(1000),
+                drive_file_id VARCHAR(200),
+                content_type VARCHAR(150),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tarefa_card_anexos_card ON tarefa_card_anexos(card_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tarefa_card_anexos_subtask ON tarefa_card_anexos(subtask_id)"))
+        conn.execute(text("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS codigo VARCHAR(12)"))
+        # Registro de pastas do Drive (trava anti-duplicação cross-process/restart)
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS drive_pasta_registry (
+                parent_id VARCHAR(200) NOT NULL,
+                name VARCHAR(500) NOT NULL,
+                folder_id VARCHAR(200) NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (parent_id, name)
+            )
+        """))
         # Links do Drive para o contrato finalizado (pasta do cliente + pasta mestra /Contratos)
         conn.execute(text(
             "ALTER TABLE contratos ADD COLUMN IF NOT EXISTS drive_link_cliente VARCHAR(1000)"

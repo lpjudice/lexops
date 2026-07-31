@@ -58,6 +58,12 @@ class TarefaCard(Base):
     confidencial: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     usuarios_com_acesso: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=list)
 
+    arquivada: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    arquivada_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Código curto único da entidade (base36), replicado nas pastas/arquivos do Drive
+    codigo: Mapped[str | None] = mapped_column(String(12), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -66,6 +72,12 @@ class TarefaCard(Base):
         back_populates="card",
         cascade="all, delete-orphan",
         order_by="TarefaCardSubtask.ordem",
+    )
+    anexos: Mapped[list["TarefaCardAnexo"]] = relationship(
+        "TarefaCardAnexo",
+        primaryjoin="and_(TarefaCardAnexo.card_id==TarefaCard.id, TarefaCardAnexo.subtask_id==None)",
+        cascade="all, delete-orphan",
+        viewonly=False,
     )
 
 
@@ -84,3 +96,27 @@ class TarefaCardSubtask(Base):
     data_limite: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     card: Mapped["TarefaCard"] = relationship("TarefaCard", back_populates="subtasks")
+    anexos: Mapped[list["TarefaCardAnexo"]] = relationship(
+        "TarefaCardAnexo",
+        primaryjoin="TarefaCardAnexo.subtask_id==TarefaCardSubtask.id",
+        cascade="all, delete-orphan",
+        viewonly=False,
+    )
+
+
+class TarefaCardAnexo(Base):
+    """Anexo (Drive) de um card macro (subtask_id nulo) ou de uma subtarefa."""
+    __tablename__ = "tarefa_card_anexos"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    card_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tarefa_cards.id", ondelete="CASCADE"), nullable=False
+    )
+    subtask_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tarefa_card_subtasks.id", ondelete="CASCADE"), nullable=True
+    )
+    nome_arquivo: Mapped[str] = mapped_column(String(500), nullable=False)
+    drive_link: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    drive_file_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    content_type: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

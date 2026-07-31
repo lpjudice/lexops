@@ -18,6 +18,18 @@ class SubtaskCardCreate(BaseModel):
     data_limite: date | None = None
 
 
+class AnexoCardOut(BaseModel):
+    id: uuid.UUID
+    card_id: uuid.UUID
+    subtask_id: uuid.UUID | None = None
+    nome_arquivo: str
+    drive_link: str | None = None
+    content_type: str | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class SubtaskCardOut(BaseModel):
     id: uuid.UUID
     texto: str
@@ -26,6 +38,7 @@ class SubtaskCardOut(BaseModel):
     responsavel: str | None = None
     responsavel_email: str | None = None
     data_limite: date | None = None
+    anexos: list[AnexoCardOut] = []
 
     model_config = {"from_attributes": True}
 
@@ -93,6 +106,10 @@ class TarefaCardOut(BaseModel):
     ordem: int | None = None
     confidencial: bool = False
     usuarios_com_acesso: list[str] | None = None
+    arquivada: bool = False
+    arquivada_em: datetime | None = None
+    codigo: str | None = None
+    anexos: list[AnexoCardOut] = []
     created_at: datetime
     updated_at: datetime
     subtasks: list[SubtaskCardOut] = []

@@ -131,6 +131,7 @@ export default function TarefasPage() {
   // ── Filters ───────────────────────────────────────────────────────────
   const [filtroProjeto, setFiltroProjeto] = useState('')
   const [filtroStatus, setFiltroStatus] = useState<StatusTarefa | ''>('pendente')
+  const [visao, setVisao] = useState<'ativas' | 'arquivadas'>('ativas')
   const [filtroCliente, setFiltroCliente] = useState('')
   const [filtroResponsavel, setFiltroResponsavel] = useState('')
   const filtroPeriodo = useFiltroMes() // filtro por mês (padrão Despacho) — visão de concluídas
@@ -151,8 +152,11 @@ export default function TarefasPage() {
 
   // ── Queries ───────────────────────────────────────────────────────────
   const { data: tarefas = [], isLoading } = useQuery({
-    queryKey: ['tarefas', filtroStatus],
-    queryFn: () => tarefasApi.listar(filtroStatus ? { status: filtroStatus } : undefined),
+    queryKey: ['tarefas', filtroStatus, visao],
+    queryFn: () => tarefasApi.listar({
+      ...(filtroStatus && visao === 'ativas' ? { status: filtroStatus } : {}),
+      arquivada: visao === 'arquivadas',
+    }),
   })
 
   const { data: clientes = [] } = useQuery({
@@ -222,6 +226,24 @@ export default function TarefasPage() {
     onError: () => alert('Sem permissão para excluir esta tarefa.'),
   })
 
+  const arquivar = useMutation({
+    mutationFn: (id: string) => tarefasApi.arquivar(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tarefas'] }),
+  })
+  const desarquivar = useMutation({
+    mutationFn: (id: string) => tarefasApi.desarquivar(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tarefas'] }),
+  })
+  const uploadAnexo = useMutation({
+    mutationFn: ({ id, file }: { id: string; file: File }) => tarefasApi.uploadAnexo(id, file),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tarefas'] }),
+    onError: (e: unknown) => alert((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Erro ao anexar'),
+  })
+  const deletarAnexo = useMutation({
+    mutationFn: (id: string) => tarefasApi.deletarAnexo(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tarefas'] }),
+  })
+
   const solicitarAcesso = useMutation({
     mutationFn: (id: string) => tarefasApi.solicitarAcesso(id),
     onSuccess: (r) => { alert(r.mensagem); qc.invalidateQueries({ queryKey: ['tarefas'] }) },
@@ -278,6 +300,8 @@ export default function TarefasPage() {
     if (filtroCliente) arr = arr.filter((t) => t.cliente_id === filtroCliente)
     if (filtroResponsavel) arr = arr.filter((t) => t.responsavel === filtroResponsavel)
     if (filtroProjeto) arr = arr.filter((t) => t.projeto_id === filtroProjeto)
+    // Na visão Arquivadas o status é filtrado no cliente (o servidor não filtra por status ali)
+    if (visao === 'arquivadas' && filtroStatus) arr = arr.filter((t) => t.status === filtroStatus)
     if (filtroStatus === 'concluido' && filtroPeriodo.aplicar) {
       arr = arr.filter((t) => filtroPeriodo.dentro(t.data_limite || t.updated_at))
     }
@@ -291,7 +315,8 @@ export default function TarefasPage() {
       }
       return arr
     } else if (sortBy === 'recente') {
-      arr.sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))
+      // Em Arquivadas, "mais recente" = arquivada mais recentemente
+      arr.sort((a, b) => (b.arquivada_em ?? b.created_at ?? '').localeCompare(a.arquivada_em ?? a.created_at ?? ''))
     } else if (sortBy === 'prazo_asc') {
       arr.sort((a, b) => {
         if (!a.data_limite && !b.data_limite) return 0
@@ -318,7 +343,7 @@ export default function TarefasPage() {
       arr.sort((a, b) => (a.responsavel ?? '').localeCompare(b.responsavel ?? '', 'pt-BR'))
     }
     return arr
-  }, [tarefas, filtroCliente, filtroResponsavel, filtroProjeto, filtroStatus, sortBy, orderedIds, clientes,
+  }, [tarefas, filtroCliente, filtroResponsavel, filtroProjeto, filtroStatus, visao, sortBy, orderedIds, clientes,
       filtroPeriodo.aplicar, filtroPeriodo.range.de?.getTime(), filtroPeriodo.range.ate?.getTime()]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const processoOptions = processos.map((p) => {
@@ -509,20 +534,36 @@ export default function TarefasPage() {
       <div className={styles.pageHeader}>
         <h1 className={styles.pageTitle}>Tarefas</h1>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button
-            onClick={() => setViewMode(viewMode === 'list' ? 'calendar' : 'list')}
-            style={{
-              padding: '6px 14px', borderRadius: 8, border: '1px solid #e5e7eb',
-              background: viewMode === 'calendar' ? '#1d1e20' : '#fff',
-              color: viewMode === 'calendar' ? '#fff' : '#6b7280',
-              fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-            }}
-          >
-            {viewMode === 'calendar' ? '☰ Lista' : '📅 Calendário'}
-          </button>
-          <button className={styles.btnPrimary} onClick={() => setShowForm(!showForm)}>
-            {showForm ? 'Cancelar' : '+ Nova Tarefa'}
-          </button>
+          <div style={{ display: 'inline-flex', border: '1px solid #e5e7eb', borderRadius: 999, overflow: 'hidden' }}>
+            {(['ativas', 'arquivadas'] as const).map((v) => (
+              <button key={v}
+                onClick={() => { setVisao(v); if (v === 'arquivadas') { setViewMode('list'); setShowForm(false); setSortBy('recente') } }}
+                style={{
+                  padding: '6px 14px', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600, fontFamily: 'inherit',
+                  background: visao === v ? '#1d1e20' : '#fff', color: visao === v ? '#fff' : '#6b7280',
+                }}>
+                {v === 'ativas' ? 'Ativas' : '🗄 Arquivadas'}
+              </button>
+            ))}
+          </div>
+          {visao === 'ativas' && (
+            <>
+              <button
+                onClick={() => setViewMode(viewMode === 'list' ? 'calendar' : 'list')}
+                style={{
+                  padding: '6px 14px', borderRadius: 8, border: '1px solid #e5e7eb',
+                  background: viewMode === 'calendar' ? '#1d1e20' : '#fff',
+                  color: viewMode === 'calendar' ? '#fff' : '#6b7280',
+                  fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                }}
+              >
+                {viewMode === 'calendar' ? '☰ Lista' : '📅 Calendário'}
+              </button>
+              <button className={styles.btnPrimary} onClick={() => setShowForm(!showForm)}>
+                {showForm ? 'Cancelar' : '+ Nova Tarefa'}
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -1182,6 +1223,20 @@ export default function TarefasPage() {
                         )}
                         <button className={t.btnEdit} onClick={() => openEdit(tarefa)} title="Editar">✎</button>
                         {(!tarefa.confidencial || canManage) && (
+                          <label className={t.btnEdit} title="Anexar arquivo" style={{ cursor: 'pointer' }}>
+                            📎
+                            <input type="file" style={{ display: 'none' }} disabled={uploadAnexo.isPending}
+                              onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadAnexo.mutate({ id: tarefa.id, file: f }); e.currentTarget.value = '' }} />
+                          </label>
+                        )}
+                        {visao === 'arquivadas' ? (
+                          <button className={t.btnEdit} title="Desarquivar" disabled={desarquivar.isPending}
+                            onClick={() => desarquivar.mutate(tarefa.id)}>↩</button>
+                        ) : (
+                          <button className={t.btnEdit} title="Arquivar" disabled={arquivar.isPending}
+                            onClick={() => arquivar.mutate(tarefa.id)}>🗄</button>
+                        )}
+                        {(!tarefa.confidencial || canManage) && (
                           <button className={styles.btnDanger}
                             onClick={() => { if (confirm('Remover tarefa?')) deletar.mutate(tarefa.id) }}>
                             ×
@@ -1189,6 +1244,19 @@ export default function TarefasPage() {
                         )}
                       </div>
                     </div>
+
+                    {(tarefa.anexos && tarefa.anexos.length > 0) && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                        {tarefa.anexos.map((a) => (
+                          <span key={a.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, background: '#eff6ff', color: '#1d4ed8', borderRadius: 6, padding: '2px 6px', maxWidth: 220 }}>
+                            <a href={a.drive_link || '#'} target="_blank" rel="noreferrer" title={a.nome_arquivo}
+                              style={{ color: 'inherit', textDecoration: 'none', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 180 }}>📎 {a.nome_arquivo}</a>
+                            <button onClick={() => deletarAnexo.mutate(a.id)} title="Remover"
+                              style={{ border: 'none', background: 'none', color: '#93c5fd', cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: 0 }}>×</button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
 
                     {isExpanded && tarefa.descricao && (
                       <div className={t.expandedNotes}>{tarefa.descricao}</div>

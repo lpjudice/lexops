@@ -1,14 +1,15 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user, get_optional_user
 from app.models.cliente import Cliente
-from app.models.tarefa import Tarefa
+from app.models.tarefa import Tarefa, TarefaAnexo
 from app.models.tarefa_projeto import TarefaProjeto
 from app.models.usuario import Usuario
+from app.services import tarefa_drive
 from app.schemas.tarefa import (
     PedidoAcessoTarefa,
     SolicitarAcessoTarefaResponse,
@@ -50,6 +51,7 @@ def _enrich(t: Tarefa, db: Session, usuario: Usuario | None = None) -> TarefaOut
         out.responsavel = None
         out.tags = None
         out.resumo_ia = None
+        out.anexos = []
 
     # Enrich cliente name
     if t.cliente_id:
@@ -109,6 +111,7 @@ def listar_tarefas(
     processo_id: uuid.UUID | None = Query(None),
     anotacao_id: uuid.UUID | None = Query(None),
     status: str | None = Query(None),
+    arquivada: bool = Query(False),
     db: Session = Depends(get_db),
     usuario: Usuario | None = Depends(get_optional_user),
 ):
@@ -121,8 +124,50 @@ def listar_tarefas(
         q = q.filter(Tarefa.anotacao_id == anotacao_id)
     if status:
         q = q.filter(Tarefa.status == status)
-    tarefas = q.order_by(Tarefa.data_limite.asc().nullslast(), Tarefa.created_at.desc()).all()
+    q = q.filter(Tarefa.arquivada.is_(True) if arquivada else Tarefa.arquivada.is_(False))
+    if arquivada:
+        # Arquivadas: mais recente (por data de arquivamento) primeiro por padrão
+        tarefas = q.order_by(Tarefa.arquivada_em.desc().nullslast(), Tarefa.updated_at.desc()).all()
+    else:
+        tarefas = q.order_by(Tarefa.data_limite.asc().nullslast(), Tarefa.created_at.desc()).all()
     return [_enrich(t, db, usuario) for t in tarefas]
+
+
+@router.post("/{tarefa_id}/arquivar", response_model=TarefaOut)
+def arquivar_tarefa(
+    tarefa_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    usuario: Usuario | None = Depends(get_optional_user),
+):
+    from datetime import datetime, timezone
+    t = db.query(Tarefa).filter(Tarefa.id == tarefa_id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Tarefa não encontrada")
+    if not _pode_ver_tarefa(t, usuario):
+        raise HTTPException(status_code=403, detail="Acesso restrito a esta tarefa")
+    t.arquivada = True
+    t.arquivada_em = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(t)
+    return _enrich(t, db, usuario)
+
+
+@router.post("/{tarefa_id}/desarquivar", response_model=TarefaOut)
+def desarquivar_tarefa(
+    tarefa_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    usuario: Usuario | None = Depends(get_optional_user),
+):
+    t = db.query(Tarefa).filter(Tarefa.id == tarefa_id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Tarefa não encontrada")
+    if not _pode_ver_tarefa(t, usuario):
+        raise HTTPException(status_code=403, detail="Acesso restrito a esta tarefa")
+    t.arquivada = False
+    t.arquivada_em = None
+    db.commit()
+    db.refresh(t)
+    return _enrich(t, db, usuario)
 
 
 @router.post("/", response_model=TarefaOut, status_code=status.HTTP_201_CREATED)
@@ -132,6 +177,7 @@ def criar_tarefa(
     usuario: Usuario | None = Depends(get_optional_user),
 ):
     tarefa = Tarefa(**data.model_dump())
+    tarefa.codigo = tarefa_drive.gerar_codigo()
     if usuario:
         tarefa.criado_por_id = usuario.id
     db.add(tarefa)
@@ -361,3 +407,59 @@ def revogar_acesso(
     db.commit()
     db.refresh(t)
     return _enrich(t, db, usuario)
+
+
+# ── Anexos (Google Drive) ─────────────────────────────────────────────────────
+
+@router.post("/{tarefa_id}/anexos", response_model=TarefaOut)
+async def upload_anexo_tarefa(
+    tarefa_id: uuid.UUID,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    usuario: Usuario | None = Depends(get_optional_user),
+):
+    from app.services.google_drive import extrair_file_id, upload_arquivo_raiz
+
+    t = db.query(Tarefa).filter(Tarefa.id == tarefa_id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Tarefa não encontrada")
+    if not _pode_ver_tarefa(t, usuario):
+        raise HTTPException(status_code=403, detail="Acesso restrito a esta tarefa")
+
+    if not t.codigo:
+        t.codigo = tarefa_drive.gerar_codigo()
+        db.commit()
+
+    conteudo = await file.read()
+    nome = file.filename or "anexo"
+    nome_drive = tarefa_drive.nome_arquivo_com_codigo(nome, t.codigo)
+    subpath = tarefa_drive.pasta_tarefa(tarefa_drive.abreviar(t.titulo), t.codigo)
+    link = upload_arquivo_raiz(conteudo, nome_drive, subpath, mimetype=file.content_type or "application/octet-stream")
+    if not link:
+        raise HTTPException(status_code=503, detail="Falha ao enviar para o Google Drive (verifique a conexão)")
+
+    anexo = TarefaAnexo(
+        tarefa_id=t.id, nome_arquivo=nome,
+        drive_link=link, drive_file_id=extrair_file_id(link), content_type=file.content_type,
+    )
+    db.add(anexo)
+    db.commit()
+    db.refresh(t)
+    return _enrich(t, db, usuario)
+
+
+@router.delete("/anexos/{anexo_id}", status_code=status.HTTP_204_NO_CONTENT)
+def deletar_anexo_tarefa(
+    anexo_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    _usuario: Usuario | None = Depends(get_optional_user),
+):
+    from app.services.google_drive import deletar_arquivo_por_id
+
+    anexo = db.query(TarefaAnexo).filter(TarefaAnexo.id == anexo_id).first()
+    if not anexo:
+        raise HTTPException(status_code=404, detail="Anexo não encontrado")
+    if anexo.drive_file_id:
+        deletar_arquivo_por_id(anexo.drive_file_id)  # best-effort
+    db.delete(anexo)
+    db.commit()

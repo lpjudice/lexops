@@ -7,6 +7,7 @@ import { reunioesApi } from '../api/reunioes'
 import { usuariosApi, type UsuarioCreate, type UsuarioUpdate } from '../api/usuarios'
 import { responsaveisApi, type CategoriaResponsavel, type Responsavel } from '../api/responsaveis'
 import { useAuth } from '../contexts/AuthContext'
+import DriveTree from '../components/DriveTree'
 import styles from './Page.module.css'
 import cfg from './ConfiguracoesPage.module.css'
 
@@ -733,6 +734,17 @@ export default function ConfiguracoesPage() {
               </a>
             )}
           </div>
+        </div>
+
+        {/* Seção: Árvore de arquivos do Drive */}
+        <div className={cfg.secao}>
+          <div className={cfg.secaoHeader}>
+            <h2 className={cfg.secaoTitulo}>Arquivos do Drive (árvore)</h2>
+            <p className={cfg.secaoDesc}>
+              Navegue pelas pastas vinculadas ao sistema no Google Drive — populadas pelo sistema ou adicionadas manualmente. Abra/feche cada menu para investigar.
+            </p>
+          </div>
+          <DriveTree />
         </div>
 
         {/* Seção: IAs */}

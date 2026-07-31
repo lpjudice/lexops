@@ -295,6 +295,62 @@ def _sync_diario2_gmail() -> None:
         logger.warning("Scheduler: falha na sincronização automática do Diário 2 Gmail: %s", exc)
 
 
+def _consolidar_drive_duplicatas() -> None:
+    """Self-healing noturno: mescla pastas duplicadas no Drive (mantém a mais
+    antiga, MOVE o conteúdo, e manda à lixeira só as cascas VAZIAS).
+    NENHUM arquivo é apagado. Notifica o super admin por email quando houve ação."""
+    try:
+        from app.services.drive_manutencao import consolidar
+        res = consolidar(max_depth=3, dry_run=False)
+        if res.get("erro"):
+            logger.info("Scheduler: consolidação Drive pulada — %s", res["erro"])
+            return
+        grupos = res.get("grupos_duplicados", 0)
+        logger.info(
+            "Scheduler: consolidação Drive — %d grupo(s), %d pasta(s) mesclada(s), %d arquivo(s) movido(s), %d pasta(s) à lixeira",
+            grupos, res.get("pastas_mescladas", 0), res.get("arquivos_movidos", 0), len(res.get("pastas_lixeira", [])),
+        )
+        if grupos > 0:
+            _notificar_consolidacao_email(res)
+    except Exception as exc:
+        logger.warning("Scheduler: falha na consolidação de duplicatas do Drive: %s", exc)
+
+
+def _notificar_consolidacao_email(res: dict) -> None:
+    """Envia email ao super admin com o resumo da consolidação noturna."""
+    try:
+        from app.database import SessionLocal
+        from app.models.usuario import Usuario
+        from app.services.email_service import _send_via_gmail_oauth
+
+        with SessionLocal() as db:
+            admin = db.query(Usuario).filter(Usuario.role == "super_admin", Usuario.ativo.is_(True)).first()
+        if not admin or not admin.email:
+            return
+
+        lixeira = res.get("pastas_lixeira", [])
+        linhas = "".join(f"<li>{p['name']} <code style='color:#9ca3af'>({p['id']})</code></li>" for p in lixeira[:200])
+        html = f"""
+        <div style="font-family:Arial,sans-serif;font-size:14px;color:#1d1e20">
+          <h2 style="color:#0d9488">Consolidação de pastas do Drive</h2>
+          <p>A rotina noturna encontrou e mesclou pastas duplicadas.</p>
+          <ul>
+            <li><b>{res.get('grupos_duplicados', 0)}</b> grupo(s) de pastas duplicadas</li>
+            <li><b>{res.get('pastas_mescladas', 0)}</b> pasta(s) extra mescladas na mais antiga</li>
+            <li><b>{res.get('arquivos_movidos', 0)}</b> arquivo(s) <b>movidos</b> (nenhum apagado)</li>
+            <li><b>{len(lixeira)}</b> pasta(s) VAZIA(s) enviada(s) à lixeira do Drive (recuperável)</li>
+          </ul>
+          <p style="color:#065f46"><b>Critério:</b> mantém a pasta MAIS ANTIGA, move o conteúdo das cópias para dentro dela,
+          e só manda à lixeira as pastas que ficaram vazias. <b>Nenhum arquivo é apagado</b> — arquivos duplicados de mesmo nome coexistem.</p>
+          {f'<p><b>Pastas vazias enviadas à lixeira:</b></p><ul style="font-size:12px">{linhas}</ul>' if lixeira else ''}
+        </div>
+        """
+        _send_via_gmail_oauth(admin.email, "Drive — pastas duplicadas consolidadas", html)
+        logger.info("Scheduler: email de consolidação enviado para %s", admin.email)
+    except Exception as exc:
+        logger.warning("Scheduler: falha ao notificar consolidação por email: %s", exc)
+
+
 def _relatorio_fiscal_contador() -> None:
     """Diariamente às 8h30 — envia o relatório fiscal se hoje == dia configurado.
     Idempotente: não reenvia se já houver log da competência (evita duplicidade).
@@ -427,6 +483,13 @@ def start_scheduler() -> None:
         _renovar_drive_watch,
         trigger=CronTrigger(hour=6, minute=0),
         id="renovar_drive_watch",
+        replace_existing=True,
+    )
+    # Self-healing de pastas duplicadas no Drive — 04h
+    scheduler.add_job(
+        _consolidar_drive_duplicatas,
+        trigger=CronTrigger(hour=4, minute=0),
+        id="consolidar_drive_duplicatas",
         replace_existing=True,
     )
     scheduler.add_job(

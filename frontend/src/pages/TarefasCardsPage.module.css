@@ -338,6 +338,74 @@
   font-family: inherit;
 }
 
+/* ── Anexos (Google Drive) ──────────────────────────────── */
+.anexos {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed #e5e7eb;
+}
+
+.anexoChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  font-size: 11px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+.anexoChip a {
+  color: inherit;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+.anexoChip a:hover { text-decoration: underline; }
+.anexoDel {
+  border: none;
+  background: none;
+  color: #93c5fd;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0;
+}
+.anexoDel:hover { color: #ef4444; }
+
+.anexoAdd {
+  font-size: 11px;
+  color: #2563eb;
+  cursor: pointer;
+  border: 1px dashed #bfdbfe;
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+.anexoAdd:hover { background: #eff6ff; }
+
+.subAnexoBtn {
+  font-size: 11px;
+  color: #c7c9cc;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 2px;
+}
+.subAnexoBtn:hover { color: #2563eb; }
+
+.subAnexosLine {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 0 4px 24px;
+}
+
 /* ── Ações do card ──────────────────────────────────────── */
 .cardActions {
   display: flex;

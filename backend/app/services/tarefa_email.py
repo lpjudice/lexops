@@ -35,8 +35,10 @@ def build_tarefa_email_html(
     cliente_nome: str | None,
     processo_numero: str | None,
     frontend_url: str,
+    frontend_path: str = "/tarefas",
 ) -> str:
-    from_telegram = tarefa.tags and "telegram" in tarefa.tags
+    _tags = getattr(tarefa, "tags", None)  # TarefaCard não tem 'tags'
+    from_telegram = _tags and "telegram" in _tags
     origem_badge = (
         '<span style="display:inline-block;background:#e0f2fe;color:#0369a1;'
         'font-size:11px;font-weight:700;border-radius:4px;padding:2px 8px;margin-left:8px;">'
@@ -132,7 +134,7 @@ def build_tarefa_email_html(
             <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:32px;">
               <tr>
                 <td align="center">
-                  <a href="{frontend_url}/tarefas"
+                  <a href="{frontend_url}{frontend_path}"
                     style="display:inline-block;padding:12px 28px;background:{_HEADER_COLOR};color:#fff;
                     font-size:14px;font-weight:700;text-decoration:none;border-radius:8px;letter-spacing:0.02em;">
                     Abrir no LexOps →
@@ -164,6 +166,7 @@ def notificar_responsavel(
     db: Session,
     tarefa: Tarefa,
     dry_run: bool = False,
+    frontend_path: str = "/tarefas",
 ) -> bool:
     """Envia email ao responsável da tarefa.
 
@@ -211,6 +214,7 @@ def notificar_responsavel(
         cliente_nome=cliente_nome,
         processo_numero=processo_numero,
         frontend_url=settings.frontend_url,
+        frontend_path=frontend_path,
     )
 
     subject = f"Tarefa atribuída: {tarefa.titulo}"

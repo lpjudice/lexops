@@ -2,6 +2,16 @@ import api from './client'
 
 export type StatusTarefaCard = 'pendente' | 'em_andamento' | 'concluido' | 'cancelado'
 
+export interface AnexoCard {
+  id: string
+  card_id: string
+  subtask_id: string | null
+  nome_arquivo: string
+  drive_link: string | null
+  content_type: string | null
+  created_at: string
+}
+
 export interface SubtaskCard {
   id: string
   texto: string
@@ -10,6 +20,7 @@ export interface SubtaskCard {
   responsavel?: string | null
   responsavel_email?: string | null
   data_limite?: string | null
+  anexos?: AnexoCard[]
 }
 
 export interface PedidoAcessoCard {
@@ -40,6 +51,10 @@ export interface TarefaCard {
   ordem: number | null
   confidencial: boolean
   usuarios_com_acesso: string[] | null
+  arquivada?: boolean
+  arquivada_em?: string | null
+  codigo?: string | null
+  anexos?: AnexoCard[]
   created_at: string
   updated_at: string
   subtasks: SubtaskCard[]
@@ -66,8 +81,21 @@ export interface TarefaCardCreate {
 }
 
 export const tarefaCardsApi = {
-  listar: (params?: { projeto_id?: string; cliente_id?: string; status?: StatusTarefaCard }) =>
+  listar: (params?: { projeto_id?: string; cliente_id?: string; status?: StatusTarefaCard; arquivada?: boolean }) =>
     api.get<TarefaCard[]>('/tarefa-cards/', { params }).then((r) => r.data),
+
+  arquivar: (id: string) => api.post<TarefaCard>(`/tarefa-cards/${id}/arquivar`).then((r) => r.data),
+  desarquivar: (id: string) => api.post<TarefaCard>(`/tarefa-cards/${id}/desarquivar`).then((r) => r.data),
+
+  uploadAnexoCard: (cardId: string, file: File) => {
+    const fd = new FormData(); fd.append('file', file)
+    return api.post<TarefaCard>(`/tarefa-cards/${cardId}/anexos`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then((r) => r.data)
+  },
+  uploadAnexoSubtask: (subtaskId: string, file: File) => {
+    const fd = new FormData(); fd.append('file', file)
+    return api.post<TarefaCard>(`/tarefa-cards/subtasks/${subtaskId}/anexos`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then((r) => r.data)
+  },
+  deletarAnexo: (anexoId: string) => api.delete(`/tarefa-cards/anexos/${anexoId}`),
 
   criar: (data: TarefaCardCreate) =>
     api.post<TarefaCard>('/tarefa-cards/', data).then((r) => r.data),

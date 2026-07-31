@@ -7,14 +7,15 @@ não compartilha registros com o módulo Tarefas atual.
 import uuid
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user, get_optional_user
 from app.models.cliente import Cliente
 from app.models.processo import Processo
-from app.models.tarefa_card import TarefaCard, TarefaCardSubtask
+from app.models.tarefa_card import TarefaCard, TarefaCardAnexo, TarefaCardSubtask
+from app.services import tarefa_drive
 from app.models.tarefa_projeto import TarefaProjeto
 from app.models.usuario import Usuario
 from app.schemas.tarefa_card import (
@@ -57,6 +58,7 @@ def _enrich(card: TarefaCard, db: Session, usuario: Usuario | None = None) -> Ta
         out.notas = None
         out.responsavel = None
         out.subtasks = []
+        out.anexos = []
 
     if card.cliente_id:
         c = db.query(Cliente).filter(Cliente.id == card.cliente_id).first()
@@ -115,6 +117,7 @@ def listar_cards(
     projeto_id: uuid.UUID | None = Query(None),
     cliente_id: uuid.UUID | None = Query(None),
     status: str | None = Query(None),
+    arquivada: bool = Query(False),
     db: Session = Depends(get_db),
     usuario: Usuario | None = Depends(get_optional_user),
 ):
@@ -125,10 +128,69 @@ def listar_cards(
         q = q.filter(TarefaCard.cliente_id == cliente_id)
     if status:
         q = q.filter(TarefaCard.status == status)
-    cards = q.order_by(
-        TarefaCard.ordem.asc().nullslast(), TarefaCard.created_at.desc()
-    ).all()
+    q = q.filter(TarefaCard.arquivada.is_(True) if arquivada else TarefaCard.arquivada.is_(False))
+    if arquivada:
+        cards = q.order_by(TarefaCard.arquivada_em.desc().nullslast(), TarefaCard.updated_at.desc()).all()
+    else:
+        cards = q.order_by(TarefaCard.ordem.asc().nullslast(), TarefaCard.created_at.desc()).all()
     return [_enrich(c, db, usuario) for c in cards]
+
+
+@router.post("/{card_id}/arquivar", response_model=TarefaCardOut)
+def arquivar_card(
+    card_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    usuario: Usuario | None = Depends(get_optional_user),
+):
+    from datetime import datetime, timezone
+    card = db.query(TarefaCard).filter(TarefaCard.id == card_id).first()
+    if not card:
+        raise HTTPException(status_code=404, detail="Card não encontrado")
+    if not _pode_ver(card, usuario):
+        raise HTTPException(status_code=403, detail="Acesso restrito a este card")
+    card.arquivada = True
+    card.arquivada_em = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(card)
+    return _enrich(card, db, usuario)
+
+
+@router.post("/{card_id}/desarquivar", response_model=TarefaCardOut)
+def desarquivar_card(
+    card_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    usuario: Usuario | None = Depends(get_optional_user),
+):
+    card = db.query(TarefaCard).filter(TarefaCard.id == card_id).first()
+    if not card:
+        raise HTTPException(status_code=404, detail="Card não encontrado")
+    if not _pode_ver(card, usuario):
+        raise HTTPException(status_code=403, detail="Acesso restrito a este card")
+    card.arquivada = False
+    card.arquivada_em = None
+    db.commit()
+    db.refresh(card)
+    return _enrich(card, db, usuario)
+
+
+def _notificar_responsavel_card_async(card_id: uuid.UUID) -> None:
+    """Envia o email de tarefa atribuída ao responsável, em background (mesma
+    lógica do menu Tarefas), com link para /tarefas-cards."""
+    import threading
+
+    from app.database import SessionLocal
+    from app.services.tarefa_email import notificar_responsavel
+
+    def _enviar() -> None:
+        _db = SessionLocal()
+        try:
+            _c = _db.query(TarefaCard).filter(TarefaCard.id == card_id).first()
+            if _c:
+                notificar_responsavel(_db, _c, dry_run=False, frontend_path="/tarefas-cards")
+        finally:
+            _db.close()
+
+    threading.Thread(target=_enviar, daemon=True).start()
 
 
 @router.post("/", response_model=TarefaCardOut, status_code=status.HTTP_201_CREATED)
@@ -139,6 +201,7 @@ def criar_card(
 ):
     payload = data.model_dump(exclude={"subtasks"})
     card = TarefaCard(**payload)
+    card.codigo = tarefa_drive.gerar_codigo()
     if usuario:
         card.criado_por_id = usuario.id
     for idx, st in enumerate(data.subtasks):
@@ -152,6 +215,9 @@ def criar_card(
     db.add(card)
     db.commit()
     db.refresh(card)
+    # Notifica o responsável por email se já veio definido na criação
+    if card.responsavel:
+        _notificar_responsavel_card_async(card.id)
     return _enrich(card, db, usuario)
 
 
@@ -180,6 +246,7 @@ def atualizar_card(
     if not _pode_ver(card, usuario):
         raise HTTPException(status_code=403, detail="Acesso restrito a este card")
 
+    resp_anterior = card.responsavel
     updates = data.model_dump(exclude_unset=True)
     for field, value in updates.items():
         setattr(card, field, value)
@@ -190,6 +257,10 @@ def atualizar_card(
                 st.data_limite = card.data_limite
     db.commit()
     db.refresh(card)
+    # Notifica se o responsável foi definido/alterado
+    novo_resp = updates.get("responsavel")
+    if novo_resp and novo_resp != resp_anterior:
+        _notificar_responsavel_card_async(card.id)
     return _enrich(card, db, usuario)
 
 
@@ -298,6 +369,103 @@ def deletar_subtask(
     if not st:
         raise HTTPException(status_code=404, detail="Subtarefa não encontrada")
     db.delete(st)
+    db.commit()
+
+
+# ── Anexos (Google Drive) ─────────────────────────────────────────────────────
+
+def _ensure_codigo(card: TarefaCard, db: Session) -> str:
+    if not card.codigo:
+        card.codigo = tarefa_drive.gerar_codigo()
+        db.commit()
+    return card.codigo
+
+
+@router.post("/{card_id}/anexos", response_model=TarefaCardOut)
+async def upload_anexo_card(
+    card_id: uuid.UUID,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    usuario: Usuario | None = Depends(get_optional_user),
+):
+    from app.services.google_drive import extrair_file_id, upload_arquivo_raiz
+
+    card = db.query(TarefaCard).filter(TarefaCard.id == card_id).first()
+    if not card:
+        raise HTTPException(status_code=404, detail="Card não encontrado")
+    if not _pode_ver(card, usuario):
+        raise HTTPException(status_code=403, detail="Acesso restrito a este card")
+
+    codigo = _ensure_codigo(card, db)
+    conteudo = await file.read()
+    nome = file.filename or "anexo"
+    nome_drive = tarefa_drive.nome_arquivo_com_codigo(nome, codigo)
+    subpath = tarefa_drive.pasta_card(tarefa_drive.abreviar(card.titulo), codigo)
+    link = upload_arquivo_raiz(conteudo, nome_drive, subpath, mimetype=file.content_type or "application/octet-stream")
+    if not link:
+        raise HTTPException(status_code=503, detail="Falha ao enviar para o Google Drive (verifique a conexão)")
+
+    anexo = TarefaCardAnexo(
+        card_id=card.id, subtask_id=None, nome_arquivo=nome,
+        drive_link=link, drive_file_id=extrair_file_id(link), content_type=file.content_type,
+    )
+    db.add(anexo)
+    db.commit()
+    db.refresh(card)
+    return _enrich(card, db, usuario)
+
+
+@router.post("/subtasks/{subtask_id}/anexos", response_model=TarefaCardOut)
+async def upload_anexo_subtask(
+    subtask_id: uuid.UUID,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    usuario: Usuario | None = Depends(get_optional_user),
+):
+    from app.services.google_drive import extrair_file_id, upload_arquivo_raiz
+
+    st = db.query(TarefaCardSubtask).filter(TarefaCardSubtask.id == subtask_id).first()
+    if not st:
+        raise HTTPException(status_code=404, detail="Subtarefa não encontrada")
+    card = db.query(TarefaCard).filter(TarefaCard.id == st.card_id).first()
+    if not _pode_ver(card, usuario):
+        raise HTTPException(status_code=403, detail="Acesso restrito a este card")
+
+    codigo = _ensure_codigo(card, db)
+    conteudo = await file.read()
+    nome = file.filename or "anexo"
+    nome_drive = tarefa_drive.nome_arquivo_com_codigo(nome, codigo)
+    subpath = tarefa_drive.pasta_card_subtask(
+        tarefa_drive.abreviar(card.titulo), codigo, tarefa_drive.abreviar(st.texto),
+    )
+    link = upload_arquivo_raiz(conteudo, nome_drive, subpath, mimetype=file.content_type or "application/octet-stream")
+    if not link:
+        raise HTTPException(status_code=503, detail="Falha ao enviar para o Google Drive (verifique a conexão)")
+
+    anexo = TarefaCardAnexo(
+        card_id=card.id, subtask_id=st.id, nome_arquivo=nome,
+        drive_link=link, drive_file_id=extrair_file_id(link), content_type=file.content_type,
+    )
+    db.add(anexo)
+    db.commit()
+    db.refresh(card)
+    return _enrich(card, db, usuario)
+
+
+@router.delete("/anexos/{anexo_id}", status_code=status.HTTP_204_NO_CONTENT)
+def deletar_anexo_card(
+    anexo_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    _usuario: Usuario | None = Depends(get_optional_user),
+):
+    from app.services.google_drive import deletar_arquivo_por_id
+
+    anexo = db.query(TarefaCardAnexo).filter(TarefaCardAnexo.id == anexo_id).first()
+    if not anexo:
+        raise HTTPException(status_code=404, detail="Anexo não encontrado")
+    if anexo.drive_file_id:
+        deletar_arquivo_por_id(anexo.drive_file_id)  # best-effort
+    db.delete(anexo)
     db.commit()
 
 

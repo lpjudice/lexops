@@ -46,6 +46,17 @@ class TarefaUpdate(BaseModel):
     ordem: int | None = None
 
 
+class AnexoTarefaOut(BaseModel):
+    id: uuid.UUID
+    tarefa_id: uuid.UUID
+    nome_arquivo: str
+    drive_link: str | None = None
+    content_type: str | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class PedidoAcessoTarefa(BaseModel):
     usuario_id: str
     nome: str
@@ -77,6 +88,10 @@ class TarefaOut(BaseModel):
     usuarios_com_acesso: list[str] | None = None
     criado_automaticamente: bool = False
     prazo_id: uuid.UUID | None = None
+    arquivada: bool = False
+    arquivada_em: datetime | None = None
+    codigo: str | None = None
+    anexos: list["AnexoTarefaOut"] = []
     created_at: datetime
     updated_at: datetime
     # Enriched

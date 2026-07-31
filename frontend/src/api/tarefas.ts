@@ -7,6 +7,15 @@ export interface PedidoAcessoTarefa {
   nome: string
 }
 
+export interface AnexoTarefa {
+  id: string
+  tarefa_id: string
+  nome_arquivo: string
+  drive_link: string | null
+  content_type: string | null
+  created_at: string
+}
+
 export interface Tarefa {
   id: string
   cliente_id: string | null
@@ -33,6 +42,10 @@ export interface Tarefa {
   usuarios_com_acesso: string[] | null
   criado_automaticamente?: boolean
   prazo_id?: string | null
+  arquivada?: boolean
+  arquivada_em?: string | null
+  codigo?: string | null
+  anexos?: AnexoTarefa[]
   acesso_restrito: boolean
   pedidos_acesso: PedidoAcessoTarefa[]
   ja_solicitou: boolean
@@ -58,8 +71,17 @@ export interface TarefaCreate {
 }
 
 export const tarefasApi = {
-  listar: (params?: { cliente_id?: string; status?: StatusTarefa }) =>
+  listar: (params?: { cliente_id?: string; status?: StatusTarefa; arquivada?: boolean }) =>
     api.get<Tarefa[]>('/tarefas/', { params }).then((r) => r.data),
+
+  arquivar: (id: string) => api.post<Tarefa>(`/tarefas/${id}/arquivar`).then((r) => r.data),
+  desarquivar: (id: string) => api.post<Tarefa>(`/tarefas/${id}/desarquivar`).then((r) => r.data),
+
+  uploadAnexo: (tarefaId: string, file: File) => {
+    const fd = new FormData(); fd.append('file', file)
+    return api.post<Tarefa>(`/tarefas/${tarefaId}/anexos`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then((r) => r.data)
+  },
+  deletarAnexo: (anexoId: string) => api.delete(`/tarefas/anexos/${anexoId}`),
 
   criar: (data: TarefaCreate) =>
     api.post<Tarefa>('/tarefas/', data).then((r) => r.data),

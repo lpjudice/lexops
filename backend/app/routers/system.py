@@ -141,3 +141,58 @@ def acesso_confidencial(
         pass
 
     return [v for v in grupos.values() if v["itens"]]
+
+
+# ── Árvore de arquivos do Google Drive ────────────────────────────────────────
+
+@router.get("/drive/tree")
+def drive_tree(
+    folder_id: str | None = Query(None, description="Pasta a expandir; raiz LexOps se omitido"),
+    db: Session = Depends(get_db),
+    _usuario: Usuario = Depends(get_current_user),
+):
+    """Lista pastas/arquivos filhos diretos de uma pasta do Drive (lazy-load da árvore).
+
+    Sem `folder_id` retorna o topo (as pastas 'menu' sob a raiz LexOps).
+    """
+    from app.services.google_drive import listar_filhos, root_folder_id
+
+    filhos = listar_filhos(folder_id)
+    if filhos is None:
+        raise HTTPException(status_code=503, detail="Google Drive não conectado")
+
+    # No TOPO (raiz), distingue pastas de CLIENTE das pastas de MENU (sistema).
+    # Cliente = casa com um Cliente por drive_folder_id ou por nome; o resto é menu.
+    if folder_id is None:
+        import unicodedata
+
+        def _norm(s: str | None) -> str:
+            s = (s or "").strip().lower()
+            s = "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
+            return " ".join(s.split())
+
+        # Pastas-MENU do sistema (conjunto fixo e estável). Todo o resto na raiz é
+        # pasta de CLIENTE (nomes de cliente variam e nem sempre casam com o banco).
+        MENUS_SISTEMA = {
+            _norm(x) for x in (
+                "Backoffice", "Contratos", "Fiscal", "Andamentos em Batch",
+                "Tarefas", "Tarefas em Card", "Reembolsos", "Teses", "Jurisprudência",
+                "Organizador", "Diretrizes", "Expansão", "Reuniões",
+            )
+        }
+        from app.models.cliente import Cliente
+        clientes = db.query(Cliente.drive_folder_id, Cliente.nome).all()
+        ids_cli = {c[0] for c in clientes if c[0]}
+        for it in filhos:
+            if not it.get("is_folder"):
+                it["categoria"] = "arquivo"
+            elif it.get("id") in ids_cli or _norm(it.get("name")) not in MENUS_SISTEMA:
+                it["categoria"] = "cliente"
+            else:
+                it["categoria"] = "menu"
+
+    return {
+        "root_id": root_folder_id(),
+        "folder_id": folder_id or root_folder_id(),
+        "itens": filhos,
+    }

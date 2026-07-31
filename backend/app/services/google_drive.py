@@ -95,6 +95,74 @@ def _lock_for(parent_id: str, name: str) -> threading.Lock:
         return lk
 
 
+def _registry_get(parent_id: str, name: str) -> str | None:
+    """Retorna o folder_id registrado para (pai, nome), ou None. Cross-process."""
+    try:
+        from sqlalchemy import text
+        from app.database import SessionLocal
+        with SessionLocal() as db:
+            row = db.execute(
+                text("SELECT folder_id FROM drive_pasta_registry WHERE parent_id=:p AND name=:n"),
+                {"p": parent_id, "n": name},
+            ).first()
+            return row[0] if row else None
+    except Exception:
+        return None
+
+
+def _registry_put(parent_id: str, name: str, folder_id: str) -> str:
+    """Registra (pai, nome)->folder_id (first-wins). Retorna o id VENCEDOR — se
+    outro processo já registrou, devolve o dele (o chamador descarta o extra)."""
+    try:
+        from sqlalchemy import text
+        from app.database import SessionLocal
+        with SessionLocal() as db:
+            db.execute(
+                text("INSERT INTO drive_pasta_registry (parent_id, name, folder_id) "
+                     "VALUES (:p,:n,:f) ON CONFLICT (parent_id, name) DO NOTHING"),
+                {"p": parent_id, "n": name, "f": folder_id},
+            )
+            db.commit()
+            row = db.execute(
+                text("SELECT folder_id FROM drive_pasta_registry WHERE parent_id=:p AND name=:n"),
+                {"p": parent_id, "n": name},
+            ).first()
+            return row[0] if row else folder_id
+    except Exception:
+        return folder_id
+
+
+def registry_set(parent_id: str, name: str, folder_id: str) -> None:
+    """Força o registro a apontar para `folder_id` (usado após consolidação)."""
+    try:
+        from sqlalchemy import text
+        from app.database import SessionLocal
+        with SessionLocal() as db:
+            db.execute(
+                text("INSERT INTO drive_pasta_registry (parent_id, name, folder_id) "
+                     "VALUES (:p,:n,:f) ON CONFLICT (parent_id, name) DO UPDATE SET folder_id=:f"),
+                {"p": parent_id, "n": name, "f": folder_id},
+            )
+            db.commit()
+    except Exception:
+        pass
+
+
+def registry_forget(parent_id: str, name: str) -> None:
+    """Remove o registro (ex.: pasta descartada)."""
+    try:
+        from sqlalchemy import text
+        from app.database import SessionLocal
+        with SessionLocal() as db:
+            db.execute(
+                text("DELETE FROM drive_pasta_registry WHERE parent_id=:p AND name=:n"),
+                {"p": parent_id, "n": name},
+            )
+            db.commit()
+    except Exception:
+        pass
+
+
 def _listar_pastas(name: str, parent_id: str, headers: dict) -> list[dict]:
     """Lista pastas-irmãs com este nome (ordenadas da mais antiga p/ a mais nova)."""
     query = (
@@ -180,9 +248,16 @@ def _get_or_create_subfolder(name: str, parent_id: str, headers: dict) -> str:
     if cached:
         return cached
 
+    # Registro no banco: fonte de verdade cross-process/cross-restart.
+    reg = _registry_get(parent_id, name)
+    if reg:
+        _cache_set(parent_id, name, reg)
+        return reg
+
     existentes = _listar_pastas(name, parent_id, headers)
     if existentes:
         fid = _consolidar_pastas(existentes, headers) if len(existentes) > 1 else existentes[0]["id"]
+        fid = _registry_put(parent_id, name, fid)
         _cache_set(parent_id, name, fid)
         return fid
 
@@ -192,9 +267,14 @@ def _get_or_create_subfolder(name: str, parent_id: str, headers: dict) -> str:
         cached = _cache_get(parent_id, name)
         if cached:
             return cached
+        reg = _registry_get(parent_id, name)
+        if reg:
+            _cache_set(parent_id, name, reg)
+            return reg
         existentes = _listar_pastas(name, parent_id, headers)
         if existentes:
             fid = _consolidar_pastas(existentes, headers) if len(existentes) > 1 else existentes[0]["id"]
+            fid = _registry_put(parent_id, name, fid)
             _cache_set(parent_id, name, fid)
             return fid
 
@@ -212,11 +292,23 @@ def _get_or_create_subfolder(name: str, parent_id: str, headers: dict) -> str:
         r.raise_for_status()
         novo_id = r.json()["id"]
 
-        # Reconciliação: se outro processo criou em paralelo e o índice já
-        # reflete ambas, mantém a mais antiga e descarta extras vazias.
+        # Registra (first-wins). Se OUTRO processo já registrou outro id,
+        # perdemos a corrida: descarta nossa pasta recém-criada (vazia) e usa a dele.
+        vencedor = _registry_put(parent_id, name, novo_id)
+        if vencedor != novo_id:
+            try:
+                _trash_folder(novo_id, headers)
+            except Exception:
+                pass
+            _cache_set(parent_id, name, vencedor)
+            return vencedor
+
+        # Reconciliação: se o índice já reflete duplicatas (criadas fora desta
+        # trava), mantém a mais antiga e aponta o registro para ela.
         todas = _listar_pastas(name, parent_id, headers)
         if len(todas) > 1:
             novo_id = _consolidar_pastas(todas, headers)
+            registry_set(parent_id, name, novo_id)
         _cache_set(parent_id, name, novo_id)
         return novo_id
 
@@ -764,6 +856,66 @@ def listar_arquivos(nome_cliente: str, subfolder: str, sub_subfolder: str | None
             return []
 
 
+def root_folder_id() -> str:
+    """ID da pasta raiz LexOps no Drive."""
+    return DRIVE_FOLDER_ID
+
+
+def listar_filhos(folder_id: str | None = None) -> list[dict] | None:
+    """Lista pastas e arquivos filhos diretos de `folder_id` (raiz se None).
+
+    Retorna dicts com id, name, is_folder, created_time, modified_time,
+    web_view_link, mime_type, size. Retorna None se o Drive não estiver acessível.
+    """
+    tokens = _load_tokens()
+    if not tokens:
+        return None
+    alvo = folder_id or DRIVE_FOLDER_ID
+
+    def _do(tkns: dict) -> list[dict]:
+        h = _auth_headers(tkns)
+        r = httpx.get(
+            f"{DRIVE_META}/files",
+            headers=h,
+            params={
+                "q": f"'{alvo}' in parents and trashed=false",
+                "fields": "files(id,name,mimeType,size,createdTime,modifiedTime,webViewLink)",
+                "supportsAllDrives": True,
+                "includeItemsFromAllDrives": True,
+                "orderBy": "folder,name",
+                "pageSize": 1000,
+            },
+            timeout=30,
+        )
+        r.raise_for_status()
+        out: list[dict] = []
+        for item in r.json().get("files", []):
+            is_folder = item.get("mimeType") == "application/vnd.google-apps.folder"
+            out.append({
+                "id": item.get("id"),
+                "name": item.get("name") or "",
+                "is_folder": is_folder,
+                "mime_type": item.get("mimeType"),
+                "size": int(item.get("size") or 0),
+                "created_time": item.get("createdTime"),
+                "modified_time": item.get("modifiedTime"),
+                "web_view_link": item.get("webViewLink"),
+            })
+        return out
+
+    try:
+        return _do(tokens)
+    except Exception as exc:
+        if not _is_unauthorized(exc):
+            logger.warning("Falha ao listar filhos do Drive (%s): %s", alvo, exc)
+            return None
+        try:
+            return _do(_refresh(tokens))
+        except Exception as exc2:
+            logger.warning("Falha ao listar filhos do Drive apos refresh: %s", exc2)
+            return None
+
+
 def extrair_file_id(drive_link: str) -> str | None:
     """Extrai o ID do arquivo de uma URL do Drive (formatos /d/<id>/ ou ?id=<id>)."""
     import re
@@ -800,6 +952,37 @@ def baixar_arquivo_por_id(file_id: str) -> bytes | None:
         except Exception as exc2:
             logger.warning("Falha ao baixar arquivo %s do Drive apos refresh: %s", file_id, exc2)
             return None
+
+
+def deletar_arquivo_por_id(file_id: str) -> bool:
+    """Move um arquivo do Drive para a lixeira pelo ID. Best-effort."""
+    tokens = _load_tokens()
+    if not tokens:
+        return False
+
+    def _do(tkns: dict) -> bool:
+        h = _auth_headers(tkns)
+        r = httpx.patch(
+            f"{DRIVE_META}/files/{file_id}",
+            headers={**h, "Content-Type": "application/json"},
+            params={"supportsAllDrives": True},
+            content=json.dumps({"trashed": True}).encode(),
+            timeout=30,
+        )
+        r.raise_for_status()
+        return True
+
+    try:
+        return _do(tokens)
+    except Exception as exc:
+        if not _is_unauthorized(exc):
+            logger.warning("Falha ao apagar arquivo %s do Drive: %s", file_id, exc)
+            return False
+        try:
+            return _do(_refresh(tokens))
+        except Exception as exc2:
+            logger.warning("Falha ao apagar arquivo %s do Drive apos refresh: %s", file_id, exc2)
+            return False
 
 
 def copiar_arquivo_por_id(file_id: str, novo_nome: str, parent_folder_id: str | None = None) -> dict | None:

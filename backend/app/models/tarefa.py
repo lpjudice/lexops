@@ -44,7 +44,33 @@ class Tarefa(Base):
     # Criada automaticamente pelo gestor jurídico (Despacho), sem clique humano.
     criado_automaticamente: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
+    arquivada: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    arquivada_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Código curto único da entidade (base36), replicado nas pastas/arquivos do Drive
+    codigo: Mapped[str | None] = mapped_column(String(12), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     criado_por: Mapped["Usuario"] = relationship("Usuario", foreign_keys=[criado_por_id])  # noqa: F821
+    anexos: Mapped[list["TarefaAnexo"]] = relationship(
+        "TarefaAnexo", back_populates="tarefa", cascade="all, delete-orphan"
+    )
+
+
+class TarefaAnexo(Base):
+    """Anexo (Drive) de uma tarefa do menu original."""
+    __tablename__ = "tarefa_anexos"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tarefa_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tarefas.id", ondelete="CASCADE"), nullable=False
+    )
+    nome_arquivo: Mapped[str] = mapped_column(String(500), nullable=False)
+    drive_link: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    drive_file_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    content_type: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    tarefa: Mapped["Tarefa"] = relationship("Tarefa", back_populates="anexos")

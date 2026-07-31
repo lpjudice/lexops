@@ -83,7 +83,13 @@ export default function TarefasCardsPage() {
   const [novaSubtask, setNovaSubtask] = useState<Record<string, string>>({})
   const [editSub, setEditSub] = useState<{ id: string; texto: string } | null>(null)
 
-  const { data: cards = [], isLoading } = useQuery({ queryKey: ['tarefa-cards'], queryFn: () => tarefaCardsApi.listar() })
+  const [visao, setVisao] = useState<'ativas' | 'arquivadas'>('ativas')
+  const [sortArq, setSortArq] = useState<'recente' | 'prazo' | 'titulo' | 'cliente'>('recente')
+
+  const { data: cards = [], isLoading } = useQuery({
+    queryKey: ['tarefa-cards', visao],
+    queryFn: () => tarefaCardsApi.listar({ arquivada: visao === 'arquivadas' }),
+  })
   const { data: projetos = [] } = useQuery({ queryKey: ['tarefa-projetos'], queryFn: tarefaProjetosApi.listar })
   const { data: clientes = [] } = useQuery({ queryKey: ['clientes'], queryFn: () => clientesApi.listar() })
   const { data: processos = [] } = useQuery({ queryKey: ['processos'], queryFn: () => processosApi.listar() })
@@ -99,6 +105,19 @@ export default function TarefasCardsPage() {
     onSuccess: invalidate,
   })
   const deletar = useMutation({ mutationFn: tarefaCardsApi.deletar, onSuccess: invalidate })
+  const arquivar = useMutation({ mutationFn: tarefaCardsApi.arquivar, onSuccess: invalidate })
+  const desarquivar = useMutation({ mutationFn: tarefaCardsApi.desarquivar, onSuccess: invalidate })
+  const uploadAnexoCard = useMutation({
+    mutationFn: ({ id, file }: { id: string; file: File }) => tarefaCardsApi.uploadAnexoCard(id, file),
+    onSuccess: invalidate,
+    onError: (e: unknown) => alert((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Erro ao anexar'),
+  })
+  const uploadAnexoSub = useMutation({
+    mutationFn: ({ id, file }: { id: string; file: File }) => tarefaCardsApi.uploadAnexoSubtask(id, file),
+    onSuccess: invalidate,
+    onError: (e: unknown) => alert((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Erro ao anexar'),
+  })
+  const deletarAnexo = useMutation({ mutationFn: tarefaCardsApi.deletarAnexo, onSuccess: invalidate })
   const addSubtask = useMutation({
     mutationFn: ({ id, texto }: { id: string; texto: string }) => tarefaCardsApi.addSubtask(id, texto),
     onSuccess: invalidate,
@@ -213,6 +232,16 @@ export default function TarefasCardsPage() {
       if (!map.has(key)) map.set(key, { nome: c.projeto_nome || 'Sem projeto', cor: c.projeto_cor || '#d1d5db', cards: [] })
       map.get(key)!.cards.push(c)
     }
+    // Dentro de cada projeto: cards COM prazo primeiro (mais próximo antes),
+    // cards SEM prazo depois (mantendo a ordem de chegada entre si).
+    for (const g of map.values()) {
+      g.cards.sort((a, b) => {
+        if (a.data_limite && !b.data_limite) return -1
+        if (!a.data_limite && b.data_limite) return 1
+        if (a.data_limite && b.data_limite) return a.data_limite.localeCompare(b.data_limite)
+        return 0
+      })
+    }
     return [...map.entries()].sort((a, b) => {
       if (a[0] === '__none__') return 1
       if (b[0] === '__none__') return -1
@@ -225,12 +254,177 @@ export default function TarefasCardsPage() {
   const podeGerenciar = (c: TarefaCard) => isSuperAdmin || (c.criado_por_id && usuario?.id === c.criado_por_id)
   const totalFiltrado = grupos.reduce((n, [, g]) => n + g.cards.length, 0)
 
+  // Visão Arquivadas: lista plana filtrada + ordenável (recente por padrão)
+  const arquivadasOrdenadas = useMemo(() => {
+    const arr = cards.filter(passaFiltro)
+    arr.sort((a, b) => {
+      if (sortArq === 'titulo') return a.titulo.localeCompare(b.titulo)
+      if (sortArq === 'cliente') return (a.cliente_nome || '').localeCompare(b.cliente_nome || '')
+      if (sortArq === 'prazo') return (a.data_limite || '9999').localeCompare(b.data_limite || '9999')
+      // recente: por data de arquivamento desc (fallback updated_at)
+      return (b.arquivada_em || b.updated_at || '').localeCompare(a.arquivada_em || a.updated_at || '')
+    })
+    return arr
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cards, sortArq, filtroStatus, filtroVenc, filtroResp, filtroCriador, filtroProjetos,
+      filtroMes.aplicar, filtroMes.range.de?.getTime(), filtroMes.range.ate?.getTime()])
+
+  const renderCard = (c: TarefaCard) => {
+    const done = c.subtasks.filter((s) => s.concluida).length
+    return (
+                  <div key={c.id} className={`${cs.card} ${cs[`card_${c.status}` as keyof typeof cs]} ${c.confidencial ? cs.card_confidencial : ''}`}>
+                    {c.acesso_restrito ? (
+                      <div className={cs.restrito}>
+                        <div className={cs.restritoIcon}>🔒</div>
+                        <div className={cs.restritoTxt}>Card confidencial</div>
+                        {!c.ja_solicitou ? (
+                          <button className={cs.linkBtn} style={{ color: '#7c3aed', fontWeight: 600 }}
+                            onClick={() => solicitar.mutate(c.id)}>Solicitar acesso</button>
+                        ) : <span className={cs.projetoCount}>Acesso solicitado</span>}
+                      </div>
+                    ) : (
+                      <>
+                        <div className={cs.cardTopRow}>
+                          <div className={cs.cardTitle}>{c.titulo}</div>
+                          {c.confidencial && <span className={cs.lockBadge}>🔒</span>}
+                        </div>
+                        {c.descricao && <div className={cs.cardDesc}>{c.descricao}</div>}
+
+                        <div className={cs.chips}>
+                          {c.responsavel && <span className={cs.chip}>👤 {c.responsavel}</span>}
+                          {c.cliente_nome && <span className={cs.chip}>🏢 {c.cliente_nome}</span>}
+                          {c.processo_numero && <span className={cs.chip}>⚖️ {c.processo_numero}</span>}
+                          {c.data_limite && (
+                            <span className={`${cs.chip} ${vencido(c.data_limite) && c.status !== 'concluido' ? cs.chipVencido : cs.chipPrazo}`}>
+                              📅 {fmtData(c.data_limite)}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className={cs.cardMeta}>
+                          <select className={cs.statusSelect} value={c.status}
+                            onChange={(e) => atualizar.mutate({ id: c.id, data: { status: e.target.value as StatusTarefaCard } })}>
+                            {STATUS_OPTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                          </select>
+                        </div>
+
+                        {/* Subtarefas */}
+                        <div className={cs.subtasks}>
+                          {c.subtasks.length > 0 && <div className={cs.subtaskProgress}>{done}/{c.subtasks.length} concluídas</div>}
+                          <div className={cs.subtaskList}>
+                          {c.subtasks.map((st) => (
+                            <div key={st.id}>
+                            <div className={cs.subtaskRow}>
+                              <input type="checkbox" checked={st.concluida}
+                                onChange={(e) => toggleSubtask.mutate({ id: st.id, concluida: e.target.checked })} />
+                              {editSub?.id === st.id ? (
+                                <input autoFocus className={cs.subEditInput} value={editSub.texto}
+                                  onChange={(e) => setEditSub({ id: st.id, texto: e.target.value })}
+                                  onBlur={() => editSub.texto.trim() ? editarSubtask.mutate({ id: st.id, texto: editSub.texto.trim() }) : setEditSub(null)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && editSub.texto.trim()) editarSubtask.mutate({ id: st.id, texto: editSub.texto.trim() })
+                                    if (e.key === 'Escape') setEditSub(null)
+                                  }} />
+                              ) : (
+                                <span className={`${cs.subtaskText} ${st.concluida ? cs.subtaskDone : ''}`}
+                                  onDoubleClick={() => setEditSub({ id: st.id, texto: st.texto })}>{st.texto}</span>
+                              )}
+                              <SubtaskPrazo
+                                value={st.data_limite || null}
+                                max={c.data_limite || null}
+                                vencido={vencido(st.data_limite) && !st.concluida}
+                                onChange={(d) => setPrazoSub.mutate({ id: st.id, data: d })}
+                              />
+                              <button className={cs.subEdit} title="Editar" onClick={() => setEditSub({ id: st.id, texto: st.texto })}>✎</button>
+                              <label className={cs.subAnexoBtn} title="Anexar arquivo">
+                                📎
+                                <input type="file" style={{ display: 'none' }} disabled={uploadAnexoSub.isPending}
+                                  onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadAnexoSub.mutate({ id: st.id, file: f }); e.currentTarget.value = '' }} />
+                              </label>
+                              <button className={cs.subtaskDel} title="Excluir" onClick={() => delSubtask.mutate(st.id)}>×</button>
+                            </div>
+                            {st.anexos && st.anexos.length > 0 && (
+                              <div className={cs.subAnexosLine}>
+                                {st.anexos.map((a) => (
+                                  <span key={a.id} className={cs.anexoChip}>
+                                    <a href={a.drive_link || '#'} target="_blank" rel="noreferrer" title={a.nome_arquivo}>📎 {a.nome_arquivo}</a>
+                                    <button className={cs.anexoDel} title="Remover" onClick={() => deletarAnexo.mutate(a.id)}>×</button>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            </div>
+                          ))}
+                          </div>
+                          <input className={cs.addSubtask} placeholder="+ subtarefa (Enter)"
+                            value={novaSubtask[c.id] || ''}
+                            onChange={(e) => setNovaSubtask((s) => ({ ...s, [c.id]: e.target.value }))}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && novaSubtask[c.id]?.trim()) {
+                                addSubtask.mutate({ id: c.id, texto: novaSubtask[c.id].trim() })
+                                setNovaSubtask((s) => ({ ...s, [c.id]: '' }))
+                              }
+                            }} />
+                        </div>
+
+                        <AnexoUploader
+                          anexos={c.anexos || []}
+                          onUpload={(f) => uploadAnexoCard.mutate({ id: c.id, file: f })}
+                          onDelete={(id) => deletarAnexo.mutate(id)}
+                          uploading={uploadAnexoCard.isPending}
+                        />
+
+                        {podeGerenciar(c) && c.pedidos_acesso.length > 0 && (
+                          <div style={{ marginTop: 8, fontSize: 11 }}>
+                            <div style={{ color: '#92400e', marginBottom: 4 }}>Pedidos de acesso:</div>
+                            {c.pedidos_acesso.map((p) => (
+                              <div key={p.usuario_id} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                                <span>{p.nome}</span>
+                                <button className={cs.linkBtn} style={{ color: '#10b981' }}
+                                  onClick={() => conceder.mutate({ cardId: c.id, usuarioId: p.usuario_id })}>conceder</button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className={cs.cardActions}>
+                          {c.data_limite && (
+                            c.google_event_id
+                              ? <span className={`${cs.linkBtn} ${cs.linkAgendado}`}>✓ Na agenda</span>
+                              : <button className={`${cs.linkBtn} ${cs.linkAgendar}`} disabled={agendar.isPending}
+                                  onClick={() => agendar.mutate(c.id)}>📅 Agendar</button>
+                          )}
+                          <button className={`${cs.linkBtn} ${cs.linkEditar}`} onClick={() => setEditCard(c)}>✎ Editar</button>
+                          {visao === 'arquivadas' ? (
+                            <button className={`${cs.linkBtn} ${cs.linkEditar}`} disabled={desarquivar.isPending}
+                              onClick={() => desarquivar.mutate(c.id)}>↩ Desarquivar</button>
+                          ) : (
+                            <button className={`${cs.linkBtn} ${cs.linkEditar}`} disabled={arquivar.isPending}
+                              onClick={() => arquivar.mutate(c.id)}>🗄 Arquivar</button>
+                          )}
+                          <button className={`${cs.linkBtn} ${cs.linkExcluir}`}
+                            onClick={() => { if (confirm('Excluir card?')) deletar.mutate(c.id) }}>Excluir</button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+    )
+  }
+
   return (
     <div>
       <div className={cs.toolbar}>
-        <button className={styles.btnPrimary} onClick={() => { setShowForm((s) => !s); setForm(emptyForm) }}>
-          {showForm ? 'Cancelar' : '+ Novo card'}
-        </button>
+        {visao === 'ativas' && (
+          <button className={styles.btnPrimary} onClick={() => { setShowForm((s) => !s); setForm(emptyForm) }}>
+            {showForm ? 'Cancelar' : '+ Novo card'}
+          </button>
+        )}
+        <div className={cs.statusTabs} style={{ marginLeft: 'auto' }}>
+          <button className={`${cs.statusTab} ${visao === 'ativas' ? cs.statusTabActive : ''}`}
+            onClick={() => setVisao('ativas')}>Ativas</button>
+          <button className={`${cs.statusTab} ${visao === 'arquivadas' ? cs.statusTabActive : ''}`}
+            onClick={() => { setVisao('arquivadas'); setShowForm(false) }}>🗄 Arquivadas</button>
+        </div>
       </div>
 
       {/* ── Formulário de criação ─────────────────────────────── */}
@@ -319,8 +513,26 @@ export default function TarefasCardsPage() {
         </div>
       )}
 
-      {/* ── Lista agrupada por projeto ────────────────────────── */}
-      {isLoading ? <p>Carregando...</p> : cards.length === 0 ? (
+      {/* Sort — só na visão Arquivadas (mais recente por padrão) */}
+      {visao === 'arquivadas' && (
+        <div style={{ marginBottom: 12 }}>
+          <select className={cs.filterSelect} value={sortArq} onChange={(e) => setSortArq(e.target.value as typeof sortArq)}>
+            <option value="recente">Mais recente primeiro</option>
+            <option value="prazo">Prazo ↑</option>
+            <option value="titulo">Título A→Z</option>
+            <option value="cliente">Cliente A→Z</option>
+          </select>
+        </div>
+      )}
+
+      {/* ── Lista ────────────────────────────────────────────── */}
+      {isLoading ? <p>Carregando...</p> : visao === 'arquivadas' ? (
+        arquivadasOrdenadas.length === 0 ? (
+          <div className={styles.empty}>{cards.length === 0 ? 'Nenhuma tarefa arquivada.' : 'Nenhuma arquivada com os filtros atuais.'}</div>
+        ) : (
+          <div className={cs.cardGrid}>{arquivadasOrdenadas.map(renderCard)}</div>
+        )
+      ) : cards.length === 0 ? (
         <div className={styles.empty}>Nenhum card cadastrado</div>
       ) : totalFiltrado === 0 ? (
         <div className={styles.empty}>Nenhum card com os filtros atuais</div>
@@ -333,116 +545,7 @@ export default function TarefasCardsPage() {
               <span className={cs.projetoCount}>{g.cards.length}</span>
             </h3>
             <div className={cs.cardGrid}>
-              {g.cards.map((c) => {
-                const done = c.subtasks.filter((s) => s.concluida).length
-                return (
-                  <div key={c.id} className={`${cs.card} ${cs[`card_${c.status}` as keyof typeof cs]} ${c.confidencial ? cs.card_confidencial : ''}`}>
-                    {c.acesso_restrito ? (
-                      <div className={cs.restrito}>
-                        <div className={cs.restritoIcon}>🔒</div>
-                        <div className={cs.restritoTxt}>Card confidencial</div>
-                        {!c.ja_solicitou ? (
-                          <button className={cs.linkBtn} style={{ color: '#7c3aed', fontWeight: 600 }}
-                            onClick={() => solicitar.mutate(c.id)}>Solicitar acesso</button>
-                        ) : <span className={cs.projetoCount}>Acesso solicitado</span>}
-                      </div>
-                    ) : (
-                      <>
-                        <div className={cs.cardTopRow}>
-                          <div className={cs.cardTitle}>{c.titulo}</div>
-                          {c.confidencial && <span className={cs.lockBadge}>🔒</span>}
-                        </div>
-                        {c.descricao && <div className={cs.cardDesc}>{c.descricao}</div>}
-
-                        <div className={cs.chips}>
-                          {c.responsavel && <span className={cs.chip}>👤 {c.responsavel}</span>}
-                          {c.cliente_nome && <span className={cs.chip}>🏢 {c.cliente_nome}</span>}
-                          {c.processo_numero && <span className={cs.chip}>⚖️ {c.processo_numero}</span>}
-                          {c.data_limite && (
-                            <span className={`${cs.chip} ${vencido(c.data_limite) && c.status !== 'concluido' ? cs.chipVencido : cs.chipPrazo}`}>
-                              📅 {fmtData(c.data_limite)}
-                            </span>
-                          )}
-                        </div>
-
-                        <div className={cs.cardMeta}>
-                          <select className={cs.statusSelect} value={c.status}
-                            onChange={(e) => atualizar.mutate({ id: c.id, data: { status: e.target.value as StatusTarefaCard } })}>
-                            {STATUS_OPTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                          </select>
-                        </div>
-
-                        {/* Subtarefas */}
-                        <div className={cs.subtasks}>
-                          {c.subtasks.length > 0 && <div className={cs.subtaskProgress}>{done}/{c.subtasks.length} concluídas</div>}
-                          <div className={cs.subtaskList}>
-                          {c.subtasks.map((st) => (
-                            <div key={st.id} className={cs.subtaskRow}>
-                              <input type="checkbox" checked={st.concluida}
-                                onChange={(e) => toggleSubtask.mutate({ id: st.id, concluida: e.target.checked })} />
-                              {editSub?.id === st.id ? (
-                                <input autoFocus className={cs.subEditInput} value={editSub.texto}
-                                  onChange={(e) => setEditSub({ id: st.id, texto: e.target.value })}
-                                  onBlur={() => editSub.texto.trim() ? editarSubtask.mutate({ id: st.id, texto: editSub.texto.trim() }) : setEditSub(null)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter' && editSub.texto.trim()) editarSubtask.mutate({ id: st.id, texto: editSub.texto.trim() })
-                                    if (e.key === 'Escape') setEditSub(null)
-                                  }} />
-                              ) : (
-                                <span className={`${cs.subtaskText} ${st.concluida ? cs.subtaskDone : ''}`}
-                                  onDoubleClick={() => setEditSub({ id: st.id, texto: st.texto })}>{st.texto}</span>
-                              )}
-                              <SubtaskPrazo
-                                value={st.data_limite || null}
-                                max={c.data_limite || null}
-                                vencido={vencido(st.data_limite) && !st.concluida}
-                                onChange={(d) => setPrazoSub.mutate({ id: st.id, data: d })}
-                              />
-                              <button className={cs.subEdit} title="Editar" onClick={() => setEditSub({ id: st.id, texto: st.texto })}>✎</button>
-                              <button className={cs.subtaskDel} title="Excluir" onClick={() => delSubtask.mutate(st.id)}>×</button>
-                            </div>
-                          ))}
-                          </div>
-                          <input className={cs.addSubtask} placeholder="+ subtarefa (Enter)"
-                            value={novaSubtask[c.id] || ''}
-                            onChange={(e) => setNovaSubtask((s) => ({ ...s, [c.id]: e.target.value }))}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter' && novaSubtask[c.id]?.trim()) {
-                                addSubtask.mutate({ id: c.id, texto: novaSubtask[c.id].trim() })
-                                setNovaSubtask((s) => ({ ...s, [c.id]: '' }))
-                              }
-                            }} />
-                        </div>
-
-                        {podeGerenciar(c) && c.pedidos_acesso.length > 0 && (
-                          <div style={{ marginTop: 8, fontSize: 11 }}>
-                            <div style={{ color: '#92400e', marginBottom: 4 }}>Pedidos de acesso:</div>
-                            {c.pedidos_acesso.map((p) => (
-                              <div key={p.usuario_id} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
-                                <span>{p.nome}</span>
-                                <button className={cs.linkBtn} style={{ color: '#10b981' }}
-                                  onClick={() => conceder.mutate({ cardId: c.id, usuarioId: p.usuario_id })}>conceder</button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-
-                        <div className={cs.cardActions}>
-                          {c.data_limite && (
-                            c.google_event_id
-                              ? <span className={`${cs.linkBtn} ${cs.linkAgendado}`}>✓ Na agenda</span>
-                              : <button className={`${cs.linkBtn} ${cs.linkAgendar}`} disabled={agendar.isPending}
-                                  onClick={() => agendar.mutate(c.id)}>📅 Agendar</button>
-                          )}
-                          <button className={`${cs.linkBtn} ${cs.linkEditar}`} onClick={() => setEditCard(c)}>✎ Editar</button>
-                          <button className={`${cs.linkBtn} ${cs.linkExcluir}`}
-                            onClick={() => { if (confirm('Excluir card?')) deletar.mutate(c.id) }}>Excluir</button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )
-              })}
+              {g.cards.map(renderCard)}
             </div>
           </section>
         ))
@@ -458,6 +561,30 @@ export default function TarefasCardsPage() {
           saving={atualizar.isPending}
         />
       )}
+    </div>
+  )
+}
+
+// ─────────────────────────── Anexos (Google Drive) ─────────────────────────
+function AnexoUploader({ anexos, onUpload, onDelete, uploading }: {
+  anexos: { id: string; nome_arquivo: string; drive_link: string | null }[]
+  onUpload: (file: File) => void
+  onDelete: (id: string) => void
+  uploading: boolean
+}) {
+  return (
+    <div className={cs.anexos}>
+      {anexos.map((a) => (
+        <span key={a.id} className={cs.anexoChip}>
+          <a href={a.drive_link || '#'} target="_blank" rel="noreferrer" title={a.nome_arquivo}>📎 {a.nome_arquivo}</a>
+          <button className={cs.anexoDel} title="Remover" onClick={() => onDelete(a.id)}>×</button>
+        </span>
+      ))}
+      <label className={cs.anexoAdd}>
+        {uploading ? '⏳ enviando…' : '📎 anexar'}
+        <input type="file" style={{ display: 'none' }} disabled={uploading}
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) onUpload(f); e.currentTarget.value = '' }} />
+      </label>
     </div>
   )
 }
