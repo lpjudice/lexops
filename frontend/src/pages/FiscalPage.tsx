@@ -380,18 +380,20 @@ function EmissaoModal({
     staleTime: Infinity,
   })
 
-  // Contratos do cliente selecionado como sugestões de valor/descrição
+  // Contratos/processos seguem o cliente da NF (form.cliente_id) — que é setado
+  // tanto ao escolher o tomador quanto em NF pré-preenchida (honorário) ou pagante
+  // com cliente vinculado. Antes dependia de clienteSelecionado, que ficava nulo
+  // nesses fluxos e escondia os contratos.
   const { data: contratos = [] } = useQuery({
-    queryKey: ['contratos-cliente', clienteSelecionado?.id],
-    queryFn: () => contratosApi.listar({ cliente_id: clienteSelecionado!.id }),
-    enabled: !!clienteSelecionado,
+    queryKey: ['contratos-cliente', form.cliente_id],
+    queryFn: () => contratosApi.listar({ cliente_id: form.cliente_id! }),
+    enabled: !!form.cliente_id,
   })
 
-  // Processos do cliente selecionado (para vincular)
   const { data: processos = [] } = useQuery({
-    queryKey: ['processos-cliente', clienteSelecionado?.id],
-    queryFn: () => processosApi.listar({ cliente_id: clienteSelecionado!.id }),
-    enabled: !!clienteSelecionado,
+    queryKey: ['processos-cliente', form.cliente_id],
+    queryFn: () => processosApi.listar({ cliente_id: form.cliente_id! }),
+    enabled: !!form.cliente_id,
   })
 
   const qc = useQueryClient()
@@ -798,7 +800,7 @@ function EmissaoModal({
           )}
 
           {/* ── Vínculos (processo / contrato) ──────────────────────── */}
-          {clienteSelecionado && (processos.length > 0 || contratos.length > 0) && (
+          {form.cliente_id && (processos.length > 0 || contratos.length > 0) && (
             <>
               {processos.length > 0 && (
                 <div>
