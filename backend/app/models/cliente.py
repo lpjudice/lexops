@@ -1,7 +1,7 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, String, Text, func
+from sqlalchemy import Boolean, Date, DateTime, Enum, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -21,8 +21,42 @@ class Cliente(Base):
     cpf_cnpj: Mapped[str | None] = mapped_column(String(18), unique=True)
     email: Mapped[str | None] = mapped_column(String(255))
     telefone: Mapped[str | None] = mapped_column(String(30))
+    # Contato adicional (WhatsApp), comum a PF e PJ.
+    whatsapp: Mapped[str | None] = mapped_column(String(30))
     endereco: Mapped[str | None] = mapped_column(Text)
     observacoes: Mapped[str | None] = mapped_column(Text)
+
+    # ── Endereço estruturado (auto-preenchível por CEP via ViaCEP) ──────────────
+    # Mantemos `endereco` (texto único) por compatibilidade; estes são os campos
+    # canônicos do autocadastro.
+    cep: Mapped[str | None] = mapped_column(String(9))
+    logradouro: Mapped[str | None] = mapped_column(String(255))
+    numero: Mapped[str | None] = mapped_column(String(20))
+    complemento: Mapped[str | None] = mapped_column(String(120))
+    bairro: Mapped[str | None] = mapped_column(String(120))
+    cidade: Mapped[str | None] = mapped_column(String(120))
+    uf: Mapped[str | None] = mapped_column(String(2))
+
+    # ── Campos Pessoa Física ────────────────────────────────────────────────────
+    data_nascimento: Mapped[date | None] = mapped_column(Date)
+    rg: Mapped[str | None] = mapped_column(String(30))
+    estado_civil: Mapped[str | None] = mapped_column(String(40))
+    profissao: Mapped[str | None] = mapped_column(String(150))
+    # Empresas vinculadas ao CPF (texto livre, uma por linha).
+    empresas_vinculadas: Mapped[str | None] = mapped_column(Text)
+
+    # ── Campos Pessoa Jurídica ──────────────────────────────────────────────────
+    # `nome` guarda a razão social; nome_fantasia é o nome comercial.
+    nome_fantasia: Mapped[str | None] = mapped_column(String(255))
+    responsavel_nome: Mapped[str | None] = mapped_column(String(255))
+    responsavel_cpf: Mapped[str | None] = mapped_column(String(18))
+    responsavel_email: Mapped[str | None] = mapped_column(String(255))
+    responsavel_telefone: Mapped[str | None] = mapped_column(String(30))
+
+    # Origem do cadastro: 'manual' (padrão) ou 'autocadastro' (formulário público).
+    origem_cadastro: Mapped[str | None] = mapped_column(
+        String(30), default="manual", server_default="manual"
+    )
     incompleto: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     projeto_nome: Mapped[str | None] = mapped_column(String(500), nullable=True)
     worktree_nome: Mapped[str | None] = mapped_column(String(255), nullable=True)

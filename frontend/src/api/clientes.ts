@@ -1,6 +1,31 @@
 import api from './client'
 
-export interface Cliente {
+/** Campos cadastrais estendidos (PF + PJ), preenchíveis no autocadastro. */
+export interface ClienteCadastroFields {
+  whatsapp?: string
+  // Endereço estruturado
+  cep?: string
+  logradouro?: string
+  numero?: string
+  complemento?: string
+  bairro?: string
+  cidade?: string
+  uf?: string
+  // Pessoa Física
+  data_nascimento?: string | null
+  rg?: string
+  estado_civil?: string
+  profissao?: string
+  empresas_vinculadas?: string
+  // Pessoa Jurídica
+  nome_fantasia?: string
+  responsavel_nome?: string
+  responsavel_cpf?: string
+  responsavel_email?: string
+  responsavel_telefone?: string
+}
+
+export interface Cliente extends ClienteCadastroFields {
   id: string
   nome: string
   tipo: 'PF' | 'PJ'
@@ -11,13 +36,14 @@ export interface Cliente {
   observacoes?: string
   incompleto?: boolean
   monitorar_diario?: boolean
+  origem_cadastro?: string
   projeto_nome?: string
   worktree_nome?: string
   created_at: string
   updated_at: string
 }
 
-export interface ClienteCreate {
+export interface ClienteCreate extends ClienteCadastroFields {
   nome: string
   tipo: 'PF' | 'PJ'
   cpf_cnpj?: string
@@ -113,4 +139,26 @@ export const clientesApi = {
       `/clientes/${clienteId}/emails/${emailId}/privacidade`,
       { privado },
     ).then(r => r.data),
+}
+
+// ── Links de autocadastro (Fase 2) ────────────────────────────────────────────
+
+export interface CadastroLink {
+  id: string
+  token: string
+  cliente_id: string | null
+  rotulo?: string
+  reutilizavel: boolean
+  expira_em: string | null
+  revogado: boolean
+  usos: number
+  caminho: string
+  created_at: string | null
+}
+
+export const cadastroLinksApi = {
+  listar: () => api.get<CadastroLink[]>('/cadastro-links').then((r) => r.data),
+  criar: (data: { cliente_id?: string | null; rotulo?: string; expira_em_dias?: number | null }) =>
+    api.post<CadastroLink>('/cadastro-links', data).then((r) => r.data),
+  revogar: (id: string) => api.post(`/cadastro-links/${id}/revogar`),
 }
