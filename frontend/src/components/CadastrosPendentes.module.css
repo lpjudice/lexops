@@ -206,3 +206,20 @@
   .thead, .linha { grid-template-columns: 28px 1fr 1fr; }
   .thead span:nth-child(3), .linha .atual { display: none; }
 }
+
+/* ── Form editável de revisão ─────────────────────────────────────────────── */
+.tipoRow { display: flex; gap: 8px; margin: 8px 0 14px; }
+.tipoBtn, .tipoAtivo {
+  flex: 1; padding: 10px; border-radius: 9px; border: 1px solid #cbd5e1;
+  background: #fff; color: #475569; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.tipoAtivo { border-color: #0f766e; background: #0f766e; color: #fff; }
+
+.campoLinha { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.campoLabel { font-size: 12px; font-weight: 600; color: #64748b; }
+.campoInput {
+  width: 100%; box-sizing: border-box; padding: 9px 11px;
+  border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px; color: #0f172a;
+  font-family: inherit; background: #fff;
+}
+.campoInput:focus { outline: none; border-color: #0f766e; box-shadow: 0 0 0 3px rgba(15,118,110,0.12); }

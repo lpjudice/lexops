@@ -98,6 +98,7 @@ def obter_submissao(sub_id: uuid.UUID, db: Session = Depends(get_db)):
     return {
         **_sub_resumo(sub, db),
         "tipo": sub.tipo,
+        "dados": dados,   # valores crus enviados (pré-preenchem o form editável)
         "diff": diff,
         "anexos": [{"filename": a.get("filename"), "mime": a.get("mime")} for a in (sub.anexos or [])],
         "consentimento_texto": sub.consentimento_texto,
@@ -106,8 +107,13 @@ def obter_submissao(sub_id: uuid.UUID, db: Session = Depends(get_db)):
 
 
 class AprovarPayload(BaseModel):
-    # Campos a aplicar. None/omitido = aplicar todos os enviados.
-    campos: list[str] | None = None
+    # Valores finais (já editados pelo revisor). None = usa os enviados na submissão.
+    dados: dict | None = None
+    # PF/PJ escolhido no momento da aprovação. None = tipo da submissão.
+    tipo: str | None = None
+    # Destino: criar cliente novo, ou atualizar um cliente específico.
+    criar_novo: bool = False
+    cliente_id_alvo: uuid.UUID | None = None
 
 
 def _aplicar_valor(cliente: Cliente, campo: str, valor):
@@ -153,31 +159,43 @@ def aprovar_submissao(
     if sub.status != "pendente":
         raise HTTPException(409, f"Submissão já {sub.status}")
 
-    dados = sub.dados or {}
-    campos_validos = _campos_do_tipo(sub.tipo)
-    # Aplica só campos válidos, não vazios, e (se especificado) escolhidos.
-    escolhidos = set(payload.campos) if payload.campos is not None else None
+    # Tipo final (o revisor pode corrigir PF↔PJ).
+    tipo = (payload.tipo or sub.tipo or "").upper()
+    if tipo not in ("PF", "PJ"):
+        raise HTTPException(400, "Tipo inválido")
+
+    # Valores finais: os editados pelo revisor, ou os enviados na submissão.
+    dados = payload.dados if payload.dados is not None else (sub.dados or {})
+    campos_validos = _campos_do_tipo(tipo)
     aplicaveis = {
         k: v for k, v in dados.items()
         if k in campos_validos and v not in (None, "")
-        and (escolhidos is None or k in escolhidos)
     }
 
-    if sub.cliente_id_alvo:
-        cliente = db.query(Cliente).filter(Cliente.id == sub.cliente_id_alvo).first()
+    # Destino: novo cliente, cliente escolhido, ou (default) o alvo da submissão.
+    if payload.criar_novo:
+        alvo_id = None
+    elif payload.cliente_id_alvo is not None:
+        alvo_id = payload.cliente_id_alvo
+    else:
+        alvo_id = sub.cliente_id_alvo
+
+    if alvo_id:
+        cliente = db.query(Cliente).filter(Cliente.id == alvo_id).first()
         if not cliente:
             raise HTTPException(404, "Cliente-alvo não existe mais")
+        cliente.tipo = tipo  # corrige/garante PF↔PJ (evita dados misturados)
         for campo, valor in aplicaveis.items():
             _aplicar_valor(cliente, campo, valor)
         criado = False
     else:
-        nome = aplicaveis.get("nome") or dados.get("nome")
+        nome = aplicaveis.get("nome") or (dados.get("nome") if isinstance(dados, dict) else None)
         if not nome:
-            raise HTTPException(400, "Submissão sem nome — não é possível criar cliente")
+            raise HTTPException(400, "Sem nome — não é possível criar cliente")
         from app.routers.clientes import _gerar_projeto
         projeto_nome, worktree_nome = _gerar_projeto(nome)
         cliente = Cliente(
-            nome=nome, tipo=sub.tipo, origem_cadastro="autocadastro",
+            nome=nome, tipo=tipo, origem_cadastro="autocadastro",
             projeto_nome=projeto_nome, worktree_nome=worktree_nome,
         )
         for campo, valor in aplicaveis.items():
