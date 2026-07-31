@@ -404,6 +404,32 @@ def listar_documentos(processo_id: uuid.UUID, db: Session = Depends(get_db)):
     return [*drive_docs, *[doc for doc in local_docs if doc["filename"] not in nomes_drive]]
 
 
+@router.get("/{processo_id}/pasta-drive")
+def pasta_drive(processo_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Link da pasta deste processo no Google Drive ({cliente}/{numero_cnj}),
+    onde ficam os andamentos e documentos. Cria a pasta se ainda não existir."""
+    processo = db.query(Processo).filter(Processo.id == processo_id).first()
+    if not processo:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+
+    drive_link = None
+    try:
+        from app.models.cliente import Cliente
+        from app.services.google_drive import get_folder_link
+        cliente = db.query(Cliente).filter(Cliente.id == processo.cliente_id).first()
+        if cliente and processo.numero_cnj:
+            drive_link = get_folder_link(cliente.nome, processo.numero_cnj)
+    except Exception:
+        drive_link = None
+
+    if not drive_link:
+        raise HTTPException(
+            status_code=404,
+            detail="Pasta do Drive indisponível (Google Drive não conectado ou processo sem cliente/CNJ).",
+        )
+    return {"drive_link": drive_link}
+
+
 @router.delete("/{processo_id}/documentos/{filename}")
 def remover_documento(
     processo_id: uuid.UUID, filename: str, db: Session = Depends(get_db)

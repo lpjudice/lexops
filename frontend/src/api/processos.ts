@@ -146,6 +146,8 @@ export const processosApi = {
     api.get<Documento[]>(`/processos/${id}/documentos`).then((r) => r.data),
   removerDocumento: (id: string, filename: string) =>
     api.delete(`/processos/${id}/documentos/${filename}`),
+  pastaDrive: (id: string) =>
+    api.get<{ drive_link: string }>(`/processos/${id}/pasta-drive`).then((r) => r.data),
 
   chat: (id: string, pergunta: string, historico: ChatMessage[], modelo: string) =>
     api.post<{ resposta: string }>(`/processos/${id}/chat`, { pergunta, historico, modelo }).then((r) => r.data),

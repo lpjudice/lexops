@@ -74,6 +74,22 @@
 .btnLer:hover:not(:disabled) { background: #dbeafe; }
 .btnLer:disabled { opacity: 0.5; cursor: default; }
 
+.btnDrive {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 1px solid #bbf7d0;
+  background: #f0fdf4;
+  color: #047857;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: all 0.12s;
+}
+.btnDrive:hover:not(:disabled) { background: #dcfce7; border-color: #86efac; }
+.btnDrive:disabled { opacity: 0.6; cursor: default; }
+
 .semSupporte {
   font-size: 11px;
   color: #9ca3af;
