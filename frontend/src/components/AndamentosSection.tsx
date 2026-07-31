@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 import { andamentosApi } from '../api/andamentos'
+import { processosApi } from '../api/processos'
 import type { Andamento, JusbrSessionStatus, JusbrSyncJobStatus, SincronizacaoResult } from '../api/andamentos'
 import InstrucoesJusBRModal from './InstrucoesJusBRModal'
 import ConectarGovBrModal from './ConectarGovBrModal'
@@ -108,7 +109,25 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
   const [jusbrJobId, setJusbrJobId] = useState<string | null>(null)
   const [jusbrJobResult, setJusbrJobResult] = useState<SincronizacaoResult | null>(null)
   const [jusbrJobError, setJusbrJobError] = useState<string | null>(null)
+  const [abrindoPasta, setAbrindoPasta] = useState(false)
   const PAGE = 10
+
+  // Abre a pasta deste processo no Drive. Abre a aba na hora (evita bloqueio de
+  // pop-up) e só depois redireciona para o link resolvido pelo backend.
+  const abrirPastaDrive = async () => {
+    setAbrindoPasta(true)
+    const win = window.open('', '_blank')
+    try {
+      const { drive_link } = await processosApi.pastaDrive(processoId)
+      if (win) win.location.href = drive_link
+      else window.open(drive_link, '_blank', 'noopener')
+    } catch {
+      if (win) win.close()
+      alert('Pasta do Drive indisponível para este processo (Google Drive não conectado ou processo sem cliente/CNJ).')
+    } finally {
+      setAbrindoPasta(false)
+    }
+  }
 
   const fonteParam = fonte === 'datajud' ? 'datajud' : 'jusbr'
 
@@ -293,6 +312,15 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
               Marcar lidos
             </button>
           )}
+
+          <button
+            className={styles.btnDrive}
+            onClick={abrirPastaDrive}
+            disabled={abrindoPasta}
+            title="Abrir a pasta deste processo no Google Drive (andamentos e documentos)"
+          >
+            {abrindoPasta ? '⏳' : '📁'} Pasta no Drive
+          </button>
 
           {/* Sync / token button */}
           {fonte === 'jusbr' && jusbrAtivo && (
