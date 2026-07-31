@@ -106,7 +106,10 @@ def revogar_link(link_id: uuid.UUID, db: Session = Depends(get_db)):
 # ── Envio do link de convite por e-mail / Telegram (Fase 4) ───────────────────
 
 def _base_url(request: Request) -> str:
-    """Host pelo qual o painel foi acessado (ex.: cadastro.pimentajudice.com.br)."""
+    """Base pública dos links. Usa CADASTRO_BASE_URL se configurado (domínio
+    customizado); senão o host pelo qual o painel foi acessado."""
+    if settings.cadastro_base_url.strip():
+        return settings.cadastro_base_url.strip().rstrip("/")
     return str(request.base_url).rstrip("/")
 
 

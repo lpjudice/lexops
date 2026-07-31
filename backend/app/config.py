@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     # Email ou UUID do usuário LexOps que será `criado_por` nas tarefas criadas pelo bot.
     telegram_tarefas_default_user: str = ""
 
+    # Base pública dos links de autocadastro (ex.: https://cadastro.pimentajudice.com.br).
+    # Vazio = usa o host pelo qual o painel foi acessado. Setar SÓ depois do DNS/cert prontos.
+    cadastro_base_url: str = ""
+
     # NFS-e Nacional — e-CNPJ A1 (mTLS)
     nfse_cert_path: str = ""       # caminho local do .pfx (dev)
     nfse_cert_password: str = ""   # senha do .pfx

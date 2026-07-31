@@ -212,8 +212,10 @@ def _build_cadastro_html(cadastro_url: str, nome: str | None, is_update: bool) -
               </a>
             </td></tr>
           </table>
-          <p style="margin:0 0 6px;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#555;">Ou copie este link</p>
-          <p style="margin:0;font-size:11px;color:#555;word-break:break-all;line-height:1.6;background:#141414;padding:10px 12px;border-radius:8px;border:1px solid #2a2a2a;font-family:'Courier New',monospace;">{cadastro_url}</p>
+          <p style="margin:0 0 6px;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#8a8a8a;">Ou copie este link</p>
+          <p style="margin:0;font-size:12px;word-break:break-all;line-height:1.6;background:#141414;padding:10px 12px;border-radius:8px;border:1px solid #2a2a2a;font-family:'Courier New',monospace;">
+            <a href="{cadastro_url}" style="color:#5eead4;text-decoration:underline;">{cadastro_url}</a>
+          </p>
         </td></tr>
         <tr><td style="padding:20px 32px 28px;border-top:1px solid #2a2a2a;">
           <p style="margin:0;font-size:11px;color:#444;line-height:1.6;text-align:center;">
