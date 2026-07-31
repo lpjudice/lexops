@@ -1,8 +1,14 @@
 .wrap {
-  min-height: 100vh;
+  /* O #root global é height:100dvh; overflow:hidden — então ESटA página precisa
+     ser o proprio container de scroll, senao o conteudo e cortado e o botao de
+     enviar fica inalcancavel no celular. */
+  height: 100dvh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   background: #f1f5f9;
   display: flex;
   justify-content: center;
+  align-items: flex-start;
   padding: 24px 16px 64px;
   box-sizing: border-box;
 }

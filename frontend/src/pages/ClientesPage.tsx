@@ -22,20 +22,28 @@ export default function ClientesPage() {
   const [linkMsg, setLinkMsg] = useState<string | null>(null)
   const [gerandoLink, setGerandoLink] = useState(false)
 
-  async function gerarLink(clienteId?: string, rotulo?: string) {
+  async function copiarUrl(url: string) {
+    try {
+      await navigator.clipboard.writeText(url)
+      setLinkMsg(`Link copiado: ${url}`)
+    } catch {
+      setLinkMsg(`Link: ${url}`)
+    }
+  }
+
+  // Link genérico de captação: URL fixa e curta, sem token nem chamada de API.
+  function linkGenerico() {
+    setLinkMsg(null)
+    copiarUrl(`${window.location.origin}/cadastro`)
+  }
+
+  // Convite por cliente: cria um link com token (curto) atrelado ao cliente.
+  async function gerarLinkConvite(clienteId: string, rotulo?: string) {
     setGerandoLink(true)
     setLinkMsg(null)
     try {
-      const link = await cadastroLinksApi.criar(
-        clienteId ? { cliente_id: clienteId, rotulo } : {},
-      )
-      const url = `${window.location.origin}${link.caminho}`
-      try {
-        await navigator.clipboard.writeText(url)
-        setLinkMsg(`Link copiado: ${url}`)
-      } catch {
-        setLinkMsg(`Link gerado: ${url}`)
-      }
+      const link = await cadastroLinksApi.criar({ cliente_id: clienteId, rotulo })
+      await copiarUrl(`${window.location.origin}${link.caminho}`)
     } catch {
       setLinkMsg('Erro ao gerar o link.')
     } finally {
@@ -95,9 +103,9 @@ export default function ClientesPage() {
       <div className={styles.pageHeader}>
         <h1 className={styles.pageTitle}>Clientes</h1>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className={styles.btnTable} disabled={gerandoLink}
-            title="Cria um link público de autocadastro para captação de cliente novo"
-            onClick={() => gerarLink()}>
+          <button className={styles.btnTable}
+            title="Copia o link público de autocadastro (captação de cliente novo)"
+            onClick={() => linkGenerico()}>
             🔗 Link de cadastro
           </button>
           <button className={styles.btnPrimary} onClick={() => setShowForm(!showForm)}>
@@ -178,7 +186,7 @@ export default function ClientesPage() {
                   </button>
                   <button className={styles.btnTable} disabled={gerandoLink}
                     title="Gera um link para o cliente atualizar os próprios dados"
-                    onClick={() => gerarLink(c.id, c.nome)}>
+                    onClick={() => gerarLinkConvite(c.id, c.nome)}>
                     🔗 Link
                   </button>
                   <Link to={`/clientes/${c.id}`} className={styles.btnTable}>Ver</Link>

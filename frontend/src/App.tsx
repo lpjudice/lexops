@@ -50,6 +50,7 @@ function AppRoutes() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/aceitar-convite/:token" element={<AceitarConvitePage />} />
       <Route path="/p/reforma/:token" element={<ReformaPublicaPage />} />
+      <Route path="/cadastro" element={<CadastroPublicoPage />} />
       <Route path="/cadastro/:token" element={<CadastroPublicoPage />} />
       <Route
         path="/"
