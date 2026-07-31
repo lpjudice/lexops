@@ -99,4 +99,12 @@ export const patrimonioApi = {
     form.append('file', file)
     return api.post<CadeiaElo>(`/patrimonio/${bemId}/cadeia/${eloId}/anexo`, form).then((r) => r.data)
   },
+
+  exportXls: (clienteId: string) =>
+    api.get(`/patrimonio/export/xls`, { params: { cliente_id: clienteId }, responseType: 'blob' })
+      .then((r) => r.data as Blob),
+
+  exportPdf: (clienteId: string) =>
+    api.get(`/patrimonio/export/pdf`, { params: { cliente_id: clienteId }, responseType: 'blob' })
+      .then((r) => r.data as Blob),
 }

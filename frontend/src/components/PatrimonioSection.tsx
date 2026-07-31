@@ -44,6 +44,16 @@ function fmtDate(d?: string | null) {
 function norm(x?: string | null) {
   return (x || '').trim().toLowerCase().replace(/\s+/g, ' ')
 }
+function baixarBlob(blob: Blob, nome: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = nome
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
 
 // ── Form de bem (criar/editar) ───────────────────────────────────────────────
 type FormState = Omit<BemCreate, 'cliente_id' | 'nome'> & { nome: string }
@@ -543,6 +553,21 @@ export default function PatrimonioSection({ clienteId }: { clienteId: string }) 
   const totalMercado = bens.reduce((sum, b) => sum + (b.valor_mercado ?? 0), 0)
   const totalHolding = bens.filter((b) => b.integralizar_holding).length
 
+  const [exportando, setExportando] = useState<'xls' | 'pdf' | null>(null)
+  const exportar = async (fmt: 'xls' | 'pdf') => {
+    setExportando(fmt)
+    try {
+      const blob = fmt === 'xls'
+        ? await patrimonioApi.exportXls(clienteId)
+        : await patrimonioApi.exportPdf(clienteId)
+      baixarBlob(blob, `Patrimonio.${fmt === 'xls' ? 'xlsx' : 'pdf'}`)
+    } catch {
+      alert('Não foi possível gerar o arquivo. Tente novamente.')
+    } finally {
+      setExportando(null)
+    }
+  }
+
   return (
     <div className={s.wrap}>
       {bens.length > 0 && (
@@ -589,6 +614,18 @@ export default function PatrimonioSection({ clienteId }: { clienteId: string }) 
       ) : (
         <div className={s.list}>
           {bens.map((b) => <BemCard key={b.id} bem={b} />)}
+        </div>
+      )}
+
+      {bens.length > 0 && (
+        <div className={s.exportBar}>
+          <span className={s.exportLabel}>Exportar inventário</span>
+          <button className={s.exportBtn} disabled={exportando !== null} onClick={() => exportar('xls')}>
+            {exportando === 'xls' ? '⏳ Gerando...' : '⬇ Excel (XLS)'}
+          </button>
+          <button className={`${s.exportBtn} ${s.exportPdf}`} disabled={exportando !== null} onClick={() => exportar('pdf')}>
+            {exportando === 'pdf' ? '⏳ Gerando...' : '📄 PDF'}
+          </button>
         </div>
       )}
     </div>

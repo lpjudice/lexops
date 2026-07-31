@@ -2,7 +2,7 @@ import re
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -75,6 +75,45 @@ def listar_bens(
         .filter(PatrimonioBem.cliente_id == cliente_id)
         .order_by(PatrimonioBem.created_at.desc())
         .all()
+    )
+
+
+def _bens_do_cliente(cliente_id: uuid.UUID, db: Session) -> tuple[str, list[PatrimonioBem]]:
+    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+    bens = (
+        db.query(PatrimonioBem)
+        .filter(PatrimonioBem.cliente_id == cliente_id)
+        .order_by(PatrimonioBem.created_at.desc())
+        .all()
+    )
+    return cliente.nome, bens
+
+
+@router.get("/export/xls")
+def exportar_xls(cliente_id: uuid.UUID = Query(...), db: Session = Depends(get_db)):
+    from app.services.patrimonio_export import gerar_xls
+    nome, bens = _bens_do_cliente(cliente_id, db)
+    conteudo = gerar_xls(nome, bens)
+    fname = f"Patrimonio - {_safe(nome)}.xlsx"
+    return Response(
+        content=conteudo,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+@router.get("/export/pdf")
+def exportar_pdf(cliente_id: uuid.UUID = Query(...), db: Session = Depends(get_db)):
+    from app.services.patrimonio_export import gerar_pdf
+    nome, bens = _bens_do_cliente(cliente_id, db)
+    conteudo = gerar_pdf(nome, bens)
+    fname = f"Patrimonio - {_safe(nome)}.pdf"
+    return Response(
+        content=conteudo,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
 
 
