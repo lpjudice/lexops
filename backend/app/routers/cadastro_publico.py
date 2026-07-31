@@ -44,7 +44,7 @@ def _so_digitos(v: str | None) -> str:
 
 
 def _link_por_token(db: Session, token: str) -> ClienteCadastroLink:
-    if not token or len(token) < 16:
+    if not token or len(token) < 8:
         raise HTTPException(404, "Link inválido")
     link = db.query(ClienteCadastroLink).filter(ClienteCadastroLink.token == token).first()
     if not link or link.revogado:
@@ -54,23 +54,17 @@ def _link_por_token(db: Session, token: str) -> ClienteCadastroLink:
     return link
 
 
-@router.get("/cadastro/{token}")
-def obter_formulario(token: str, db: Session = Depends(get_db)):
-    """Valida o link e devolve o contexto do formulário.
-
-    Para convite de atualização (link atrelado a cliente), pré-preenche com os
-    dados atuais — o token é secreto e foi enviado àquele cliente específico.
-    """
-    link = _link_por_token(db, token)
+def _contexto_form(db: Session, link: ClienteCadastroLink | None) -> dict:
+    """Contexto do formulário. link=None => link genérico (captação de novo)."""
     resp: dict = {
         "ok": True,
-        "is_update": link.cliente_id is not None,
-        "rotulo": link.rotulo,
+        "is_update": bool(link and link.cliente_id),
+        "rotulo": link.rotulo if link else None,
         "consentimento_texto": CONSENTIMENTO_TEXTO,
         "tipo_sugerido": None,
         "prefill": {},
     }
-    if link.cliente_id:
+    if link and link.cliente_id:
         cli = db.query(Cliente).filter(Cliente.id == link.cliente_id).first()
         if cli:
             resp["tipo_sugerido"] = cli.tipo
@@ -84,16 +78,25 @@ def obter_formulario(token: str, db: Session = Depends(get_db)):
     return resp
 
 
-@router.post("/cadastro/{token}", status_code=201)
-async def submeter_formulario(
-    token: str,
-    request: Request,
-    payload: str = Form(...),
-    files: list[UploadFile] = File(default=[]),
-    db: Session = Depends(get_db),
-):
-    link = _link_por_token(db, token)
+@router.get("/cadastro")
+def obter_formulario_generico(db: Session = Depends(get_db)):
+    """Link genérico de captação (sem token) — sempre cadastro novo."""
+    return _contexto_form(db, None)
 
+
+@router.get("/cadastro/{token}")
+def obter_formulario(token: str, db: Session = Depends(get_db)):
+    """Convite atrelado a um cliente (token secreto) — pré-preenche os dados atuais."""
+    return _contexto_form(db, _link_por_token(db, token))
+
+
+async def _processar_submissao(
+    link: ClienteCadastroLink | None,
+    request: Request,
+    payload: str,
+    files: list[UploadFile],
+    db: Session,
+) -> dict:
     try:
         raw = json.loads(payload)
     except (json.JSONDecodeError, TypeError):
@@ -113,7 +116,7 @@ async def submeter_formulario(
     dados = {k: v for k, v in raw.items() if k in permitidos and v not in (None, "")}
 
     # Alvo: convite atrelado a cliente, senão casa por CPF/CNPJ. Nulo = cadastro novo.
-    cliente_id_alvo = link.cliente_id
+    cliente_id_alvo = link.cliente_id if link else None
     if cliente_id_alvo is None:
         doc = _so_digitos(dados.get("cpf_cnpj"))
         if doc:
@@ -142,7 +145,7 @@ async def submeter_formulario(
 
     sub = ClienteCadastroSubmissao(
         id=sub_id,
-        link_id=link.id,
+        link_id=link.id if link else None,
         cliente_id_alvo=cliente_id_alvo,
         tipo=tipo,
         dados=dados,
@@ -155,6 +158,29 @@ async def submeter_formulario(
         status="pendente",
     )
     db.add(sub)
-    link.usos = (link.usos or 0) + 1
+    if link:
+        link.usos = (link.usos or 0) + 1
     db.commit()
     return {"ok": True, "is_update": cliente_id_alvo is not None}
+
+
+@router.post("/cadastro", status_code=201)
+async def submeter_generico(
+    request: Request,
+    payload: str = Form(...),
+    files: list[UploadFile] = File(default=[]),
+    db: Session = Depends(get_db),
+):
+    return await _processar_submissao(None, request, payload, files, db)
+
+
+@router.post("/cadastro/{token}", status_code=201)
+async def submeter_formulario(
+    token: str,
+    request: Request,
+    payload: str = Form(...),
+    files: list[UploadFile] = File(default=[]),
+    db: Session = Depends(get_db),
+):
+    link = _link_por_token(db, token)
+    return await _processar_submissao(link, request, payload, files, db)

@@ -79,7 +79,8 @@ def criar_link(
         expira_em = datetime.now(timezone.utc) + timedelta(days=data.expira_em_dias)
 
     link = ClienteCadastroLink(
-        token=secrets.token_urlsafe(32),
+        # Token curto (~12 chars, ~72 bits) — link enxuto mas imprevisível.
+        token=secrets.token_urlsafe(9),
         cliente_id=cliente_id,
         rotulo=data.rotulo,
         reutilizavel=reutilizavel,

@@ -62,9 +62,12 @@ export default function CadastroPublicoPage() {
   const [erroEnvio, setErroEnvio] = useState<string>('')
   const [ehUpdate, setEhUpdate] = useState(false)
 
+  // Sem token => link genérico de captação (/cadastro); com token => convite.
+  const apiBase = token ? `/api/publico/cadastro/${token}` : '/api/publico/cadastro'
+
   useEffect(() => {
     let ativo = true
-    fetch(`/api/publico/cadastro/${token}`)
+    fetch(apiBase)
       .then(async (r) => {
         if (!r.ok) {
           const msg = r.status === 410 ? 'Este link expirou.' : 'Link inválido ou revogado.'
@@ -88,7 +91,7 @@ export default function CadastroPublicoPage() {
         setEstado('invalido')
       })
     return () => { ativo = false }
-  }, [token])
+  }, [apiBase])
 
   const isPF = form.tipo === 'PF'
   const set = (patch: Partial<FormState>) => setForm((f) => ({ ...f, ...patch }))
@@ -121,7 +124,7 @@ export default function CadastroPublicoPage() {
     fd.append('payload', JSON.stringify(payload))
     files.forEach((f) => fd.append('files', f))
     try {
-      const r = await fetch(`/api/publico/cadastro/${token}`, { method: 'POST', body: fd })
+      const r = await fetch(apiBase, { method: 'POST', body: fd })
       if (!r.ok) {
         const body = await r.json().catch(() => ({}))
         throw new Error(body?.detail || 'Não foi possível enviar. Tente novamente.')
