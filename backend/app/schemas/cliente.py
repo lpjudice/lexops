@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, field_validator
@@ -12,7 +12,42 @@ def _blank_to_none(v: str | None) -> str | None:
     return v
 
 
-class ClienteBase(BaseModel):
+_CADASTRO_STR_FIELDS = (
+    "cpf_cnpj", "email", "telefone", "whatsapp", "endereco", "observacoes",
+    "cep", "logradouro", "numero", "complemento", "bairro", "cidade", "uf",
+    "rg", "estado_civil", "profissao", "empresas_vinculadas",
+    "nome_fantasia", "responsavel_nome", "responsavel_cpf",
+    "responsavel_email", "responsavel_telefone",
+)
+
+
+class _CadastroFields(BaseModel):
+    """Campos cadastrais estendidos, compartilhados por Base/Update/Out."""
+
+    whatsapp: str | None = None
+    # Endereço estruturado
+    cep: str | None = None
+    logradouro: str | None = None
+    numero: str | None = None
+    complemento: str | None = None
+    bairro: str | None = None
+    cidade: str | None = None
+    uf: str | None = None
+    # Pessoa Física
+    data_nascimento: date | None = None
+    rg: str | None = None
+    estado_civil: str | None = None
+    profissao: str | None = None
+    empresas_vinculadas: str | None = None
+    # Pessoa Jurídica
+    nome_fantasia: str | None = None
+    responsavel_nome: str | None = None
+    responsavel_cpf: str | None = None
+    responsavel_email: str | None = None
+    responsavel_telefone: str | None = None
+
+
+class ClienteBase(_CadastroFields):
     nome: str
     tipo: Literal["PF", "PJ"]
     cpf_cnpj: str | None = None
@@ -24,7 +59,7 @@ class ClienteBase(BaseModel):
     # Opt-in: quando True, o nome deste cliente entra na busca automática do Diário Oficial.
     monitorar_diario: bool = False
 
-    @field_validator("cpf_cnpj", "email", "telefone", "endereco", "observacoes", mode="before")
+    @field_validator(*_CADASTRO_STR_FIELDS, mode="before")
     @classmethod
     def blank_to_none(cls, v: str | None) -> str | None:
         return _blank_to_none(v)
@@ -34,7 +69,7 @@ class ClienteCreate(ClienteBase):
     pass
 
 
-class ClienteUpdate(BaseModel):
+class ClienteUpdate(_CadastroFields):
     nome: str | None = None
     tipo: Literal["PF", "PJ"] | None = None
     cpf_cnpj: str | None = None
@@ -44,9 +79,15 @@ class ClienteUpdate(BaseModel):
     observacoes: str | None = None
     monitorar_diario: bool | None = None
 
+    @field_validator(*_CADASTRO_STR_FIELDS, mode="before")
+    @classmethod
+    def blank_to_none(cls, v: str | None) -> str | None:
+        return _blank_to_none(v)
+
 
 class ClienteOut(ClienteBase):
     id: uuid.UUID
+    origem_cadastro: str | None = None
     projeto_nome: str | None = None
     worktree_nome: str | None = None
     created_at: datetime

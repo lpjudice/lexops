@@ -27,6 +27,7 @@ import FiscalPage from './pages/FiscalPage'
 import ConfigFiscalPage from './pages/ConfigFiscalPage'
 import VisaoFiscalPage from './pages/VisaoFiscalPage'
 import ReformaPublicaPage from './pages/ReformaPublicaPage'
+import CadastroPublicoPage from './pages/CadastroPublicoPage'
 import BackofficeDecisaoPage from './pages/BackofficeDecisaoPage'
 import DespesasPage from './pages/DespesasPage'
 import PrecedentCheckPage from './pages/PrecedentCheckPage'
@@ -49,6 +50,7 @@ function AppRoutes() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/aceitar-convite/:token" element={<AceitarConvitePage />} />
       <Route path="/p/reforma/:token" element={<ReformaPublicaPage />} />
+      <Route path="/cadastro/:token" element={<CadastroPublicoPage />} />
       <Route
         path="/"
         element={

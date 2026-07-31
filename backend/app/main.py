@@ -23,8 +23,10 @@ from app.models import tarefa_card as _tarefa_card_model  # noqa: F401 — ensur
 from app.models import memoria_estrategica as _memoria_estrategica_model  # noqa: F401 — ensures MemoriaEstrategica table is registered
 from app.models import responsavel as _responsavel_model  # noqa: F401 — ensures Responsavel table is registered
 from app.models import patrimonio as _patrimonio_model  # noqa: F401 — ensures Patrimonio tables are registered
+from app.models import cadastro_link as _cadastro_link_model  # noqa: F401 — ensures ClienteCadastroLink/Submissao tables are registered
 from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, fiscal, pagantes, config_fiscal, jurisprudencia, organizador, pje, prazos, processos, publico, reembolsos, reunioes, system, tarefas, telegram, telegram_andamentos, telegram_tasks, teses, usuarios, webhooks
 from app.routers import backoffice, precedentcheck, conselho, tarefa_projetos, tarefa_cards, memoria_estrategica, despacho, conselho_juridico, responsaveis, patrimonio
+from app.routers import cadastro_links, cadastro_publico, cadastro_submissoes
 
 # Cria as tabelas (Alembic gerencia em produção; aqui facilita o dev)
 Base.metadata.create_all(bind=engine)
@@ -1054,6 +1056,29 @@ def _run_migrations() -> None:
         conn.execute(text(
             "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS tarefa_card_id UUID REFERENCES tarefa_cards(id) ON DELETE SET NULL"
         ))
+        # Cliente: cadastro enriquecido (autocadastro via link público — Fase 1)
+        for col_sql in [
+            "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS whatsapp VARCHAR(30)",
+            "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS cep VARCHAR(9)",
+            "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS logradouro VARCHAR(255)",
+            "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS numero VARCHAR(20)",
+            "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS complemento VARCHAR(120)",
+            "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS bairro VARCHAR(120)",
+            "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS cidade VARCHAR(120)",
+            "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS uf VARCHAR(2)",
+            "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS data_nascimento DATE",
+            "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS rg VARCHAR(30)",
+            "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS estado_civil VARCHAR(40)",
+            "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS profissao VARCHAR(150)",
+            "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS empresas_vinculadas TEXT",
+            "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS nome_fantasia VARCHAR(255)",
+            "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS responsavel_nome VARCHAR(255)",
+            "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS responsavel_cpf VARCHAR(18)",
+            "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS responsavel_email VARCHAR(255)",
+            "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS responsavel_telefone VARCHAR(30)",
+            "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS origem_cadastro VARCHAR(30) DEFAULT 'manual'",
+        ]:
+            conn.execute(text(col_sql))
 
         # Patrimônio: inventário de bens do cliente (diagnóstico de holding)
         conn.execute(text("""
@@ -1393,6 +1418,9 @@ app.include_router(pagantes.router)
 app.include_router(backoffice.router)
 app.include_router(config_fiscal.router)
 app.include_router(publico.router)
+app.include_router(cadastro_publico.router)
+app.include_router(cadastro_links.router)
+app.include_router(cadastro_submissoes.router)
 app.include_router(tarefas.router)
 app.include_router(conversas_ia.router)
 app.include_router(organizador.router)

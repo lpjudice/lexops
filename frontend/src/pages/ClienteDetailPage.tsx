@@ -259,9 +259,19 @@ export default function ClienteDetailPage() {
           <h1 className={styles.pageTitle}>{cliente.nome}</h1>
           <div className={detailStyles.clienteMeta}>
             <span className={styles.badge}>{cliente.tipo}</span>
+            {cliente.nome_fantasia && <span>🏷️ {cliente.nome_fantasia}</span>}
             {cliente.cpf_cnpj && <span>{cliente.cpf_cnpj}</span>}
             {cliente.email && <span>✉️ {cliente.email}</span>}
             {cliente.telefone && <span>📞 {cliente.telefone}</span>}
+            {cliente.whatsapp && <span>📱 {cliente.whatsapp}</span>}
+            {(cliente.cidade || cliente.uf) && (
+              <span>📍 {[cliente.cidade, cliente.uf].filter(Boolean).join('/')}</span>
+            )}
+            {cliente.origem_cadastro === 'autocadastro' && (
+              <span className={styles.badge} title="Cadastro preenchido pelo próprio cliente via link">
+                autocadastro
+              </span>
+            )}
           </div>
         </div>
       </div>

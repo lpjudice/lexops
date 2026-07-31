@@ -1,6 +1,31 @@
 import api from './client'
 
-export interface Cliente {
+/** Campos cadastrais estendidos (PF + PJ), preenchíveis no autocadastro. */
+export interface ClienteCadastroFields {
+  whatsapp?: string
+  // Endereço estruturado
+  cep?: string
+  logradouro?: string
+  numero?: string
+  complemento?: string
+  bairro?: string
+  cidade?: string
+  uf?: string
+  // Pessoa Física
+  data_nascimento?: string | null
+  rg?: string
+  estado_civil?: string
+  profissao?: string
+  empresas_vinculadas?: string
+  // Pessoa Jurídica
+  nome_fantasia?: string
+  responsavel_nome?: string
+  responsavel_cpf?: string
+  responsavel_email?: string
+  responsavel_telefone?: string
+}
+
+export interface Cliente extends ClienteCadastroFields {
   id: string
   nome: string
   tipo: 'PF' | 'PJ'
@@ -11,13 +36,14 @@ export interface Cliente {
   observacoes?: string
   incompleto?: boolean
   monitorar_diario?: boolean
+  origem_cadastro?: string
   projeto_nome?: string
   worktree_nome?: string
   created_at: string
   updated_at: string
 }
 
-export interface ClienteCreate {
+export interface ClienteCreate extends ClienteCadastroFields {
   nome: string
   tipo: 'PF' | 'PJ'
   cpf_cnpj?: string
@@ -113,4 +139,69 @@ export const clientesApi = {
       `/clientes/${clienteId}/emails/${emailId}/privacidade`,
       { privado },
     ).then(r => r.data),
+}
+
+// ── Links de autocadastro (Fase 2) ────────────────────────────────────────────
+
+export interface CadastroLink {
+  id: string
+  token: string
+  cliente_id: string | null
+  rotulo?: string
+  reutilizavel: boolean
+  expira_em: string | null
+  revogado: boolean
+  usos: number
+  caminho: string
+  created_at: string | null
+}
+
+export const cadastroLinksApi = {
+  listar: () => api.get<CadastroLink[]>('/cadastro-links').then((r) => r.data),
+  criar: (data: { cliente_id?: string | null; rotulo?: string; expira_em_dias?: number | null }) =>
+    api.post<CadastroLink>('/cadastro-links', data).then((r) => r.data),
+  revogar: (id: string) => api.post(`/cadastro-links/${id}/revogar`),
+}
+
+// ── Submissões de autocadastro (Fase 3 — revisão/aprovação) ───────────────────
+
+export interface CadastroSubmissaoResumo {
+  id: string
+  tipo: 'PF' | 'PJ'
+  status: string
+  is_update: boolean
+  cliente_alvo_id: string | null
+  cliente_alvo_nome: string | null
+  nome_enviado?: string
+  cpf_cnpj_enviado?: string
+  qtd_anexos: number
+  consentimento_em: string | null
+  created_at: string | null
+}
+
+export interface CadastroDiffLinha {
+  campo: string
+  atual: string | null
+  novo: string | null
+  mudou: boolean
+}
+
+export interface CadastroSubmissaoDetalhe extends CadastroSubmissaoResumo {
+  diff: CadastroDiffLinha[]
+  anexos: { filename: string; mime?: string }[]
+  consentimento_texto: string | null
+  ip: string | null
+}
+
+export const cadastroSubmissoesApi = {
+  listar: (status = 'pendente') =>
+    api.get<CadastroSubmissaoResumo[]>('/cadastro-submissoes', { params: { status } }).then((r) => r.data),
+  obter: (id: string) =>
+    api.get<CadastroSubmissaoDetalhe>(`/cadastro-submissoes/${id}`).then((r) => r.data),
+  aprovar: (id: string, campos?: string[]) =>
+    api.post<{ ok: boolean; cliente_id: string; criado: boolean }>(
+      `/cadastro-submissoes/${id}/aprovar`, { campos: campos ?? null },
+    ).then((r) => r.data),
+  rejeitar: (id: string) =>
+    api.post<{ ok: boolean }>(`/cadastro-submissoes/${id}/rejeitar`).then((r) => r.data),
 }
