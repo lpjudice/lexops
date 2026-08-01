@@ -125,6 +125,30 @@ def exportar_pdf(cliente_id: uuid.UUID = Query(...), db: Session = Depends(get_d
     )
 
 
+@router.post("/extrair-escritura")
+def extrair_escritura_endpoint(file: UploadFile = File(...)):
+    """Lê uma escritura/matrícula (PDF ou imagem) via IA e devolve os campos
+    extraídos + o trecho de origem de cada um. NÃO persiste o arquivo — o upload
+    para o Drive só acontece quando o usuário salvar o bem."""
+    conteudo = file.file.read()
+    filename = (file.filename or "").lower()
+    mime = file.content_type or ""
+    if not mime or mime == "application/octet-stream":
+        if filename.endswith(".pdf"):
+            mime = "application/pdf"
+        elif filename.endswith((".jpg", ".jpeg")):
+            mime = "image/jpeg"
+        elif filename.endswith(".png"):
+            mime = "image/png"
+        elif filename.endswith(".webp"):
+            mime = "image/webp"
+    from app.services.escritura_ia import extrair_escritura
+    resultado = extrair_escritura(conteudo, mime)
+    if resultado.get("erro"):
+        raise HTTPException(status_code=502, detail=resultado["erro"])
+    return resultado
+
+
 @router.post("/", response_model=BemOut, status_code=status.HTTP_201_CREATED)
 def criar_bem(data: BemCreate, db: Session = Depends(get_db)):
     cliente = db.query(Cliente).filter(Cliente.id == data.cliente_id).first()
