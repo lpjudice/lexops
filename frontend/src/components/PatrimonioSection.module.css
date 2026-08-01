@@ -481,6 +481,8 @@
   font-weight: 700;
   border-bottom: none;
 }
+.gcRowOff { opacity: 0.42; }
+.gcRowOff .gcTdBest { background: transparent; color: inherit; font-weight: 400; }
 
 /* Quadro de sócios */
 .socioList { display: flex; flex-direction: column; gap: 6px; }

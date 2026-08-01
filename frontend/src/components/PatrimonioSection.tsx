@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   patrimonioApi,
@@ -54,6 +54,36 @@ function baixarBlob(blob: Blob, nome: string) {
   a.click()
   a.remove()
   setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+// Datas: guardadas internamente em ISO (YYYY-MM-DD), exibidas/digitadas em DD/MM/AAAA.
+function isoToBr(iso?: string | null): string {
+  if (!iso) return ''
+  const [y, m, d] = iso.split('-')
+  return y && m && d ? `${d}/${m}/${y}` : ''
+}
+function brToIso(br: string): string {
+  const m = br.match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : ''
+}
+
+/** Campo de data em DD/MM/AAAA que emite ISO (ou '' se incompleto). */
+function DateInput({ value, onChange, className }: {
+  value?: string | null; onChange: (iso: string) => void; className?: string
+}) {
+  const [txt, setTxt] = useState(isoToBr(value))
+  useEffect(() => { setTxt(isoToBr(value)) }, [value])
+  const handle = (raw: string) => {
+    const d = raw.replace(/\D/g, '').slice(0, 8)
+    const out = d.length > 4 ? `${d.slice(0, 2)}/${d.slice(2, 4)}/${d.slice(4)}`
+      : d.length > 2 ? `${d.slice(0, 2)}/${d.slice(2)}` : d
+    setTxt(out)
+    onChange(brToIso(out))
+  }
+  return (
+    <input type="text" inputMode="numeric" placeholder="DD/MM/AAAA" maxLength={10}
+      className={className} value={txt} onChange={(e) => handle(e.target.value)} />
+  )
 }
 
 // ── Form de bem (criar/editar) ───────────────────────────────────────────────
@@ -141,8 +171,8 @@ function BemForm({
         </div>
         <div className={styles.formRow}>
           <label className={styles.formLabel}>Data da compra</label>
-          <input type="date" className={styles.input} value={f.data_compra ?? ''}
-            onChange={(e) => set({ data_compra: e.target.value })} />
+          <DateInput className={styles.input} value={f.data_compra}
+            onChange={(iso) => set({ data_compra: iso })} />
         </div>
       </div>
 
@@ -196,8 +226,8 @@ function BemForm({
             </div>
             <div className={styles.formRow}>
               <label className={styles.formLabel}>Data do balanço</label>
-              <input type="date" className={styles.input} value={f.data_balanco ?? ''}
-                onChange={(e) => set({ data_balanco: e.target.value })} />
+              <DateInput className={styles.input} value={f.data_balanco}
+                onChange={(iso) => set({ data_balanco: iso })} />
             </div>
           </div>
           <p className={s.cotaHint}>
@@ -375,8 +405,8 @@ function CadeiaSection({ bem }: { bem: Bem }) {
                   value={nf.de_quem} onChange={(e) => setNf({ ...nf, de_quem: e.target.value })} />
                 <input className={s.miniInput} style={{ flex: 1, minWidth: 120 }} placeholder="Para quem (adquirente)"
                   value={nf.para_quem} onChange={(e) => setNf({ ...nf, para_quem: e.target.value })} />
-                <input type="date" className={s.miniInput} style={{ width: 150 }}
-                  value={nf.data} onChange={(e) => setNf({ ...nf, data: e.target.value })} />
+                <DateInput className={s.miniInput} value={nf.data}
+                  onChange={(iso) => setNf({ ...nf, data: iso })} />
               </div>
               <textarea className={s.miniInput} rows={2} placeholder="Descrição / observações do elo"
                 value={nf.descricao} onChange={(e) => setNf({ ...nf, descricao: e.target.value })} />
@@ -483,7 +513,8 @@ function CalculadoraGC({ bem }: { bem: Bem }) {
   const [venda, setVenda] = useState<number>(bem.valor_mercado ?? 0)
   const [dataVenda, setDataVenda] = useState<string>(new Date().toISOString().slice(0, 10))
 
-  const r = calcularGC(aquisicao, venda, bem.data_compra, new Date(dataVenda + 'T12:00:00'))
+  const dvDate = dataVenda ? new Date(dataVenda + 'T12:00:00') : new Date()
+  const r = calcularGC(aquisicao, venda, bem.data_compra, isNaN(dvDate.getTime()) ? new Date() : dvDate)
   const reducaoPct = (1 - r.fator) * 100
 
   const cenarios = [
@@ -530,8 +561,8 @@ function CalculadoraGC({ bem }: { bem: Bem }) {
             </div>
             <div className={s.field}>
               <span className={s.fieldLabel}>Data da venda (simulação)</span>
-              <input type="date" className={s.miniInput} value={dataVenda}
-                onChange={(e) => setDataVenda(e.target.value)} />
+              <DateInput className={s.miniInput} value={dataVenda}
+                onChange={(iso) => setDataVenda(iso)} />
             </div>
             <div className={s.field}>
               <span className={s.fieldLabel}>Ganho de capital</span>
@@ -586,31 +617,40 @@ function CalculadoraGC({ bem }: { bem: Bem }) {
 // ── Tabela consolidada de Ganho de Capital (todos os imóveis) ─────────────────
 function TabelaGCImoveis({ bens }: { bens: Bem[] }) {
   const [aberto, setAberto] = useState(false)
+  const [excluidos, setExcluidos] = useState<Set<string>>(new Set())
   const imoveis = bens.filter((b) => b.tipo_bem === 'imovel')
   if (imoveis.length === 0) return null
+
+  const toggleBem = (id: string) => setExcluidos((prev) => {
+    const next = new Set(prev)
+    next.has(id) ? next.delete(id) : next.add(id)
+    return next
+  })
 
   const hoje = new Date()
   const linhas = imoveis.map((b) => ({
     bem: b,
+    incluido: !excluidos.has(b.id),
     r: calcularGC(b.valor_compra ?? b.valor_ir ?? 0, b.valor_mercado ?? 0, b.data_compra, hoje),
   }))
-  const tot = linhas.reduce(
+  const tot = linhas.filter((l) => l.incluido).reduce(
     (a, l) => ({
       ganho: a.ganho + l.r.ganho, impPF: a.impPF + l.r.impPF,
       impPJ: a.impPJ + l.r.impPJ, impHolding: a.impHolding + l.r.impHolding,
     }),
     { ganho: 0, impPF: 0, impPJ: 0, impHolding: 0 },
   )
-  const cell = (val: number, best: boolean) =>
-    <td className={`${s.gcTd} ${s.gcTdNum} ${best ? s.gcTdBest : ''}`}>{brl(val)}</td>
+  const nIncluidos = linhas.filter((l) => l.incluido).length
+  const cell = (val: number, best: boolean, incluido: boolean) =>
+    <td className={`${s.gcTd} ${s.gcTdNum} ${best && incluido ? s.gcTdBest : ''}`}>{brl(val)}</td>
 
   return (
     <div className={s.card}>
       <div className={s.cardHead} onClick={() => setAberto(!aberto)}>
         <span className={s.bemIcon}>🧮</span>
         <div className={s.grow}>
-          <div className={s.bemTitulo}>Ganho de Capital — todos os imóveis ({imoveis.length})</div>
-          <div className={s.bemMeta}><span>Comparativo PF (com fator de redução) × PJ 34% × Holding 6,73%, vendendo hoje</span></div>
+          <div className={s.bemTitulo}>Ganho de Capital — imóveis ({nIncluidos}/{imoveis.length} nos totais)</div>
+          <div className={s.bemMeta}><span>PF (com fator de redução) × PJ 34% × Holding 6,73%, vendendo hoje · marque para incluir/excluir dos totais</span></div>
         </div>
         <span style={{ color: 'var(--gray-mid)', fontSize: 12 }}>{aberto ? '▾' : '▸'}</span>
       </div>
@@ -619,6 +659,7 @@ function TabelaGCImoveis({ bens }: { bens: Bem[] }) {
           <table className={s.gcTable}>
             <thead>
               <tr>
+                <th className={s.gcTh} style={{ width: 34 }} title="Incluir nos totais"></th>
                 <th className={s.gcTh}>Imóvel</th>
                 <th className={`${s.gcTh} ${s.gcThNum}`}>Aquisição</th>
                 <th className={`${s.gcTh} ${s.gcThNum}`}>Venda est.</th>
@@ -630,8 +671,12 @@ function TabelaGCImoveis({ bens }: { bens: Bem[] }) {
               </tr>
             </thead>
             <tbody>
-              {linhas.map(({ bem: b, r }) => (
-                <tr key={b.id}>
+              {linhas.map(({ bem: b, r, incluido }) => (
+                <tr key={b.id} className={incluido ? '' : s.gcRowOff}>
+                  <td className={s.gcTd} style={{ textAlign: 'center' }}>
+                    <input type="checkbox" checked={incluido} onChange={() => toggleBem(b.id)}
+                      title={incluido ? 'Excluir dos totais' : 'Incluir nos totais'} />
+                  </td>
                   <td className={s.gcTd}>
                     <div className={s.gcNome}>{b.nome}</div>
                     {b.numero_matricula && <div className={s.gcSub}>Mat. {b.numero_matricula}</div>}
@@ -642,15 +687,15 @@ function TabelaGCImoveis({ bens }: { bens: Bem[] }) {
                   <td className={`${s.gcTd} ${s.gcTdNum}`}>
                     {r.temReducao ? `−${((1 - r.fator) * 100).toFixed(1).replace('.', ',')}%` : (b.data_compra ? '—' : '⚠ s/ data')}
                   </td>
-                  {cell(r.impPF, r.menorKey === 'pf')}
-                  {cell(r.impPJ, r.menorKey === 'pj')}
-                  {cell(r.impHolding, r.menorKey === 'holding')}
+                  {cell(r.impPF, r.menorKey === 'pf', incluido)}
+                  {cell(r.impPJ, r.menorKey === 'pj', incluido)}
+                  {cell(r.impHolding, r.menorKey === 'holding', incluido)}
                 </tr>
               ))}
             </tbody>
             <tfoot>
               <tr>
-                <td className={`${s.gcTd} ${s.gcTfoot}`} colSpan={3}>Totais</td>
+                <td className={`${s.gcTd} ${s.gcTfoot}`} colSpan={4}>Totais ({nIncluidos} imóvel{nIncluidos === 1 ? '' : 'is'})</td>
                 <td className={`${s.gcTd} ${s.gcTdNum} ${s.gcTfoot}`}>{brl(tot.ganho)}</td>
                 <td className={`${s.gcTd} ${s.gcTfoot}`} />
                 <td className={`${s.gcTd} ${s.gcTdNum} ${s.gcTfoot}`}>{brl(tot.impPF)}</td>
@@ -660,8 +705,8 @@ function TabelaGCImoveis({ bens }: { bens: Bem[] }) {
             </tfoot>
           </table>
           <p className={s.gcDisclaimer} style={{ margin: '10px 12px 0' }}>
-            ⚠️ Estimativa vendendo hoje, com fator de redução da PF por imóvel. Ajuste valores e data de venda
-            na calculadora de cada imóvel. Não considera isenções nem custos da operação.
+            ⚠️ Estimativa vendendo hoje, com fator de redução da PF por imóvel. Desmarque um imóvel para tirá-lo dos totais.
+            Ajuste valores e data de venda na calculadora de cada imóvel. Não considera isenções nem custos da operação.
           </p>
         </div>
       )}
@@ -965,11 +1010,17 @@ export default function PatrimonioSection({ clienteId }: { clienteId: string }) 
 
   const criar = useMutation({
     mutationFn: (data: FormState) =>
-      patrimonioApi.criar({ ...data, cliente_id: clienteId, data_compra: data.data_compra || undefined } as BemCreate),
+      patrimonioApi.criar({
+        ...data,
+        cliente_id: clienteId,
+        data_compra: data.data_compra || undefined,
+        data_balanco: data.data_balanco || undefined,
+      } as BemCreate),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['patrimonio', clienteId] })
       setNovoAberto(false)
     },
+    onError: () => alert('Não foi possível salvar o bem. Verifique os campos e tente novamente.'),
   })
 
   const totalMercado = bens.reduce((sum, b) => sum + (b.valor_mercado ?? 0), 0)
