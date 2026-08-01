@@ -84,7 +84,30 @@ export type CadeiaEloUpdate = CadeiaEloCreate
 export type SocioCreate = Partial<Omit<Socio, 'id' | 'created_at'>> & { nome: string }
 export type SocioUpdate = Partial<Omit<Socio, 'id' | 'created_at'>>
 
+export interface EscrituraCampo {
+  valor: string | number | null
+  trecho: string
+}
+export interface EscrituraExtraida {
+  descricao_imovel: EscrituraCampo
+  proprietario_atual: EscrituraCampo
+  valor_compra: EscrituraCampo
+  proprietarios_anteriores: EscrituraCampo
+  data_transacao: EscrituraCampo
+  numero_matricula: EscrituraCampo
+  cartorio: EscrituraCampo
+  hipoteca: { existe: boolean; vencida: boolean | null; descricao: string; trecho: string }
+}
+
 export const patrimonioApi = {
+  extrairEscritura: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post<EscrituraExtraida>('/patrimonio/extrair-escritura', form, {
+      timeout: 200000,
+    }).then((r) => r.data)
+  },
+
   listar: (clienteId: string) =>
     api.get<Bem[]>('/patrimonio/', { params: { cliente_id: clienteId } }).then((r) => r.data),
 

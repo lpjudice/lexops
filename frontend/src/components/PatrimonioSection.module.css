@@ -484,6 +484,134 @@
 .gcRowOff { opacity: 0.42; }
 .gcRowOff .gcTdBest { background: transparent; color: inherit; font-weight: 400; }
 
+/* ── Leitor de escritura (modal split-screen) ── */
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 22, 24, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+.modalEscritura {
+  background: var(--white);
+  border-radius: 14px;
+  width: min(1200px, 96vw);
+  height: min(88vh, 900px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: var(--shadow-card-hover);
+}
+.modalHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--gray-border);
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--dark);
+  flex-shrink: 0;
+}
+.modalClose {
+  background: none;
+  border: none;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--gray-mid);
+}
+.dropzone {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  text-align: center;
+  padding: 40px;
+  color: var(--gray-mid);
+  font-size: 14px;
+}
+.dropzone p { max-width: 460px; line-height: 1.5; }
+
+.escBody {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: 0;
+}
+.escForm {
+  overflow-y: auto;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-right: 1px solid var(--gray-border);
+}
+.escGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.escPreview {
+  background: #33363a;
+  min-height: 0;
+  display: flex;
+}
+.escDoc { width: 100%; height: 100%; border: none; object-fit: contain; }
+
+.escLendo {
+  background: var(--teal-light);
+  color: #067a63;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.escErro {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+}
+.trecho {
+  font-size: 11px;
+  color: var(--gray-mid);
+  font-style: italic;
+  margin-top: 3px;
+  padding-left: 8px;
+  border-left: 2px solid var(--teal-light);
+  line-height: 1.35;
+}
+.escHipoteca {
+  border: 1px solid var(--gray-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #fafbfc;
+}
+.hipBadge {
+  align-self: flex-start;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 2px 10px;
+}
+.hipVencida { background: #fee2e2; color: #b91c1c; }
+.hipOk { background: #d1fae5; color: #065f46; }
+.hipIndef { background: #fef3c7; color: #92400e; }
+.escNota { font-size: 11px; color: var(--gray-mid); line-height: 1.4; margin: 4px 0 0; }
+
+@media (max-width: 760px) {
+  .escBody { grid-template-columns: 1fr; }
+  .escPreview { min-height: 300px; border-top: 1px solid var(--gray-border); }
+  .escForm { border-right: none; }
+}
+
 /* Quadro de sócios */
 .socioList { display: flex; flex-direction: column; gap: 6px; }
 .socioRow {

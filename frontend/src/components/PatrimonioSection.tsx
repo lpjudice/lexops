@@ -5,6 +5,7 @@ import {
   type Bem,
   type BemCreate,
   type CadeiaElo,
+  type EscrituraExtraida,
   type ObjetivoBem,
   type Socio,
   type StatusBem,
@@ -1090,10 +1091,206 @@ function BemCard({ bem }: { bem: Bem }) {
   )
 }
 
+// ── Leitor de escritura com IA (extração + validação lado a lado) ─────────────
+function Trecho({ t }: { t?: string }) {
+  if (!t) return null
+  return <div className={s.trecho}>origem: “{t}”</div>
+}
+
+function LeitorEscrituraModal({ clienteId, onClose }: { clienteId: string; onClose: () => void }) {
+  const qc = useQueryClient()
+  const [file, setFile] = useState<File | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string>('')
+  const [isPdf, setIsPdf] = useState(false)
+  const [extraindo, setExtraindo] = useState(false)
+  const [erro, setErro] = useState<string | null>(null)
+  const [dados, setDados] = useState<EscrituraExtraida | null>(null)
+  const [salvando, setSalvando] = useState(false)
+  const [f, setF] = useState<FormState>(emptyForm())
+
+  useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl) }, [previewUrl])
+
+  const str = (v: string | number | null) => (v == null ? '' : String(v))
+  const set = (patch: Partial<FormState>) => setF((prev) => ({ ...prev, ...patch }))
+
+  const handleFile = async (selected: File) => {
+    setErro(null)
+    setFile(selected)
+    setPreviewUrl(URL.createObjectURL(selected))
+    setIsPdf(selected.type === 'application/pdf' || selected.name.toLowerCase().endsWith('.pdf'))
+    setExtraindo(true)
+    setDados(null)
+    try {
+      const d = await patrimonioApi.extrairEscritura(selected)
+      setDados(d)
+      const desc = str(d.descricao_imovel.valor)
+      const vc = d.valor_compra.valor
+      const hipTxt = d.hipoteca.existe
+        ? `${d.hipoteca.descricao || 'Gravame/hipoteca'}${d.hipoteca.vencida === true ? ' — VENCIDA' : d.hipoteca.vencida === false ? ' — não vencida' : ''}`
+        : ''
+      setF({
+        ...emptyForm(),
+        tipo_bem: 'imovel',
+        nome: desc ? desc.slice(0, 70) : (d.numero_matricula.valor ? `Imóvel matrícula ${d.numero_matricula.valor}` : ''),
+        descricao_matricula: desc,
+        proprietario_matricula: str(d.proprietario_atual.valor),
+        valor_compra: typeof vc === 'number' ? vc : (vc ? parseFloat(String(vc)) || undefined : undefined),
+        data_compra: typeof d.data_transacao.valor === 'string' ? d.data_transacao.valor : '',
+        numero_matricula: str(d.numero_matricula.valor),
+        cartorio: str(d.cartorio.valor),
+        observacoes: d.proprietarios_anteriores.valor ? `Proprietários anteriores: ${str(d.proprietarios_anteriores.valor)}` : '',
+        tem_gravame: d.hipoteca.existe,
+        gravame_descricao: hipTxt,
+      })
+    } catch {
+      setErro('Não foi possível ler o documento. Você pode preencher os campos manualmente.')
+    } finally {
+      setExtraindo(false)
+    }
+  }
+
+  const salvar = async () => {
+    if (!f.nome) { alert('Dê um nome ao imóvel antes de salvar.'); return }
+    setSalvando(true)
+    try {
+      const bem = await patrimonioApi.criar({
+        ...f, cliente_id: clienteId, data_compra: f.data_compra || undefined, data_balanco: undefined,
+      } as BemCreate)
+      if (file) { try { await patrimonioApi.uploadAnexo(bem.id, file) } catch { /* anexo best-effort */ } }
+      qc.invalidateQueries({ queryKey: ['patrimonio', clienteId] })
+      onClose()
+    } catch {
+      alert('Erro ao salvar o imóvel.')
+      setSalvando(false)
+    }
+  }
+
+  const hip = dados?.hipoteca
+
+  return (
+    <div className={s.modalOverlay} onClick={onClose}>
+      <div className={s.modalEscritura} onClick={(e) => e.stopPropagation()}>
+        <div className={s.modalHead}>
+          <span>📄 Ler escritura com IA</span>
+          <button className={s.modalClose} onClick={onClose}>×</button>
+        </div>
+
+        {!file ? (
+          <div className={s.dropzone}>
+            <p>Envie a <b>escritura, matrícula ou contrato</b> (PDF ou imagem). A IA lê e preenche os campos —
+              nada é salvo até você confirmar.</p>
+            <label className={styles.btnPrimary} style={{ cursor: 'pointer' }}>
+              Selecionar arquivo
+              <input type="file" accept=".pdf,image/*" style={{ display: 'none' }}
+                onChange={(e) => { const x = e.target.files?.[0]; if (x) handleFile(x) }} />
+            </label>
+          </div>
+        ) : (
+          <div className={s.escBody}>
+            <div className={s.escForm}>
+              {extraindo && <div className={s.escLendo}>🔎 Lendo o documento com IA (Gemini)…</div>}
+              {erro && <div className={s.escErro}>{erro}</div>}
+
+              <div className={styles.formRow}>
+                <label className={styles.formLabel}>Nome do imóvel *</label>
+                <input className={styles.input} value={f.nome} onChange={(e) => set({ nome: e.target.value })} />
+              </div>
+
+              <div className={styles.formRow}>
+                <label className={styles.formLabel}>Descrição conforme matrícula</label>
+                <textarea className={styles.input} rows={3} value={f.descricao_matricula ?? ''}
+                  onChange={(e) => set({ descricao_matricula: e.target.value })} />
+                <Trecho t={dados?.descricao_imovel.trecho} />
+              </div>
+
+              <div className={styles.formRow}>
+                <label className={styles.formLabel}>Proprietário na matrícula (atual)</label>
+                <input className={styles.input} value={f.proprietario_matricula ?? ''}
+                  onChange={(e) => set({ proprietario_matricula: e.target.value })} />
+                <Trecho t={dados?.proprietario_atual.trecho} />
+              </div>
+
+              <div className={s.escGrid}>
+                <div className={styles.formRow}>
+                  <label className={styles.formLabel}>Valor de compra (real)</label>
+                  <MoneyInput value={f.valor_compra ?? 0} onChange={(v) => set({ valor_compra: v || undefined })} />
+                  <Trecho t={dados?.valor_compra.trecho} />
+                </div>
+                <div className={styles.formRow}>
+                  <label className={styles.formLabel}>Data da compra/venda</label>
+                  <DateInput className={styles.input} value={f.data_compra} onChange={(iso) => set({ data_compra: iso })} />
+                  <Trecho t={dados?.data_transacao.trecho} />
+                </div>
+              </div>
+
+              <div className={s.escGrid}>
+                <div className={styles.formRow}>
+                  <label className={styles.formLabel}>Nº da matrícula</label>
+                  <input className={styles.input} value={f.numero_matricula ?? ''}
+                    onChange={(e) => set({ numero_matricula: e.target.value })} />
+                  <Trecho t={dados?.numero_matricula.trecho} />
+                </div>
+                <div className={styles.formRow}>
+                  <label className={styles.formLabel}>Cartório</label>
+                  <input className={styles.input} value={f.cartorio ?? ''}
+                    onChange={(e) => set({ cartorio: e.target.value })} />
+                  <Trecho t={dados?.cartorio.trecho} />
+                </div>
+              </div>
+
+              <div className={styles.formRow}>
+                <label className={styles.formLabel}>Proprietários anteriores / observações</label>
+                <textarea className={styles.input} rows={2} value={f.observacoes ?? ''}
+                  onChange={(e) => set({ observacoes: e.target.value })} />
+                <Trecho t={dados?.proprietarios_anteriores.trecho} />
+              </div>
+
+              {/* Hipoteca / gravame */}
+              <div className={s.escHipoteca}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={!!f.tem_gravame} onChange={(e) => set({ tem_gravame: e.target.checked })} />
+                  Possui hipoteca / gravame na matrícula
+                </label>
+                {hip?.existe && (
+                  <span className={`${s.hipBadge} ${hip.vencida === true ? s.hipVencida : hip.vencida === false ? s.hipOk : s.hipIndef}`}>
+                    {hip.vencida === true ? '⚠ VENCIDA' : hip.vencida === false ? '✓ não vencida' : 'vencimento indefinido'}
+                  </span>
+                )}
+                {f.tem_gravame && (
+                  <>
+                    <textarea className={styles.input} rows={2} value={f.gravame_descricao ?? ''}
+                      onChange={(e) => set({ gravame_descricao: e.target.value })} placeholder="Detalhes do gravame" />
+                    <Trecho t={dados?.hipoteca.trecho} />
+                  </>
+                )}
+              </div>
+
+              <div className={s.rowBtns} style={{ marginTop: 12 }}>
+                <button className={styles.btnPrimary} disabled={salvando || extraindo || !f.nome} onClick={salvar}>
+                  {salvando ? 'Salvando…' : 'Salvar imóvel'}
+                </button>
+                <button className={styles.btnTable} onClick={onClose}>Cancelar</button>
+              </div>
+              <p className={s.escNota}>A escritura só é salva no Drive do cliente quando você clicar em "Salvar imóvel". Revise cada campo comparando com o documento ao lado.</p>
+            </div>
+
+            <div className={s.escPreview}>
+              {isPdf
+                ? <iframe title="documento" src={previewUrl} className={s.escDoc} />
+                : <img src={previewUrl} className={s.escDoc} alt="documento" />}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── Seção principal ───────────────────────────────────────────────────────────
 export default function PatrimonioSection({ clienteId }: { clienteId: string }) {
   const qc = useQueryClient()
   const [novoAberto, setNovoAberto] = useState(false)
+  const [lendoEscritura, setLendoEscritura] = useState(false)
 
   const { data: bens = [], isLoading } = useQuery({
     queryKey: ['patrimonio', clienteId],
@@ -1157,10 +1354,19 @@ export default function PatrimonioSection({ clienteId }: { clienteId: string }) 
 
       <div className={s.header}>
         <span className={s.headerTitle}>Patrimônio</span>
-        <button className={styles.btnPrimary} onClick={() => setNovoAberto(!novoAberto)}>
-          {novoAberto ? 'Cancelar' : '+ Novo bem'}
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className={styles.btnTable} onClick={() => setLendoEscritura(true)}>
+            📄 Ler escritura (IA)
+          </button>
+          <button className={styles.btnPrimary} onClick={() => setNovoAberto(!novoAberto)}>
+            {novoAberto ? 'Cancelar' : '+ Novo bem'}
+          </button>
+        </div>
       </div>
+
+      {lendoEscritura && (
+        <LeitorEscrituraModal clienteId={clienteId} onClose={() => setLendoEscritura(false)} />
+      )}
 
       {novoAberto && (
         <div className={s.card}>
