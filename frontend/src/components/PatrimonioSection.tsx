@@ -418,31 +418,91 @@ function irpfProgressivo(ganho: number): number {
   return imposto
 }
 
+function mesesEntre(inicio: Date, fim: Date): number {
+  return Math.max(0, (fim.getFullYear() - inicio.getFullYear()) * 12 + (fim.getMonth() - inicio.getMonth()))
+}
+
+// Fator de redução do ganho de capital de imóveis (só PF). Retorna a FRAÇÃO do
+// ganho que permanece tributável (quanto menor, maior a redução).
+// Lei 11.196/2005 (FR1 até nov/2005 e FR2 até a venda) + Lei 7.713/88 (imóveis até 1988).
+function fatorReducaoImovel(dataCompra: Date, dataVenda: Date): number {
+  const ano = dataCompra.getFullYear()
+  let mult7713 = 1
+  if (ano <= 1969) mult7713 = 0
+  else if (ano <= 1988) mult7713 = (5 * (ano - 1969)) / 100 // fração tributável (7.713/88)
+  const nov2005 = new Date(2005, 10, 1)
+  const dez2005 = new Date(2005, 11, 1)
+  const m1 = dataCompra < nov2005 ? mesesEntre(dataCompra, nov2005) : 0
+  const inicioF2 = dataCompra > dez2005 ? dataCompra : dez2005
+  const m2 = mesesEntre(inicioF2, dataVenda)
+  const fr1 = 1 / Math.pow(1.0035, m1)
+  const fr2 = 1 / Math.pow(1.006, m2)
+  return mult7713 * fr1 * fr2
+}
+
+interface GCResult {
+  ganho: number
+  fator: number      // fração tributável na PF (1 = sem redução)
+  temReducao: boolean
+  ganhoPF: number    // ganho já reduzido (base PF)
+  impPF: number
+  impPJ: number
+  impHolding: number
+  menorKey: 'pf' | 'pj' | 'holding'
+}
+
+function calcularGC(aquisicao: number, venda: number, dataCompra?: string | null, dataVenda?: Date): GCResult {
+  const ganho = Math.max(0, venda - aquisicao)
+  let fator = 1
+  if (dataCompra) {
+    const dc = new Date(dataCompra + 'T12:00:00')
+    if (!isNaN(dc.getTime())) fator = fatorReducaoImovel(dc, dataVenda ?? new Date())
+  }
+  const ganhoPF = ganho * fator
+  const impPF = irpfProgressivo(ganhoPF)
+  const impPJ = ganho * 0.34
+  const impHolding = venda * 0.0673
+  const menor = Math.min(impPF, impPJ, impHolding)
+  const menorKey = menor === impPF ? 'pf' : menor === impHolding ? 'holding' : 'pj'
+  return { ganho, fator, temReducao: fator < 0.9999, ganhoPF, impPF, impPJ, impHolding, menorKey }
+}
+
+function MoneyInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  return (
+    <div className={s.moneyWrap}>
+      <span className={s.moneyPrefix}>R$</span>
+      <input type="number" step="0.01" min="0" className={s.moneyField}
+        value={value || ''} onChange={(e) => onChange(parseFloat(e.target.value) || 0)} />
+    </div>
+  )
+}
+
 function CalculadoraGC({ bem }: { bem: Bem }) {
   const [aberto, setAberto] = useState(false)
   const [aquisicao, setAquisicao] = useState<number>(bem.valor_compra ?? bem.valor_ir ?? 0)
   const [venda, setVenda] = useState<number>(bem.valor_mercado ?? 0)
+  const [dataVenda, setDataVenda] = useState<string>(new Date().toISOString().slice(0, 10))
 
-  const ganho = Math.max(0, venda - aquisicao)
-  const impPF = irpfProgressivo(ganho)
-  const impPJ = ganho * 0.34
-  const impHolding = venda * 0.0673
+  const r = calcularGC(aquisicao, venda, bem.data_compra, new Date(dataVenda + 'T12:00:00'))
+  const reducaoPct = (1 - r.fator) * 100
 
   const cenarios = [
     {
       key: 'holding', nome: 'PJ Holding Imobiliária', base: 'sobre a venda',
-      taxa: '6,73%', imposto: impHolding,
-      nota: 'Lucro Presumido, imóvel como estoque e atividade imobiliária no objeto social. IRPJ 1,2% + adic. ~0,8% + CSLL 1,08% + PIS 0,65% + COFINS 3%.',
+      taxa: '6,73%', imposto: r.impHolding,
+      nota: 'Lucro Presumido, imóvel como estoque e atividade imobiliária no objeto social. IRPJ 1,2% + adic. ~0,8% + CSLL 1,08% + PIS 0,65% + COFINS 3%. Sem fator de redução (PJ).',
     },
     {
-      key: 'pf', nome: 'Pessoa Física', base: 'sobre o ganho',
-      taxa: '15%–22,5%', imposto: impPF,
-      nota: 'Alíquotas progressivas (Lei 13.259/2016): 15% até R$5M · 17,5% R$5–10M · 20% R$10–30M · 22,5% acima. Não considera isenções nem fator de redução.',
+      key: 'pf', nome: 'Pessoa Física', base: 'sobre o ganho reduzido',
+      taxa: '15%–22,5%', imposto: r.impPF,
+      nota: r.temReducao
+        ? 'Faixas progressivas (Lei 13.259/2016) sobre o ganho já reduzido pelo fator de redução (Leis 11.196/2005 e 7.713/88).'
+        : 'Faixas progressivas (Lei 13.259/2016). Cadastre a data da compra para aplicar o fator de redução automaticamente.',
     },
     {
       key: 'pj', nome: 'PJ não imobiliária', base: 'sobre o ganho',
-      taxa: '34%', imposto: impPJ,
-      nota: 'Lucro Real ou Presumido: IRPJ 15% + adicional 10% + CSLL 9% sobre o ganho de capital (venda de imobilizado não usa presunção). No Simples, o ganho é tributado fora do DAS pelas faixas da PF.',
+      taxa: '34%', imposto: r.impPJ,
+      nota: 'Lucro Real ou Presumido: IRPJ 15% + adicional 10% + CSLL 9% sobre o ganho (venda de imobilizado não usa presunção). No Simples, tributado fora do DAS pelas faixas da PF. Sem fator de redução.',
     },
   ]
   const menor = Math.min(...cenarios.map((c) => c.imposto))
@@ -453,7 +513,7 @@ function CalculadoraGC({ bem }: { bem: Bem }) {
         <span>{aberto ? '▾' : '▸'}</span>
         🧮 Calculadora de Ganho de Capital
         <span style={{ color: 'var(--gray-mid)', fontWeight: 600 }}>
-          (ganho estimado: {brl(ganho)})
+          (ganho estimado: {brl(r.ganho)})
         </span>
       </button>
 
@@ -462,18 +522,34 @@ function CalculadoraGC({ bem }: { bem: Bem }) {
           <div className={s.gcInputs}>
             <div className={s.field}>
               <span className={s.fieldLabel}>Valor de aquisição</span>
-              <input type="number" step="0.01" min="0" className={s.miniInput}
-                value={aquisicao || ''} onChange={(e) => setAquisicao(parseFloat(e.target.value) || 0)} />
+              <MoneyInput value={aquisicao} onChange={setAquisicao} />
             </div>
             <div className={s.field}>
               <span className={s.fieldLabel}>Valor estimado de venda</span>
-              <input type="number" step="0.01" min="0" className={s.miniInput}
-                value={venda || ''} onChange={(e) => setVenda(parseFloat(e.target.value) || 0)} />
+              <MoneyInput value={venda} onChange={setVenda} />
+            </div>
+            <div className={s.field}>
+              <span className={s.fieldLabel}>Data da venda (simulação)</span>
+              <input type="date" className={s.miniInput} value={dataVenda}
+                onChange={(e) => setDataVenda(e.target.value)} />
             </div>
             <div className={s.field}>
               <span className={s.fieldLabel}>Ganho de capital</span>
-              <span className={s.gcGanho}>{brl(ganho)}</span>
+              <span className={s.gcGanho}>{brl(r.ganho)}</span>
             </div>
+          </div>
+
+          <div className={s.gcReducao}>
+            {bem.data_compra ? (
+              r.temReducao ? (
+                <>Fator de redução (PF): <b>−{reducaoPct.toFixed(1).replace('.', ',')}%</b> do ganho ·
+                  compra em {fmtDate(bem.data_compra)} · ganho tributável na PF: <b>{brl(r.ganhoPF)}</b></>
+              ) : (
+                <>Sem redução aplicável (imóvel adquirido em {fmtDate(bem.data_compra)}).</>
+              )
+            ) : (
+              <>⚠ Cadastre a <b>data da compra</b> do imóvel para aplicar o fator de redução na PF.</>
+            )}
           </div>
 
           <div className={s.gcCenarios}>
@@ -497,9 +573,95 @@ function CalculadoraGC({ bem }: { bem: Bem }) {
             })}
           </div>
           <p className={s.gcDisclaimer}>
-            ⚠️ Estimativa para comparação. Não considera isenções (imóvel único, reinvestimento em 180 dias),
-            fator de redução, ITBI, adicional de IRPJ variável por faturamento nem custos da operação.
-            Confirme sempre no caso concreto.
+            ⚠️ Estimativa para comparação. Já aplica o fator de redução da PF (Leis 11.196/2005 e 7.713/88),
+            mas não considera isenções (imóvel único, reinvestimento em 180 dias), ITBI, adicional de IRPJ
+            variável por faturamento nem custos da operação. Confirme sempre no caso concreto.
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Tabela consolidada de Ganho de Capital (todos os imóveis) ─────────────────
+function TabelaGCImoveis({ bens }: { bens: Bem[] }) {
+  const [aberto, setAberto] = useState(false)
+  const imoveis = bens.filter((b) => b.tipo_bem === 'imovel')
+  if (imoveis.length === 0) return null
+
+  const hoje = new Date()
+  const linhas = imoveis.map((b) => ({
+    bem: b,
+    r: calcularGC(b.valor_compra ?? b.valor_ir ?? 0, b.valor_mercado ?? 0, b.data_compra, hoje),
+  }))
+  const tot = linhas.reduce(
+    (a, l) => ({
+      ganho: a.ganho + l.r.ganho, impPF: a.impPF + l.r.impPF,
+      impPJ: a.impPJ + l.r.impPJ, impHolding: a.impHolding + l.r.impHolding,
+    }),
+    { ganho: 0, impPF: 0, impPJ: 0, impHolding: 0 },
+  )
+  const cell = (val: number, best: boolean) =>
+    <td className={`${s.gcTd} ${s.gcTdNum} ${best ? s.gcTdBest : ''}`}>{brl(val)}</td>
+
+  return (
+    <div className={s.card}>
+      <div className={s.cardHead} onClick={() => setAberto(!aberto)}>
+        <span className={s.bemIcon}>🧮</span>
+        <div className={s.grow}>
+          <div className={s.bemTitulo}>Ganho de Capital — todos os imóveis ({imoveis.length})</div>
+          <div className={s.bemMeta}><span>Comparativo PF (com fator de redução) × PJ 34% × Holding 6,73%, vendendo hoje</span></div>
+        </div>
+        <span style={{ color: 'var(--gray-mid)', fontSize: 12 }}>{aberto ? '▾' : '▸'}</span>
+      </div>
+      {aberto && (
+        <div className={s.gcTableWrap}>
+          <table className={s.gcTable}>
+            <thead>
+              <tr>
+                <th className={s.gcTh}>Imóvel</th>
+                <th className={`${s.gcTh} ${s.gcThNum}`}>Aquisição</th>
+                <th className={`${s.gcTh} ${s.gcThNum}`}>Venda est.</th>
+                <th className={`${s.gcTh} ${s.gcThNum}`}>Ganho</th>
+                <th className={`${s.gcTh} ${s.gcThNum}`}>Redução PF</th>
+                <th className={`${s.gcTh} ${s.gcThNum}`}>IR PF</th>
+                <th className={`${s.gcTh} ${s.gcThNum}`}>PJ 34%</th>
+                <th className={`${s.gcTh} ${s.gcThNum}`}>Holding 6,73%</th>
+              </tr>
+            </thead>
+            <tbody>
+              {linhas.map(({ bem: b, r }) => (
+                <tr key={b.id}>
+                  <td className={s.gcTd}>
+                    <div className={s.gcNome}>{b.nome}</div>
+                    {b.numero_matricula && <div className={s.gcSub}>Mat. {b.numero_matricula}</div>}
+                  </td>
+                  <td className={`${s.gcTd} ${s.gcTdNum}`}>{brl(b.valor_compra ?? b.valor_ir)}</td>
+                  <td className={`${s.gcTd} ${s.gcTdNum}`}>{brl(b.valor_mercado)}</td>
+                  <td className={`${s.gcTd} ${s.gcTdNum}`}>{brl(r.ganho)}</td>
+                  <td className={`${s.gcTd} ${s.gcTdNum}`}>
+                    {r.temReducao ? `−${((1 - r.fator) * 100).toFixed(1).replace('.', ',')}%` : (b.data_compra ? '—' : '⚠ s/ data')}
+                  </td>
+                  {cell(r.impPF, r.menorKey === 'pf')}
+                  {cell(r.impPJ, r.menorKey === 'pj')}
+                  {cell(r.impHolding, r.menorKey === 'holding')}
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td className={`${s.gcTd} ${s.gcTfoot}`} colSpan={3}>Totais</td>
+                <td className={`${s.gcTd} ${s.gcTdNum} ${s.gcTfoot}`}>{brl(tot.ganho)}</td>
+                <td className={`${s.gcTd} ${s.gcTfoot}`} />
+                <td className={`${s.gcTd} ${s.gcTdNum} ${s.gcTfoot}`}>{brl(tot.impPF)}</td>
+                <td className={`${s.gcTd} ${s.gcTdNum} ${s.gcTfoot}`}>{brl(tot.impPJ)}</td>
+                <td className={`${s.gcTd} ${s.gcTdNum} ${s.gcTfoot}`}>{brl(tot.impHolding)}</td>
+              </tr>
+            </tfoot>
+          </table>
+          <p className={s.gcDisclaimer} style={{ margin: '10px 12px 0' }}>
+            ⚠️ Estimativa vendendo hoje, com fator de redução da PF por imóvel. Ajuste valores e data de venda
+            na calculadora de cada imóvel. Não considera isenções nem custos da operação.
           </p>
         </div>
       )}
@@ -846,6 +1008,8 @@ export default function PatrimonioSection({ clienteId }: { clienteId: string }) 
           </div>
         </div>
       )}
+
+      {bens.length > 0 && <TabelaGCImoveis bens={bens} />}
 
       <div className={s.header}>
         <span className={s.headerTitle}>Patrimônio</span>

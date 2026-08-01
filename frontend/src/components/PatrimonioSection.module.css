@@ -400,6 +400,88 @@
   padding: 8px 10px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;
 }
 
+/* Input com prefixo R$ */
+.moneyWrap {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--gray-border);
+  border-radius: 6px;
+  background: var(--white);
+  overflow: hidden;
+}
+.moneyPrefix {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--gray-mid);
+  padding: 5px 6px 5px 9px;
+  background: var(--light);
+  border-right: 1px solid var(--gray-border);
+}
+.moneyField {
+  border: none;
+  outline: none;
+  padding: 5px 8px;
+  font-size: 12.5px;
+  font-family: inherit;
+  width: 100%;
+  background: transparent;
+}
+
+/* Banner do fator de redução */
+.gcReducao {
+  font-size: 12px;
+  color: var(--dark);
+  background: var(--teal-light);
+  border: 1px solid #b6e6db;
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+/* Tabela consolidada de GC */
+.gcTableWrap {
+  border-top: 1px solid var(--gray-border);
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.gcTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  min-width: 640px;
+}
+.gcTh {
+  text-align: left;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--gray-mid);
+  font-weight: 700;
+  padding: 10px 12px;
+  background: var(--light);
+  border-bottom: 1px solid var(--gray-border);
+  white-space: nowrap;
+}
+.gcThNum { text-align: right; }
+.gcTd {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--gray-border);
+  color: var(--dark);
+  vertical-align: top;
+}
+.gcTdNum { text-align: right; white-space: nowrap; }
+.gcTdBest {
+  background: var(--teal-light);
+  color: #065f46;
+  font-weight: 700;
+}
+.gcNome { font-weight: 600; color: var(--dark); }
+.gcSub { font-size: 10.5px; color: var(--gray-mid); margin-top: 1px; }
+.gcTfoot {
+  background: var(--light);
+  font-weight: 700;
+  border-bottom: none;
+}
+
 /* Quadro de sócios */
 .socioList { display: flex; flex-direction: column; gap: 6px; }
 .socioRow {
