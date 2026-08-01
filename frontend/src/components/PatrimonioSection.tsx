@@ -714,6 +714,96 @@ function TabelaGCImoveis({ bens }: { bens: Bem[] }) {
   )
 }
 
+// ── Tabela de Ganho de Capital — cotas / participações societárias ────────────
+function ehCota(b: Bem): boolean {
+  return b.tipo_bem === 'movel' &&
+    (!!b.empresa_nome || b.capital_social != null || b.valor_balanco != null || (b.socios?.length ?? 0) > 0)
+}
+
+function TabelaGCCotas({ bens }: { bens: Bem[] }) {
+  const [aberto, setAberto] = useState(false)
+  const [excluidos, setExcluidos] = useState<Set<string>>(new Set())
+  const cotas = bens.filter(ehCota)
+  if (cotas.length === 0) return null
+
+  const toggleBem = (id: string) => setExcluidos((prev) => {
+    const next = new Set(prev)
+    next.has(id) ? next.delete(id) : next.add(id)
+    return next
+  })
+
+  const linhas = cotas.map((b) => {
+    const custo = b.valor_compra ?? b.capital_social ?? b.valor_ir ?? 0
+    const venda = b.valor_mercado ?? b.valor_balanco ?? 0
+    const ganho = Math.max(0, venda - custo)
+    return { bem: b, incluido: !excluidos.has(b.id), custo, venda, ganho, impPF: irpfProgressivo(ganho) }
+  })
+  const tot = linhas.filter((l) => l.incluido).reduce(
+    (a, l) => ({ ganho: a.ganho + l.ganho, impPF: a.impPF + l.impPF }),
+    { ganho: 0, impPF: 0 },
+  )
+  const nIncluidos = linhas.filter((l) => l.incluido).length
+
+  return (
+    <div className={s.card}>
+      <div className={s.cardHead} onClick={() => setAberto(!aberto)}>
+        <span className={s.bemIcon}>📊</span>
+        <div className={s.grow}>
+          <div className={s.bemTitulo}>Ganho de Capital — cotas/participações ({nIncluidos}/{cotas.length} nos totais)</div>
+          <div className={s.bemMeta}><span>Venda de participação: PF 15–22,5% sobre (valor − custo/capital). Sem fator de redução (só imóveis).</span></div>
+        </div>
+        <span style={{ color: 'var(--gray-mid)', fontSize: 12 }}>{aberto ? '▾' : '▸'}</span>
+      </div>
+      {aberto && (
+        <div className={s.gcTableWrap}>
+          <table className={s.gcTable}>
+            <thead>
+              <tr>
+                <th className={s.gcTh} style={{ width: 34 }}></th>
+                <th className={s.gcTh}>Participação</th>
+                <th className={`${s.gcTh} ${s.gcThNum}`}>Custo / capital</th>
+                <th className={`${s.gcTh} ${s.gcThNum}`}>Valor estimado</th>
+                <th className={`${s.gcTh} ${s.gcThNum}`}>Ganho</th>
+                <th className={`${s.gcTh} ${s.gcThNum}`}>IR PF (15–22,5%)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {linhas.map(({ bem: b, incluido, custo, venda, ganho, impPF }) => (
+                <tr key={b.id} className={incluido ? '' : s.gcRowOff}>
+                  <td className={s.gcTd} style={{ textAlign: 'center' }}>
+                    <input type="checkbox" checked={incluido} onChange={() => toggleBem(b.id)}
+                      title={incluido ? 'Excluir dos totais' : 'Incluir nos totais'} />
+                  </td>
+                  <td className={s.gcTd}>
+                    <div className={s.gcNome}>{b.empresa_nome || b.nome}</div>
+                    <div className={s.gcSub}>{b.empresa_cnpj || b.nome}</div>
+                  </td>
+                  <td className={`${s.gcTd} ${s.gcTdNum}`}>{brl(custo)}</td>
+                  <td className={`${s.gcTd} ${s.gcTdNum}`}>{brl(venda)}</td>
+                  <td className={`${s.gcTd} ${s.gcTdNum}`}>{brl(ganho)}</td>
+                  <td className={`${s.gcTd} ${s.gcTdNum} ${incluido ? s.gcTdBest : ''}`}>{brl(impPF)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td className={`${s.gcTd} ${s.gcTfoot}`} colSpan={4}>Totais ({nIncluidos})</td>
+                <td className={`${s.gcTd} ${s.gcTdNum} ${s.gcTfoot}`}>{brl(tot.ganho)}</td>
+                <td className={`${s.gcTd} ${s.gcTdNum} ${s.gcTfoot}`}>{brl(tot.impPF)}</td>
+              </tr>
+            </tfoot>
+          </table>
+          <p className={s.gcDisclaimer} style={{ margin: '10px 12px 0' }}>
+            ⚠️ Custo = valor de compra/integralização; valor estimado = valor de mercado (ou PL do balanço).
+            IR PF progressivo sobre o ganho (Lei 13.259/2016), sem fator de redução (exclusivo de imóveis).
+            Alienação por holding (PJ) costuma ser tributada ~34% sobre o ganho — normalmente pior que a PF.
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Quadro de sócios (bem móvel = cota social) ────────────────────────────────
 function SociosSection({ bem }: { bem: Bem }) {
   const qc = useQueryClient()
@@ -1061,6 +1151,7 @@ export default function PatrimonioSection({ clienteId }: { clienteId: string }) 
       )}
 
       {bens.length > 0 && <TabelaGCImoveis bens={bens} />}
+      {bens.length > 0 && <TabelaGCCotas bens={bens} />}
 
       <div className={s.header}>
         <span className={s.headerTitle}>Patrimônio</span>
