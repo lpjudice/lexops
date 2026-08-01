@@ -527,8 +527,8 @@ function CalculadoraGC({ bem }: { bem: Bem }) {
       key: 'pf', nome: 'Pessoa Física', base: 'sobre o ganho reduzido',
       taxa: '15%–22,5%', imposto: r.impPF,
       nota: r.temReducao
-        ? 'Faixas progressivas (Lei 13.259/2016) sobre o ganho já reduzido pelo fator de redução (Leis 11.196/2005 e 7.713/88).'
-        : 'Faixas progressivas (Lei 13.259/2016). Cadastre a data da compra para aplicar o fator de redução automaticamente.',
+        ? 'Faixas progressivas (Lei 13.259/2016) sobre o ganho JÁ REDUZIDO. O fator de redução incide sobre a BASE (o ganho), não sobre o imposto. Leis 11.196/2005 (FR1×FR2, 0,6%/mês) e 7.713/88 (imóveis até 1969 isentos; 1970–1988 redução decrescente).'
+        : 'Faixas progressivas (Lei 13.259/2016). Cadastre a data da compra para aplicar o fator de redução (sobre a base) automaticamente.',
     },
     {
       key: 'pj', nome: 'PJ não imobiliária', base: 'sobre o ganho',
@@ -573,7 +573,7 @@ function CalculadoraGC({ bem }: { bem: Bem }) {
           <div className={s.gcReducao}>
             {bem.data_compra ? (
               r.temReducao ? (
-                <>Fator de redução (PF): <b>−{reducaoPct.toFixed(1).replace('.', ',')}%</b> do ganho ·
+                <>Fator de redução (PF): <b>−{reducaoPct.toFixed(1).replace('.', ',')}%</b> sobre a <b>base</b> (o ganho) ·
                   compra em {fmtDate(bem.data_compra)} · ganho tributável na PF: <b>{brl(r.ganhoPF)}</b></>
               ) : (
                 <>Sem redução aplicável (imóvel adquirido em {fmtDate(bem.data_compra)}).</>
@@ -604,9 +604,10 @@ function CalculadoraGC({ bem }: { bem: Bem }) {
             })}
           </div>
           <p className={s.gcDisclaimer}>
-            ⚠️ Estimativa para comparação. Já aplica o fator de redução da PF (Leis 11.196/2005 e 7.713/88),
-            mas não considera isenções (imóvel único, reinvestimento em 180 dias), ITBI, adicional de IRPJ
-            variável por faturamento nem custos da operação. Confirme sempre no caso concreto.
+            ⚠️ Estimativa. O fator de redução da PF incide sobre a <b>base</b> (o ganho), não sobre o imposto,
+            e combina duas leis: 11.196/2005 (FR1×FR2, 0,6%/mês) e 7.713/88 (imóveis até 1969 isentos;
+            1970–1988 redução decrescente). Não considera isenções (imóvel único, reinvestimento em 180 dias),
+            ITBI, adicional de IRPJ variável nem custos da operação. Confirme no caso concreto.
           </p>
         </div>
       )}
@@ -664,7 +665,7 @@ function TabelaGCImoveis({ bens }: { bens: Bem[] }) {
                 <th className={`${s.gcTh} ${s.gcThNum}`}>Aquisição</th>
                 <th className={`${s.gcTh} ${s.gcThNum}`}>Venda est.</th>
                 <th className={`${s.gcTh} ${s.gcThNum}`}>Ganho</th>
-                <th className={`${s.gcTh} ${s.gcThNum}`}>Redução PF</th>
+                <th className={`${s.gcTh} ${s.gcThNum}`} title="Redução sobre a BASE (o ganho) — Leis 11.196/2005 e 7.713/88">Redução PF (base)</th>
                 <th className={`${s.gcTh} ${s.gcThNum}`}>IR PF</th>
                 <th className={`${s.gcTh} ${s.gcThNum}`}>PJ 34%</th>
                 <th className={`${s.gcTh} ${s.gcThNum}`}>Holding 6,73%</th>
@@ -705,8 +706,9 @@ function TabelaGCImoveis({ bens }: { bens: Bem[] }) {
             </tfoot>
           </table>
           <p className={s.gcDisclaimer} style={{ margin: '10px 12px 0' }}>
-            ⚠️ Estimativa vendendo hoje, com fator de redução da PF por imóvel. Desmarque um imóvel para tirá-lo dos totais.
-            Ajuste valores e data de venda na calculadora de cada imóvel. Não considera isenções nem custos da operação.
+            ⚠️ Estimativa vendendo hoje. O fator de redução da PF incide sobre a base (o ganho): Leis 11.196/2005
+            (0,6%/mês) e 7.713/88 (até 1969 isento; 1970–1988 decrescente). Desmarque um imóvel para tirá-lo dos totais.
+            Ajuste valores e data na calculadora de cada imóvel. Não considera isenções nem custos da operação.
           </p>
         </div>
       )}

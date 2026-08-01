@@ -88,6 +88,72 @@ def _norm(x: str | None) -> str:
     return " ".join((x or "").strip().lower().split())
 
 
+# ── Ganho de capital (mesma lógica do frontend) ──────────────────────────────
+def _num(v) -> float:
+    try:
+        return float(v) if v is not None else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _meses_entre(inicio: date, fim: date) -> int:
+    return max(0, (fim.year - inicio.year) * 12 + (fim.month - inicio.month))
+
+
+def _irpf_progressivo(ganho: float) -> float:
+    faixas = [(5_000_000, 0.15), (10_000_000, 0.175), (30_000_000, 0.20), (float("inf"), 0.225)]
+    imposto = 0.0
+    anterior = 0.0
+    for teto, aliq in faixas:
+        if ganho <= anterior:
+            break
+        imposto += (min(ganho, teto) - anterior) * aliq
+        anterior = teto
+    return imposto
+
+
+def _fator_reducao_imovel(data_compra: date, data_venda: date) -> float:
+    """Fração do ganho que permanece tributável na PF (Leis 11.196/2005 e 7.713/88)."""
+    ano = data_compra.year
+    if ano <= 1969:
+        mult7713 = 0.0
+    elif ano <= 1988:
+        mult7713 = 5 * (ano - 1969) / 100
+    else:
+        mult7713 = 1.0
+    nov2005, dez2005 = date(2005, 11, 1), date(2005, 12, 1)
+    m1 = _meses_entre(data_compra, nov2005) if data_compra < nov2005 else 0
+    inicio_f2 = data_compra if data_compra > dez2005 else dez2005
+    m2 = _meses_entre(inicio_f2, data_venda)
+    return mult7713 * (1 / (1.0035 ** m1)) * (1 / (1.006 ** m2))
+
+
+def _gc_imovel(b, hoje: date) -> dict:
+    aquis = _num(b.valor_compra) or _num(b.valor_ir)
+    venda = _num(b.valor_mercado)
+    ganho = max(0.0, venda - aquis)
+    fator = _fator_reducao_imovel(b.data_compra, hoje) if b.data_compra else 1.0
+    imp_pf = _irpf_progressivo(ganho * fator)
+    imp_pj = ganho * 0.34
+    imp_hold = venda * 0.0673
+    menor = min(imp_pf, imp_pj, imp_hold)
+    return {"aquis": aquis, "venda": venda, "ganho": ganho, "fator": fator,
+            "imp_pf": imp_pf, "imp_pj": imp_pj, "imp_hold": imp_hold, "menor": menor}
+
+
+def _gc_cota(b) -> dict:
+    custo = _num(b.valor_compra) or _num(b.capital_social) or _num(b.valor_ir)
+    venda = _num(b.valor_mercado) or _num(b.valor_balanco)
+    ganho = max(0.0, venda - custo)
+    return {"custo": custo, "venda": venda, "ganho": ganho, "imp_pf": _irpf_progressivo(ganho)}
+
+
+def _eh_cota(b) -> bool:
+    return b.tipo_bem == "movel" and bool(
+        b.empresa_nome or b.capital_social is not None or b.valor_balanco is not None or b.socios
+    )
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # XLS
 # ════════════════════════════════════════════════════════════════════════════
@@ -170,6 +236,72 @@ def gerar_xls(cliente_nome: str, bens: list) -> bytes:
         c.number_format = 'R$ #,##0.00'
 
     ws.freeze_panes = f"A{header_row + 1}"
+
+    # ── Aba: Ganho de Capital — Imóveis ──────────────────────────────────────
+    from datetime import date as _date
+    hoje = _date.today()
+
+    def _header_aba(ws2, titulo, colunas):
+        ws2.cell(row=1, column=1, value=titulo).font = Font(bold=True, size=13, color="1D1E20")
+        for i, (nome, larg) in enumerate(colunas, start=1):
+            c = ws2.cell(row=3, column=i, value=nome)
+            c.font = Font(bold=True, color="FFFFFF", size=10)
+            c.fill = PatternFill(start_color="00B090", end_color="00B090", fill_type="solid")
+            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            ws2.column_dimensions[get_column_letter(i)].width = larg
+
+    imoveis = [b for b in bens if b.tipo_bem == "imovel"]
+    if imoveis:
+        wi = wb.create_sheet("GC Imóveis")
+        _header_aba(wi, f"Ganho de Capital — Imóveis (venda estimada hoje, {hoje.strftime('%d/%m/%Y')})", [
+            ("Imóvel", 34), ("Nº matrícula", 16), ("Aquisição", 16), ("Venda estimada", 16),
+            ("Ganho", 16), ("Redução PF (base) %", 18), ("IR PF", 16), ("PJ 34%", 16), ("Holding 6,73%", 16),
+        ])
+        r = 4
+        tot = {"ganho": 0.0, "pf": 0.0, "pj": 0.0, "hold": 0.0}
+        for b in imoveis:
+            g = _gc_imovel(b, hoje)
+            red = (1 - g["fator"]) * 100 if b.data_compra else None
+            vals = [b.nome, b.numero_matricula or "", g["aquis"], g["venda"], g["ganho"],
+                    (red if red is not None else "s/ data"), g["imp_pf"], g["imp_pj"], g["imp_hold"]]
+            for i, v in enumerate(vals, start=1):
+                cell = wi.cell(row=r, column=i, value=v)
+                if i in (3, 4, 5, 7, 8, 9):
+                    cell.number_format = 'R$ #,##0.00'
+                if i == 6 and isinstance(v, (int, float)):
+                    cell.number_format = '0.0"%"'
+            tot["ganho"] += g["ganho"]; tot["pf"] += g["imp_pf"]; tot["pj"] += g["imp_pj"]; tot["hold"] += g["imp_hold"]
+            r += 1
+        wi.cell(row=r, column=2, value="TOTAIS").font = Font(bold=True)
+        for i, val in ((5, tot["ganho"]), (7, tot["pf"]), (8, tot["pj"]), (9, tot["hold"])):
+            c = wi.cell(row=r, column=i, value=val)
+            c.font = Font(bold=True, color="00B090"); c.number_format = 'R$ #,##0.00'
+        wi.freeze_panes = "A4"
+
+    # ── Aba: Ganho de Capital — Cotas ────────────────────────────────────────
+    cotas = [b for b in bens if _eh_cota(b)]
+    if cotas:
+        wc = wb.create_sheet("GC Cotas")
+        _header_aba(wc, "Ganho de Capital — Cotas/Participações (PF 15–22,5%, sem fator de redução)", [
+            ("Participação", 34), ("CNPJ", 20), ("Custo/capital", 16), ("Valor estimado", 16),
+            ("Ganho", 16), ("IR PF", 16),
+        ])
+        r = 4
+        tot = {"ganho": 0.0, "pf": 0.0}
+        for b in cotas:
+            g = _gc_cota(b)
+            vals = [b.empresa_nome or b.nome, b.empresa_cnpj or "", g["custo"], g["venda"], g["ganho"], g["imp_pf"]]
+            for i, v in enumerate(vals, start=1):
+                cell = wc.cell(row=r, column=i, value=v)
+                if i in (3, 4, 5, 6):
+                    cell.number_format = 'R$ #,##0.00'
+            tot["ganho"] += g["ganho"]; tot["pf"] += g["imp_pf"]
+            r += 1
+        wc.cell(row=r, column=2, value="TOTAIS").font = Font(bold=True)
+        for i, val in ((5, tot["ganho"]), (6, tot["pf"])):
+            c = wc.cell(row=r, column=i, value=val)
+            c.font = Font(bold=True, color="00B090"); c.number_format = 'R$ #,##0.00'
+        wc.freeze_panes = "A4"
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -382,6 +514,98 @@ def _faixa(paras, content_w, bg=LIGHT):
     return t
 
 
+def _gc_pdf(bens, st, content_w) -> list:
+    """Seções de Ganho de Capital (imóveis + cotas) para o PDF."""
+    from datetime import date as _date
+    hoje = _date.today()
+    imoveis = [b for b in bens if b.tipo_bem == "imovel"]
+    cotas = [b for b in bens if _eh_cota(b)]
+    els: list = []
+    if not imoveis and not cotas:
+        return els
+
+    header_st = ParagraphStyle("gchead", fontName="Helvetica-Bold", fontSize=7.5, textColor=WHITE)
+    cel_st = ParagraphStyle("gccel", fontName="Helvetica", fontSize=7.5, textColor=DARK, leading=9)
+    tot_st = ParagraphStyle("gctot", fontName="Helvetica-Bold", fontSize=7.5, textColor=DARK)
+
+    def _p(txt, style=cel_st):
+        return Paragraph(str(txt), style)
+
+    els.append(Paragraph("Análise de Ganho de Capital", st["secao"]))
+    els.append(Paragraph(
+        f"Venda estimada hoje ({hoje.strftime('%d/%m/%Y')}). Na PF, o fator de redução incide sobre a "
+        f"base (o ganho): Leis 11.196/2005 (0,6%/mês) e 7.713/88 (imóveis até 1969 isentos; 1970–1988 decrescente).",
+        st["obs"]))
+
+    # ── Imóveis
+    if imoveis:
+        els.append(Paragraph("Imóveis", st["lbl"]))
+        head = ["Imóvel", "Aquisição", "Venda est.", "Ganho", "Red. PF", "IR PF", "PJ 34%", "Holding"]
+        rows = [[_p(h, header_st) for h in head]]
+        menor_cols = []
+        tot = {"g": 0.0, "pf": 0.0, "pj": 0.0, "hold": 0.0}
+        for b in imoveis:
+            g = _gc_imovel(b, hoje)
+            red = f"−{(1 - g['fator']) * 100:.1f}%".replace(".", ",") if b.data_compra else "s/ data"
+            rows.append([
+                _p(b.nome), _p(_brl(g["aquis"])), _p(_brl(g["venda"])), _p(_brl(g["ganho"])),
+                _p(red), _p(_brl(g["imp_pf"])), _p(_brl(g["imp_pj"])), _p(_brl(g["imp_hold"])),
+            ])
+            menor_cols.append(5 if g["menor"] == g["imp_pf"] else 6 if g["menor"] == g["imp_pj"] else 7)
+            tot["g"] += g["ganho"]; tot["pf"] += g["imp_pf"]; tot["pj"] += g["imp_pj"]; tot["hold"] += g["imp_hold"]
+        rows.append([_p("TOTAIS", tot_st), _p(""), _p(""), _p(_brl(tot["g"]), tot_st), _p(""),
+                     _p(_brl(tot["pf"]), tot_st), _p(_brl(tot["pj"]), tot_st), _p(_brl(tot["hold"]), tot_st)])
+        cw = [c * content_w for c in (0.224, 0.121, 0.121, 0.121, 0.086, 0.121, 0.103, 0.103)]
+        t = Table(rows, colWidths=cw, repeatRows=1)
+        ts = [
+            ("BACKGROUND", (0, 0), (-1, 0), DARK),
+            ("BACKGROUND", (0, -1), (-1, -1), LIGHT),
+            ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("LEFTPADDING", (0, 0), (-1, -1), 5), ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+            ("LINEBELOW", (0, 0), (-1, -2), 0.4, BORDER),
+            ("BOX", (0, 0), (-1, -1), 0.6, BORDER),
+        ]
+        for i, col in enumerate(menor_cols, start=1):
+            ts.append(("BACKGROUND", (col, i), (col, i), TEAL_LIGHT))
+        t.setStyle(TableStyle(ts))
+        els.append(t)
+        els.append(Spacer(1, 0.3 * cm))
+
+    # ── Cotas
+    if cotas:
+        els.append(Paragraph("Cotas / participações societárias (PF 15–22,5%, sem fator de redução)", st["lbl"]))
+        head = ["Participação", "CNPJ", "Custo/capital", "Valor est.", "Ganho", "IR PF"]
+        rows = [[_p(h, header_st) for h in head]]
+        tot = {"g": 0.0, "pf": 0.0}
+        for b in cotas:
+            g = _gc_cota(b)
+            rows.append([
+                _p(b.empresa_nome or b.nome), _p(b.empresa_cnpj or "—"),
+                _p(_brl(g["custo"])), _p(_brl(g["venda"])), _p(_brl(g["ganho"])), _p(_brl(g["imp_pf"])),
+            ])
+            tot["g"] += g["ganho"]; tot["pf"] += g["imp_pf"]
+        rows.append([_p("TOTAIS", tot_st), _p(""), _p(""), _p(""), _p(_brl(tot["g"]), tot_st), _p(_brl(tot["pf"]), tot_st)])
+        cw = [c * content_w for c in (0.29, 0.19, 0.13, 0.13, 0.13, 0.13)]
+        t = Table(rows, colWidths=cw, repeatRows=1)
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), DARK),
+            ("BACKGROUND", (0, -1), (-1, -1), LIGHT),
+            ("BACKGROUND", (5, 1), (5, -2), TEAL_LIGHT),
+            ("ALIGN", (2, 0), (-1, -1), "RIGHT"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("LEFTPADDING", (0, 0), (-1, -1), 5), ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+            ("LINEBELOW", (0, 0), (-1, -2), 0.4, BORDER),
+            ("BOX", (0, 0), (-1, -1), 0.6, BORDER),
+        ]))
+        els.append(t)
+
+    els.append(Spacer(1, 0.5 * cm))
+    return els
+
+
 def gerar_pdf(cliente_nome: str, bens: list) -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -436,6 +660,10 @@ def gerar_pdf(cliente_nome: str, bens: list) -> bytes:
     ]))
     story.append(resumo)
     story.append(Spacer(1, 0.5 * cm))
+
+    # Análise de Ganho de Capital (imóveis + cotas)
+    for el in _gc_pdf(bens, st, content_w):
+        story.append(el)
 
     if not bens:
         story.append(Paragraph("Nenhum bem cadastrado.", st["val"]))
