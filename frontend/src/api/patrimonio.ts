@@ -87,16 +87,24 @@ export type SocioUpdate = Partial<Omit<Socio, 'id' | 'created_at'>>
 export interface EscrituraCampo {
   valor: string | number | null
   trecho: string
+  referencia?: string
+}
+export interface GravameItem {
+  tipo: string
+  descricao: string
+  vencida: boolean | null
+  trecho: string
+  referencia?: string
 }
 export interface EscrituraExtraida {
   descricao_imovel: EscrituraCampo
-  proprietario_atual: EscrituraCampo
-  valor_compra: EscrituraCampo
+  proprietario_atual: EscrituraCampo & { data_aquisicao?: string | null }
+  valor_compra: EscrituraCampo & { moeda?: string }
   proprietarios_anteriores: EscrituraCampo
   data_transacao: EscrituraCampo
   numero_matricula: EscrituraCampo
   cartorio: EscrituraCampo
-  hipoteca: { existe: boolean; vencida: boolean | null; descricao: string; trecho: string }
+  gravames: { existe: boolean; itens: GravameItem[] }
 }
 
 export const patrimonioApi = {

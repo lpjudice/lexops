@@ -498,12 +498,18 @@ function calcularGC(aquisicao: number, venda: number, dataCompra?: string | null
   return { ganho, fator, temReducao: fator < 0.9999, ganhoPF, impPF, impPJ, impHolding, menorKey }
 }
 
+// Input de dinheiro no padrão brasileiro (R$ 1.234.567,89). Digita como centavos.
 function MoneyInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const display = value ? value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''
+  const handle = (raw: string) => {
+    const digits = raw.replace(/\D/g, '')
+    onChange(digits ? parseInt(digits, 10) / 100 : 0)
+  }
   return (
     <div className={s.moneyWrap}>
       <span className={s.moneyPrefix}>R$</span>
-      <input type="number" step="0.01" min="0" className={s.moneyField}
-        value={value || ''} onChange={(e) => onChange(parseFloat(e.target.value) || 0)} />
+      <input type="text" inputMode="numeric" className={s.moneyField}
+        value={display} placeholder="0,00" onChange={(e) => handle(e.target.value)} />
     </div>
   )
 }
@@ -1092,9 +1098,28 @@ function BemCard({ bem }: { bem: Bem }) {
 }
 
 // ── Leitor de escritura com IA (extração + validação lado a lado) ─────────────
-function Trecho({ t }: { t?: string }) {
-  if (!t) return null
-  return <div className={s.trecho}>origem: “{t}”</div>
+function Trecho({ t, referencia }: { t?: string; referencia?: string }) {
+  if (!t && !referencia) return null
+  return (
+    <div className={s.trecho}>
+      {t && <span>origem: “{t}”</span>}
+      {referencia && <div className={s.trechoRef}>📍 {referencia}</div>}
+    </div>
+  )
+}
+
+const GRAVAME_LABEL: Record<string, string> = {
+  hipoteca: 'Hipoteca', penhora: 'Penhora', indisponibilidade: 'Indisponibilidade',
+  alienacao_fiduciaria: 'Alienação fiduciária', usufruto: 'Usufruto', servidao: 'Servidão',
+  arresto: 'Arresto', penhora_fiscal: 'Penhora fiscal', outro: 'Outro gravame',
+}
+function labelGravame(tipo: string): string {
+  return GRAVAME_LABEL[tipo] || tipo || 'Gravame'
+}
+// Detecta se a moeda extraída é real (senão é cruzeiro/cruzado/etc.)
+function ehReal(moeda?: string): boolean {
+  const m = (moeda || '').trim().toLowerCase()
+  return m === '' || m === 'r$' || m.includes('real') || m.includes('reais') || m.includes('brl')
 }
 
 function LeitorEscrituraModal({ clienteId, onClose }: { clienteId: string; onClose: () => void }) {
@@ -1107,6 +1132,9 @@ function LeitorEscrituraModal({ clienteId, onClose }: { clienteId: string; onClo
   const [dados, setDados] = useState<EscrituraExtraida | null>(null)
   const [salvando, setSalvando] = useState(false)
   const [f, setF] = useState<FormState>(emptyForm())
+  // Moeda estrangeira à época (cruzeiro/cruzado): exige o usuário informar o valor em R$.
+  const [moedaInfo, setMoedaInfo] = useState<{ moeda: string; original: string } | null>(null)
+  const [reaisConfirmado, setReaisConfirmado] = useState(true)
 
   useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl) }, [previewUrl])
 
@@ -1125,25 +1153,42 @@ function LeitorEscrituraModal({ clienteId, onClose }: { clienteId: string; onClo
       setDados(d)
       const desc = str(d.descricao_imovel.valor)
       const vc = d.valor_compra.valor
-      const hipTxt = d.hipoteca.existe
-        ? `${d.hipoteca.descricao || 'Gravame/hipoteca'}${d.hipoteca.vencida === true ? ' — VENCIDA' : d.hipoteca.vencida === false ? ' — não vencida' : ''}`
+      const moeda = (d.valor_compra.moeda || 'R$').trim()
+      const real = ehReal(moeda)
+      setMoedaInfo(real ? null : { moeda, original: str(vc) })
+      setReaisConfirmado(real)  // se não é real, o usuário precisa confirmar o valor em R$
+
+      const grav = d.gravames
+      const gravTxt = grav?.existe
+        ? grav.itens.map((it) =>
+            `• ${labelGravame(it.tipo)}: ${it.descricao}` +
+            (it.vencida === true ? ' [VENCIDA]' : it.vencida === false ? ' [não vencida]' : '')).join('\n')
         : ''
+      const obs = [
+        d.proprietarios_anteriores.valor ? `Proprietários anteriores: ${str(d.proprietarios_anteriores.valor)}` : '',
+        !real && vc ? `Valor original no documento: ${moeda} ${str(vc)}` : '',
+      ].filter(Boolean).join('\n')
+
       setF({
         ...emptyForm(),
         tipo_bem: 'imovel',
         nome: desc ? desc.slice(0, 70) : (d.numero_matricula.valor ? `Imóvel matrícula ${d.numero_matricula.valor}` : ''),
         descricao_matricula: desc,
         proprietario_matricula: str(d.proprietario_atual.valor),
-        valor_compra: typeof vc === 'number' ? vc : (vc ? parseFloat(String(vc)) || undefined : undefined),
+        // Só preenche o valor se for real; se for cruzeiro/cruzado, o campo R$ fica em branco p/ o usuário.
+        valor_compra: real ? (typeof vc === 'number' ? vc : (vc ? parseFloat(String(vc)) || undefined : undefined)) : undefined,
         data_compra: typeof d.data_transacao.valor === 'string' ? d.data_transacao.valor : '',
         numero_matricula: str(d.numero_matricula.valor),
         cartorio: str(d.cartorio.valor),
-        observacoes: d.proprietarios_anteriores.valor ? `Proprietários anteriores: ${str(d.proprietarios_anteriores.valor)}` : '',
-        tem_gravame: d.hipoteca.existe,
-        gravame_descricao: hipTxt,
+        observacoes: obs,
+        tem_gravame: !!grav?.existe,
+        gravame_descricao: gravTxt,
       })
-    } catch {
-      setErro('Não foi possível ler o documento. Você pode preencher os campos manualmente.')
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setErro(detail
+        ? `Não foi possível ler: ${detail}`
+        : 'Não foi possível ler o documento. Você pode preencher os campos manualmente.')
     } finally {
       setExtraindo(false)
     }
@@ -1151,6 +1196,7 @@ function LeitorEscrituraModal({ clienteId, onClose }: { clienteId: string; onClo
 
   const salvar = async () => {
     if (!f.nome) { alert('Dê um nome ao imóvel antes de salvar.'); return }
+    if (moedaInfo && !reaisConfirmado) { alert('Confirme o valor de aquisição em R$ (mesmo que 0).'); return }
     setSalvando(true)
     try {
       const bem = await patrimonioApi.criar({
@@ -1165,7 +1211,7 @@ function LeitorEscrituraModal({ clienteId, onClose }: { clienteId: string; onClo
     }
   }
 
-  const hip = dados?.hipoteca
+  const gravames = dados?.gravames
 
   return (
     <div className={s.modalOverlay} onClick={onClose}>
@@ -1200,41 +1246,55 @@ function LeitorEscrituraModal({ clienteId, onClose }: { clienteId: string; onClo
                 <label className={styles.formLabel}>Descrição conforme matrícula</label>
                 <textarea className={styles.input} rows={3} value={f.descricao_matricula ?? ''}
                   onChange={(e) => set({ descricao_matricula: e.target.value })} />
-                <Trecho t={dados?.descricao_imovel.trecho} />
+                <Trecho t={dados?.descricao_imovel.trecho} referencia={dados?.descricao_imovel.referencia} />
               </div>
 
               <div className={styles.formRow}>
                 <label className={styles.formLabel}>Proprietário na matrícula (atual)</label>
                 <input className={styles.input} value={f.proprietario_matricula ?? ''}
                   onChange={(e) => set({ proprietario_matricula: e.target.value })} />
-                <Trecho t={dados?.proprietario_atual.trecho} />
+                <Trecho t={dados?.proprietario_atual.trecho}
+                  referencia={[dados?.proprietario_atual.referencia,
+                    dados?.proprietario_atual.data_aquisicao ? `aquisição em ${fmtDate(dados.proprietario_atual.data_aquisicao)}` : '']
+                    .filter(Boolean).join(' · ') || undefined} />
               </div>
 
               <div className={s.escGrid}>
                 <div className={styles.formRow}>
-                  <label className={styles.formLabel}>Valor de compra (real)</label>
+                  <label className={styles.formLabel}>Valor de compra em R$ {moedaInfo ? '(equivalente hoje)' : '(real)'}</label>
                   <MoneyInput value={f.valor_compra ?? 0} onChange={(v) => set({ valor_compra: v || undefined })} />
-                  <Trecho t={dados?.valor_compra.trecho} />
+                  <Trecho t={dados?.valor_compra.trecho} referencia={dados?.valor_compra.referencia} />
                 </div>
                 <div className={styles.formRow}>
                   <label className={styles.formLabel}>Data da compra/venda</label>
                   <DateInput className={styles.input} value={f.data_compra} onChange={(iso) => set({ data_compra: iso })} />
-                  <Trecho t={dados?.data_transacao.trecho} />
+                  <Trecho t={dados?.data_transacao.trecho} referencia={dados?.data_transacao.referencia} />
                 </div>
               </div>
+
+              {moedaInfo && (
+                <div className={s.escMoeda}>
+                  <div>⚠ O valor no documento está em <b>{moedaInfo.moeda} {moedaInfo.original}</b> (moeda da época).
+                    Informe o <b>equivalente em R$</b> no campo acima — mesmo que 0 — e confirme abaixo.</div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={reaisConfirmado} onChange={(e) => setReaisConfirmado(e.target.checked)} />
+                    Confirmo o valor de aquisição em R$ acima (ainda que 0).
+                  </label>
+                </div>
+              )}
 
               <div className={s.escGrid}>
                 <div className={styles.formRow}>
                   <label className={styles.formLabel}>Nº da matrícula</label>
                   <input className={styles.input} value={f.numero_matricula ?? ''}
                     onChange={(e) => set({ numero_matricula: e.target.value })} />
-                  <Trecho t={dados?.numero_matricula.trecho} />
+                  <Trecho t={dados?.numero_matricula.trecho} referencia={dados?.numero_matricula.referencia} />
                 </div>
                 <div className={styles.formRow}>
                   <label className={styles.formLabel}>Cartório</label>
                   <input className={styles.input} value={f.cartorio ?? ''}
                     onChange={(e) => set({ cartorio: e.target.value })} />
-                  <Trecho t={dados?.cartorio.trecho} />
+                  <Trecho t={dados?.cartorio.trecho} referencia={dados?.cartorio.referencia} />
                 </div>
               </div>
 
@@ -1242,31 +1302,37 @@ function LeitorEscrituraModal({ clienteId, onClose }: { clienteId: string; onClo
                 <label className={styles.formLabel}>Proprietários anteriores / observações</label>
                 <textarea className={styles.input} rows={2} value={f.observacoes ?? ''}
                   onChange={(e) => set({ observacoes: e.target.value })} />
-                <Trecho t={dados?.proprietarios_anteriores.trecho} />
+                <Trecho t={dados?.proprietarios_anteriores.trecho} referencia={dados?.proprietarios_anteriores.referencia} />
               </div>
 
-              {/* Hipoteca / gravame */}
+              {/* Gravames / ônus */}
               <div className={s.escHipoteca}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
                   <input type="checkbox" checked={!!f.tem_gravame} onChange={(e) => set({ tem_gravame: e.target.checked })} />
-                  Possui hipoteca / gravame na matrícula
+                  Possui gravame/ônus na matrícula (hipoteca, penhora, indisponibilidade, alienação fiduciária…)
                 </label>
-                {hip?.existe && (
-                  <span className={`${s.hipBadge} ${hip.vencida === true ? s.hipVencida : hip.vencida === false ? s.hipOk : s.hipIndef}`}>
-                    {hip.vencida === true ? '⚠ VENCIDA' : hip.vencida === false ? '✓ não vencida' : 'vencimento indefinido'}
-                  </span>
+                {gravames?.existe && gravames.itens.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {gravames.itens.map((it, i) => (
+                      <span key={i} className={`${s.hipBadge} ${it.vencida === true ? s.hipVencida : it.vencida === false ? s.hipOk : s.hipIndef}`}>
+                        {labelGravame(it.tipo)}{it.vencida === true ? ' ⚠ VENCIDA' : it.vencida === false ? ' ✓ não vencida' : ''}
+                      </span>
+                    ))}
+                  </div>
                 )}
                 {f.tem_gravame && (
                   <>
-                    <textarea className={styles.input} rows={2} value={f.gravame_descricao ?? ''}
-                      onChange={(e) => set({ gravame_descricao: e.target.value })} placeholder="Detalhes do gravame" />
-                    <Trecho t={dados?.hipoteca.trecho} />
+                    <textarea className={styles.input} rows={3} value={f.gravame_descricao ?? ''}
+                      onChange={(e) => set({ gravame_descricao: e.target.value })} placeholder="Detalhes dos gravames" />
+                    {gravames?.itens?.[0] && <Trecho t={gravames.itens[0].trecho} referencia={gravames.itens[0].referencia} />}
                   </>
                 )}
               </div>
 
               <div className={s.rowBtns} style={{ marginTop: 12 }}>
-                <button className={styles.btnPrimary} disabled={salvando || extraindo || !f.nome} onClick={salvar}>
+                <button className={styles.btnPrimary}
+                  disabled={salvando || extraindo || !f.nome || (!!moedaInfo && !reaisConfirmado)}
+                  onClick={salvar}>
                   {salvando ? 'Salvando…' : 'Salvar imóvel'}
                 </button>
                 <button className={styles.btnTable} onClick={onClose}>Cancelar</button>
