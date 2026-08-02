@@ -27,6 +27,7 @@ import {
   LayoutGrid,
   Gavel,
   Landmark,
+  Camera,
 } from 'lucide-react'
 import api from '../api/client'
 import { useAuth } from '../contexts/AuthContext'
@@ -77,6 +78,7 @@ const navGroups: NavGroup[] = [
       { to: '/tarefas-cards', label: 'Tarefas Cards', Icon: LayoutGrid },
       { to: '/reunioes', label: 'Reuniões', Icon: Video },
       { to: '/conselho', label: 'Expansão', Icon: Users2 },
+      { to: '/instagram', label: 'Instagram', Icon: Camera },
     ],
   },
   {
@@ -154,6 +156,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/tarefas-cards': 'Tarefas Cards',
   '/reunioes': 'Reuniões',
   '/conselho': 'Expansão',
+  '/instagram': 'Instagram',
   '/configuracoes': 'Configurações',
 }
 

@@ -34,6 +34,7 @@ import PrecedentCheckPage from './pages/PrecedentCheckPage'
 import ConselhoPage from './pages/ConselhoPage'
 import DespachoPage from './pages/DespachoPage'
 import ConselhoJuridicoPage from './pages/ConselhoJuridicoPage'
+import InstagramPage from './pages/InstagramPage'
 
 const queryClient = new QueryClient()
 
@@ -81,6 +82,7 @@ function AppRoutes() {
         <Route path="tarefas-cards" element={<TarefasCardsPage />} />
         <Route path="reunioes" element={<ReunioesPage />} />
         <Route path="conselho" element={<ConselhoPage />} />
+        <Route path="instagram" element={<InstagramPage />} />
         <Route path="fiscal" element={<FiscalPage />} />
         <Route path="fiscal/visao" element={<VisaoFiscalPage />} />
         <Route path="fiscal/decisao" element={<BackofficeDecisaoPage />} />

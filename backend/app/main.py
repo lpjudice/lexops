@@ -24,8 +24,9 @@ from app.models import memoria_estrategica as _memoria_estrategica_model  # noqa
 from app.models import responsavel as _responsavel_model  # noqa: F401 — ensures Responsavel table is registered
 from app.models import patrimonio as _patrimonio_model  # noqa: F401 — ensures Patrimonio tables are registered
 from app.models import cadastro_link as _cadastro_link_model  # noqa: F401 — ensures ClienteCadastroLink/Submissao tables are registered
+from app.models import instagram as _instagram_model  # noqa: F401 — ensures InstagramSugestao table is registered
 from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, fiscal, pagantes, config_fiscal, jurisprudencia, organizador, pje, prazos, processos, publico, reembolsos, reunioes, system, tarefas, telegram, telegram_andamentos, telegram_tasks, teses, usuarios, webhooks
-from app.routers import backoffice, precedentcheck, conselho, tarefa_projetos, tarefa_cards, memoria_estrategica, despacho, conselho_juridico, responsaveis, patrimonio
+from app.routers import backoffice, precedentcheck, conselho, tarefa_projetos, tarefa_cards, memoria_estrategica, despacho, conselho_juridico, responsaveis, patrimonio, instagram
 from app.routers import cadastro_links, cadastro_publico, cadastro_submissoes
 
 # Cria as tabelas (Alembic gerencia em produção; aqui facilita o dev)
@@ -807,6 +808,42 @@ def _run_migrations() -> None:
             "ALTER TABLE precedentcheck_analises ADD COLUMN IF NOT EXISTS custo_usd DOUBLE PRECISION NOT NULL DEFAULT 0"
         ))
 
+        # Instagram — sugestões de post do Agente master (@dr.lucasjudice)
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS instagram_sugestoes (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                titulo VARCHAR(255) NOT NULL,
+                tema VARCHAR(255) NOT NULL DEFAULT '',
+                formato VARCHAR(20) NOT NULL DEFAULT 'carrossel',
+                tema_capa VARCHAR(1) NOT NULL DEFAULT 'A',
+                slides JSONB NOT NULL DEFAULT '[]'::jsonb,
+                legenda TEXT NOT NULL DEFAULT '',
+                hashtags TEXT NOT NULL DEFAULT '',
+                fonte_tipo VARCHAR(20) NOT NULL DEFAULT 'evergreen',
+                fonte_ref VARCHAR(500),
+                motivo_ia TEXT NOT NULL DEFAULT '',
+                status VARCHAR(20) NOT NULL DEFAULT 'sugerido',
+                data_sugerida DATE,
+                enviado_assessoria_em TIMESTAMPTZ,
+                data_geracao TIMESTAMPTZ NOT NULL DEFAULT now(),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_instagram_sugestoes_status ON instagram_sugestoes(status, data_geracao DESC)"
+        ))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS instagram_config (
+                id INTEGER PRIMARY KEY DEFAULT 1,
+                assessoria_emails TEXT NOT NULL DEFAULT 'moni@pimentajudice.com.br',
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text(
+            "INSERT INTO instagram_config (id, assessoria_emails) VALUES (1, 'moni@pimentajudice.com.br') ON CONFLICT (id) DO NOTHING"
+        ))
+
         # Conselho/Expansão: dias_lembrete adicionado a conselho_eventos depois da tabela já existir em produção
         # (Base.metadata.create_all só cria tabelas novas, não adiciona colunas a tabelas existentes)
         conn.execute(text(
@@ -1464,6 +1501,7 @@ app.include_router(despacho.router)
 app.include_router(conselho_juridico.router)
 app.include_router(responsaveis.router)
 app.include_router(patrimonio.router)
+app.include_router(instagram.router)
 
 
 @app.on_event("startup")

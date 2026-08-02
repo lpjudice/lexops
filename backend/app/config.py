@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     smtp_port: int = 587
     smtp_from: str = ""
 
+    # Instagram — e-mails da assessoria (separados por vírgula) que recebem posts aprovados
+    instagram_assessoria_emails: str = ""
+
     # Frontend base URL (for magic links)
     frontend_url: str = "http://localhost:5174"
 
