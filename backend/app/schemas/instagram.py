@@ -73,6 +73,8 @@ class SugestaoOut(BaseModel):
     brinde_titulo: str | None = None
     brinde_formato: str | None = None
     brinde_drive_link: str | None = None
+    tem_brinde: bool = False
+    tem_brinde_site: bool = False
     video_drive_link: str | None = None
     custo_usd: float = 0.0
     ajustes: list[dict] = []
@@ -110,10 +112,12 @@ class GerarResponse(BaseModel):
 
 
 BrindeFormato = Literal["one_pager", "slides", "html"]
+BrindeEstilo = Literal["instagram", "site"]
 
 
 class BrindeGerarRequest(BaseModel):
     formato: BrindeFormato = "one_pager"
+    estilo: BrindeEstilo = "instagram"
 
 
 class BrindeKeywordRequest(BaseModel):

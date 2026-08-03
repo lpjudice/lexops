@@ -171,22 +171,53 @@ def brinde_palavra_chave(sugestao_id: uuid.UUID, payload: BrindeKeywordRequest, 
     return sug
 
 
+def _brinde_slug(sug: InstagramSugestao) -> str:
+    import re
+    base = (sug.brinde_titulo or sug.titulo or "brinde").lower()
+    return re.sub(r"[^a-z0-9]+", "-", base).strip("-")[:50] or "brinde"
+
+
+def _salvar_brinde_no_drive(sug: InstagramSugestao, conteudo: dict, formato: str, estilo: str) -> None:
+    """Salva HTML+PDF do brinde no Drive: pasta da sugestão + pasta única /Instagram/Brindes."""
+    try:
+        from app.services import brinde_instagram
+        from app.services.google_drive import upload_arquivo_raiz
+        html = brinde_instagram.render(conteudo, formato, estilo, para_pdf=False)
+        pdf = brinde_instagram.html_para_pdf(brinde_instagram.render(conteudo, formato, estilo, para_pdf=True))
+        slug = _brinde_slug(sug)
+        suf = "-site" if estilo == "site" else ""
+        pasta_status = "Aprovados" if sug.status in ("aprovado", "publicado") else "Sugeridos"
+        destinos = [
+            ["Instagram", pasta_status, _mes_ano(sug), f"{sug.id.hex[:6]}-{slug}"],  # pasta da sugestão
+            ["Instagram", "Brindes", _mes_ano(sug)],  # pasta única de brindes (histórico)
+        ]
+        for sub in destinos:
+            upload_arquivo_raiz(html.encode("utf-8"), f"{slug}{suf}.html", sub, "text/html")
+            upload_arquivo_raiz(pdf, f"{slug}{suf}.pdf", sub, "application/pdf")
+    except Exception:
+        pass  # best-effort (depende de OAuth do Drive)
+
+
 @router.post("/sugestoes/{sugestao_id}/brinde/gerar", response_model=SugestaoOut)
 def brinde_gerar(sugestao_id: uuid.UUID, payload: BrindeGerarRequest, db: Session = Depends(get_db)):
-    """Gera o brinde (HTML na identidade Pimenta Judice) com a IA."""
+    """Gera o brinde com a IA. estilo='instagram' (teal) ou 'site' (bege/preto oficial)."""
     _checar_ia_configurada()
     sug = _get(db, sugestao_id)
     from app.services import brinde_instagram
     try:
-        html, custo, titulo = brinde_instagram.gerar_brinde(db, sug, payload.formato)
+        conteudo, custo, titulo = brinde_instagram.gerar_conteudo(sug, payload.formato, payload.estilo)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Falha ao gerar brinde: {exc}")
-    sug.brinde_html = html
+    if payload.estilo == "site":
+        sug.brinde_site_conteudo = conteudo
+    else:
+        sug.brinde_conteudo = conteudo
+        sug.brinde_formato = payload.formato
     sug.brinde_titulo = titulo
-    sug.brinde_formato = payload.formato
     sug.custo_usd = round((sug.custo_usd or 0.0) + custo, 5)
     db.commit()
     db.refresh(sug)
+    _salvar_brinde_no_drive(sug, conteudo, payload.formato, payload.estilo)  # background-ish (best-effort)
     return sug
 
 

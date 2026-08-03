@@ -36,18 +36,31 @@ const FORMATOS_BRINDE: { key: 'one_pager' | 'slides' | 'html'; label: string }[]
   { key: 'one_pager', label: 'One-pager' }, { key: 'slides', label: 'Guia (blocos)' }, { key: 'html', label: 'Material completo' },
 ]
 
+function BrindeDownloads({ id, estilo, label }: { id: string; estilo: 'instagram' | 'site'; label: string }) {
+  const [copiado, setCopiado] = useState(false)
+  return (
+    <div className={s.brindeRow}>
+      <span className={s.brindeTitulo}>{label}:</span>
+      <a className={s.driveLink} href={brindeUrl(id, 'view', estilo)} target="_blank" rel="noreferrer"><FileText size={13} /> Ver</a>
+      <a className={s.driveLink} href={brindeUrl(id, 'pdf', estilo)} target="_blank" rel="noreferrer"><Download size={13} /> PDF</a>
+      <a className={s.driveLink} href={brindeUrl(id, 'html', estilo)} target="_blank" rel="noreferrer"><Download size={13} /> HTML</a>
+      <button className={s.driveLink} onClick={() => { navigator.clipboard?.writeText(brindeUrl(id, 'view', estilo)); setCopiado(true); setTimeout(() => setCopiado(false), 2000) }}>
+        <Link2 size={13} /> {copiado ? 'Copiado!' : 'Link'}
+      </button>
+    </div>
+  )
+}
+
 function BrindeSection({ sug }: { sug: Sugestao }) {
   const qc = useQueryClient()
   const invalidate = () => qc.invalidateQueries({ queryKey: ['instagram-sugestoes'] })
   const [kw, setKw] = useState(sug.brinde_palavra_chave ?? '')
   const [formato, setFormato] = useState<'one_pager' | 'slides' | 'html'>((sug.brinde_formato as never) || 'one_pager')
-  const [copiado, setCopiado] = useState(false)
-  const temBrinde = !!sug.brinde_titulo && !sug.brinde_drive_link
   const fileRef = useRef<HTMLInputElement>(null)
 
   const salvarKw = useMutation({ mutationFn: () => instagramApi.brindeKeyword(sug.id, kw.trim()), onSuccess: invalidate })
   const gerar = useMutation({
-    mutationFn: () => instagramApi.brindeGerar(sug.id, formato),
+    mutationFn: (estilo: 'instagram' | 'site') => instagramApi.brindeGerar(sug.id, formato, estilo),
     onSuccess: invalidate,
     onError: (e: unknown) => alert((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Falha ao gerar brinde.'),
   })
@@ -56,10 +69,8 @@ function BrindeSection({ sug }: { sug: Sugestao }) {
     onSuccess: invalidate,
     onError: (e: unknown) => alert((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Falha no upload.'),
   })
-
-  const copiarLink = () => {
-    navigator.clipboard?.writeText(brindeUrl(sug.id, 'view')); setCopiado(true); setTimeout(() => setCopiado(false), 2000)
-  }
+  const gerandoSite = gerar.isPending && gerar.variables === 'site'
+  const gerandoIg = gerar.isPending && gerar.variables === 'instagram'
 
   return (
     <div className={s.brindeBox}>
@@ -73,23 +84,19 @@ function BrindeSection({ sug }: { sug: Sugestao }) {
         <select className={s.dateInput} value={formato} onChange={(e) => setFormato(e.target.value as never)}>
           {FORMATOS_BRINDE.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
         </select>
-        <button className={s.btn} disabled={gerar.isPending} onClick={() => gerar.mutate()}>
-          <Sparkles size={14} /> {gerar.isPending ? 'Gerando…' : temBrinde ? 'Regerar com Claude' : 'Gerar com Claude'}
+        <button className={s.btn} disabled={gerar.isPending} onClick={() => gerar.mutate('instagram')}>
+          <Sparkles size={14} /> {gerandoIg ? 'Gerando…' : sug.tem_brinde ? 'Regerar brinde' : 'Gerar brinde (teal)'}
+        </button>
+        <button className={s.btn} disabled={gerar.isPending} onClick={() => gerar.mutate('site')} title="Identidade oficial do site (bege/preto), estilo landing page">
+          <Sparkles size={14} /> {gerandoSite ? 'Gerando…' : 'Versão site'}
         </button>
         <input ref={fileRef} type="file" accept="application/pdf" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate(f) }} />
         <button className={s.btn} disabled={upload.isPending} onClick={() => fileRef.current?.click()}>
           <Upload size={14} /> {upload.isPending ? 'Subindo…' : 'Subir PDF'}
         </button>
       </div>
-      {temBrinde && (
-        <div className={s.brindeRow}>
-          <span className={s.brindeTitulo}>“{sug.brinde_titulo}”</span>
-          <a className={s.driveLink} href={brindeUrl(sug.id, 'view')} target="_blank" rel="noreferrer"><FileText size={13} /> Ver</a>
-          <a className={s.driveLink} href={brindeUrl(sug.id, 'pdf')} target="_blank" rel="noreferrer"><Download size={13} /> PDF</a>
-          <a className={s.driveLink} href={brindeUrl(sug.id, 'html')} target="_blank" rel="noreferrer"><Download size={13} /> HTML</a>
-          <button className={s.driveLink} onClick={copiarLink}><Link2 size={13} /> {copiado ? 'Copiado!' : 'Link'}</button>
-        </div>
-      )}
+      {sug.tem_brinde && <BrindeDownloads id={sug.id} estilo="instagram" label="Brinde (Instagram)" />}
+      {sug.tem_brinde_site && <BrindeDownloads id={sug.id} estilo="site" label="Versão site" />}
       {sug.brinde_drive_link && (
         <a className={s.driveLink} href={sug.brinde_drive_link} target="_blank" rel="noreferrer"><FolderOpen size={13} /> PDF no Drive</a>
       )}

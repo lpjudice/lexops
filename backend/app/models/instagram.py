@@ -72,10 +72,21 @@ class InstagramSugestao(Base):
     brinde_titulo: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # 'one_pager' | 'slides' | 'html'
     brinde_formato: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    # HTML na identidade Pimenta Judice (fonte de verdade; PDF é gerado a partir dele)
+    # (legado) HTML renderizado — hoje renderizamos sob demanda a partir do conteúdo
     brinde_html: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Conteúdo do brinde (JSON) — estilo Instagram (teal) e estilo Site (bege/preto)
+    brinde_conteudo: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    brinde_site_conteudo: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # Se o Lucas subiu o próprio PDF, link da pasta/arquivo no Drive
     brinde_drive_link: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    @property
+    def tem_brinde(self) -> bool:
+        return bool(self.brinde_conteudo)
+
+    @property
+    def tem_brinde_site(self) -> bool:
+        return bool(self.brinde_site_conteudo)
 
     # Vídeo → copy: link da pasta do vídeo no Drive (a copy gerada vai p/ legenda/hashtags)
     video_drive_link: Mapped[str | None] = mapped_column(Text, nullable=True)

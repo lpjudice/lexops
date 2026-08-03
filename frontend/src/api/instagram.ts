@@ -52,6 +52,8 @@ export interface Sugestao {
   brinde_titulo?: string | null
   brinde_formato?: string | null
   brinde_drive_link?: string | null
+  tem_brinde?: boolean
+  tem_brinde_site?: boolean
   video_drive_link?: string | null
   custo_usd: number
   ajustes: { instrucao: string; quando: string }[]
@@ -140,8 +142,8 @@ export const instagramApi = {
   brindeKeyword: (id: string, palavra_chave: string) =>
     api.patch<Sugestao>(`/instagram/sugestoes/${id}/brinde/palavra-chave`, { palavra_chave }).then((r) => r.data),
 
-  brindeGerar: (id: string, formato: 'one_pager' | 'slides' | 'html') =>
-    api.post<Sugestao>(`/instagram/sugestoes/${id}/brinde/gerar`, { formato }, { timeout: 180000 }).then((r) => r.data),
+  brindeGerar: (id: string, formato: 'one_pager' | 'slides' | 'html', estilo: 'instagram' | 'site' = 'instagram') =>
+    api.post<Sugestao>(`/instagram/sugestoes/${id}/brinde/gerar`, { formato, estilo }, { timeout: 180000 }).then((r) => r.data),
 
   brindeUpload: (id: string, file: File) => {
     const fd = new FormData()
@@ -156,9 +158,10 @@ export const instagramApi = {
   },
 }
 
-/** URL pública (compartilhável) do brinde. kind: 'view' | 'html' | 'pdf'. */
-export function brindeUrl(id: string, kind: 'view' | 'html' | 'pdf' = 'view'): string {
-  const base = (typeof window !== 'undefined' ? window.location.origin : '') + '/api/publico/instagram/' + id + '/brinde'
+/** URL pública (compartilhável) do brinde. kind: 'view'|'html'|'pdf'; estilo: 'instagram'|'site'. */
+export function brindeUrl(id: string, kind: 'view' | 'html' | 'pdf' = 'view', estilo: 'instagram' | 'site' = 'instagram'): string {
+  const path = estilo === 'site' ? 'brinde-site' : 'brinde'
+  const base = (typeof window !== 'undefined' ? window.location.origin : '') + '/api/publico/instagram/' + id + '/' + path
   return kind === 'view' ? base : `${base}.${kind}`
 }
 
