@@ -38,6 +38,19 @@ def _get(db: Session, sugestao_id: uuid.UUID) -> InstagramSugestao:
     return sug
 
 
+def _checar_ia_configurada() -> None:
+    """Garante que a chave do motor de IA ativo está configurada."""
+    engine = (settings.instagram_ia_engine or "claude").lower()
+    if engine == "claude" and settings.anthropic_api_key:
+        return
+    if settings.google_ai_api_key:
+        return
+    raise HTTPException(
+        status_code=400,
+        detail="Nenhuma chave de IA configurada (ANTHROPIC_API_KEY ou GOOGLE_AI_API_KEY).",
+    )
+
+
 def _get_config(db: Session) -> InstagramConfig:
     cfg = db.get(InstagramConfig, 1)
     if not cfg:
@@ -99,8 +112,7 @@ def custos(db: Session = Depends(get_db)):
 
 @router.post("/gerar", response_model=GerarResponse)
 def gerar(payload: GerarRequest, db: Session = Depends(get_db)):
-    if not settings.google_ai_api_key:
-        raise HTTPException(status_code=400, detail="GOOGLE_AI_API_KEY não configurada no servidor.")
+    _checar_ia_configurada()
     quantidade = max(1, min(payload.quantidade or 3, 8))
     fontes = set(payload.fontes) if payload.fontes else None
     try:
@@ -130,8 +142,7 @@ def atualizar(sugestao_id: uuid.UUID, payload: SugestaoUpdate, db: Session = Dep
 @router.post("/sugestoes/{sugestao_id}/ajustar", response_model=SugestaoOut)
 def ajustar(sugestao_id: uuid.UUID, payload: AjustarRequest, db: Session = Depends(get_db)):
     """Ajuste pontual via IA: muda só o que foi pedido, mantém o resto do post."""
-    if not settings.google_ai_api_key:
-        raise HTTPException(status_code=400, detail="GOOGLE_AI_API_KEY não configurada no servidor.")
+    _checar_ia_configurada()
     sug = _get(db, sugestao_id)
     if not (payload.instrucao or "").strip():
         raise HTTPException(status_code=400, detail="Descreva o ajuste desejado.")

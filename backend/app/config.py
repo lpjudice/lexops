@@ -29,6 +29,10 @@ class Settings(BaseSettings):
 
     # Instagram — e-mails da assessoria (separados por vírgula) que recebem posts aprovados
     instagram_assessoria_emails: str = ""
+    # Motor de IA do módulo Instagram: "claude" (recomendado) ou "gemini"
+    instagram_ia_engine: str = "claude"
+    # Modelo Claude usado (SDK 0.28 do repo lida bem com 4.x; subir p/ claude-opus-5 após upgrade do SDK)
+    instagram_claude_model: str = "claude-opus-4-5"
 
     # Frontend base URL (for magic links)
     frontend_url: str = "http://localhost:5174"

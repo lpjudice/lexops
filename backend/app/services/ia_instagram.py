@@ -291,13 +291,29 @@ Inclua em cada post um campo "motivo": "1 frase explicando a origem do tema".
 """
 
 
-# Preços aproximados Gemini 2.5 Flash (USD por milhão de tokens)
+# Preços aproximados por milhão de tokens (USD)
 _GEMINI_IN_PER_MTOK = 0.30
 _GEMINI_OUT_PER_MTOK = 2.50
+_CLAUDE_IN_PER_MTOK = 5.00   # Opus 4.x / 5
+_CLAUDE_OUT_PER_MTOK = 25.00
+
+SYSTEM_JSON = (
+    "Você é o social media jurídico do @dr.lucasjudice (Pimenta Judice). "
+    "Responda SEMPRE E SOMENTE com JSON válido — sem markdown, sem crases, sem comentários."
+)
+
+
+def _strip_fences(txt: str) -> str:
+    """Remove cercas ```json ... ``` que o modelo às vezes adiciona."""
+    t = txt.strip()
+    if t.startswith("```"):
+        t = t.split("\n", 1)[1] if "\n" in t else t
+        if t.endswith("```"):
+            t = t.rsplit("```", 1)[0]
+    return t.strip()
 
 
 def _call_gemini_json(prompt: str) -> tuple[dict, float]:
-    """Retorna (json_parseado, custo_usd_estimado)."""
     if not settings.google_ai_api_key:
         raise RuntimeError("GOOGLE_AI_API_KEY não configurada.")
     import httpx
@@ -318,7 +334,36 @@ def _call_gemini_json(prompt: str) -> tuple[dict, float]:
     tin = usage.get("promptTokenCount", 0) or 0
     tout = usage.get("candidatesTokenCount", 0) or 0
     custo = round((tin * _GEMINI_IN_PER_MTOK + tout * _GEMINI_OUT_PER_MTOK) / 1_000_000, 5)
-    return json.loads(txt), custo
+    return json.loads(_strip_fences(txt)), custo
+
+
+def _call_claude_json(prompt: str) -> tuple[dict, float]:
+    """Gera via Claude (Anthropic). Modelo configurável (settings.instagram_claude_model)."""
+    if not settings.anthropic_api_key:
+        raise RuntimeError("ANTHROPIC_API_KEY não configurada.")
+    import anthropic
+
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    msg = client.messages.create(
+        model=settings.instagram_claude_model or "claude-opus-4-5",
+        max_tokens=8000,
+        system=SYSTEM_JSON,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    txt = "".join(getattr(b, "text", "") for b in msg.content if getattr(b, "type", "") == "text")
+    usage = getattr(msg, "usage", None)
+    tin = getattr(usage, "input_tokens", 0) or 0
+    tout = getattr(usage, "output_tokens", 0) or 0
+    custo = round((tin * _CLAUDE_IN_PER_MTOK + tout * _CLAUDE_OUT_PER_MTOK) / 1_000_000, 5)
+    return json.loads(_strip_fences(txt)), custo
+
+
+def _call_llm_json(prompt: str) -> tuple[dict, float]:
+    """Dispatcher: Claude por padrão, Gemini como alternativa/fallback."""
+    engine = (settings.instagram_ia_engine or "claude").lower()
+    if engine == "claude" and settings.anthropic_api_key:
+        return _call_claude_json(prompt)
+    return _call_gemini_json(prompt)
 
 
 def _classificar_fonte(ctx: dict) -> str:
@@ -398,7 +443,7 @@ POST ATUAL (JSON):
 
 Responda APENAS com o JSON do post completo já ajustado, no mesmo formato
 (chaves: titulo, tema, formato, legenda, hashtags, slides[]). Sem markdown."""
-    data, custo = _call_gemini_json(prompt)
+    data, custo = _call_llm_json(prompt)
     if not isinstance(data, dict) or not data.get("slides"):
         raise ValueError("A IA não retornou um post válido no ajuste.")
     sug.titulo = (data.get("titulo") or sug.titulo)[:255]
@@ -425,7 +470,7 @@ def gerar_sugestoes(
     ctx = coletar_contexto_semana(db, fontes)
     evitar = _temas_recentes(db)
     prompt = _build_prompt(ctx, quantidade, formato, evitar=evitar)
-    data, custo = _call_gemini_json(prompt)
+    data, custo = _call_llm_json(prompt)
 
     posts = data.get("posts") if isinstance(data, dict) else data
     if not isinstance(posts, list):
