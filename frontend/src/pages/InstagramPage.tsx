@@ -14,7 +14,7 @@ import s from './InstagramPage.module.css'
 const CAPA_LABEL: Record<string, string> = { '1': 'Teal', '2': 'Off-white', '3': 'Split', '4': 'Cream', '5': 'Destaque' }
 const FONTE_LABEL: Record<string, string> = {
   insight: 'Insight do site', publicacao: 'Publicação da semana', andamento: 'Andamento',
-  peca: 'Peça produzida', tese: 'Tese IA', evergreen: 'Tema recorrente',
+  peca: 'Peça produzida', tese: 'Tese IA', evergreen: 'Tema recorrente', video: 'De um vídeo',
 }
 const FONTES: { key: FonteColeta; label: string }[] = [
   { key: 'insights', label: 'Insights do site' }, { key: 'publicacoes', label: 'Publicações' },
@@ -340,6 +340,17 @@ export default function InstagramPage() {
     onError: (e: unknown) => alert((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Falha ao gerar sugestões.'),
   })
 
+  const videoPostRef = useRef<HTMLInputElement>(null)
+  const videoPost = useMutation({
+    mutationFn: (f: File) => instagramApi.videoPost(f),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['instagram-sugestoes'] })
+      qc.invalidateQueries({ queryKey: ['instagram-custos'] })
+      setAba('sugeridas')
+    },
+    onError: (e: unknown) => alert((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Falha ao criar post do vídeo.'),
+  })
+
   const grupos = useMemo(() => {
     const g: Record<Aba, Sugestao[]> = { sugeridas: [], agenda: [], rejeitadas: [] }
     for (const su of sugestoes) {
@@ -386,6 +397,10 @@ export default function InstagramPage() {
           onChange={(e) => setQuantidade(Math.max(1, Math.min(8, Number(e.target.value) || 1)))} />
         <button className={s.genBtn} disabled={gerar.isPending} onClick={() => gerar.mutate()}>
           <Sparkles size={16} />{gerar.isPending ? 'Gerando sugestões…' : 'Gerar sugestões'}
+        </button>
+        <input ref={videoPostRef} type="file" accept="video/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) videoPost.mutate(f) }} />
+        <button className={s.genBtn} style={{ background: '#2b6aa8' }} disabled={videoPost.isPending} onClick={() => videoPostRef.current?.click()} title="Suba um vídeo: o Gemini interpreta e o Claude monta o carrossel">
+          <Film size={16} />{videoPost.isPending ? 'Processando vídeo…' : 'Criar post de vídeo'}
         </button>
       </div>
 

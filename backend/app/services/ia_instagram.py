@@ -463,6 +463,34 @@ Responda APENAS com o JSON do post completo já ajustado, no mesmo formato
     return sug
 
 
+def gerar_post_de_video(tema: str, resumo: str, pontos: list[str]) -> tuple[dict, float]:
+    """Claude monta UM post de carrossel a partir do conteúdo extraído de um vídeo."""
+    pts = "\n".join(f"- {p}" for p in (pontos or []))
+    prompt = f"""Você é o social media jurídico do @dr.lucasjudice (Pimenta Judice).
+Crie UM post de carrossel a partir do CONTEÚDO DE UM VÍDEO abaixo, no padrão visual
+do escritório. Fidelize-se ao que o vídeo diz — não invente fatos novos.
+
+{DESIGN_SYSTEM}
+
+CONTEÚDO DO VÍDEO:
+Tema: {tema}
+Resumo: {resumo}
+Pontos-chave:
+{pts}
+
+{JSON_CONTRATO}
+
+Gere EXATAMENTE 1 post (lista "posts" com 1 item). O carrossel deve refletir os
+pontos-chave do vídeo (1 capa + miolos cobrindo os pontos + 1 fechamento).
+Inclua o campo "motivo": "Gerado a partir de um vídeo enviado".
+"""
+    data, custo = _call_llm_json(prompt)
+    posts = data.get("posts") if isinstance(data, dict) else data
+    if not isinstance(posts, list) or not posts or not isinstance(posts[0], dict) or not posts[0].get("slides"):
+        raise ValueError("A IA não retornou um post válido do vídeo.")
+    return posts[0], custo
+
+
 def gerar_sugestoes(
     db: Session, quantidade: int = 3, formato: str | None = None, fontes: set[str] | None = None,
 ) -> list[InstagramSugestao]:

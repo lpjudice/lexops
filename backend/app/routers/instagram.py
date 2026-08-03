@@ -248,6 +248,66 @@ def brinde_upload(sugestao_id: uuid.UUID, file: UploadFile = File(...), db: Sess
 _VIDEO_MAX_BYTES = 80 * 1024 * 1024  # 80 MB
 
 
+@router.post("/video-post", response_model=SugestaoOut)
+def video_post(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Vídeo AVULSO → cria uma nova sugestão: Gemini extrai o conteúdo e a copy,
+    Claude monta os slides do carrossel a partir disso."""
+    _checar_ia_configurada()
+    if not settings.google_ai_api_key:
+        raise HTTPException(status_code=400, detail="GOOGLE_AI_API_KEY não configurada (necessária para vídeo).")
+    conteudo = file.file.read()
+    if not conteudo:
+        raise HTTPException(status_code=400, detail="Vídeo vazio.")
+    if len(conteudo) > _VIDEO_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Vídeo acima de 80 MB — comprima antes de subir.")
+    mime = file.content_type or "video/mp4"
+
+    from app.services import video_instagram
+    try:
+        analise, custo_g = video_instagram.analisar_video_para_post(conteudo, mime)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Falha ao interpretar o vídeo: {exc}")
+
+    tema = (analise.get("tema") or "Vídeo")[:255]
+    try:
+        post, custo_c = ia_instagram.gerar_post_de_video(
+            tema, analise.get("resumo") or "", analise.get("pontos") or [],
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Falha ao montar os slides: {exc}")
+
+    slides = post.get("slides") or []
+    sug = InstagramSugestao(
+        titulo=(post.get("titulo") or tema)[:255],
+        tema=tema,
+        formato="estatico" if post.get("formato") == "estatico" else "carrossel",
+        tema_capa=ia_instagram._capa_codigo(slides),
+        slides=slides,
+        legenda=analise.get("legenda") or post.get("legenda") or "",
+        hashtags=analise.get("hashtags") or post.get("hashtags") or "",
+        fonte_tipo="video",
+        motivo_ia=post.get("motivo") or "Gerado a partir de um vídeo enviado.",
+        status="sugerido",
+        custo_usd=round((custo_g + custo_c), 5),
+    )
+    db.add(sug)
+    db.commit()
+    db.refresh(sug)
+
+    # guarda o vídeo no Drive (best-effort)
+    try:
+        from app.services.google_drive import get_folder_link_raiz, upload_arquivo_raiz
+        subpath = ["Instagram", "Videos", _mes_ano(sug)]
+        nome = file.filename or f"video-{sug.id.hex[:6]}.mp4"
+        if upload_arquivo_raiz(conteudo, nome, subpath, mime):
+            sug.video_drive_link = get_folder_link_raiz(subpath)
+            db.commit()
+            db.refresh(sug)
+    except Exception:
+        pass
+    return sug
+
+
 @router.post("/sugestoes/{sugestao_id}/video", response_model=SugestaoOut)
 def video_para_copy(sugestao_id: uuid.UUID, file: UploadFile = File(...), db: Session = Depends(get_db)):
     """Sobe o vídeo (Drive) e o Gemini gera a copy (legenda + hashtags)."""

@@ -99,6 +99,19 @@ Responda APENAS com JSON válido (sem markdown):
         ]}],
         "generationConfig": {"responseMimeType": "application/json", "temperature": 0.8},
     }
+    return _gemini_video(uri, mime, prompt, key)
+
+
+def _gemini_video(uri: str, mime: str, prompt: str, key: str) -> tuple[dict, float]:
+    import httpx
+
+    payload = {
+        "contents": [{"role": "user", "parts": [
+            {"file_data": {"mime_type": mime, "file_uri": uri}},
+            {"text": prompt},
+        ]}],
+        "generationConfig": {"responseMimeType": "application/json", "temperature": 0.8},
+    }
     resp = httpx.post(
         f"{_BASE}/v1beta/models/gemini-2.5-flash:generateContent?key={key}",
         json=payload, timeout=180,
@@ -111,3 +124,26 @@ Responda APENAS com JSON válido (sem markdown):
     tout = usage.get("candidatesTokenCount", 0) or 0
     custo = round((tin * _GEMINI_IN + tout * _GEMINI_OUT) / 1_000_000, 5)
     return json.loads(_strip_fences(txt)), custo
+
+
+def analisar_video_para_post(video: bytes, mime: str) -> tuple[dict, float]:
+    """Analisa o vídeo e retorna o conteúdo para GERAR UM POST de carrossel.
+
+    Retorna ({tema, resumo, pontos[], legenda, hashtags}, custo_usd)."""
+    key = settings.google_ai_api_key
+    if not key:
+        raise RuntimeError("GOOGLE_AI_API_KEY não configurada (necessária para vídeo).")
+    uri = _upload_gemini_file(video, mime, key)
+    prompt = """Você é o social media jurídico do @dr.lucasjudice (Pimenta Judice),
+advocacia patrimonialista. Assista ao vídeo (imagem + áudio) e EXTRAIA o conteúdo
+para virar um post de carrossel no Instagram.
+
+Responda APENAS com JSON válido (sem markdown):
+{
+  "tema": "assunto do vídeo em poucas palavras",
+  "resumo": "3 a 5 frases resumindo o que é dito/mostrado (será a base dos slides)",
+  "pontos": ["4 a 7 pontos/ideias-chave do vídeo, em ordem"],
+  "legenda": "legenda pronta p/ Instagram (2-4 frases + CTA; pode ter emojis)",
+  "hashtags": "#ate #oito #hashtags"
+}"""
+    return _gemini_video(uri, mime, prompt, key)

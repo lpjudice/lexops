@@ -156,6 +156,12 @@ export const instagramApi = {
     fd.append('file', file)
     return api.post<Sugestao>(`/instagram/sugestoes/${id}/video`, fd, { timeout: 300000 }).then((r) => r.data)
   },
+
+  videoPost: (file: File) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return api.post<Sugestao>('/instagram/video-post', fd, { timeout: 300000 }).then((r) => r.data)
+  },
 }
 
 /** URL pública (compartilhável) do brinde. kind: 'view'|'html'|'pdf'; estilo: 'instagram'|'site'. */

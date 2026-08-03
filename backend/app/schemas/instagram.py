@@ -7,7 +7,7 @@ from pydantic import BaseModel
 Formato = Literal["carrossel", "estatico"]
 TemaCapa = Literal["A", "B", "C", "D"]  # legado (não usado no novo design)
 TipoSlide = Literal["capa", "conteudo", "fechamento"]
-FonteTipo = Literal["insight", "publicacao", "andamento", "peca", "tese", "evergreen"]
+FonteTipo = Literal["insight", "publicacao", "andamento", "peca", "tese", "evergreen", "video"]
 # Chaves de fonte usadas na coleta/geração (plural — batem com ia_instagram)
 FonteColeta = Literal["insights", "publicacoes", "andamentos", "pecas", "teses", "evergreen"]
 Status = Literal["sugerido", "aprovado", "rejeitado", "publicado"]
