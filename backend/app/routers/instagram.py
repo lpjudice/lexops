@@ -80,8 +80,9 @@ def gerar(payload: GerarRequest, db: Session = Depends(get_db)):
     if not settings.google_ai_api_key:
         raise HTTPException(status_code=400, detail="GOOGLE_AI_API_KEY não configurada no servidor.")
     quantidade = max(1, min(payload.quantidade or 3, 8))
+    fontes = set(payload.fontes) if payload.fontes else None
     try:
-        criadas = ia_instagram.gerar_sugestoes(db, quantidade=quantidade, formato=payload.formato)
+        criadas = ia_instagram.gerar_sugestoes(db, quantidade=quantidade, formato=payload.formato, fontes=fontes)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Falha ao gerar sugestões: {exc}")
     aviso = None if criadas else "A IA não retornou posts válidos. Tente novamente."
@@ -96,6 +97,9 @@ def atualizar(sugestao_id: uuid.UUID, payload: SugestaoUpdate, db: Session = Dep
         dados["slides"] = [s.model_dump() if hasattr(s, "model_dump") else s for s in payload.slides]
     for campo, valor in dados.items():
         setattr(sug, campo, valor)
+    # Marca o momento da aprovação (para o filtro por mês na Agenda)
+    if dados.get("status") == "aprovado" and sug.aprovado_em is None:
+        sug.aprovado_em = datetime.now(timezone.utc)
     db.commit()
     db.refresh(sug)
     return sug
@@ -252,4 +256,6 @@ def salvar_no_drive(
     link = get_folder_link_raiz(subpath)
     if not enviados or not link:
         raise HTTPException(status_code=502, detail="Não foi possível salvar no Drive (verifique a autenticação Google).")
+    sug.drive_link = link
+    db.commit()
     return {"enviados": enviados, "pasta": link}

@@ -52,6 +52,10 @@ class InstagramSugestao(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="sugerido")
     # Data sugerida de publicação (preenchida ao aprovar)
     data_sugerida: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Quando foi aprovado (para filtro por mês de aprovação na Agenda)
+    aprovado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Link da pasta no Drive (preenchido ao salvar os PNGs)
+    drive_link: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Quando foi enviado para a assessoria (e-mail)
     enviado_assessoria_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

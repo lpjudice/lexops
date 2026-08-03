@@ -8,6 +8,8 @@ Formato = Literal["carrossel", "estatico"]
 TemaCapa = Literal["A", "B", "C", "D"]  # legado (não usado no novo design)
 TipoSlide = Literal["capa", "conteudo", "fechamento"]
 FonteTipo = Literal["insight", "publicacao", "andamento", "peca", "tese", "evergreen"]
+# Chaves de fonte usadas na coleta/geração (plural — batem com ia_instagram)
+FonteColeta = Literal["insights", "publicacoes", "andamentos", "pecas", "teses", "evergreen"]
 Status = Literal["sugerido", "aprovado", "rejeitado", "publicado"]
 
 # Layouts do design system @dr.lucasjudice (5 capas + 5 miolos + fechamento)
@@ -63,6 +65,8 @@ class SugestaoOut(BaseModel):
     motivo_ia: str
     status: Status
     data_sugerida: date | None = None
+    aprovado_em: datetime | None = None
+    drive_link: str | None = None
     enviado_assessoria_em: datetime | None = None
     data_geracao: datetime
     created_at: datetime
@@ -74,6 +78,8 @@ class SugestaoOut(BaseModel):
 class GerarRequest(BaseModel):
     quantidade: int = 3
     formato: Formato | None = None  # se None, o Agente decide por post
+    # Fontes habilitadas nesta geração (None/vazio = todas). Ex.: desmarcar 'insights'.
+    fontes: list[FonteColeta] | None = None
 
 
 class GerarResponse(BaseModel):

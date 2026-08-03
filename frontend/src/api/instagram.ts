@@ -44,11 +44,15 @@ export interface Sugestao {
   motivo_ia: string
   status: StatusSugestao
   data_sugerida?: string | null
+  aprovado_em?: string | null
+  drive_link?: string | null
   enviado_assessoria_em?: string | null
   data_geracao: string
   created_at: string
   updated_at: string
 }
+
+export type FonteColeta = 'insights' | 'publicacoes' | 'andamentos' | 'pecas' | 'teses' | 'evergreen'
 
 export interface GerarResponse {
   criadas: number
@@ -80,11 +84,11 @@ export const instagramApi = {
       .get<Sugestao[]>('/instagram/sugestoes', { params: status ? { status } : undefined })
       .then((r) => r.data),
 
-  gerar: (quantidade = 3, formato?: Formato) =>
+  gerar: (quantidade = 3, formato?: Formato, fontes?: FonteColeta[]) =>
     api
       .post<GerarResponse>(
         '/instagram/gerar',
-        { quantidade, formato },
+        { quantidade, formato, fontes: fontes && fontes.length ? fontes : undefined },
         { timeout: 180000 }, // geração pode levar mais que o default de 30s
       )
       .then((r) => r.data),

@@ -99,7 +99,10 @@ FECHAMENTO (última slide, tipo "fechamento", layout "fechamento"):
 - { "titulo","frase","cta" }   (cta = texto curto do botão, ex.: "Salve este post")
 
 REGRAS:
-- carrossel = 5 slides: 1 capa + 3 miolo (layouts DIFERENTES entre si) + 1 fechamento.
+- carrossel = 1 capa + N slides de miolo + 1 fechamento. ESCOLHA o N conforme o
+  tema exige (de 3 a 8 miolos): temas simples pedem menos, temas densos pedem mais.
+  Não force 3; use quantos slides o conteúdo realmente precisar, sem encher linguiça.
+- Alterne os layouts de miolo (não repita o mesmo layout em sequência).
 - estatico = 1 slide (uma capa OU um "numero"/"citacao" de impacto).
 - Português brasileiro. Frases curtas. Nada de listas/bullets em nenhum slide.
 """
@@ -109,68 +112,80 @@ def _janela(dias: int) -> date:
     return date.today() - timedelta(days=dias)
 
 
-def coletar_contexto_semana(db: Session) -> dict:
-    """Reúne os sinais da semana que alimentam o Agente master."""
-    ctx: dict = {"publicacoes": [], "andamentos": [], "pecas": [], "teses": [], "insights": [], "evergreen": EVERGREEN_TEMAS}
+FONTES_VALIDAS = {"insights", "publicacoes", "andamentos", "pecas", "teses", "evergreen"}
+
+
+def coletar_contexto_semana(db: Session, fontes: set[str] | None = None) -> dict:
+    """Reúne os sinais da semana que alimentam o Agente master.
+
+    `fontes` = conjunto de fontes habilitadas (None = todas). Permite, por exemplo,
+    desselecionar 'insights' para forçar o Agente a buscar em outras fontes."""
+    on = fontes if fontes else FONTES_VALIDAS
+    ctx: dict = {"publicacoes": [], "andamentos": [], "pecas": [], "teses": [], "insights": [],
+                 "evergreen": EVERGREEN_TEMAS if "evergreen" in on else []}
 
     # Publicações (Diário/DJEN/Recorte) dos últimos 7 dias
-    try:
-        pubs = db.execute(
-            select(Publicacao)
-            .where(Publicacao.data_publicacao >= _janela(7))
-            .where(Publicacao.rejeitada.is_(False))
-            .order_by(Publicacao.data_publicacao.desc())
-            .limit(30)
-        ).scalars().all()
-        for p in pubs:
-            resumo = (p.texto_resumo or p.texto_completo or "")[:400]
-            if not resumo:
-                continue
-            ctx["publicacoes"].append({
-                "data": p.data_publicacao.isoformat() if p.data_publicacao else None,
-                "tipo_ato": p.tipo_ato,
-                "tribunal": p.tribunal,
-                "resumo": resumo,
-            })
-            # Peças geradas a partir da publicação viram sinal de "peça da semana"
-            if p.peca_gerada:
-                ctx["pecas"].append({"tema": p.tipo_ato or "peça", "trecho": (p.peca_gerada or "")[:400]})
-    except Exception as exc:  # pragma: no cover — resiliente a schema/ausência de dados
-        logger.warning("[ig] falha ao coletar publicações: %s", exc)
+    if "publicacoes" in on:
+        try:
+            pubs = db.execute(
+                select(Publicacao)
+                .where(Publicacao.data_publicacao >= _janela(7))
+                .where(Publicacao.rejeitada.is_(False))
+                .order_by(Publicacao.data_publicacao.desc())
+                .limit(30)
+            ).scalars().all()
+            for p in pubs:
+                resumo = (p.texto_resumo or p.texto_completo or "")[:400]
+                if not resumo:
+                    continue
+                ctx["publicacoes"].append({
+                    "data": p.data_publicacao.isoformat() if p.data_publicacao else None,
+                    "tipo_ato": p.tipo_ato,
+                    "tribunal": p.tribunal,
+                    "resumo": resumo,
+                })
+                # Peças geradas a partir da publicação viram sinal de "peça da semana"
+                if p.peca_gerada and "pecas" in on:
+                    ctx["pecas"].append({"tema": p.tipo_ato or "peça", "trecho": (p.peca_gerada or "")[:400]})
+        except Exception as exc:  # pragma: no cover — resiliente a schema/ausência de dados
+            logger.warning("[ig] falha ao coletar publicações: %s", exc)
 
     # Andamentos dos últimos 7 dias
-    try:
-        ands = db.execute(
-            select(AndamentoProcesso)
-            .where(AndamentoProcesso.data_andamento >= _janela(7))
-            .order_by(AndamentoProcesso.data_andamento.desc())
-            .limit(30)
-        ).scalars().all()
-        for a in ands:
-            ctx["andamentos"].append({
-                "data": a.data_andamento.isoformat() if a.data_andamento else None,
-                "tipo": a.tipo,
-                "descricao": (a.descricao or "")[:300],
-            })
-    except Exception as exc:  # pragma: no cover
-        logger.warning("[ig] falha ao coletar andamentos: %s", exc)
+    if "andamentos" in on:
+        try:
+            ands = db.execute(
+                select(AndamentoProcesso)
+                .where(AndamentoProcesso.data_andamento >= _janela(7))
+                .order_by(AndamentoProcesso.data_andamento.desc())
+                .limit(30)
+            ).scalars().all()
+            for a in ands:
+                ctx["andamentos"].append({
+                    "data": a.data_andamento.isoformat() if a.data_andamento else None,
+                    "tipo": a.tipo,
+                    "descricao": (a.descricao or "")[:300],
+                })
+        except Exception as exc:  # pragma: no cover
+            logger.warning("[ig] falha ao coletar andamentos: %s", exc)
 
     # Teses dos últimos 14 dias
-    try:
-        teses = db.execute(
-            select(Tese).where(Tese.created_at >= datetime.combine(_janela(14), datetime.min.time()))
-            .order_by(Tese.created_at.desc()).limit(15)
-        ).scalars().all()
-        for t in teses:
-            ctx["teses"].append({"titulo": t.titulo, "trecho": (t.texto_input or "")[:400]})
-    except Exception as exc:  # pragma: no cover
-        logger.warning("[ig] falha ao coletar teses: %s", exc)
+    if "teses" in on:
+        try:
+            teses = db.execute(
+                select(Tese).where(Tese.created_at >= datetime.combine(_janela(14), datetime.min.time()))
+                .order_by(Tese.created_at.desc()).limit(15)
+            ).scalars().all()
+            for t in teses:
+                ctx["teses"].append({"titulo": t.titulo, "trecho": (t.texto_input or "")[:400]})
+        except Exception as exc:  # pragma: no cover
+            logger.warning("[ig] falha ao coletar teses: %s", exc)
 
     # Insights do site (Pílulas Jurídicas) — hoje pode vir vazio; resiliente
-    try:
-        ctx["insights"] = coletar_insights_web()
-    except Exception as exc:  # pragma: no cover
-        logger.warning("[ig] falha ao coletar insights do site: %s", exc)
+    if "insights" in on:
+        try:
+            ctx["insights"] = coletar_insights_web()
+        except Exception as exc:  # pragma: no cover
+            logger.warning("[ig] falha ao coletar insights do site: %s", exc)
 
     return ctx
 
@@ -351,9 +366,11 @@ Responda APENAS com o JSON do post completo já ajustado, no mesmo formato
     return sug
 
 
-def gerar_sugestoes(db: Session, quantidade: int = 3, formato: str | None = None) -> list[InstagramSugestao]:
+def gerar_sugestoes(
+    db: Session, quantidade: int = 3, formato: str | None = None, fontes: set[str] | None = None,
+) -> list[InstagramSugestao]:
     """Gera sugestões, persiste no banco e retorna as instâncias criadas."""
-    ctx = coletar_contexto_semana(db)
+    ctx = coletar_contexto_semana(db, fontes)
     prompt = _build_prompt(ctx, quantidade, formato)
     data = _call_gemini_json(prompt)
 

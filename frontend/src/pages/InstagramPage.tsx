@@ -2,10 +2,10 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Camera, Sparkles, Check, X, Send, Trash2, RotateCcw, Mail, Lightbulb, Wand2, Plus, CheckCircle2,
-  Download, HardDrive,
+  Download, HardDrive, ChevronDown, ChevronUp, FolderOpen,
 } from 'lucide-react'
 import { instagramApi } from '../api/instagram'
-import type { Sugestao } from '../api/instagram'
+import type { FonteColeta, Sugestao } from '../api/instagram'
 import { SlideCarousel } from '../components/InstagramSlide'
 import { baixarZip, salvarNoDrive } from '../utils/instagramExport'
 import page from './Page.module.css'
@@ -16,6 +16,20 @@ const FONTE_LABEL: Record<string, string> = {
   insight: 'Insight do site', publicacao: 'Publicação da semana', andamento: 'Andamento',
   peca: 'Peça produzida', tese: 'Tese IA', evergreen: 'Tema recorrente',
 }
+const FONTES: { key: FonteColeta; label: string }[] = [
+  { key: 'insights', label: 'Insights do site' }, { key: 'publicacoes', label: 'Publicações' },
+  { key: 'andamentos', label: 'Andamentos' }, { key: 'pecas', label: 'Peças' },
+  { key: 'teses', label: 'Teses' }, { key: 'evergreen', label: 'Evergreen' },
+]
+
+function mesKey(su: Sugestao): string | null {
+  const d = su.aprovado_em ?? su.data_sugerida
+  return d ? d.slice(0, 7) : null // YYYY-MM
+}
+function mesLabel(k: string): string {
+  const [y, m] = k.split('-')
+  return `${m}/${y}`
+}
 
 // ─────────────────── Card de sugestão ───────────────────
 function SugestaoCard({ sug }: { sug: Sugestao }) {
@@ -24,20 +38,7 @@ function SugestaoCard({ sug }: { sug: Sugestao }) {
   const [ajuste, setAjuste] = useState('')
   const [zipBusy, setZipBusy] = useState(false)
   const [driveBusy, setDriveBusy] = useState(false)
-
-  const onZip = async () => {
-    setZipBusy(true)
-    try { await baixarZip(sug) } catch { alert('Falha ao gerar o ZIP.') } finally { setZipBusy(false) }
-  }
-  const onDrive = async () => {
-    setDriveBusy(true)
-    try {
-      const pasta = await salvarNoDrive(sug)
-      if (confirm('Salvo no Drive! Abrir a pasta?')) window.open(pasta, '_blank')
-    } catch (e) {
-      alert((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Falha ao salvar no Drive.')
-    } finally { setDriveBusy(false) }
-  }
+  const [aberto, setAberto] = useState(sug.status !== 'publicado')
 
   const patch = useMutation({
     mutationFn: (p: Parameters<typeof instagramApi.atualizar>[1]) => instagramApi.atualizar(sug.id, p),
@@ -51,24 +52,66 @@ function SugestaoCard({ sug }: { sug: Sugestao }) {
     onError: (e: unknown) => alert((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Falha ao ajustar.'),
   })
 
+  const aprovar = async () => {
+    const upd = await patch.mutateAsync({ status: 'aprovado' })
+    // Salva no Drive automaticamente em background (não bloqueia a aprovação)
+    if (!upd.drive_link) salvarNoDrive(upd).then(() => invalidate()).catch(() => {})
+  }
+  const onZip = async () => {
+    setZipBusy(true)
+    try { await baixarZip(sug) } catch { alert('Falha ao gerar o ZIP.') } finally { setZipBusy(false) }
+  }
+  const onDrive = async () => {
+    setDriveBusy(true)
+    try {
+      const pasta = await salvarNoDrive(sug); invalidate()
+      if (confirm('Salvo no Drive! Abrir a pasta?')) window.open(pasta, '_blank')
+    } catch (e) {
+      alert((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Falha ao salvar no Drive.')
+    } finally { setDriveBusy(false) }
+  }
+
+  // Barra compacta (colapsado)
+  if (!aberto) {
+    return (
+      <div className={s.card}>
+        <div className={s.compact}>
+          <button className={s.compactExpand} onClick={() => setAberto(true)} title="Expandir"><ChevronDown size={18} /></button>
+          <div className={s.compactBody}>
+            <div className={s.cardTitle}>{sug.titulo}</div>
+            <div className={s.metaRow}>
+              {sug.status === 'publicado' && <span className={s.pubBadge}>✓ Publicado</span>}
+              {sug.data_sugerida && <span className={s.chip}>{new Date(sug.data_sugerida + 'T12:00:00').toLocaleDateString('pt-BR')}</span>}
+              {sug.drive_link && <a className={s.driveLink} href={sug.drive_link} target="_blank" rel="noreferrer"><FolderOpen size={13} /> Drive</a>}
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className={s.card}>
       <SlideCarousel slides={sug.slides} width={320} />
       <div className={s.cardBody}>
-        <div className={s.cardTitle}>{sug.titulo}</div>
+        <div className={s.cardTitleRow}>
+          <div className={s.cardTitle}>{sug.titulo}</div>
+          {(sug.status === 'aprovado' || sug.status === 'publicado') && (
+            <button className={s.compactExpand} onClick={() => setAberto(false)} title="Colapsar"><ChevronUp size={18} /></button>
+          )}
+        </div>
         <div className={s.metaRow}>
           <span className={s.chip}>{sug.formato === 'carrossel' ? 'Carrossel' : 'Estático'}</span>
           <span className={s.chip}>Capa {CAPA_LABEL[sug.tema_capa] ?? sug.tema_capa}</span>
           <span className={`${s.chip} ${s.chipFonte}`}>{FONTE_LABEL[sug.fonte_tipo] ?? sug.fonte_tipo}</span>
+          {sug.drive_link && <a className={s.driveLink} href={sug.drive_link} target="_blank" rel="noreferrer"><FolderOpen size={13} /> Drive</a>}
         </div>
         {sug.motivo_ia && <div className={s.motivo}>“{sug.motivo_ia}”</div>}
 
-        {/* Ajuste pontual com IA */}
         <div className={s.ajusteBox}>
           <input
             placeholder="Ajuste pontual (ex.: troca a palavra X no slide 3)"
-            value={ajuste}
-            onChange={(e) => setAjuste(e.target.value)}
+            value={ajuste} onChange={(e) => setAjuste(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && ajuste.trim()) ajustar.mutate() }}
           />
           <button className={s.btn} disabled={!ajuste.trim() || ajustar.isPending} onClick={() => ajustar.mutate()}>
@@ -82,11 +125,10 @@ function SugestaoCard({ sug }: { sug: Sugestao }) {
         <div className={s.actions}>
           {sug.status === 'sugerido' && (
             <>
-              <button className={`${s.btn} ${s.btnApprove}`} onClick={() => patch.mutate({ status: 'aprovado' })}><Check size={14} /> Aprovar</button>
+              <button className={`${s.btn} ${s.btnApprove}`} onClick={aprovar}><Check size={14} /> Aprovar</button>
               <button className={`${s.btn} ${s.btnReject}`} onClick={() => patch.mutate({ status: 'rejeitado' })}><X size={14} /> Rejeitar</button>
             </>
           )}
-
           {sug.status === 'aprovado' && (
             <>
               <label style={{ fontSize: 12, color: '#667' }}>Data:</label>
@@ -94,25 +136,18 @@ function SugestaoCard({ sug }: { sug: Sugestao }) {
               <button className={`${s.btn} ${s.btnSend}`} disabled={enviar.isPending} onClick={() => enviar.mutate()}>
                 <Send size={14} /> {enviar.isPending ? 'Enviando…' : 'Enviar à assessoria'}
               </button>
-              <button className={`${s.btn} ${s.btnPub}`} onClick={() => patch.mutate({ status: 'publicado' })}><CheckCircle2 size={14} /> Publicado</button>
+              <button className={`${s.btn} ${s.btnPub}`} onClick={() => patch.mutate({ status: 'publicado' })}><CheckCircle2 size={14} /> Marcar publicado</button>
               <button className={s.btn} onClick={() => patch.mutate({ status: 'sugerido' })}><RotateCcw size={14} /> Voltar</button>
             </>
           )}
-
           {sug.status === 'publicado' && (
             <button className={s.btn} onClick={() => patch.mutate({ status: 'aprovado' })}><RotateCcw size={14} /> Reabrir</button>
           )}
-
           {sug.status === 'rejeitado' && (
             <button className={s.btn} onClick={() => patch.mutate({ status: 'sugerido' })}><RotateCcw size={14} /> Restaurar</button>
           )}
-
-          <button className={s.btn} title="Baixar ZIP (PNGs + copy)" disabled={zipBusy} onClick={onZip}>
-            <Download size={14} /> {zipBusy ? 'Gerando…' : 'ZIP'}
-          </button>
-          <button className={s.btn} title="Salvar no Drive" disabled={driveBusy} onClick={onDrive}>
-            <HardDrive size={14} /> {driveBusy ? 'Salvando…' : 'Drive'}
-          </button>
+          <button className={s.btn} title="Baixar ZIP (PNGs + copy)" disabled={zipBusy} onClick={onZip}><Download size={14} /> {zipBusy ? 'Gerando…' : 'ZIP'}</button>
+          <button className={s.btn} title="Salvar no Drive" disabled={driveBusy} onClick={onDrive}><HardDrive size={14} /> {driveBusy ? 'Salvando…' : 'Drive'}</button>
           <button className={s.btn} title="Excluir" onClick={() => { if (confirm('Excluir esta sugestão?')) excluir.mutate() }}><Trash2 size={14} /></button>
         </div>
 
@@ -129,21 +164,13 @@ function SugestaoCard({ sug }: { sug: Sugestao }) {
 function EmailsConfig() {
   const qc = useQueryClient()
   const { data: config } = useQuery({ queryKey: ['instagram-config'], queryFn: () => instagramApi.obterConfig() })
-  const emails = useMemo(
-    () => (config?.assessoria_emails ?? '').split(',').map((e) => e.trim()).filter(Boolean),
-    [config],
-  )
+  const emails = useMemo(() => (config?.assessoria_emails ?? '').split(',').map((e) => e.trim()).filter(Boolean), [config])
   const [novo, setNovo] = useState('')
   const salvar = useMutation({
     mutationFn: (lista: string[]) => instagramApi.salvarConfig(lista.join(', ')),
     onSuccess: (c) => qc.setQueryData(['instagram-config'], c),
   })
-
-  const add = () => {
-    const e = novo.trim()
-    if (!e || emails.includes(e)) { setNovo(''); return }
-    salvar.mutate([...emails, e]); setNovo('')
-  }
+  const add = () => { const e = novo.trim(); if (!e || emails.includes(e)) { setNovo(''); return } salvar.mutate([...emails, e]); setNovo('') }
   const remove = (e: string) => salvar.mutate(emails.filter((x) => x !== e))
 
   return (
@@ -151,16 +178,10 @@ function EmailsConfig() {
       <Mail size={16} color="#4a6a6a" />
       <span className={s.configLabel}>Assessoria:</span>
       <div className={s.emailChips}>
-        {emails.map((e) => (
-          <span key={e} className={s.emailChip}>{e}<button title="Remover" onClick={() => remove(e)}>×</button></span>
-        ))}
+        {emails.map((e) => <span key={e} className={s.emailChip}>{e}<button title="Remover" onClick={() => remove(e)}>×</button></span>)}
       </div>
       <div className={s.addEmail}>
-        <input
-          type="email" placeholder="adicionar e-mail" value={novo}
-          onChange={(e) => setNovo(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') add() }}
-        />
+        <input type="email" placeholder="adicionar e-mail" value={novo} onChange={(e) => setNovo(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') add() }} />
         <button className={s.iconBtn} title="Adicionar" onClick={add}><Plus size={16} /></button>
       </div>
     </div>
@@ -174,14 +195,20 @@ export default function InstagramPage() {
   const qc = useQueryClient()
   const [aba, setAba] = useState<Aba>('sugeridas')
   const [quantidade, setQuantidade] = useState(3)
+  const [fontes, setFontes] = useState<Record<FonteColeta, boolean>>({
+    insights: true, publicacoes: true, andamentos: true, pecas: true, teses: true, evergreen: true,
+  })
+  const [mesFiltro, setMesFiltro] = useState('todos')
 
   const { data: sugestoes = [], isLoading } = useQuery({
-    queryKey: ['instagram-sugestoes'],
-    queryFn: () => instagramApi.listar(),
+    queryKey: ['instagram-sugestoes'], queryFn: () => instagramApi.listar(),
   })
 
   const gerar = useMutation({
-    mutationFn: () => instagramApi.gerar(quantidade),
+    mutationFn: () => {
+      const selecionadas = (Object.keys(fontes) as FonteColeta[]).filter((k) => fontes[k])
+      return instagramApi.gerar(quantidade, undefined, selecionadas)
+    },
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['instagram-sugestoes'] })
       if (res.aviso) alert(res.aviso)
@@ -200,37 +227,47 @@ export default function InstagramPage() {
     return g
   }, [sugestoes])
 
-  const dicaFormato = useMemo(() => {
-    const agendados = [...grupos.agenda].filter((x) => x.data_sugerida)
-      .sort((a, b) => (b.data_sugerida! < a.data_sugerida! ? -1 : 1))
-    let streak = 0
-    for (const p of agendados) { if (p.formato === 'carrossel') streak++; else break }
-    return streak >= 3
-      ? `Já são ${streak} carrosséis seguidos na agenda. Que tal variar hoje com um Reels ou Stories para movimentar o alcance?`
-      : null
+  const meses = useMemo(() => {
+    const set = new Set<string>()
+    for (const su of grupos.agenda) { const k = mesKey(su); if (k) set.add(k) }
+    return [...set].sort().reverse()
   }, [grupos.agenda])
 
-  const lista = grupos[aba]
+  const dicaFormato = useMemo(() => {
+    const agendados = [...grupos.agenda].filter((x) => x.data_sugerida).sort((a, b) => (b.data_sugerida! < a.data_sugerida! ? -1 : 1))
+    let streak = 0
+    for (const p of agendados) { if (p.formato === 'carrossel') streak++; else break }
+    return streak >= 3 ? `Já são ${streak} carrosséis seguidos na agenda. Que tal variar hoje com um Reels ou Stories?` : null
+  }, [grupos.agenda])
+
+  let lista = grupos[aba]
+  if (aba === 'agenda' && mesFiltro !== 'todos') lista = lista.filter((su) => mesKey(su) === mesFiltro)
 
   return (
     <div>
       <div className={page.pageHeader}>
-        <h1 className={page.pageTitle}>
-          <Camera size={22} style={{ verticalAlign: '-4px', marginRight: 8 }} />
-          Instagram · @dr.lucasjudice
-        </h1>
+        <h1 className={page.pageTitle}><Camera size={22} style={{ verticalAlign: '-4px', marginRight: 8 }} />Instagram · @dr.lucasjudice</h1>
       </div>
 
       <div className={s.toolbar}>
         <p style={{ margin: 0, color: '#667', fontSize: 14 }} className={s.grow}>
-          O Agente master varre a semana (insights, publicações, andamentos, peças, teses) e propõe posts no
-          padrão visual do escritório. Valide, ajuste, agende e envie para a assessoria.
+          O Agente master varre a semana e propõe posts no padrão do escritório. Valide, ajuste, agende e envie para a assessoria.
         </p>
         <input type="number" min={1} max={8} className={s.qtyInput} value={quantidade}
           onChange={(e) => setQuantidade(Math.max(1, Math.min(8, Number(e.target.value) || 1)))} />
         <button className={s.genBtn} disabled={gerar.isPending} onClick={() => gerar.mutate()}>
           <Sparkles size={16} />{gerar.isPending ? 'Gerando sugestões…' : 'Gerar sugestões'}
         </button>
+      </div>
+
+      <div className={s.fontesRow}>
+        <span className={s.configLabel}>Fontes desta geração:</span>
+        {FONTES.map(({ key, label }) => (
+          <label key={key} className={s.fonteChk}>
+            <input type="checkbox" checked={fontes[key]} onChange={(e) => setFontes({ ...fontes, [key]: e.target.checked })} />
+            {label}
+          </label>
+        ))}
       </div>
 
       <EmailsConfig />
@@ -244,6 +281,16 @@ export default function InstagramPage() {
           </button>
         ))}
       </div>
+
+      {aba === 'agenda' && meses.length > 0 && (
+        <div className={s.filterRow}>
+          <span className={s.configLabel}>Mês de aprovação:</span>
+          <select className={s.dateInput} value={mesFiltro} onChange={(e) => setMesFiltro(e.target.value)}>
+            <option value="todos">Todos</option>
+            {meses.map((m) => <option key={m} value={m}>{mesLabel(m)}</option>)}
+          </select>
+        </div>
+      )}
 
       {isLoading ? (
         <p className={page.empty}>Carregando…</p>

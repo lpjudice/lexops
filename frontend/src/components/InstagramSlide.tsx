@@ -26,7 +26,7 @@ const ICONS: Record<IconeNome, ReactElement> = {
 function Header({ n, total, avatar }: { n: number; total: number; avatar?: string }) {
   return (
     <div className={s.head}>
-      {avatar ? <img className={s.avatarImg} src={avatar} alt="" /> : <div className={s.avatar} />}
+      {avatar ? <img className={s.avatarImg} src={avatar} alt="" /> : <span />}
       <span className={s.pagenum}>{n} / {total}</span>
     </div>
   )

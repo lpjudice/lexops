@@ -833,6 +833,8 @@ def _run_migrations() -> None:
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_instagram_sugestoes_status ON instagram_sugestoes(status, data_geracao DESC)"
         ))
+        conn.execute(text("ALTER TABLE instagram_sugestoes ADD COLUMN IF NOT EXISTS aprovado_em TIMESTAMPTZ"))
+        conn.execute(text("ALTER TABLE instagram_sugestoes ADD COLUMN IF NOT EXISTS drive_link TEXT"))
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS instagram_config (
                 id INTEGER PRIMARY KEY DEFAULT 1,

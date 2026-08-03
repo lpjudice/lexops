@@ -5,6 +5,9 @@ import { InstagramSlide } from '../components/InstagramSlide'
 import type { SlideBlock, Sugestao } from '../api/instagram'
 import api from '../api/client'
 
+/** Forma mínima para exportar (serve tanto p/ Sugestao quanto p/ CardPublico). */
+export type Exportavel = { titulo: string; legenda: string; hashtags: string; slides: SlideBlock[] }
+
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 /** Renderiza cada slide (1080×1350) num container oculto e captura PNG. */
@@ -45,7 +48,7 @@ async function renderSlideBlobs(slides: SlideBlock[]): Promise<{ name: string; b
   return out
 }
 
-function copyText(sug: Sugestao): string {
+function copyText(sug: Exportavel): string {
   return `${sug.titulo}\n\n${sug.legenda || ''}\n\n${sug.hashtags || ''}`.trim() + '\n'
 }
 
@@ -62,7 +65,7 @@ const slugify = (t: string) =>
     .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50) || 'post'
 
 /** Baixa um ZIP com os PNGs dos slides + copy.txt. */
-export async function baixarZip(sug: Sugestao): Promise<void> {
+export async function baixarZip(sug: Exportavel): Promise<void> {
   const blobs = await renderSlideBlobs(sug.slides)
   const zip = new JSZip()
   for (const b of blobs) zip.file(b.name, b.blob)

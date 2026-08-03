@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&display=swap');
-
 /* ===================== LAYOUT DA PÁGINA ===================== */
 .toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin-bottom:16px; }
 .toolbar .grow { flex:1; min-width:220px; }
@@ -19,6 +17,22 @@
 
 .dica { display:flex; align-items:center; gap:10px; background:#fff6e6; border:1px solid #f2d79a;
   color:#8a5a10; border-radius:10px; padding:10px 14px; font-size:14px; margin-bottom:16px; }
+
+.fontesRow { display:flex; align-items:center; flex-wrap:wrap; gap:14px; margin-bottom:14px; padding:8px 2px; }
+.fonteChk { display:inline-flex; align-items:center; gap:6px; font-size:13px; color:#445; cursor:pointer; }
+.fonteChk input { accent-color:#1C5A4E; width:15px; height:15px; }
+
+.filterRow { display:flex; align-items:center; gap:10px; margin-bottom:16px; }
+
+.cardTitleRow { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; }
+.compact { display:flex; align-items:center; gap:10px; padding:12px 14px; }
+.compactExpand { appearance:none; border:1px solid #ddd; background:#fff; border-radius:8px; width:30px; height:30px;
+  display:inline-flex; align-items:center; justify-content:center; cursor:pointer; color:#456; flex-shrink:0; }
+.compactExpand:hover { background:#f2f2f2; }
+.compactBody { flex:1; display:flex; flex-direction:column; gap:6px; min-width:0; }
+.driveLink { display:inline-flex; align-items:center; gap:4px; font-size:12px; font-weight:600; color:#1C5A4E;
+  text-decoration:none; background:#e8f5f2; border-radius:999px; padding:3px 9px; }
+.driveLink:hover { background:#d8efe9; }
 
 .tabs { display:flex; gap:4px; border-bottom:1px solid #e2e2e2; margin-bottom:20px; }
 .tab { appearance:none; border:none; background:none; padding:10px 16px; font-size:14px; font-weight:600;
@@ -53,7 +67,7 @@
 .btnApprove { border-color:#1C5A4E; color:#1C5A4E; } .btnApprove:hover { background:#e8f5f2; }
 .btnReject { border-color:#d88; color:#b44; } .btnReject:hover { background:#fdeeee; }
 .btnSend { background:#1C5A4E; color:#fff; border-color:#1C5A4E; } .btnSend:hover { background:#14463b; }
-.btnPub { background:#2a8a5a; color:#fff; border-color:#2a8a5a; } .btnPub:hover { background:#217048; }
+.btnPub { border-color:#2a8a5a; color:#2a8a5a; background:#fff; } .btnPub:hover { background:#eef8f1; }
 .dateInput { padding:6px 10px; border:1px solid #ccc; border-radius:8px; font-size:13px; }
 .sentBadge { font-size:12px; color:#2a8a2a; font-weight:600; }
 .pubBadge { font-size:12px; color:#1C5A4E; font-weight:700; }
