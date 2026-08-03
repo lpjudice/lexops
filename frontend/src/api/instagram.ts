@@ -52,6 +52,7 @@ export interface Sugestao {
   brinde_titulo?: string | null
   brinde_formato?: string | null
   brinde_drive_link?: string | null
+  video_drive_link?: string | null
   custo_usd: number
   ajustes: { instrucao: string; quando: string }[]
   ajustes_count: number
@@ -146,6 +147,12 @@ export const instagramApi = {
     const fd = new FormData()
     fd.append('file', file)
     return api.post<Sugestao>(`/instagram/sugestoes/${id}/brinde/upload`, fd, { timeout: 120000 }).then((r) => r.data)
+  },
+
+  videoCopy: (id: string, file: File) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return api.post<Sugestao>(`/instagram/sugestoes/${id}/video`, fd, { timeout: 300000 }).then((r) => r.data)
   },
 }
 

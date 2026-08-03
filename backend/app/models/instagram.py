@@ -77,6 +77,9 @@ class InstagramSugestao(Base):
     # Se o Lucas subiu o próprio PDF, link da pasta/arquivo no Drive
     brinde_drive_link: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Vídeo → copy: link da pasta do vídeo no Drive (a copy gerada vai p/ legenda/hashtags)
+    video_drive_link: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     data_geracao: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

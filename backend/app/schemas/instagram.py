@@ -73,6 +73,7 @@ class SugestaoOut(BaseModel):
     brinde_titulo: str | None = None
     brinde_formato: str | None = None
     brinde_drive_link: str | None = None
+    video_drive_link: str | None = None
     custo_usd: float = 0.0
     ajustes: list[dict] = []
     ajustes_count: int = 0

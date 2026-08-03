@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Camera, Sparkles, Check, X, Send, Trash2, RotateCcw, Mail, Lightbulb, Wand2, Plus, CheckCircle2,
-  Download, HardDrive, ChevronDown, ChevronUp, FolderOpen, History, DollarSign, Gift, Link2, FileText, Upload,
+  Download, HardDrive, ChevronDown, ChevronUp, FolderOpen, History, DollarSign, Gift, Link2, FileText, Upload, Film,
 } from 'lucide-react'
 import { instagramApi, brindeUrl } from '../api/instagram'
 import type { FonteColeta, Sugestao } from '../api/instagram'
@@ -93,6 +93,30 @@ function BrindeSection({ sug }: { sug: Sugestao }) {
       {sug.brinde_drive_link && (
         <a className={s.driveLink} href={sug.brinde_drive_link} target="_blank" rel="noreferrer"><FolderOpen size={13} /> PDF no Drive</a>
       )}
+    </div>
+  )
+}
+
+// ─────────────────── Vídeo → copy ───────────────────
+function VideoSection({ sug }: { sug: Sugestao }) {
+  const qc = useQueryClient()
+  const fileRef = useRef<HTMLInputElement>(null)
+  const up = useMutation({
+    mutationFn: (f: File) => instagramApi.videoCopy(sug.id, f),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['instagram-sugestoes'] }),
+    onError: (e: unknown) => alert((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Falha ao processar o vídeo.'),
+  })
+  return (
+    <div className={s.videoBox}>
+      <div className={s.videoHead}><Film size={15} /> Vídeo → copy</div>
+      <input ref={fileRef} type="file" accept="video/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) up.mutate(f) }} />
+      <div className={s.brindeRow}>
+        <button className={s.btn} disabled={up.isPending} onClick={() => fileRef.current?.click()}>
+          <Upload size={14} /> {up.isPending ? 'Interpretando vídeo…' : 'Subir vídeo (Gemini gera a copy)'}
+        </button>
+        {sug.video_drive_link && <a className={s.driveLink} href={sug.video_drive_link} target="_blank" rel="noreferrer"><FolderOpen size={13} /> Vídeo no Drive</a>}
+      </div>
+      {up.isPending && <span className={s.brindeHint}>pode levar até 1 min (o Gemini processa e assiste o vídeo).</span>}
     </div>
   )
 }
@@ -239,6 +263,7 @@ function SugestaoCard({ sug }: { sug: Sugestao }) {
         </div>
 
         <BrindeSection sug={sug} />
+        <VideoSection sug={sug} />
 
         {sug.status === 'publicado' && <div className={s.pubBadge}>✓ Publicado</div>}
         {sug.enviado_assessoria_em && sug.status !== 'publicado' && (

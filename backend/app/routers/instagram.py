@@ -213,6 +213,49 @@ def brinde_upload(sugestao_id: uuid.UUID, file: UploadFile = File(...), db: Sess
 # sem exigir JWT em <a href>): ver publico.py → /publico/instagram/{id}/brinde*.
 
 
+# ── Vídeo → copy ───────────────────────────────────────────────────────────────
+_VIDEO_MAX_BYTES = 80 * 1024 * 1024  # 80 MB
+
+
+@router.post("/sugestoes/{sugestao_id}/video", response_model=SugestaoOut)
+def video_para_copy(sugestao_id: uuid.UUID, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Sobe o vídeo (Drive) e o Gemini gera a copy (legenda + hashtags)."""
+    if not settings.google_ai_api_key:
+        raise HTTPException(status_code=400, detail="GOOGLE_AI_API_KEY não configurada (necessária para vídeo).")
+    sug = _get(db, sugestao_id)
+    conteudo = file.file.read()
+    if not conteudo:
+        raise HTTPException(status_code=400, detail="Vídeo vazio.")
+    if len(conteudo) > _VIDEO_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Vídeo acima de 80 MB — comprima antes de subir.")
+    mime = file.content_type or "video/mp4"
+
+    # 1) copy com o Gemini (assiste ao vídeo)
+    from app.services import video_instagram
+    try:
+        data, custo = video_instagram.gerar_copy_de_video(conteudo, mime, sug.tema or sug.titulo)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Falha ao interpretar o vídeo: {exc}")
+
+    # 2) guarda o vídeo no Drive (best-effort)
+    try:
+        from app.services.google_drive import get_folder_link_raiz, upload_arquivo_raiz
+        subpath = ["Instagram", "Videos", _mes_ano(sug)]
+        nome = file.filename or f"video-{sug.id.hex[:6]}.mp4"
+        if upload_arquivo_raiz(conteudo, nome, subpath, mime):
+            sug.video_drive_link = get_folder_link_raiz(subpath)
+    except Exception:
+        pass
+
+    sug.legenda = data.get("legenda") or sug.legenda
+    if data.get("hashtags"):
+        sug.hashtags = data["hashtags"]
+    sug.custo_usd = round((sug.custo_usd or 0.0) + custo, 5)
+    db.commit()
+    db.refresh(sug)
+    return sug
+
+
 def _split_emails(raw: str) -> list[str]:
     return [e.strip() for e in (raw or "").replace(";", ",").split(",") if e.strip()]
 
