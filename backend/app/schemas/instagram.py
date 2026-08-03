@@ -44,7 +44,8 @@ class SlideBlock(BaseModel):
     numero: str | None = None         # layout "numero": dado de impacto (ex.: "50/50")
     citacao: str | None = None        # layout "citacao": definição/quote em card
     icones: list[IconeItem] = []      # layout "icones": 2–3 ícones com rótulo
-    imagem_hint: str | None = None    # layout "imagem": descrição da imagem/ilustração sugerida
+    imagem_hint: str | None = None    # (legado) descrição de imagem — não renderizado
+    icone_destaque: IconeNome | None = None  # layout "imagem": ícone grande do painel
     destaque: str | None = None       # capa_keyword: palavra realçada
     cta: str | None = None            # fechamento: texto do botão pílula
 
@@ -68,11 +69,26 @@ class SugestaoOut(BaseModel):
     aprovado_em: datetime | None = None
     drive_link: str | None = None
     enviado_assessoria_em: datetime | None = None
+    custo_usd: float = 0.0
+    ajustes: list[dict] = []
+    ajustes_count: int = 0
     data_geracao: datetime
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class CustosMes(BaseModel):
+    mes: str          # "MM/AAAA"
+    total_usd: float
+    qtd: int
+
+
+class CustosOut(BaseModel):
+    total_usd: float
+    mes_atual_usd: float
+    por_mes: list[CustosMes]
 
 
 class GerarRequest(BaseModel):

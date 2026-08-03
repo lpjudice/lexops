@@ -7,7 +7,19 @@ import s from '../pages/InstagramPage.module.css'
 const HANDLE = '@dr.lucasjudice'
 const TAGLINE = 'Advogado Patrimonialista'
 
-// Ícones de linha (viewBox 0 0 24 24) para o layout "icones"
+// remove markdown/asteriscos que a IA às vezes injeta
+const clean = (t?: string | null) => (t || '').replace(/[*#`]/g, '').replace(/\s+/g, ' ').trim()
+
+// tamanho de fonte da CAPA conforme o comprimento do hook (evita estourar margem)
+function coverSize(t: string): number {
+  const n = t.length
+  if (n <= 16) return 118
+  if (n <= 24) return 104
+  if (n <= 34) return 88
+  if (n <= 44) return 74
+  return 62
+}
+
 const ICONS: Record<IconeNome, ReactElement> = {
   usuario: <><path d="M4 20v-2a4 4 0 0 1 4-4h0a4 4 0 0 1 4 4v2" /><circle cx="8" cy="7" r="3" /></>,
   balanca: <><path d="M12 3v18M5 21h14M7 7h10M7 7l-3 6a3 3 0 0 0 6 0zM17 7l3 6a3 3 0 0 1-6 0z" /></>,
@@ -22,6 +34,9 @@ const ICONS: Record<IconeNome, ReactElement> = {
   cofre: <><rect x="3" y="5" width="18" height="14" rx="2" /><circle cx="12" cy="12" r="3.5" /><path d="M12 8.5v0M12 12h3" /></>,
   arvore: <><path d="M12 21v-6M12 15L7 11M12 12l5-4" /><circle cx="12" cy="6" r="3" /><circle cx="6" cy="10" r="2.5" /><circle cx="18" cy="7" r="2.5" /></>,
 }
+const Ico = ({ name, cls }: { name: IconeNome; cls?: string }) => (
+  <svg viewBox="0 0 24 24" className={cls}>{ICONS[name] ?? ICONS.check}</svg>
+)
 
 function Header({ n, total, avatar }: { n: number; total: number; avatar?: string }) {
   return (
@@ -32,32 +47,23 @@ function Header({ n, total, avatar }: { n: number; total: number; avatar?: strin
   )
 }
 
-/** Um slide renderizado fielmente conforme seu `layout`. */
 export function InstagramSlide({ slide, index, total, avatar }: {
   slide: SlideBlock; index: number; total: number; avatar?: string
 }) {
   const n = index + 1
   const layout = slide.layout || 'editorial'
+  const titulo = clean(slide.titulo)
+  const kicker = clean(slide.kicker)
+  const frase = clean(slide.frase)
 
   // ---------- CAPAS ----------
   if (slide.tipo === 'capa' || layout.startsWith('capa_')) {
-    if (layout === 'capa_teal') {
-      return (
-        <div className={`${s.slide} ${s.cover} ${s.coverTeal}`}>
-          <div className={s.topbar} />
-          {slide.kicker && <span className={s.coverTag}>{slide.kicker}</span>}
-          <div className={s.ct}>{slide.titulo}</div>
-          <div className={s.divider} />
-          <div className={s.coverArr}>Arraste →</div>
-          <div className={s.coverHandle}>{HANDLE}</div>
-        </div>
-      )
-    }
+    const size = coverSize(titulo)
     if (layout === 'capa_offwhite') {
       return (
         <div className={`${s.slide} ${s.cover} ${s.coverOff}`}>
-          {slide.kicker && <span className={s.kickerC}>{slide.kicker}</span>}
-          <div className={s.ct}>{slide.titulo}</div>
+          {kicker && <span className={s.kickerC}>{kicker}</span>}
+          <div className={s.ct} style={{ fontSize: size }}>{titulo}</div>
           <div className={s.coverArr}>Arraste →</div>
           <div className={s.coverHandle}>{HANDLE}</div>
         </div>
@@ -66,9 +72,9 @@ export function InstagramSlide({ slide, index, total, avatar }: {
     if (layout === 'capa_split') {
       return (
         <div className={`${s.slide} ${s.cover} ${s.coverSplit}`}>
-          <div className={s.top}><div className={s.over}>{slide.kicker}</div></div>
+          <div className={s.top}><div className={s.over}>{kicker}</div></div>
           <div className={s.bot}>
-            <div className={s.ct}>{slide.titulo}</div>
+            <div className={s.ct} style={{ fontSize: Math.min(size, 96) }}>{titulo}</div>
             <div className={s.coverArr}>Arraste →</div>
           </div>
           <div className={s.coverHandle}>{HANDLE}</div>
@@ -80,25 +86,33 @@ export function InstagramSlide({ slide, index, total, avatar }: {
         <div className={`${s.slide} ${s.cover} ${s.coverCream}`}>
           <div className={s.frame} />
           <div className={s.over4}>Pimenta Júdice</div>
-          <div className={s.ct}>{slide.titulo}</div>
+          <div className={s.ct} style={{ fontSize: Math.min(size, 100) }}>{titulo}</div>
           <div className={s.divider} />
           <div className={s.handle4}>{HANDLE} · {TAGLINE}</div>
         </div>
       )
     }
-    // capa_keyword — realça a palavra `destaque` dentro do título
-    const kw = (slide.destaque || '').trim()
-    const titulo = slide.titulo || ''
-    const parts = kw ? titulo.split(new RegExp(`(${kw})`, 'i')) : [titulo]
-    return (
-      <div className={`${s.slide} ${s.cover} ${s.coverKw}`}>
-        <div className={s.ct}>
-          {parts.map((p, i) =>
-            kw && p.toLowerCase() === kw.toLowerCase()
-              ? <span key={i} className={s.hl}>{p}</span>
-              : <span key={i}>{p}</span>,
-          )}
+    if (layout === 'capa_keyword') {
+      const kw = clean(slide.destaque)
+      const parts = kw ? titulo.split(new RegExp(`(${kw})`, 'i')) : [titulo]
+      return (
+        <div className={`${s.slide} ${s.cover} ${s.coverKw}`}>
+          <div className={s.ct} style={{ fontSize: size }}>
+            {parts.map((p, i) => kw && p.toLowerCase() === kw.toLowerCase()
+              ? <span key={i} className={s.hl}>{p}</span> : <span key={i}>{p}</span>)}
+          </div>
+          <div className={s.coverArr}>Arraste →</div>
+          <div className={s.coverHandle}>{HANDLE}</div>
         </div>
+      )
+    }
+    // capa_teal (default)
+    return (
+      <div className={`${s.slide} ${s.cover} ${s.coverTeal}`}>
+        <div className={s.topbar} />
+        {kicker && <span className={s.coverTag}>{kicker}</span>}
+        <div className={s.ct} style={{ fontSize: size }}>{titulo}</div>
+        <div className={s.divider} />
         <div className={s.coverArr}>Arraste →</div>
         <div className={s.coverHandle}>{HANDLE}</div>
       </div>
@@ -110,9 +124,9 @@ export function InstagramSlide({ slide, index, total, avatar }: {
     return (
       <div className={`${s.slide} ${s.closing}`}>
         <Header n={n} total={total} avatar={avatar} />
-        <div className={s.ch}>{slide.titulo}</div>
-        {slide.frase && <div className={s.cs}>{slide.frase}</div>}
-        {slide.cta && <div className={s.pill}>{slide.cta}</div>}
+        <div className={s.ch}>{titulo}</div>
+        {frase && <div className={s.cs}>{frase}</div>}
+        {slide.cta && <div className={s.pill}>{clean(slide.cta)}</div>}
       </div>
     )
   }
@@ -122,34 +136,34 @@ export function InstagramSlide({ slide, index, total, avatar }: {
     <div className={`${s.slide} ${s.mid}`}>
       <Header n={n} total={total} avatar={avatar} />
       <div className={s.body}>
-        {layout === 'numero' && slide.numero && <div className={s.bignum}>{slide.numero}</div>}
-        {slide.kicker && layout !== 'numero' && <span className={s.kicker}>{slide.kicker}</span>}
+        {layout === 'numero' && slide.numero && <div className={s.bignum}>{clean(slide.numero)}</div>}
+        {kicker && layout !== 'numero' && <span className={s.kicker}>{kicker}</span>}
 
         {layout === 'imagem' ? (
           <div className={s.cols}>
             <div className={s.cl}>
-              <div className={`${s.h} ${s.sm}`}>{slide.titulo}</div>
-              {slide.frase && <div className={s.sentence}>{slide.frase}</div>}
+              <div className={`${s.h} ${s.sm}`}>{titulo}</div>
+              {frase && <div className={s.sentence}>{frase}</div>}
             </div>
-            <div className={s.imgblk}>{slide.imagem_hint || 'imagem / ilustração'}</div>
+            <div className={s.imgblk}><Ico name={(slide.icone_destaque as IconeNome) || 'escudo'} cls={s.imgIcon} /></div>
           </div>
         ) : (
-          <div className={`${s.h} ${layout === 'editorial' ? '' : s.sm}`}>{slide.titulo}</div>
+          <div className={`${s.h} ${layout === 'editorial' ? '' : s.sm}`}>{titulo}</div>
         )}
 
-        {layout === 'editorial' && slide.frase && (
-          <div className={s.barwrap}><div className={s.bar} /><div className={s.sentence} style={{ marginTop: 0 }}>{slide.frase}</div></div>
+        {layout === 'editorial' && frase && (
+          <div className={s.barwrap}><div className={s.bar} /><div className={s.sentence} style={{ marginTop: 0 }}>{frase}</div></div>
         )}
-        {layout === 'numero' && slide.frase && <div className={s.sentence}>{slide.frase}</div>}
+        {layout === 'numero' && frase && <div className={s.sentence}>{frase}</div>}
         {layout === 'citacao' && slide.citacao && (
-          <div className={s.qcard}><div className={s.qt}>{slide.citacao}</div></div>
+          <div className={s.qcard}><div className={s.qt}>{clean(slide.citacao)}</div></div>
         )}
         {layout === 'icones' && (slide.icones?.length ?? 0) > 0 && (
           <div className={s.icons}>
             {slide.icones!.map((it, i) => (
               <div key={i} className={s.ico}>
-                <div className={s.ic}><svg viewBox="0 0 24 24">{ICONS[it.icone] ?? ICONS.check}</svg></div>
-                <div className={s.lb}>{it.label}</div>
+                <div className={s.ic}><Ico name={it.icone} /></div>
+                <div className={s.lb}>{clean(it.label)}</div>
               </div>
             ))}
           </div>
@@ -160,7 +174,6 @@ export function InstagramSlide({ slide, index, total, avatar }: {
   )
 }
 
-/** Carrossel navegável com os slides escalados a partir de 1080×1350 (4:5). */
 export function SlideCarousel({ slides, width = 320, avatar }: {
   slides: SlideBlock[]; width?: number; avatar?: string
 }) {
@@ -178,9 +191,7 @@ export function SlideCarousel({ slides, width = 320, avatar }: {
       </div>
       {slides.length > 1 && (
         <>
-          <div className={s.dots}>
-            {slides.map((_, k) => <span key={k} className={`${s.dot} ${k === cur ? s.dotActive : ''}`} />)}
-          </div>
+          <div className={s.dots}>{slides.map((_, k) => <span key={k} className={`${s.dot} ${k === cur ? s.dotActive : ''}`} />)}</div>
           <div className={s.navBtns}>
             <button className={s.navBtn} disabled={cur === 0} onClick={() => setI(cur - 1)} aria-label="Anterior"><ChevronLeft size={16} /></button>
             <button className={s.navBtn} disabled={cur >= slides.length - 1} onClick={() => setI(cur + 1)} aria-label="Próximo"><ChevronRight size={16} /></button>

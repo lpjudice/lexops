@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -84,19 +84,29 @@ CAPA (1ª slide, tipo "capa") — escolha 1 dos 5 layouts e VARIE entre os posts
 - "capa_offwhite": { "kicker","titulo" }                (educativo/limpo)
 - "capa_split":    { "kicker","titulo" }                (tensão/comparativo)
 - "capa_cream":    { "kicker","titulo" }                (premium/alta renda)
-- "capa_keyword":  { "titulo","destaque" }              (destaque = 1 palavra realçada dentro do título)
-  (titulo curto, pode quebrar em 2-3 linhas; kicker é curto em caixa alta ex.: "Holding · Sucessão")
+- "capa_keyword":  { "titulo","destaque" }              (destaque = 1 palavra que APARECE dentro do título)
+  REGRAS DA CAPA (CRÍTICO p/ legibilidade no feed):
+  * titulo = HOOK CURTO, no MÁXIMO 42 caracteres (~5-7 palavras). É um gancho, NÃO a explicação.
+    Ex. BOM: "Seu quinhão pode ser penhorado?"  Ex. RUIM: uma frase inteira explicando o tema.
+  * Escreva em caixa NORMAL (não CAIXA ALTA). NUNCA use markdown, asteriscos (*), # ou aspas no titulo.
+  * kicker = curto, 1-3 palavras, ex.: "Holding · Sucessão".
+  * destaque (capa_keyword) = UMA palavra exatamente como aparece no titulo, sem asteriscos.
 
 MIOLO (tipo "conteudo") — ALTERNE os layouts, sem repetir sempre o mesmo, SEM bullets:
 - "editorial": { "kicker","titulo","frase" }            (headline + 1 frase com barra lateral)
 - "numero":    { "numero","titulo","frase" }            (numero = dado de impacto ex.: "50/50")
 - "icones":    { "kicker","titulo","icones":[{"icone","label"}, ...2-3] }
-      icone ∈ [usuario,balanca,check,escudo,casa,familia,documento,acordo,grafico,engrenagem,cofre,arvore]
 - "citacao":   { "kicker","titulo","citacao" }          (citacao = definição/frase-chave em card)
-- "imagem":    { "kicker","titulo","frase","imagem_hint" }  (imagem_hint = descreva a imagem/ilustração ideal)
+- "imagem":    { "kicker","titulo","frase","icone_destaque" }
+      (painel visual com UM ícone grande de marca — NÃO descreva imagens, escolha um icone_destaque)
+  icone / icone_destaque ∈ [usuario,balanca,check,escudo,casa,familia,documento,acordo,grafico,engrenagem,cofre,arvore]
 
 FECHAMENTO (última slide, tipo "fechamento", layout "fechamento"):
-- { "titulo","frase","cta" }   (cta = texto curto do botão, ex.: "Salve este post")
+- { "titulo","frase","cta" }
+  * VARIE o cta a cada post — NÃO use sempre "Fale com um especialista". Prefira ação de
+    engajamento: "Salve este post", "Compartilhe com quem precisa", "Envie para seu contador",
+    "Marque um herdeiro", "Comente PLANEJAR". Escolha o que combina com o tema.
+  * titulo do fechamento = frase de reforço curta; frase = 1 linha de apoio.
 
 REGRAS:
 - carrossel = 1 capa + N slides de miolo + 1 fechamento. ESCOLHA o N conforme o
@@ -244,13 +254,20 @@ def _resumir_contexto(ctx: dict) -> str:
     return "\n".join(partes) if partes else "(sem sinais da semana — use os temas evergreen)"
 
 
-def _build_prompt(ctx: dict, quantidade: int, formato: str | None) -> str:
+def _build_prompt(ctx: dict, quantidade: int, formato: str | None, evitar: list[str] | None = None) -> str:
     ctx_txt = _resumir_contexto(ctx)
     fmt_instr = (
         f"Todos os {quantidade} posts devem ser do formato '{formato}'."
         if formato else
         f"Varie o formato: a maioria carrossel, 1 estático se fizer sentido. Gere {quantidade} posts."
     )
+    evitar_txt = ""
+    if evitar:
+        lista = "\n".join(f"- {t}" for t in evitar[:40])
+        evitar_txt = (
+            "\n\nTEMAS JÁ ABORDADOS RECENTEMENTE (NÃO repita nem traga o mesmo ângulo — "
+            "escolha assuntos ou recortes DIFERENTES):\n" + lista
+        )
     return f"""Você é o social media jurídico do @dr.lucasjudice (Pimenta Judice Advogados),
 especialista em Planejamento Patrimonial, Sucessório e Direito Societário.
 
@@ -258,13 +275,13 @@ Sua tarefa: propor {quantidade} sugestões de post para o Instagram, ancoradas
 NOS ACONTECIMENTOS DA SEMANA. Priorize, nesta ordem, as "Pílulas Jurídicas /
 Insights do site" e as "Publicações/intimações" — são os ganchos mais quentes e
 atuais. Use andamentos, peças e teses como reforço, e os temas evergreen só
-quando não houver gancho forte. Para cada post, escreva um campo "motivo" curto
-explicando por que sugeriu (qual sinal da semana ou pilar).
+quando não houver gancho forte. VARIE bastante os temas entre si nesta rodada.
+Para cada post, escreva um campo "motivo" curto (qual sinal da semana ou pilar).
 
 {DESIGN_SYSTEM}
 
 DADOS DA SEMANA:
-{ctx_txt}
+{ctx_txt}{evitar_txt}
 
 {fmt_instr}
 
@@ -274,7 +291,13 @@ Inclua em cada post um campo "motivo": "1 frase explicando a origem do tema".
 """
 
 
-def _call_gemini_json(prompt: str) -> dict:
+# Preços aproximados Gemini 2.5 Flash (USD por milhão de tokens)
+_GEMINI_IN_PER_MTOK = 0.30
+_GEMINI_OUT_PER_MTOK = 2.50
+
+
+def _call_gemini_json(prompt: str) -> tuple[dict, float]:
+    """Retorna (json_parseado, custo_usd_estimado)."""
     if not settings.google_ai_api_key:
         raise RuntimeError("GOOGLE_AI_API_KEY não configurada.")
     import httpx
@@ -289,8 +312,13 @@ def _call_gemini_json(prompt: str) -> dict:
     }
     resp = httpx.post(url, json=payload, timeout=120)
     resp.raise_for_status()
-    txt = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
-    return json.loads(txt)
+    body = resp.json()
+    txt = body["candidates"][0]["content"]["parts"][0]["text"]
+    usage = body.get("usageMetadata", {}) or {}
+    tin = usage.get("promptTokenCount", 0) or 0
+    tout = usage.get("candidatesTokenCount", 0) or 0
+    custo = round((tin * _GEMINI_IN_PER_MTOK + tout * _GEMINI_OUT_PER_MTOK) / 1_000_000, 5)
+    return json.loads(txt), custo
 
 
 def _classificar_fonte(ctx: dict) -> str:
@@ -306,6 +334,24 @@ def _classificar_fonte(ctx: dict) -> str:
     if ctx.get("teses"):
         return "tese"
     return "evergreen"
+
+
+def _temas_recentes(db: Session, limite: int = 40) -> list[str]:
+    """Títulos/temas já gerados recentemente — para o Agente não repetir assuntos."""
+    try:
+        rows = db.execute(
+            select(InstagramSugestao.titulo, InstagramSugestao.tema)
+            .order_by(InstagramSugestao.data_geracao.desc())
+            .limit(limite)
+        ).all()
+        vistos: list[str] = []
+        for titulo, tema in rows:
+            t = (tema or titulo or "").strip()
+            if t and t not in vistos:
+                vistos.append(t)
+        return vistos
+    except Exception:  # pragma: no cover
+        return []
 
 
 _CAPA_COD = {
@@ -352,7 +398,7 @@ POST ATUAL (JSON):
 
 Responda APENAS com o JSON do post completo já ajustado, no mesmo formato
 (chaves: titulo, tema, formato, legenda, hashtags, slides[]). Sem markdown."""
-    data = _call_gemini_json(prompt)
+    data, custo = _call_gemini_json(prompt)
     if not isinstance(data, dict) or not data.get("slides"):
         raise ValueError("A IA não retornou um post válido no ajuste.")
     sug.titulo = (data.get("titulo") or sug.titulo)[:255]
@@ -361,6 +407,12 @@ Responda APENAS com o JSON do post completo já ajustado, no mesmo formato
     sug.hashtags = data.get("hashtags") if data.get("hashtags") is not None else sug.hashtags
     sug.slides = data["slides"]
     sug.tema_capa = _capa_codigo(data["slides"])
+    sug.custo_usd = round((sug.custo_usd or 0.0) + custo, 5)
+    # Histórico do pedido de ajuste
+    hist = list(sug.ajustes or [])
+    hist.append({"instrucao": instrucao, "quando": datetime.now(timezone.utc).isoformat()})
+    sug.ajustes = hist
+    sug.ajustes_count = (sug.ajustes_count or 0) + 1
     db.commit()
     db.refresh(sug)
     return sug
@@ -371,8 +423,9 @@ def gerar_sugestoes(
 ) -> list[InstagramSugestao]:
     """Gera sugestões, persiste no banco e retorna as instâncias criadas."""
     ctx = coletar_contexto_semana(db, fontes)
-    prompt = _build_prompt(ctx, quantidade, formato)
-    data = _call_gemini_json(prompt)
+    evitar = _temas_recentes(db)
+    prompt = _build_prompt(ctx, quantidade, formato, evitar=evitar)
+    data, custo = _call_gemini_json(prompt)
 
     posts = data.get("posts") if isinstance(data, dict) else data
     if not isinstance(posts, list):
@@ -401,6 +454,12 @@ def gerar_sugestoes(
         )
         db.add(sug)
         criadas.append(sug)
+
+    # Rateia o custo da chamada entre os posts criados
+    if criadas:
+        por_post = round(custo / len(criadas), 5)
+        for sug in criadas:
+            sug.custo_usd = por_post
 
     db.commit()
     for s in criadas:

@@ -34,6 +34,20 @@
   text-decoration:none; background:#e8f5f2; border-radius:999px; padding:3px 9px; }
 .driveLink:hover { background:#d8efe9; }
 
+.chipCusto { display:inline-flex; align-items:center; gap:2px; font-size:11px; font-weight:700; color:#6b6150;
+  background:#f3efe6; border-radius:999px; padding:3px 8px 3px 6px; }
+.chipAlterado { display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:700; color:#8a5a10;
+  background:#fff2d8; border:none; border-radius:999px; padding:3px 9px; cursor:pointer; }
+.chipAlterado:hover { background:#ffe9be; }
+.histBox { background:#fbfaf7; border:1px solid #eee; border-radius:8px; padding:8px 10px; display:flex; flex-direction:column; gap:6px; }
+.histItem { font-size:12px; color:#444; display:flex; flex-direction:column; }
+.histDate { font-size:11px; color:#999; }
+.cardChanged { border-left:4px solid #e0a83a; }
+
+.gastoBox { display:flex; gap:14px; align-items:center; font-size:13px; color:#556; }
+.gastoMes b { color:#1C5A4E; }
+.gastoTotal { color:#8a8a8a; }
+
 .tabs { display:flex; gap:4px; border-bottom:1px solid #e2e2e2; margin-bottom:20px; }
 .tab { appearance:none; border:none; background:none; padding:10px 16px; font-size:14px; font-weight:600;
   color:#667; cursor:pointer; border-bottom:2px solid transparent; }
@@ -129,8 +143,10 @@
 .cols { display:flex; gap:56px; align-items:center; }
 .cols .cl { flex:1; }
 .imgblk { width:420px; height:520px; border-radius:28px; background:linear-gradient(150deg,#2f7a6c,#12463b);
-  flex-shrink:0; display:flex; align-items:center; justify-content:center; color:rgba(255,255,255,.72);
-  font-size:28px; font-weight:600; text-align:center; padding:30px; box-shadow:0 10px 34px rgba(18,61,52,.22); }
+  flex-shrink:0; display:flex; align-items:center; justify-content:center;
+  box-shadow:0 10px 34px rgba(18,61,52,.22); }
+.imgIcon { width:190px; height:190px; stroke:rgba(255,255,255,.92); fill:none; stroke-width:1.5;
+  stroke-linecap:round; stroke-linejoin:round; }
 
 /* ---- CAPAS (centralizadas) ---- */
 .cover { align-items:center; justify-content:center; text-align:center; padding:150px 140px; }

@@ -835,6 +835,9 @@ def _run_migrations() -> None:
         ))
         conn.execute(text("ALTER TABLE instagram_sugestoes ADD COLUMN IF NOT EXISTS aprovado_em TIMESTAMPTZ"))
         conn.execute(text("ALTER TABLE instagram_sugestoes ADD COLUMN IF NOT EXISTS drive_link TEXT"))
+        conn.execute(text("ALTER TABLE instagram_sugestoes ADD COLUMN IF NOT EXISTS custo_usd DOUBLE PRECISION NOT NULL DEFAULT 0"))
+        conn.execute(text("ALTER TABLE instagram_sugestoes ADD COLUMN IF NOT EXISTS ajustes JSONB NOT NULL DEFAULT '[]'::jsonb"))
+        conn.execute(text("ALTER TABLE instagram_sugestoes ADD COLUMN IF NOT EXISTS ajustes_count INTEGER NOT NULL DEFAULT 0"))
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS instagram_config (
                 id INTEGER PRIMARY KEY DEFAULT 1,

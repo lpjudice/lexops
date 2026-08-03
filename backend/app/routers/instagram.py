@@ -13,6 +13,8 @@ from app.schemas.instagram import (
     AjustarRequest,
     ConfigOut,
     ConfigUpdate,
+    CustosMes,
+    CustosOut,
     EnviarAssessoriaRequest,
     EnviarAssessoriaResponse,
     GerarRequest,
@@ -73,6 +75,26 @@ def listar_sugestoes(
     if status_filtro:
         stmt = stmt.where(InstagramSugestao.status == status_filtro)
     return db.execute(stmt).scalars().all()
+
+
+@router.get("/custos", response_model=CustosOut)
+def custos(db: Session = Depends(get_db)):
+    """Gasto de IA: total, mês atual e por mês (geração + ajustes)."""
+    from sqlalchemy import func as sqlfunc
+
+    mes = sqlfunc.to_char(InstagramSugestao.data_geracao, "MM/YYYY")
+    rows = db.execute(
+        select(mes.label("mes"),
+               sqlfunc.coalesce(sqlfunc.sum(InstagramSugestao.custo_usd), 0.0),
+               sqlfunc.count())
+        .group_by(mes)
+        .order_by(mes.desc())
+    ).all()
+    por_mes = [CustosMes(mes=m, total_usd=round(float(t or 0), 4), qtd=int(q)) for m, t, q in rows]
+    total = round(sum(x.total_usd for x in por_mes), 4)
+    mes_atual = datetime.now(timezone.utc).strftime("%m/%Y")
+    mes_atual_usd = next((x.total_usd for x in por_mes if x.mes == mes_atual), 0.0)
+    return CustosOut(total_usd=total, mes_atual_usd=mes_atual_usd, por_mes=por_mes)
 
 
 @router.post("/gerar", response_model=GerarResponse)

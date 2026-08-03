@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Integer, String, Text, func
+from sqlalchemy import Date, DateTime, Float, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -59,6 +59,12 @@ class InstagramSugestao(Base):
 
     # Quando foi enviado para a assessoria (e-mail)
     enviado_assessoria_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Custo acumulado de IA (geração + ajustes) em USD
+    custo_usd: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    # Histórico de pedidos de ajuste: [{"instrucao","quando"}]
+    ajustes: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
+    ajustes_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
     data_geracao: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

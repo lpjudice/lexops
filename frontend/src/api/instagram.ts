@@ -26,6 +26,7 @@ export interface SlideBlock {
   citacao?: string | null
   icones?: IconeItem[]
   imagem_hint?: string | null
+  icone_destaque?: IconeNome | null
   destaque?: string | null
   cta?: string | null
 }
@@ -47,12 +48,18 @@ export interface Sugestao {
   aprovado_em?: string | null
   drive_link?: string | null
   enviado_assessoria_em?: string | null
+  custo_usd: number
+  ajustes: { instrucao: string; quando: string }[]
+  ajustes_count: number
   data_geracao: string
   created_at: string
   updated_at: string
 }
 
 export type FonteColeta = 'insights' | 'publicacoes' | 'andamentos' | 'pecas' | 'teses' | 'evergreen'
+
+export interface CustosMes { mes: string; total_usd: number; qtd: number }
+export interface Custos { total_usd: number; mes_atual_usd: number; por_mes: CustosMes[] }
 
 export interface GerarResponse {
   criadas: number
@@ -114,6 +121,8 @@ export const instagramApi = {
         { timeout: 120000 },
       )
       .then((r) => r.data),
+
+  custos: () => api.get<Custos>('/instagram/custos').then((r) => r.data),
 
   obterConfig: () => api.get<InstagramConfig>('/instagram/config').then((r) => r.data),
 

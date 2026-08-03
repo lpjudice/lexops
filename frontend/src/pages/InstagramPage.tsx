@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Camera, Sparkles, Check, X, Send, Trash2, RotateCcw, Mail, Lightbulb, Wand2, Plus, CheckCircle2,
-  Download, HardDrive, ChevronDown, ChevronUp, FolderOpen,
+  Download, HardDrive, ChevronDown, ChevronUp, FolderOpen, History, DollarSign,
 } from 'lucide-react'
 import { instagramApi } from '../api/instagram'
 import type { FonteColeta, Sugestao } from '../api/instagram'
@@ -34,11 +34,16 @@ function mesLabel(k: string): string {
 // ─────────────────── Card de sugestão ───────────────────
 function SugestaoCard({ sug }: { sug: Sugestao }) {
   const qc = useQueryClient()
-  const invalidate = () => qc.invalidateQueries({ queryKey: ['instagram-sugestoes'] })
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['instagram-sugestoes'] })
+    qc.invalidateQueries({ queryKey: ['instagram-custos'] })
+  }
   const [ajuste, setAjuste] = useState('')
   const [zipBusy, setZipBusy] = useState(false)
   const [driveBusy, setDriveBusy] = useState(false)
   const [aberto, setAberto] = useState(sug.status !== 'publicado')
+  const [verHist, setVerHist] = useState(false)
+  const alterado = (sug.ajustes_count ?? 0) > 0
 
   const patch = useMutation({
     mutationFn: (p: Parameters<typeof instagramApi.atualizar>[1]) => instagramApi.atualizar(sug.id, p),
@@ -91,7 +96,7 @@ function SugestaoCard({ sug }: { sug: Sugestao }) {
   }
 
   return (
-    <div className={s.card}>
+    <div className={`${s.card} ${alterado ? s.cardChanged : ''}`}>
       <SlideCarousel slides={sug.slides} width={320} />
       <div className={s.cardBody}>
         <div className={s.cardTitleRow}>
@@ -104,8 +109,24 @@ function SugestaoCard({ sug }: { sug: Sugestao }) {
           <span className={s.chip}>{sug.formato === 'carrossel' ? 'Carrossel' : 'Estático'}</span>
           <span className={s.chip}>Capa {CAPA_LABEL[sug.tema_capa] ?? sug.tema_capa}</span>
           <span className={`${s.chip} ${s.chipFonte}`}>{FONTE_LABEL[sug.fonte_tipo] ?? sug.fonte_tipo}</span>
+          <span className={s.chipCusto}><DollarSign size={11} />{(sug.custo_usd ?? 0).toFixed(3)}</span>
+          {alterado && (
+            <button className={s.chipAlterado} onClick={() => setVerHist((v) => !v)} title="Ver histórico de alterações">
+              <History size={12} /> {sug.ajustes_count} alteração{sug.ajustes_count > 1 ? 'ões' : ''}
+            </button>
+          )}
           {sug.drive_link && <a className={s.driveLink} href={sug.drive_link} target="_blank" rel="noreferrer"><FolderOpen size={13} /> Drive</a>}
         </div>
+        {verHist && alterado && (
+          <div className={s.histBox}>
+            {sug.ajustes.map((a, i) => (
+              <div key={i} className={s.histItem}>
+                <span className={s.histDate}>{new Date(a.quando).toLocaleString('pt-BR')}</span>
+                <span>{a.instrucao}</span>
+              </div>
+            ))}
+          </div>
+        )}
         {sug.motivo_ia && <div className={s.motivo}>“{sug.motivo_ia}”</div>}
 
         <div className={s.ajusteBox}>
@@ -203,6 +224,7 @@ export default function InstagramPage() {
   const { data: sugestoes = [], isLoading } = useQuery({
     queryKey: ['instagram-sugestoes'], queryFn: () => instagramApi.listar(),
   })
+  const { data: custos } = useQuery({ queryKey: ['instagram-custos'], queryFn: () => instagramApi.custos() })
 
   const gerar = useMutation({
     mutationFn: () => {
@@ -211,6 +233,7 @@ export default function InstagramPage() {
     },
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['instagram-sugestoes'] })
+      qc.invalidateQueries({ queryKey: ['instagram-custos'] })
       if (res.aviso) alert(res.aviso)
       setAba('sugeridas')
     },
@@ -247,6 +270,12 @@ export default function InstagramPage() {
     <div>
       <div className={page.pageHeader}>
         <h1 className={page.pageTitle}><Camera size={22} style={{ verticalAlign: '-4px', marginRight: 8 }} />Instagram · @dr.lucasjudice</h1>
+        {custos && (
+          <div className={s.gastoBox} title="Gasto de IA (geração + ajustes)">
+            <span className={s.gastoMes}>Gasto do mês: <b>${custos.mes_atual_usd.toFixed(2)}</b></span>
+            <span className={s.gastoTotal}>Total: ${custos.total_usd.toFixed(2)}</span>
+          </div>
+        )}
       </div>
 
       <div className={s.toolbar}>

@@ -422,6 +422,22 @@ def _alerta_falha_relatorio(db, cfg, comp, motivo) -> None:
         logger.warning("Falha ao alertar erro de relatório: %s", exc)
 
 
+def _gerar_instagram_diario() -> None:
+    """07:00 BRT — Agente master gera 3 sugestões de post do dia."""
+    try:
+        from app.database import SessionLocal
+        from app.services import ia_instagram
+
+        db = SessionLocal()
+        try:
+            criadas = ia_instagram.gerar_sugestoes(db, quantidade=3)
+            logger.info("Scheduler: %d sugestões de Instagram geradas", len(criadas))
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.warning("Scheduler: falha ao gerar sugestões de Instagram: %s", exc)
+
+
 def start_scheduler() -> None:
     if scheduler.running:
         logger.info("Scheduler já estava ativo")
@@ -503,6 +519,13 @@ def start_scheduler() -> None:
         _relatorio_fiscal_contador,
         trigger=CronTrigger(hour=8, minute=30, timezone="America/Sao_Paulo"),
         id="relatorio_fiscal_contador",
+        replace_existing=True,
+    )
+    # Instagram — Agente master sugere posts todo dia às 07:00 BRT
+    scheduler.add_job(
+        _gerar_instagram_diario,
+        trigger=CronTrigger(hour=7, minute=0, timezone="America/Sao_Paulo"),
+        id="instagram_sugestoes_diarias",
         replace_existing=True,
     )
     scheduler.start()
