@@ -10,6 +10,7 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.instagram import DEFAULT_ASSESSORIA_EMAILS, InstagramConfig, InstagramSugestao
 from app.schemas.instagram import (
+    AjustarRequest,
     ConfigOut,
     ConfigUpdate,
     EnviarAssessoriaRequest,
@@ -100,6 +101,20 @@ def atualizar(sugestao_id: uuid.UUID, payload: SugestaoUpdate, db: Session = Dep
     return sug
 
 
+@router.post("/sugestoes/{sugestao_id}/ajustar", response_model=SugestaoOut)
+def ajustar(sugestao_id: uuid.UUID, payload: AjustarRequest, db: Session = Depends(get_db)):
+    """Ajuste pontual via IA: muda só o que foi pedido, mantém o resto do post."""
+    if not settings.google_ai_api_key:
+        raise HTTPException(status_code=400, detail="GOOGLE_AI_API_KEY não configurada no servidor.")
+    sug = _get(db, sugestao_id)
+    if not (payload.instrucao or "").strip():
+        raise HTTPException(status_code=400, detail="Descreva o ajuste desejado.")
+    try:
+        return ia_instagram.ajustar_sugestao(db, sug, payload.instrucao.strip(), payload.slide_index)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Falha ao ajustar: {exc}")
+
+
 @router.delete("/sugestoes/{sugestao_id}", status_code=status.HTTP_204_NO_CONTENT)
 def excluir(sugestao_id: uuid.UUID, db: Session = Depends(get_db)):
     sug = _get(db, sugestao_id)
@@ -121,55 +136,54 @@ def _emails_padrao(db: Session) -> list[str]:
     return emails
 
 
+def _card_base_url() -> str:
+    """Base pública do app para montar o link do card (/post/{id})."""
+    fu = (settings.frontend_url or "").rstrip("/")
+    if fu and "localhost" not in fu and "127.0.0.1" not in fu:
+        return fu
+    return "https://lexops.fly.dev"
+
+
+def _mes_ano(sug: InstagramSugestao) -> str:
+    d = sug.data_sugerida or date.today()
+    return d.strftime("%m-%Y")
+
+
+def _drive_folder_link(sug: InstagramSugestao) -> str | None:
+    """Link da pasta no Drive: /Instagram/{Aprovados}/{MM-AAAA}/ (best-effort)."""
+    try:
+        from app.services.google_drive import get_folder_link_raiz
+        return get_folder_link_raiz(["Instagram", "Aprovados", _mes_ano(sug)])
+    except Exception:
+        return None
+
+
 def _build_email_html(sug: InstagramSugestao, observacao: str | None) -> str:
-    TEAL = "#008080"
+    TEAL = "#1C5A4E"
     data_txt = sug.data_sugerida.strftime("%d/%m/%Y") if sug.data_sugerida else "a definir"
-    slides_html = ""
-    for i, s in enumerate(sug.slides or [], start=1):
-        titulo = (s.get("titulo") or "").strip()
-        corpo = (s.get("corpo") or "").strip()
-        bullets = s.get("bullets") or []
-        cards = s.get("cards") or []
-        cta = (s.get("cta") or "").strip()
-        linhas = []
-        if titulo:
-            linhas.append(f"<strong>{titulo}</strong>")
-        if corpo:
-            linhas.append(corpo)
-        for b in bullets:
-            linhas.append(f"• {b}")
-        for c in cards:
-            d = (c.get('destaque') or '').strip()
-            linhas.append(f"{d} {c.get('texto','')}".strip())
-        if cta:
-            linhas.append(f"<em>{cta}</em>")
-        corpo_slide = "<br>".join(linhas) if linhas else "—"
-        slides_html += (
-            f"<tr><td style='padding:10px 14px;border:1px solid #e0e0e0;vertical-align:top;'>"
-            f"<span style='color:{TEAL};font-weight:700;'>Slide {i}</span> "
-            f"<span style='color:#888;font-size:12px;'>({s.get('variante','light')})</span><br>"
-            f"<span style='font-size:14px;color:#333;'>{corpo_slide}</span></td></tr>"
-        )
+    card_url = f"{_card_base_url()}/post/{sug.id}"
+    drive_link = _drive_folder_link(sug)
+    fmt_txt = "Carrossel" if sug.formato == "carrossel" else "Post estático"
 
     obs_html = (
         f"<p style='background:#fff8e1;padding:12px 16px;border-radius:6px;font-size:14px;'>"
         f"<strong>Observação:</strong> {observacao}</p>" if observacao else ""
     )
-    fmt_txt = "Carrossel" if sug.formato == "carrossel" else "Post estático"
-    return f"""<!doctype html><html><body style="font-family:Arial,sans-serif;color:#1a1a1a;max-width:640px;margin:0 auto;">
-      <div style="background:{TEAL};color:#fff;padding:20px 24px;border-radius:8px 8px 0 0;">
-        <div style="letter-spacing:2px;font-size:12px;opacity:.85;">POST APROVADO — @dr.lucasjudice</div>
-        <h2 style="margin:6px 0 0;">{sug.titulo}</h2>
+    drive_html = (
+        f"<p style='margin:14px 0 0;font-size:14px;'>📁 <a href='{drive_link}' "
+        f"style='color:{TEAL};'>Pasta no Drive</a></p>" if drive_link else ""
+    )
+    return f"""<!doctype html><html><body style="font-family:Arial,sans-serif;color:#1a1a1a;max-width:600px;margin:0 auto;">
+      <div style="background:{TEAL};color:#fff;padding:22px 26px;border-radius:8px 8px 0 0;">
+        <div style="letter-spacing:2px;font-size:12px;opacity:.85;">POST PARA PUBLICAR — @dr.lucasjudice</div>
+        <h2 style="margin:8px 0 0;">{sug.titulo}</h2>
       </div>
-      <div style="padding:20px 24px;border:1px solid #e0e0e0;border-top:none;">
-        <p style="font-size:14px;margin:0 0 4px;"><strong>Formato:</strong> {fmt_txt} &nbsp;|&nbsp; <strong>Tema de capa:</strong> {sug.tema_capa} &nbsp;|&nbsp; <strong>Data sugerida:</strong> {data_txt}</p>
-        <p style="font-size:14px;margin:0 0 16px;color:#555;"><strong>Tema:</strong> {sug.tema}</p>
+      <div style="padding:24px 26px;border:1px solid #e0e0e0;border-top:none;">
+        <p style="font-size:15px;margin:0 0 6px;"><strong>Data de publicação:</strong> {data_txt}</p>
+        <p style="font-size:15px;margin:0 0 20px;color:#555;"><strong>Formato:</strong> {fmt_txt}</p>
         {obs_html}
-        <h3 style="color:{TEAL};font-size:15px;margin:18px 0 8px;">Roteiro dos slides</h3>
-        <table style="border-collapse:collapse;width:100%;">{slides_html}</table>
-        <h3 style="color:{TEAL};font-size:15px;margin:18px 0 8px;">Legenda</h3>
-        <p style="font-size:14px;white-space:pre-wrap;">{sug.legenda or '—'}</p>
-        <p style="font-size:13px;color:{TEAL};">{sug.hashtags or ''}</p>
+        <a href="{card_url}" style="display:inline-block;background:{TEAL};color:#fff;text-decoration:none;font-weight:700;padding:14px 26px;border-radius:999px;font-size:15px;">Abrir o card para publicar →</a>
+        {drive_html}
       </div>
       <p style="text-align:center;font-size:11px;color:#999;margin-top:14px;">Gestor Jurídico — Pimenta Judice Advogados</p>
     </body></html>"""
@@ -189,7 +203,7 @@ def enviar_assessoria(
 
     from app.services.email_service import _send_via_gmail_oauth
 
-    subject = f"[Post @dr.lucasjudice] {sug.titulo}"
+    subject = f"[Publicar {sug.data_sugerida.strftime('%d/%m') if sug.data_sugerida else ''}] {sug.titulo}".strip()
     html = _build_email_html(sug, payload.observacao)
     to = destinos[0]
     cc = destinos[1:] or None

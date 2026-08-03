@@ -35,6 +35,7 @@ import ConselhoPage from './pages/ConselhoPage'
 import DespachoPage from './pages/DespachoPage'
 import ConselhoJuridicoPage from './pages/ConselhoJuridicoPage'
 import InstagramPage from './pages/InstagramPage'
+import PostPublicoPage from './pages/PostPublicoPage'
 
 const queryClient = new QueryClient()
 
@@ -52,6 +53,7 @@ function AppRoutes() {
       <Route path="/aceitar-convite/:token" element={<AceitarConvitePage />} />
       <Route path="/p/reforma/:token" element={<ReformaPublicaPage />} />
       <Route path="/cadastro" element={<CadastroPublicoPage />} />
+      <Route path="/post/:id" element={<PostPublicoPage />} />
       <Route path="/cadastro/:token" element={<CadastroPublicoPage />} />
       <Route
         path="/"

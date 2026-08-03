@@ -21,6 +21,26 @@ from app.models.nota_fiscal import NotaFiscal
 router = APIRouter(prefix="/publico", tags=["publico"])
 
 
+@router.get("/instagram/{sugestao_id}")
+def card_instagram_publico(sugestao_id: str, db: Session = Depends(get_db)):
+    """Card de post (somente leitura, sem login) para a assessoria abrir e publicar.
+
+    Protegido pelo próprio UUID opaco. Expõe só o conteúdo do post — nada sensível."""
+    import uuid as _uuid
+
+    from app.models.instagram import InstagramSugestao
+    from app.schemas.instagram import CardPublicoOut
+
+    try:
+        sid = _uuid.UUID(sugestao_id)
+    except ValueError:
+        raise HTTPException(404, "Link inválido")
+    sug = db.get(InstagramSugestao, sid)
+    if not sug:
+        raise HTTPException(404, "Post não encontrado")
+    return CardPublicoOut.model_validate(sug)
+
+
 def _cfg_por_token(db: Session, token: str) -> ConfigFiscal:
     if not token or len(token) < 16:
         raise HTTPException(404, "Link inválido")
