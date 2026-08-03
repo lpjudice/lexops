@@ -1,7 +1,7 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -219,3 +219,37 @@ def enviar_assessoria(
     db.commit()
     db.refresh(sug)
     return EnviarAssessoriaResponse(enviado_para=destinos, enviado_assessoria_em=agora)
+
+
+def _pasta_status(sug: InstagramSugestao) -> str:
+    return "Aprovados" if sug.status in ("aprovado", "publicado") else "Sugeridos"
+
+
+@router.post("/sugestoes/{sugestao_id}/drive")
+def salvar_no_drive(
+    sugestao_id: uuid.UUID,
+    files: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+):
+    """Sobe os PNGs dos slides (+ copy.txt) gerados no navegador para o Drive:
+    /Instagram/{Sugeridos|Aprovados}/{MM-AAAA}/{slug}/"""
+    from app.services.google_drive import get_folder_link_raiz, upload_arquivo_raiz
+
+    sug = _get(db, sugestao_id)
+    import re
+    slug = re.sub(r"[^a-z0-9]+", "-", (sug.titulo or "post").lower()).strip("-")[:50] or "post"
+    subpath = ["Instagram", _pasta_status(sug), _mes_ano(sug), f"{sug.id.hex[:6]}-{slug}"]
+
+    enviados = 0
+    for f in files:
+        conteudo = f.file.read()
+        if not conteudo:
+            continue
+        mimetype = f.content_type or ("image/png" if f.filename.endswith(".png") else "text/plain")
+        if upload_arquivo_raiz(conteudo, f.filename, subpath, mimetype):
+            enviados += 1
+
+    link = get_folder_link_raiz(subpath)
+    if not enviados or not link:
+        raise HTTPException(status_code=502, detail="Não foi possível salvar no Drive (verifique a autenticação Google).")
+    return {"enviados": enviados, "pasta": link}

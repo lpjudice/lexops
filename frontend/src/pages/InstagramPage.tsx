@@ -2,10 +2,12 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Camera, Sparkles, Check, X, Send, Trash2, RotateCcw, Mail, Lightbulb, Wand2, Plus, CheckCircle2,
+  Download, HardDrive,
 } from 'lucide-react'
 import { instagramApi } from '../api/instagram'
 import type { Sugestao } from '../api/instagram'
 import { SlideCarousel } from '../components/InstagramSlide'
+import { baixarZip, salvarNoDrive } from '../utils/instagramExport'
 import page from './Page.module.css'
 import s from './InstagramPage.module.css'
 
@@ -20,6 +22,22 @@ function SugestaoCard({ sug }: { sug: Sugestao }) {
   const qc = useQueryClient()
   const invalidate = () => qc.invalidateQueries({ queryKey: ['instagram-sugestoes'] })
   const [ajuste, setAjuste] = useState('')
+  const [zipBusy, setZipBusy] = useState(false)
+  const [driveBusy, setDriveBusy] = useState(false)
+
+  const onZip = async () => {
+    setZipBusy(true)
+    try { await baixarZip(sug) } catch { alert('Falha ao gerar o ZIP.') } finally { setZipBusy(false) }
+  }
+  const onDrive = async () => {
+    setDriveBusy(true)
+    try {
+      const pasta = await salvarNoDrive(sug)
+      if (confirm('Salvo no Drive! Abrir a pasta?')) window.open(pasta, '_blank')
+    } catch (e) {
+      alert((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Falha ao salvar no Drive.')
+    } finally { setDriveBusy(false) }
+  }
 
   const patch = useMutation({
     mutationFn: (p: Parameters<typeof instagramApi.atualizar>[1]) => instagramApi.atualizar(sug.id, p),
@@ -89,6 +107,12 @@ function SugestaoCard({ sug }: { sug: Sugestao }) {
             <button className={s.btn} onClick={() => patch.mutate({ status: 'sugerido' })}><RotateCcw size={14} /> Restaurar</button>
           )}
 
+          <button className={s.btn} title="Baixar ZIP (PNGs + copy)" disabled={zipBusy} onClick={onZip}>
+            <Download size={14} /> {zipBusy ? 'Gerando…' : 'ZIP'}
+          </button>
+          <button className={s.btn} title="Salvar no Drive" disabled={driveBusy} onClick={onDrive}>
+            <HardDrive size={14} /> {driveBusy ? 'Salvando…' : 'Drive'}
+          </button>
           <button className={s.btn} title="Excluir" onClick={() => { if (confirm('Excluir esta sugestão?')) excluir.mutate() }}><Trash2 size={14} /></button>
         </div>
 
