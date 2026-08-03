@@ -48,6 +48,10 @@ export interface Sugestao {
   aprovado_em?: string | null
   drive_link?: string | null
   enviado_assessoria_em?: string | null
+  brinde_palavra_chave?: string | null
+  brinde_titulo?: string | null
+  brinde_formato?: string | null
+  brinde_drive_link?: string | null
   custo_usd: number
   ajustes: { instrucao: string; quando: string }[]
   ajustes_count: number
@@ -131,6 +135,24 @@ export const instagramApi = {
 
   buscarPublico: (id: string) =>
     api.get<CardPublico>(`/publico/instagram/${id}`).then((r) => r.data),
+
+  brindeKeyword: (id: string, palavra_chave: string) =>
+    api.patch<Sugestao>(`/instagram/sugestoes/${id}/brinde/palavra-chave`, { palavra_chave }).then((r) => r.data),
+
+  brindeGerar: (id: string, formato: 'one_pager' | 'slides' | 'html') =>
+    api.post<Sugestao>(`/instagram/sugestoes/${id}/brinde/gerar`, { formato }, { timeout: 180000 }).then((r) => r.data),
+
+  brindeUpload: (id: string, file: File) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return api.post<Sugestao>(`/instagram/sugestoes/${id}/brinde/upload`, fd, { timeout: 120000 }).then((r) => r.data)
+  },
+}
+
+/** URL pública (compartilhável) do brinde. kind: 'view' | 'html' | 'pdf'. */
+export function brindeUrl(id: string, kind: 'view' | 'html' | 'pdf' = 'view'): string {
+  const base = (typeof window !== 'undefined' ? window.location.origin : '') + '/api/publico/instagram/' + id + '/brinde'
+  return kind === 'view' ? base : `${base}.${kind}`
 }
 
 export interface CardPublico {

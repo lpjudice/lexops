@@ -48,6 +48,13 @@
 .gastoMes b { color:#1C5A4E; }
 .gastoTotal { color:#8a8a8a; }
 
+.brindeBox { border:1px solid #ead9b0; background:#fffdf6; border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; gap:8px; }
+.brindeHead { display:flex; align-items:center; gap:6px; font-size:12px; font-weight:800; letter-spacing:.5px; text-transform:uppercase; color:#9a6a1a; }
+.brindeRow { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.brindeKw { padding:7px 10px; border:1px solid #ccc; border-radius:8px; font-size:13px; font-weight:700; letter-spacing:1px; width:180px; }
+.brindeHint { font-size:11px; color:#999; }
+.brindeTitulo { font-size:13px; font-style:italic; color:#555; margin-right:2px; }
+
 .tabs { display:flex; gap:4px; border-bottom:1px solid #e2e2e2; margin-bottom:20px; }
 .tab { appearance:none; border:none; background:none; padding:10px 16px; font-size:14px; font-weight:600;
   color:#667; cursor:pointer; border-bottom:2px solid transparent; }

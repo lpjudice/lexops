@@ -69,6 +69,10 @@ class SugestaoOut(BaseModel):
     aprovado_em: datetime | None = None
     drive_link: str | None = None
     enviado_assessoria_em: datetime | None = None
+    brinde_palavra_chave: str | None = None
+    brinde_titulo: str | None = None
+    brinde_formato: str | None = None
+    brinde_drive_link: str | None = None
     custo_usd: float = 0.0
     ajustes: list[dict] = []
     ajustes_count: int = 0
@@ -102,6 +106,17 @@ class GerarResponse(BaseModel):
     criadas: int
     sugestoes: list[SugestaoOut]
     aviso: str | None = None
+
+
+BrindeFormato = Literal["one_pager", "slides", "html"]
+
+
+class BrindeGerarRequest(BaseModel):
+    formato: BrindeFormato = "one_pager"
+
+
+class BrindeKeywordRequest(BaseModel):
+    palavra_chave: str
 
 
 class AjustarRequest(BaseModel):

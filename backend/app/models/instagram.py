@@ -66,6 +66,17 @@ class InstagramSugestao(Base):
     ajustes: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
     ajustes_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
+    # ── Brinde / isca (lead magnet) ────────────────────────────────────────────
+    # Palavra-chave que a pessoa comenta para receber o brinde (ex.: "HOLDING")
+    brinde_palavra_chave: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    brinde_titulo: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # 'one_pager' | 'slides' | 'html'
+    brinde_formato: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # HTML na identidade Pimenta Judice (fonte de verdade; PDF é gerado a partir dele)
+    brinde_html: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Se o Lucas subiu o próprio PDF, link da pasta/arquivo no Drive
+    brinde_drive_link: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     data_geracao: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

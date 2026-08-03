@@ -41,6 +41,60 @@ def card_instagram_publico(sugestao_id: str, db: Session = Depends(get_db)):
     return CardPublicoOut.model_validate(sug)
 
 
+def _brinde_or_404(db: Session, sugestao_id: str):
+    import uuid as _uuid
+
+    from app.models.instagram import InstagramSugestao
+
+    try:
+        sid = _uuid.UUID(sugestao_id)
+    except ValueError:
+        raise HTTPException(404, "Link inválido")
+    sug = db.get(InstagramSugestao, sid)
+    if not sug or not sug.brinde_html:
+        raise HTTPException(404, "Brinde não encontrado")
+    return sug
+
+
+def _brinde_slug(sug) -> str:
+    import re
+    base = (sug.brinde_titulo or "brinde").lower()
+    return re.sub(r"[^a-z0-9]+", "-", base).strip("-")[:50] or "brinde"
+
+
+@router.get("/instagram/{sugestao_id}/brinde")
+def brinde_publico_view(sugestao_id: str, db: Session = Depends(get_db)):
+    """Página pública do brinde (link compartilhável) — HTML inline."""
+    from fastapi import Response
+    sug = _brinde_or_404(db, sugestao_id)
+    return Response(content=sug.brinde_html, media_type="text/html; charset=utf-8")
+
+
+@router.get("/instagram/{sugestao_id}/brinde.html")
+def brinde_publico_html(sugestao_id: str, db: Session = Depends(get_db)):
+    """Baixa o HTML do brinde (para hospedar no Netlify, etc.)."""
+    from fastapi import Response
+    sug = _brinde_or_404(db, sugestao_id)
+    return Response(
+        content=sug.brinde_html, media_type="text/html; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{_brinde_slug(sug)}.html"'},
+    )
+
+
+@router.get("/instagram/{sugestao_id}/brinde.pdf")
+def brinde_publico_pdf(sugestao_id: str, db: Session = Depends(get_db)):
+    """Baixa o PDF do brinde (derivado do HTML)."""
+    from fastapi import Response
+
+    from app.services import brinde_instagram
+    sug = _brinde_or_404(db, sugestao_id)
+    pdf = brinde_instagram.html_para_pdf(sug.brinde_html)
+    return Response(
+        content=pdf, media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{_brinde_slug(sug)}.pdf"'},
+    )
+
+
 def _cfg_por_token(db: Session, token: str) -> ConfigFiscal:
     if not token or len(token) < 16:
         raise HTTPException(404, "Link inválido")

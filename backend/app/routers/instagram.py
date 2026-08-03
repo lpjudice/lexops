@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -11,6 +11,8 @@ from app.dependencies import get_current_user
 from app.models.instagram import DEFAULT_ASSESSORIA_EMAILS, InstagramConfig, InstagramSugestao
 from app.schemas.instagram import (
     AjustarRequest,
+    BrindeGerarRequest,
+    BrindeKeywordRequest,
     ConfigOut,
     ConfigUpdate,
     CustosMes,
@@ -157,6 +159,58 @@ def excluir(sugestao_id: uuid.UUID, db: Session = Depends(get_db)):
     sug = _get(db, sugestao_id)
     db.delete(sug)
     db.commit()
+
+
+# ── Brinde / isca (lead magnet) ────────────────────────────────────────────────
+@router.patch("/sugestoes/{sugestao_id}/brinde/palavra-chave", response_model=SugestaoOut)
+def brinde_palavra_chave(sugestao_id: uuid.UUID, payload: BrindeKeywordRequest, db: Session = Depends(get_db)):
+    sug = _get(db, sugestao_id)
+    sug.brinde_palavra_chave = (payload.palavra_chave or "").strip().upper()[:60] or None
+    db.commit()
+    db.refresh(sug)
+    return sug
+
+
+@router.post("/sugestoes/{sugestao_id}/brinde/gerar", response_model=SugestaoOut)
+def brinde_gerar(sugestao_id: uuid.UUID, payload: BrindeGerarRequest, db: Session = Depends(get_db)):
+    """Gera o brinde (HTML na identidade Pimenta Judice) com a IA."""
+    _checar_ia_configurada()
+    sug = _get(db, sugestao_id)
+    from app.services import brinde_instagram
+    try:
+        html, custo, titulo = brinde_instagram.gerar_brinde(db, sug, payload.formato)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Falha ao gerar brinde: {exc}")
+    sug.brinde_html = html
+    sug.brinde_titulo = titulo
+    sug.brinde_formato = payload.formato
+    sug.custo_usd = round((sug.custo_usd or 0.0) + custo, 5)
+    db.commit()
+    db.refresh(sug)
+    return sug
+
+
+@router.post("/sugestoes/{sugestao_id}/brinde/upload", response_model=SugestaoOut)
+def brinde_upload(sugestao_id: uuid.UUID, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Sobe um PDF de brinde próprio para o Drive (/Instagram/Brindes/{MM-AAAA}/)."""
+    from app.services.google_drive import get_folder_link_raiz, upload_arquivo_raiz
+    sug = _get(db, sugestao_id)
+    conteudo = file.file.read()
+    if not conteudo:
+        raise HTTPException(status_code=400, detail="Arquivo vazio.")
+    subpath = ["Instagram", "Brindes", _mes_ano(sug)]
+    nome = file.filename or f"brinde-{sug.id.hex[:6]}.pdf"
+    if not upload_arquivo_raiz(conteudo, nome, subpath, file.content_type or "application/pdf"):
+        raise HTTPException(status_code=502, detail="Falha ao subir no Drive (verifique a autenticação Google).")
+    sug.brinde_drive_link = get_folder_link_raiz(subpath)
+    sug.brinde_titulo = sug.brinde_titulo or nome
+    db.commit()
+    db.refresh(sug)
+    return sug
+
+
+# Downloads/visualização do brinde ficam no router público (link compartilhável,
+# sem exigir JWT em <a href>): ver publico.py → /publico/instagram/{id}/brinde*.
 
 
 def _split_emails(raw: str) -> list[str]:
