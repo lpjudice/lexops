@@ -1156,6 +1156,25 @@ def _run_migrations() -> None:
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """))
+        # Patrimônio: origem/título, referência de escritura pública, % do cliente na cota
+        for _col in [
+            "ALTER TABLE patrimonio_bens ADD COLUMN IF NOT EXISTS origem_titulo VARCHAR(30)",
+            "ALTER TABLE patrimonio_bens ADD COLUMN IF NOT EXISTS escritura_numero VARCHAR(50)",
+            "ALTER TABLE patrimonio_bens ADD COLUMN IF NOT EXISTS escritura_livro VARCHAR(50)",
+            "ALTER TABLE patrimonio_bens ADD COLUMN IF NOT EXISTS escritura_folha VARCHAR(50)",
+            "ALTER TABLE patrimonio_bens ADD COLUMN IF NOT EXISTS participacao_cliente_pct NUMERIC(6,3)",
+            "ALTER TABLE patrimonio_bens ADD COLUMN IF NOT EXISTS ordem INTEGER",
+        ]:
+            conn.execute(text(_col))
+        # Objetivo: renomeia 'segurar' -> 'uso_proprio'
+        conn.execute(text("UPDATE patrimonio_bens SET objetivo='uso_proprio' WHERE objetivo='segurar'"))
+        # Ordena bens existentes sem 'ordem' (por cliente, mais recente primeiro = mesma ordem da UI)
+        conn.execute(text("""
+            UPDATE patrimonio_bens SET ordem = sub.rn FROM (
+                SELECT id, ROW_NUMBER() OVER (PARTITION BY cliente_id ORDER BY created_at DESC) AS rn
+                FROM patrimonio_bens WHERE ordem IS NULL
+            ) sub WHERE patrimonio_bens.id = sub.id
+        """))
 
         conn.commit()
 
