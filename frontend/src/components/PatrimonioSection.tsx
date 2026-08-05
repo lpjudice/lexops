@@ -55,6 +55,9 @@ function fmtDate(d?: string | null) {
   if (!d) return '—'
   return new Date(d + 'T12:00:00').toLocaleDateString('pt-BR')
 }
+function fmtDateSafe(d?: string | null) {
+  return d ? new Date(d + 'T12:00:00').toLocaleDateString('pt-BR') : ''
+}
 function norm(x?: string | null) {
   return (x || '').trim().toLowerCase().replace(/\s+/g, ' ')
 }
@@ -952,6 +955,161 @@ function SociosSection({ bem }: { bem: Bem }) {
   )
 }
 
+// ── Reler escritura num imóvel já cadastrado (comparar + aprovar divergências) ─
+function RelerEscrituraModal({ bem, onClose }: { bem: Bem; onClose: () => void }) {
+  const qc = useQueryClient()
+  const [file, setFile] = useState<File | null>(null)
+  const [previewUrl, setPreviewUrl] = useState('')
+  const [isPdf, setIsPdf] = useState(false)
+  const [extraindo, setExtraindo] = useState(false)
+  const [erro, setErro] = useState<string | null>(null)
+  const [dados, setDados] = useState<EscrituraExtraida | null>(null)
+  const [aprovados, setAprovados] = useState<Set<string>>(new Set())
+  const [salvando, setSalvando] = useState(false)
+
+  useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl) }, [previewUrl])
+  const str = (v: string | number | null | undefined) => (v == null ? '' : String(v))
+
+  const handleFile = async (selected: File) => {
+    setErro(null); setFile(selected); setPreviewUrl(URL.createObjectURL(selected))
+    setIsPdf(selected.type === 'application/pdf' || selected.name.toLowerCase().endsWith('.pdf'))
+    setExtraindo(true); setDados(null); setAprovados(new Set())
+    try {
+      const d = await patrimonioApi.extrairEscritura(selected)
+      setDados(d)
+      // pré-aprova apenas os campos que hoje estão VAZIOS (preenchimento sem conflito)
+      const pre = new Set<string>()
+      const vazio = (v?: string | number | null) => v == null || String(v).trim() === ''
+      if (vazio(bem.descricao_matricula) && d.descricao_imovel.valor) pre.add('descricao_matricula')
+      if (vazio(bem.proprietario_matricula) && d.proprietario_atual.valor) pre.add('proprietario_matricula')
+      if (vazio(bem.numero_matricula) && d.numero_matricula.valor) pre.add('numero_matricula')
+      if (vazio(bem.cartorio) && d.cartorio.valor) pre.add('cartorio')
+      if (vazio(bem.data_compra) && typeof d.data_transacao.valor === 'string') pre.add('data_compra')
+      setAprovados(pre)
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setErro(detail ? `Não foi possível ler: ${detail}` : 'Não foi possível ler o documento.')
+    } finally { setExtraindo(false) }
+  }
+
+  const ehRealMoeda = ehReal(dados?.valor_compra.moeda)
+  const gravTxt = dados?.gravames?.existe
+    ? dados.gravames.itens.map((it) => `• ${labelGravame(it.tipo)}: ${it.descricao}` +
+        (it.vencida === true ? ' [VENCIDA]' : it.vencida === false ? ' [não vencida]' : '')).join('\n')
+    : ''
+
+  // Linhas de comparação (só campos que a IA encontrou)
+  type Linha = { key: string; label: string; atual: string; novo: string; aplicar: () => Partial<Bem>; trecho?: string; ref?: string; podeAprovar: boolean }
+  const linhas: Linha[] = []
+  if (dados) {
+    const add = (key: string, label: string, atual: string, novo: string, aplicar: () => Partial<Bem>, trecho?: string, ref?: string, podeAprovar = true) => {
+      if (!novo.trim()) return
+      linhas.push({ key, label, atual, novo, aplicar, trecho, ref, podeAprovar })
+    }
+    add('numero_matricula', 'Nº matrícula', str(bem.numero_matricula), str(dados.numero_matricula.valor),
+      () => ({ numero_matricula: str(dados.numero_matricula.valor) }), dados.numero_matricula.trecho, dados.numero_matricula.referencia)
+    add('cartorio', 'Cartório', str(bem.cartorio), str(dados.cartorio.valor),
+      () => ({ cartorio: str(dados.cartorio.valor) }), dados.cartorio.trecho, dados.cartorio.referencia)
+    add('proprietario_matricula', 'Proprietário na matrícula', str(bem.proprietario_matricula), str(dados.proprietario_atual.valor),
+      () => ({ proprietario_matricula: str(dados.proprietario_atual.valor) }), dados.proprietario_atual.trecho, dados.proprietario_atual.referencia)
+    add('data_compra', 'Data da compra/venda', fmtDateSafe(bem.data_compra), fmtDateSafe(typeof dados.data_transacao.valor === 'string' ? dados.data_transacao.valor : ''),
+      () => ({ data_compra: (typeof dados.data_transacao.valor === 'string' ? dados.data_transacao.valor : null) }), dados.data_transacao.trecho, dados.data_transacao.referencia)
+    if (ehRealMoeda && typeof dados.valor_compra.valor === 'number') {
+      add('valor_compra', 'Valor de compra', brl(bem.valor_compra), brl(dados.valor_compra.valor),
+        () => ({ valor_compra: dados.valor_compra.valor as number }), dados.valor_compra.trecho, dados.valor_compra.referencia)
+    }
+    add('descricao_matricula', 'Descrição (matrícula)', str(bem.descricao_matricula), str(dados.descricao_imovel.valor),
+      () => ({ descricao_matricula: str(dados.descricao_imovel.valor) }), dados.descricao_imovel.trecho, dados.descricao_imovel.referencia)
+    if (gravTxt) {
+      add('gravame_descricao', 'Gravames', str(bem.gravame_descricao), gravTxt,
+        () => ({ tem_gravame: true, gravame_descricao: gravTxt }), dados.gravames.itens[0]?.trecho, dados.gravames.itens[0]?.referencia)
+    }
+  }
+
+  const toggle = (key: string) => setAprovados((prev) => {
+    const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n
+  })
+
+  const salvar = async () => {
+    const patch: Partial<Bem> = {}
+    for (const l of linhas) if (aprovados.has(l.key)) Object.assign(patch, l.aplicar())
+    setSalvando(true)
+    try {
+      if (Object.keys(patch).length > 0) await patrimonioApi.atualizar(bem.id, patch)
+      if (file) { try { await patrimonioApi.uploadAnexo(bem.id, file) } catch { /* best-effort */ } }
+      qc.invalidateQueries({ queryKey: ['patrimonio', bem.cliente_id] })
+      onClose()
+    } catch { alert('Erro ao aplicar as alterações.'); setSalvando(false) }
+  }
+
+  return (
+    <div className={s.modalOverlay} onClick={onClose}>
+      <div className={s.modalEscritura} onClick={(e) => e.stopPropagation()}>
+        <div className={s.modalHead}>
+          <span>📄 Reler escritura — comparar e aprovar</span>
+          <button className={s.modalClose} onClick={onClose}>×</button>
+        </div>
+        {!file ? (
+          <div className={s.dropzone}>
+            <p>Envie a escritura/matrícula atualizada. A IA compara com os dados já cadastrados de
+              <b> {bem.nome}</b> e você aprova cada alteração.</p>
+            <label className={styles.btnPrimary} style={{ cursor: 'pointer' }}>
+              Selecionar arquivo
+              <input type="file" accept=".pdf,image/*" style={{ display: 'none' }}
+                onChange={(e) => { const x = e.target.files?.[0]; if (x) handleFile(x) }} />
+            </label>
+          </div>
+        ) : (
+          <div className={s.escBody}>
+            <div className={s.escForm}>
+              {extraindo && <div className={s.escLendo}>🔎 Lendo e comparando com IA…</div>}
+              {erro && <div className={s.escErro}>{erro}</div>}
+              {!ehRealMoeda && dados && (
+                <div className={s.escMoeda}>⚠ Valor do documento em <b>{dados.valor_compra.moeda} {str(dados.valor_compra.valor)}</b> (moeda antiga) — atualize o valor em R$ manualmente no card.</div>
+              )}
+              {dados && linhas.length === 0 && <p className={styles.empty}>A IA não encontrou campos comparáveis.</p>}
+              {linhas.map((l) => {
+                const igual = norm(l.atual) === norm(l.novo)
+                return (
+                  <div key={l.key} className={`${s.cmpRow} ${igual ? s.cmpIgual : ''}`}>
+                    <div className={s.cmpLabel}>
+                      {l.label}
+                      {igual ? <span className={s.cmpOk}>✓ confere</span> : <span className={s.cmpDiff}>≠ diferente</span>}
+                    </div>
+                    <div className={s.cmpVals}>
+                      <div><span className={s.cmpTag}>atual</span> {l.atual || <i>—</i>}</div>
+                      {!igual && <div><span className={`${s.cmpTag} ${s.cmpTagNovo}`}>escritura</span> {l.novo}</div>}
+                    </div>
+                    {!igual && l.podeAprovar && (
+                      <label className={s.cmpAprovar}>
+                        <input type="checkbox" checked={aprovados.has(l.key)} onChange={() => toggle(l.key)} />
+                        aprovar alteração
+                      </label>
+                    )}
+                    <Trecho t={l.trecho} referencia={l.ref} />
+                  </div>
+                )
+              })}
+              {dados && (
+                <div className={s.rowBtns} style={{ marginTop: 12 }}>
+                  <button className={styles.btnPrimary} disabled={salvando || extraindo} onClick={salvar}>
+                    {salvando ? 'Aplicando…' : `Aplicar ${aprovados.size} alteração(ões) aprovadas`}
+                  </button>
+                  <button className={styles.btnTable} onClick={onClose}>Cancelar</button>
+                </div>
+              )}
+            </div>
+            <div className={s.escPreview}>
+              {isPdf ? <iframe title="documento" src={previewUrl} className={s.escDoc} />
+                : <img src={previewUrl} className={s.escDoc} alt="documento" />}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── Comentários (com autor e data/hora) ──────────────────────────────────────
 function ComentariosSection({ bem }: { bem: Bem }) {
   const qc = useQueryClient()
@@ -1019,6 +1177,7 @@ function BemCard({ bem, idx, total, onMoveTo }: {
   const qc = useQueryClient()
   const [aberto, setAberto] = useState(false)
   const [editando, setEditando] = useState(false)
+  const [relendo, setRelendo] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const invalidate = () => qc.invalidateQueries({ queryKey: ['patrimonio', bem.cliente_id] })
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: bem.id })
@@ -1220,6 +1379,9 @@ function BemCard({ bem, idx, total, onMoveTo }: {
           {/* Ações do bem */}
           <div className={s.rowBtns} style={{ marginTop: 4, borderTop: '1px solid var(--gray-border)', paddingTop: 12 }}>
             <button className={styles.btnTable} onClick={() => setEditando(true)}>Editar</button>
+            {bem.tipo_bem === 'imovel' && (
+              <button className={styles.btnTable} onClick={() => setRelendo(true)}>📄 Reler escritura (IA)</button>
+            )}
             <button className={styles.btnDanger}
               onClick={() => { if (confirm(`Remover o bem "${bem.nome}"?`)) deletar.mutate() }}>
               Remover
@@ -1227,6 +1389,7 @@ function BemCard({ bem, idx, total, onMoveTo }: {
           </div>
         </div>
       )}
+      {relendo && <RelerEscrituraModal bem={bem} onClose={() => setRelendo(false)} />}
     </div>
   )
 }
