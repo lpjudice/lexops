@@ -125,7 +125,8 @@ def _fator_reducao_imovel(data_compra: date, data_venda: date) -> float:
     m1 = _meses_entre(data_compra, nov2005) if data_compra < nov2005 else 0
     inicio_f2 = data_compra if data_compra > dez2005 else dez2005
     m2 = _meses_entre(inicio_f2, data_venda)
-    return mult7713 * (1 / (1.0035 ** m1)) * (1 / (1.006 ** m2))
+    # FR1 = 0,60%/mês (aquisição→nov/2005); FR2 = 0,35%/mês (dez/2005→alienação) — Lei 11.196/2005
+    return mult7713 * (1 / (1.006 ** m1)) * (1 / (1.0035 ** m2))
 
 
 def _gc_imovel(b, hoje: date) -> dict:
@@ -534,7 +535,7 @@ def _gc_pdf(bens, st, content_w) -> list:
     els.append(Paragraph("Análise de Ganho de Capital", st["secao"]))
     els.append(Paragraph(
         f"Venda estimada hoje ({hoje.strftime('%d/%m/%Y')}). Na PF, o fator de redução incide sobre a "
-        f"base (o ganho): Leis 11.196/2005 (0,6%/mês) e 7.713/88 (imóveis até 1969 isentos; 1970–1988 decrescente).",
+        f"base (o ganho): Leis 11.196/2005 (FR1 0,60%/mês e FR2 0,35%/mês) e 7.713/88 (imóveis até 1969 isentos; 1970–1988 decrescente).",
         st["obs"]))
 
     # ── Imóveis

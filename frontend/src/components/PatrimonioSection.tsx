@@ -7,6 +7,7 @@ import {
   type CadeiaElo,
   type EscrituraExtraida,
   type ObjetivoBem,
+  type OrigemTitulo,
   type Socio,
   type StatusBem,
   type TipoBem,
@@ -22,8 +23,15 @@ const STATUS_LABEL: Record<StatusBem, string> = {
 }
 const STATUS_ORDER: StatusBem[] = ['em_validacao', 'validado', 'incerto']
 
-const OBJETIVO_LABEL: Record<ObjetivoBem, string> = {
-  venda: 'Venda', aluguel: 'Aluguel', segurar: 'Segurar',
+const OBJETIVO_LABEL: Record<string, string> = {
+  venda: 'Venda', aluguel: 'Aluguel', uso_proprio: 'Uso Próprio',
+  uso_herdeiro: 'Uso de herdeiro', nao_fazer_nada: 'Não fazer nada',
+  segurar: 'Uso Próprio', // legado
+}
+const OBJETIVO_OPCOES: ObjetivoBem[] = ['venda', 'aluguel', 'uso_proprio', 'uso_herdeiro', 'nao_fazer_nada']
+const ORIGEM_LABEL: Record<string, string> = {
+  matricula_rgi: 'Matrícula (RGI)', escritura_publica: 'Escritura pública',
+  contrato_particular: 'Contrato particular', outro: 'Outro',
 }
 
 const TIPO_DOC_LABEL: Record<TipoDocumentoElo, string> = {
@@ -101,6 +109,8 @@ function emptyForm(): FormState {
     tem_gravame: false, gravame_descricao: '', observacoes: '',
     empresa_nome: '', empresa_cnpj: '', capital_social: undefined,
     valor_balanco: undefined, data_balanco: '',
+    origem_titulo: undefined, escritura_numero: '', escritura_livro: '', escritura_folha: '',
+    participacao_cliente_pct: undefined,
   }
 }
 
@@ -122,6 +132,7 @@ function BemForm({
       className={styles.form}
       onSubmit={(e) => { e.preventDefault(); onSave(f) }}
     >
+      {/* Linha 1 — dados de identificação (matrícula/cartório logo no início) */}
       <div className={s.grid}>
         <div className={styles.formRow}>
           <label className={styles.formLabel}>Tipo do bem</label>
@@ -136,14 +147,42 @@ function BemForm({
           <input className={styles.input} required value={f.nome}
             onChange={(e) => set({ nome: e.target.value })} placeholder="Ex.: Apartamento Rua X, 100" />
         </div>
+        {isImovel && (
+          <>
+            <div className={styles.formRow}>
+              <label className={styles.formLabel}>Nº da matrícula (RGI)</label>
+              <input className={styles.input} value={f.numero_matricula ?? ''}
+                onChange={(e) => set({ numero_matricula: e.target.value })} />
+            </div>
+            <div className={styles.formRow}>
+              <label className={styles.formLabel}>Cartório (RGI)</label>
+              <input className={styles.input} value={f.cartorio ?? ''}
+                onChange={(e) => set({ cartorio: e.target.value })} />
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className={s.grid}>
+        {isImovel && (
+          <div className={styles.formRow}>
+            <label className={styles.formLabel}>Origem do título</label>
+            <select className={styles.input} value={f.origem_titulo ?? ''}
+              onChange={(e) => set({ origem_titulo: (e.target.value || undefined) as OrigemTitulo | undefined })}>
+              <option value="">—</option>
+              <option value="matricula_rgi">Matrícula (RGI)</option>
+              <option value="escritura_publica">Só escritura pública</option>
+              <option value="contrato_particular">Só contrato particular</option>
+              <option value="outro">Outro</option>
+            </select>
+          </div>
+        )}
         <div className={styles.formRow}>
           <label className={styles.formLabel}>Objetivo</label>
           <select className={styles.input} value={f.objetivo ?? ''}
             onChange={(e) => set({ objetivo: (e.target.value || undefined) as ObjetivoBem | undefined })}>
             <option value="">—</option>
-            <option value="venda">Venda</option>
-            <option value="aluguel">Aluguel</option>
-            <option value="segurar">Segurar</option>
+            {OBJETIVO_OPCOES.map((o) => <option key={o} value={o}>{OBJETIVO_LABEL[o]}</option>)}
           </select>
         </div>
       </div>
@@ -157,18 +196,15 @@ function BemForm({
       <div className={s.grid}>
         <div className={styles.formRow}>
           <label className={styles.formLabel}>Valor de compra</label>
-          <input type="number" step="0.01" min="0" className={styles.input}
-            value={f.valor_compra ?? ''} onChange={(e) => set({ valor_compra: num(e.target.value) })} />
+          <MoneyInput value={f.valor_compra ?? 0} onChange={(v) => set({ valor_compra: v || undefined })} />
         </div>
         <div className={styles.formRow}>
           <label className={styles.formLabel}>Valor de mercado (atual)</label>
-          <input type="number" step="0.01" min="0" className={styles.input}
-            value={f.valor_mercado ?? ''} onChange={(e) => set({ valor_mercado: num(e.target.value) })} />
+          <MoneyInput value={f.valor_mercado ?? 0} onChange={(v) => set({ valor_mercado: v || undefined })} />
         </div>
         <div className={styles.formRow}>
           <label className={styles.formLabel}>Valor no IR</label>
-          <input type="number" step="0.01" min="0" className={styles.input}
-            value={f.valor_ir ?? ''} onChange={(e) => set({ valor_ir: num(e.target.value) })} />
+          <MoneyInput value={f.valor_ir ?? 0} onChange={(v) => set({ valor_ir: v || undefined })} />
         </div>
         <div className={styles.formRow}>
           <label className={styles.formLabel}>Data da compra</label>
@@ -181,14 +217,19 @@ function BemForm({
         <>
           <div className={s.grid}>
             <div className={styles.formRow}>
-              <label className={styles.formLabel}>Nº da matrícula</label>
-              <input className={styles.input} value={f.numero_matricula ?? ''}
-                onChange={(e) => set({ numero_matricula: e.target.value })} />
+              <label className={styles.formLabel}>Escritura pública — nº</label>
+              <input className={styles.input} value={f.escritura_numero ?? ''}
+                onChange={(e) => set({ escritura_numero: e.target.value })} placeholder="da última esc. de compra e venda" />
             </div>
             <div className={styles.formRow}>
-              <label className={styles.formLabel}>Cartório</label>
-              <input className={styles.input} value={f.cartorio ?? ''}
-                onChange={(e) => set({ cartorio: e.target.value })} />
+              <label className={styles.formLabel}>Livro</label>
+              <input className={styles.input} value={f.escritura_livro ?? ''}
+                onChange={(e) => set({ escritura_livro: e.target.value })} />
+            </div>
+            <div className={styles.formRow}>
+              <label className={styles.formLabel}>Folha</label>
+              <input className={styles.input} value={f.escritura_folha ?? ''}
+                onChange={(e) => set({ escritura_folha: e.target.value })} />
             </div>
           </div>
           <div className={styles.formRow}>
@@ -213,17 +254,21 @@ function BemForm({
               <input className={styles.input} value={f.empresa_cnpj ?? ''}
                 onChange={(e) => set({ empresa_cnpj: e.target.value })} placeholder="00.000.000/0001-00" />
             </div>
+            <div className={styles.formRow}>
+              <label className={styles.formLabel}>% do cliente na sociedade</label>
+              <input type="number" step="0.001" min="0" max="100" className={styles.input}
+                value={f.participacao_cliente_pct ?? ''}
+                onChange={(e) => set({ participacao_cliente_pct: num(e.target.value) })} placeholder="%" />
+            </div>
           </div>
           <div className={s.grid}>
             <div className={styles.formRow}>
               <label className={styles.formLabel}>Capital social</label>
-              <input type="number" step="0.01" min="0" className={styles.input}
-                value={f.capital_social ?? ''} onChange={(e) => set({ capital_social: num(e.target.value) })} />
+              <MoneyInput value={f.capital_social ?? 0} onChange={(v) => set({ capital_social: v || undefined })} />
             </div>
             <div className={styles.formRow}>
               <label className={styles.formLabel}>Valor do balanço (PL)</label>
-              <input type="number" step="0.01" min="0" className={styles.input}
-                value={f.valor_balanco ?? ''} onChange={(e) => set({ valor_balanco: num(e.target.value) })} />
+              <MoneyInput value={f.valor_balanco ?? 0} onChange={(v) => set({ valor_balanco: v || undefined })} />
             </div>
             <div className={styles.formRow}>
               <label className={styles.formLabel}>Data do balanço</label>
@@ -466,8 +511,8 @@ function fatorReducaoImovel(dataCompra: Date, dataVenda: Date): number {
   const m1 = dataCompra < nov2005 ? mesesEntre(dataCompra, nov2005) : 0
   const inicioF2 = dataCompra > dez2005 ? dataCompra : dez2005
   const m2 = mesesEntre(inicioF2, dataVenda)
-  const fr1 = 1 / Math.pow(1.0035, m1)
-  const fr2 = 1 / Math.pow(1.006, m2)
+  const fr1 = 1 / Math.pow(1.006, m1)   // FR1: 0,60%/mês, aquisição → nov/2005 (Lei 11.196/2005)
+  const fr2 = 1 / Math.pow(1.0035, m2)  // FR2: 0,35%/mês, dez/2005 → alienação
   return mult7713 * fr1 * fr2
 }
 
@@ -534,7 +579,7 @@ function CalculadoraGC({ bem }: { bem: Bem }) {
       key: 'pf', nome: 'Pessoa Física', base: 'sobre o ganho reduzido',
       taxa: '15%–22,5%', imposto: r.impPF,
       nota: r.temReducao
-        ? 'Faixas progressivas (Lei 13.259/2016) sobre o ganho JÁ REDUZIDO. O fator de redução incide sobre a BASE (o ganho), não sobre o imposto. Leis 11.196/2005 (FR1×FR2, 0,6%/mês) e 7.713/88 (imóveis até 1969 isentos; 1970–1988 redução decrescente).'
+        ? 'Faixas progressivas (Lei 13.259/2016) sobre o ganho JÁ REDUZIDO. O fator de redução incide sobre a BASE (o ganho), não sobre o imposto. Leis 11.196/2005 (FR1 0,60%/mês até nov/2005 × FR2 0,35%/mês após) e 7.713/88 (imóveis até 1969 isentos; 1970–1988 redução decrescente).'
         : 'Faixas progressivas (Lei 13.259/2016). Cadastre a data da compra para aplicar o fator de redução (sobre a base) automaticamente.',
     },
     {
@@ -612,7 +657,7 @@ function CalculadoraGC({ bem }: { bem: Bem }) {
           </div>
           <p className={s.gcDisclaimer}>
             ⚠️ Estimativa. O fator de redução da PF incide sobre a <b>base</b> (o ganho), não sobre o imposto,
-            e combina duas leis: 11.196/2005 (FR1×FR2, 0,6%/mês) e 7.713/88 (imóveis até 1969 isentos;
+            e combina duas leis: 11.196/2005 (FR1 0,60%/mês até nov/2005 × FR2 0,35%/mês após) e 7.713/88 (imóveis até 1969 isentos;
             1970–1988 redução decrescente). Não considera isenções (imóvel único, reinvestimento em 180 dias),
             ITBI, adicional de IRPJ variável nem custos da operação. Confirme no caso concreto.
           </p>
@@ -714,7 +759,7 @@ function TabelaGCImoveis({ bens }: { bens: Bem[] }) {
           </table>
           <p className={s.gcDisclaimer} style={{ margin: '10px 12px 0' }}>
             ⚠️ Estimativa vendendo hoje. O fator de redução da PF incide sobre a base (o ganho): Leis 11.196/2005
-            (0,6%/mês) e 7.713/88 (até 1969 isento; 1970–1988 decrescente). Desmarque um imóvel para tirá-lo dos totais.
+            (FR1 0,60%/mês e FR2 0,35%/mês) e 7.713/88 (até 1969 isento; 1970–1988 decrescente). Desmarque um imóvel para tirá-lo dos totais.
             Ajuste valores e data na calculadora de cada imóvel. Não considera isenções nem custos da operação.
           </p>
         </div>
@@ -950,6 +995,10 @@ function BemCard({ bem }: { bem: Bem }) {
               empresa_nome: bem.empresa_nome ?? '', empresa_cnpj: bem.empresa_cnpj ?? '',
               capital_social: bem.capital_social ?? undefined, valor_balanco: bem.valor_balanco ?? undefined,
               data_balanco: bem.data_balanco ?? '',
+              origem_titulo: bem.origem_titulo ?? undefined,
+              escritura_numero: bem.escritura_numero ?? '', escritura_livro: bem.escritura_livro ?? '',
+              escritura_folha: bem.escritura_folha ?? '',
+              participacao_cliente_pct: bem.participacao_cliente_pct ?? undefined,
             }}
             saving={atualizar.isPending}
             onCancel={() => setEditando(false)}
@@ -992,8 +1041,16 @@ function BemCard({ bem }: { bem: Bem }) {
             <div className={s.field}><span className={s.fieldLabel}>Data da compra</span><span className={s.fieldValue}>{fmtDate(bem.data_compra)}</span></div>
             {bem.tipo_bem === 'imovel' && (
               <>
-                <div className={s.field}><span className={s.fieldLabel}>Nº matrícula</span><span className={s.fieldValue}>{bem.numero_matricula || '—'}</span></div>
-                <div className={s.field}><span className={s.fieldLabel}>Cartório</span><span className={s.fieldValue}>{bem.cartorio || '—'}</span></div>
+                <div className={s.field}><span className={s.fieldLabel}>Nº matrícula (RGI)</span><span className={s.fieldValue}>{bem.numero_matricula || '—'}</span></div>
+                <div className={s.field}><span className={s.fieldLabel}>Cartório (RGI)</span><span className={s.fieldValue}>{bem.cartorio || '—'}</span></div>
+                {bem.origem_titulo && <div className={s.field}><span className={s.fieldLabel}>Origem do título</span><span className={s.fieldValue}>{ORIGEM_LABEL[bem.origem_titulo]}</span></div>}
+                {(bem.escritura_numero || bem.escritura_livro || bem.escritura_folha) && (
+                  <div className={s.field}><span className={s.fieldLabel}>Escritura pública</span>
+                    <span className={s.fieldValue}>
+                      {[bem.escritura_numero && `nº ${bem.escritura_numero}`, bem.escritura_livro && `Livro ${bem.escritura_livro}`, bem.escritura_folha && `Fl. ${bem.escritura_folha}`].filter(Boolean).join(' · ')}
+                    </span>
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -1072,10 +1129,11 @@ function BemCard({ bem }: { bem: Bem }) {
           {bem.tipo_bem === 'imovel' && <CadeiaSection bem={bem} />}
 
           {/* Cota social / participação societária (só móvel) */}
-          {bem.tipo_bem === 'movel' && (bem.empresa_nome || bem.empresa_cnpj || bem.capital_social != null || bem.valor_balanco != null) && (
+          {bem.tipo_bem === 'movel' && (bem.empresa_nome || bem.empresa_cnpj || bem.capital_social != null || bem.valor_balanco != null || bem.participacao_cliente_pct != null) && (
             <div className={s.grid}>
               {bem.empresa_nome && <div className={s.field}><span className={s.fieldLabel}>Empresa</span><span className={s.fieldValue}>{bem.empresa_nome}</span></div>}
               {bem.empresa_cnpj && <div className={s.field}><span className={s.fieldLabel}>CNPJ</span><span className={s.fieldValue}>{bem.empresa_cnpj}</span></div>}
+              {bem.participacao_cliente_pct != null && <div className={s.field}><span className={s.fieldLabel}>% do cliente</span><span className={s.fieldValue}>{bem.participacao_cliente_pct}%</span></div>}
               {bem.capital_social != null && <div className={s.field}><span className={s.fieldLabel}>Capital social</span><span className={s.fieldValue}>{brl(bem.capital_social)}</span></div>}
               {bem.valor_balanco != null && <div className={s.field}><span className={s.fieldLabel}>Valor do balanço (PL)</span><span className={s.fieldValue}>{brl(bem.valor_balanco)}</span></div>}
               {bem.data_balanco && <div className={s.field}><span className={s.fieldLabel}>Data do balanço</span><span className={s.fieldValue}>{fmtDate(bem.data_balanco)}</span></div>}
