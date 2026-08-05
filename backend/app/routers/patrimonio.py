@@ -13,8 +13,10 @@ from app.models.patrimonio import (
     PatrimonioAnexo,
     PatrimonioBem,
     PatrimonioCadeiaElo,
+    PatrimonioComentario,
     PatrimonioSocio,
 )
+from app.models.usuario import Usuario
 from app.schemas.patrimonio import (
     AnexoOut,
     BemCreate,
@@ -23,6 +25,8 @@ from app.schemas.patrimonio import (
     CadeiaEloCreate,
     CadeiaEloOut,
     CadeiaEloUpdate,
+    ComentarioCreate,
+    ComentarioOut,
     SocioCreate,
     SocioOut,
     SocioUpdate,
@@ -71,6 +75,15 @@ def _get_bem(bem_id: uuid.UUID, db: Session) -> PatrimonioBem:
 def _cliente_nome(bem: PatrimonioBem, db: Session) -> str | None:
     c = db.query(Cliente).filter(Cliente.id == bem.cliente_id).first()
     return c.nome if c else None
+
+
+def _salvar_export_drive(conteudo: bytes, filename: str, nome_cliente: str, mime: str) -> None:
+    """Salva o export (PDF/XLS) na pasta do cliente no Drive, em /Patrimônio. Best-effort."""
+    try:
+        from app.services.google_drive import upload_arquivo
+        upload_arquivo(conteudo, filename, nome_cliente, DRIVE_SUBFOLDER, mime)
+    except Exception:
+        pass
 
 
 # ── Bens ─────────────────────────────────────────────────────────────────────
@@ -128,7 +141,9 @@ def exportar_xls(cliente_id: uuid.UUID = Query(...), db: Session = Depends(get_d
     from app.services.patrimonio_export import gerar_xls
     nome, bens = _bens_do_cliente(cliente_id, db)
     conteudo = gerar_xls(nome, bens)
-    fname = f"Patrimonio - {_safe(nome)}.xlsx"
+    fname = f"Inventário Patrimonial - {_safe(nome)}.xlsx"
+    _salvar_export_drive(conteudo, fname, nome,
+                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     return Response(
         content=conteudo,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -141,7 +156,8 @@ def exportar_pdf(cliente_id: uuid.UUID = Query(...), db: Session = Depends(get_d
     from app.services.patrimonio_export import gerar_pdf
     nome, bens = _bens_do_cliente(cliente_id, db)
     conteudo = gerar_pdf(nome, bens)
-    fname = f"Patrimonio - {_safe(nome)}.pdf"
+    fname = f"Inventário Patrimonial - {_safe(nome)}.pdf"
+    _salvar_export_drive(conteudo, fname, nome, "application/pdf")
     return Response(
         content=conteudo,
         media_type="application/pdf",
@@ -393,4 +409,39 @@ def deletar_socio(bem_id: uuid.UUID, socio_id: uuid.UUID, db: Session = Depends(
     if not socio:
         raise HTTPException(status_code=404, detail="Sócio não encontrado")
     db.delete(socio)
+    db.commit()
+
+
+# ── Comentários (com autor e data/hora) ──────────────────────────────────────
+@router.post("/{bem_id}/comentarios", response_model=ComentarioOut, status_code=status.HTTP_201_CREATED)
+def criar_comentario(
+    bem_id: uuid.UUID,
+    data: ComentarioCreate,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    bem = _get_bem(bem_id, db)
+    com = PatrimonioComentario(
+        bem_id=bem.id,
+        titulo=data.titulo,
+        texto=data.texto,
+        autor_id=usuario.id,
+        autor_nome=getattr(usuario, "nome", None) or getattr(usuario, "email", None),
+    )
+    db.add(com)
+    db.commit()
+    db.refresh(com)
+    return com
+
+
+@router.delete("/{bem_id}/comentarios/{com_id}", status_code=status.HTTP_204_NO_CONTENT)
+def deletar_comentario(bem_id: uuid.UUID, com_id: uuid.UUID, db: Session = Depends(get_db)):
+    com = (
+        db.query(PatrimonioComentario)
+        .filter(PatrimonioComentario.id == com_id, PatrimonioComentario.bem_id == bem_id)
+        .first()
+    )
+    if not com:
+        raise HTTPException(status_code=404, detail="Comentário não encontrado")
+    db.delete(com)
     db.commit()
