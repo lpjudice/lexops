@@ -380,7 +380,9 @@ def _card_bem(b, st, content_w) -> KeepTogether:
         tags.append("HOLDING")
     if b.tem_gravame:
         tags.append("GRAVAME")
-    nome_txt = b.nome + (f'  <font size="7" color="#a7f3d0">[{" · ".join(tags)}]</font>' if tags else "")
+    mat_txt = (f'  <font size="8" color="#c7cbd1">· Matrícula {b.numero_matricula}</font>'
+               if b.tipo_bem == "imovel" and b.numero_matricula else "")
+    nome_txt = b.nome + mat_txt + (f'  <font size="7" color="#a7f3d0">[{" · ".join(tags)}]</font>' if tags else "")
     barra = Table(
         [[Paragraph(f'<font size="7" color="#7fd8c6">{icone}</font>  {nome_txt}', st["bemNome"]),
           status_pill]],

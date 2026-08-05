@@ -89,6 +89,22 @@ class SocioOut(SocioBase):
     model_config = {"from_attributes": True}
 
 
+# ── Comentários ──────────────────────────────────────────────────────────────
+class ComentarioCreate(BaseModel):
+    titulo: str | None = None
+    texto: str
+
+
+class ComentarioOut(BaseModel):
+    id: uuid.UUID
+    titulo: str | None = None
+    texto: str
+    autor_nome: str | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 # ── Bem ─────────────────────────────────────────────────────────────────────
 class BemBase(BaseModel):
     tipo_bem: TipoBem = "imovel"
@@ -164,6 +180,7 @@ class BemOut(BemBase):
     anexos: list[AnexoOut] = []
     cadeia: list[CadeiaEloOut] = []
     socios: list[SocioOut] = []
+    comentarios: list[ComentarioOut] = []
     created_at: datetime
     updated_at: datetime
 

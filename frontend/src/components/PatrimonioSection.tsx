@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
+import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import {
   patrimonioApi,
   type Bem,
   type BemCreate,
   type CadeiaElo,
+  type Comentario,
   type EscrituraExtraida,
   type ObjetivoBem,
   type OrigemTitulo,
@@ -948,13 +952,77 @@ function SociosSection({ bem }: { bem: Bem }) {
   )
 }
 
+// ── Comentários (com autor e data/hora) ──────────────────────────────────────
+function ComentariosSection({ bem }: { bem: Bem }) {
+  const qc = useQueryClient()
+  const [aberto, setAberto] = useState(false)
+  const [titulo, setTitulo] = useState('')
+  const [texto, setTexto] = useState('')
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['patrimonio', bem.cliente_id] })
+
+  const criar = useMutation({
+    mutationFn: () => patrimonioApi.criarComentario(bem.id, { titulo: titulo || undefined, texto }),
+    onSuccess: () => { invalidate(); setAberto(false); setTitulo(''); setTexto('') },
+  })
+  const deletar = useMutation({
+    mutationFn: (comId: string) => patrimonioApi.deletarComentario(bem.id, comId),
+    onSuccess: invalidate,
+  })
+
+  const fmtDT = (iso: string) =>
+    new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <span className={s.sectionTitle}>💬 Comentários ({bem.comentarios?.length ?? 0})</span>
+      {(bem.comentarios?.length ?? 0) > 0 && (
+        <div className={s.comentList}>
+          {bem.comentarios.map((c: Comentario) => (
+            <div key={c.id} className={s.comentItem}>
+              <div className={s.comentHead}>
+                {c.titulo && <span className={s.comentTitulo}>{c.titulo}</span>}
+                <span className={s.comentMeta}>{c.autor_nome || 'usuário'} · {fmtDT(c.created_at)}</span>
+                <button className={s.anexoDel} title="Remover"
+                  onClick={() => { if (confirm('Remover comentário?')) deletar.mutate(c.id) }}>×</button>
+              </div>
+              <div className={s.comentTexto}>{c.texto}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {aberto ? (
+        <div style={{ background: 'var(--light)', borderRadius: 10, padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <input className={s.miniInput} placeholder="Título (opcional)" value={titulo}
+            onChange={(e) => setTitulo(e.target.value)} />
+          <textarea className={s.miniInput} rows={3} placeholder="Comentário" value={texto}
+            onChange={(e) => setTexto(e.target.value)} />
+          <div className={s.rowBtns}>
+            <button className={styles.btnPrimary} disabled={!texto || criar.isPending} onClick={() => criar.mutate()}>
+              {criar.isPending ? 'Salvando…' : 'Adicionar comentário'}
+            </button>
+            <button className={styles.btnTable} onClick={() => setAberto(false)}>Cancelar</button>
+          </div>
+        </div>
+      ) : (
+        <button className={styles.btnTable} style={{ alignSelf: 'flex-start' }} onClick={() => setAberto(true)}>
+          + Comentário
+        </button>
+      )}
+    </div>
+  )
+}
+
 // ── Card de bem ───────────────────────────────────────────────────────────────
-function BemCard({ bem }: { bem: Bem }) {
+function BemCard({ bem, idx, total, onMoveTo }: {
+  bem: Bem; idx: number; total: number; onMoveTo: (bemId: string, pos1based: number) => void
+}) {
   const qc = useQueryClient()
   const [aberto, setAberto] = useState(false)
   const [editando, setEditando] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const invalidate = () => qc.invalidateQueries({ queryKey: ['patrimonio', bem.cliente_id] })
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: bem.id })
+  const sortStyle = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1, zIndex: isDragging ? 5 : undefined }
 
   const atualizar = useMutation({
     mutationFn: (data: Partial<Bem>) => patrimonioApi.atualizar(bem.id, data),
@@ -1010,8 +1078,13 @@ function BemCard({ bem }: { bem: Bem }) {
   }
 
   return (
-    <div className={s.card}>
+    <div className={s.card} ref={setNodeRef} style={sortStyle}>
       <div className={s.cardHead} onClick={() => setAberto(!aberto)}>
+        <span className={s.dragHandle} title="Arraste para reordenar"
+          {...attributes} {...listeners} onClick={(e) => e.stopPropagation()}>⠿</span>
+        <input className={s.ordemInput} type="number" min={1} max={total} value={idx + 1}
+          title="Digite a posição" onClick={(e) => e.stopPropagation()}
+          onChange={(e) => { const v = parseInt(e.target.value, 10); if (v) onMoveTo(bem.id, v) }} />
         <span className={s.bemIcon}>{bem.tipo_bem === 'imovel' ? '🏠' : '📦'}</span>
         <div className={s.grow}>
           <div className={s.bemTitulo}>
@@ -1140,6 +1213,9 @@ function BemCard({ bem }: { bem: Bem }) {
             </div>
           )}
           {bem.tipo_bem === 'movel' && <SociosSection bem={bem} />}
+
+          {/* Comentários */}
+          <ComentariosSection bem={bem} />
 
           {/* Ações do bem */}
           <div className={s.rowBtns} style={{ marginTop: 4, borderTop: '1px solid var(--gray-border)', paddingTop: 12 }}>
@@ -1436,6 +1512,28 @@ export default function PatrimonioSection({ clienteId }: { clienteId: string }) 
     onError: () => alert('Não foi possível salvar o bem. Verifique os campos e tente novamente.'),
   })
 
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
+  const aplicarOrdem = (novos: Bem[]) => {
+    qc.setQueryData(['patrimonio', clienteId], novos)
+    patrimonioApi.reordenar(clienteId, novos.map((b) => b.id)).catch(() => {
+      qc.invalidateQueries({ queryKey: ['patrimonio', clienteId] })
+    })
+  }
+  const handleDragEnd = (e: DragEndEvent) => {
+    const { active, over } = e
+    if (!over || active.id === over.id) return
+    const oldIdx = bens.findIndex((b) => b.id === active.id)
+    const newIdx = bens.findIndex((b) => b.id === over.id)
+    if (oldIdx < 0 || newIdx < 0) return
+    aplicarOrdem(arrayMove(bens, oldIdx, newIdx))
+  }
+  const moverPara = (bemId: string, pos1based: number) => {
+    const from = bens.findIndex((b) => b.id === bemId)
+    const to = Math.max(0, Math.min(bens.length - 1, pos1based - 1))
+    if (from < 0 || from === to) return
+    aplicarOrdem(arrayMove(bens, from, to))
+  }
+
   const totalMercado = bens.reduce((sum, b) => sum + (b.valor_mercado ?? 0), 0)
   const totalHolding = bens.filter((b) => b.integralizar_holding).length
 
@@ -1510,9 +1608,13 @@ export default function PatrimonioSection({ clienteId }: { clienteId: string }) 
       ) : bens.length === 0 && !novoAberto ? (
         <p className={styles.empty}>Nenhum bem cadastrado. Clique em "+ Novo bem" para começar o inventário patrimonial.</p>
       ) : (
-        <div className={s.list}>
-          {bens.map((b) => <BemCard key={b.id} bem={b} />)}
-        </div>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={bens.map((b) => b.id)} strategy={verticalListSortingStrategy}>
+            <div className={s.list}>
+              {bens.map((b, i) => <BemCard key={b.id} bem={b} idx={i} total={bens.length} onMoveTo={moverPara} />)}
+            </div>
+          </SortableContext>
+        </DndContext>
       )}
 
       {bens.length > 0 && (

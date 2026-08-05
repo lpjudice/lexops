@@ -43,6 +43,14 @@ export interface Socio {
   created_at: string
 }
 
+export interface Comentario {
+  id: string
+  titulo?: string | null
+  texto: string
+  autor_nome?: string | null
+  created_at: string
+}
+
 export interface Bem {
   id: string
   cliente_id: string
@@ -78,6 +86,7 @@ export interface Bem {
   anexos: Anexo[]
   cadeia: CadeiaElo[]
   socios: Socio[]
+  comentarios: Comentario[]
   created_at: string
   updated_at: string
 }
@@ -168,6 +177,12 @@ export const patrimonioApi = {
 
   deletarSocio: (bemId: string, socioId: string) =>
     api.delete(`/patrimonio/${bemId}/socios/${socioId}`),
+
+  criarComentario: (bemId: string, data: { titulo?: string; texto: string }) =>
+    api.post<Comentario>(`/patrimonio/${bemId}/comentarios`, data).then((r) => r.data),
+
+  deletarComentario: (bemId: string, comId: string) =>
+    api.delete(`/patrimonio/${bemId}/comentarios/${comId}`),
 
   exportXls: (clienteId: string) =>
     api.get(`/patrimonio/export/xls`, { params: { cliente_id: clienteId }, responseType: 'blob' })

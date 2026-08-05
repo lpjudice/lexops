@@ -66,6 +66,27 @@
   cursor: pointer;
 }
 .cardHead:hover { background: var(--light); }
+.dragHandle {
+  cursor: grab;
+  color: var(--gray-mid);
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+  flex-shrink: 0;
+  touch-action: none;
+  user-select: none;
+}
+.dragHandle:active { cursor: grabbing; }
+.ordemInput {
+  width: 42px;
+  border: 1px solid var(--gray-border);
+  border-radius: 6px;
+  padding: 3px 4px;
+  font-size: 12px;
+  text-align: center;
+  font-family: inherit;
+  flex-shrink: 0;
+}
 .bemIcon {
   font-size: 22px;
   flex-shrink: 0;
@@ -644,3 +665,15 @@
   padding: 4px 12px; text-align: right;
 }
 .socioAlerta { color: #b45309; font-weight: 700; }
+
+/* Comentários */
+.comentList { display: flex; flex-direction: column; gap: 8px; }
+.comentItem {
+  background: var(--light);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+.comentHead { display: flex; align-items: center; gap: 8px; }
+.comentTitulo { font-size: 13px; font-weight: 700; color: var(--dark); }
+.comentMeta { font-size: 11px; color: var(--gray-mid); margin-right: auto; }
+.comentTexto { font-size: 13px; color: var(--dark); margin-top: 3px; white-space: pre-wrap; }

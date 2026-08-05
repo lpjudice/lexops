@@ -1218,6 +1218,18 @@ def _run_migrations() -> None:
             conn.execute(text(_col))
         # Objetivo: renomeia 'segurar' -> 'uso_proprio'
         conn.execute(text("UPDATE patrimonio_bens SET objetivo='uso_proprio' WHERE objetivo='segurar'"))
+        # Comentários por bem (autor + data/hora)
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS patrimonio_comentarios (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                bem_id UUID NOT NULL REFERENCES patrimonio_bens(id) ON DELETE CASCADE,
+                titulo VARCHAR(255),
+                texto TEXT NOT NULL,
+                autor_id UUID,
+                autor_nome VARCHAR(255),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
         # Ordena bens existentes sem 'ordem' (por cliente, mais recente primeiro = mesma ordem da UI)
         conn.execute(text("""
             UPDATE patrimonio_bens SET ordem = sub.rn FROM (
