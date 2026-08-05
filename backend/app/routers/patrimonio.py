@@ -3,6 +3,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -81,9 +82,32 @@ def listar_bens(
     return (
         db.query(PatrimonioBem)
         .filter(PatrimonioBem.cliente_id == cliente_id)
-        .order_by(PatrimonioBem.created_at.desc())
+        .order_by(PatrimonioBem.ordem.asc().nullslast(), PatrimonioBem.created_at.desc())
         .all()
     )
+
+
+class ReordenarPayload(BaseModel):
+    ordem: list[uuid.UUID]  # ids dos bens na nova ordem
+
+
+@router.post("/reordenar")
+def reordenar_bens(
+    payload: ReordenarPayload,
+    cliente_id: uuid.UUID = Query(...),
+    db: Session = Depends(get_db),
+):
+    """Aplica a nova ordem (lista de ids) aos bens do cliente."""
+    bens = {
+        str(b.id): b
+        for b in db.query(PatrimonioBem).filter(PatrimonioBem.cliente_id == cliente_id).all()
+    }
+    for i, bem_id in enumerate(payload.ordem):
+        bem = bens.get(str(bem_id))
+        if bem:
+            bem.ordem = i
+    db.commit()
+    return {"ok": True}
 
 
 def _bens_do_cliente(cliente_id: uuid.UUID, db: Session) -> tuple[str, list[PatrimonioBem]]:
@@ -93,7 +117,7 @@ def _bens_do_cliente(cliente_id: uuid.UUID, db: Session) -> tuple[str, list[Patr
     bens = (
         db.query(PatrimonioBem)
         .filter(PatrimonioBem.cliente_id == cliente_id)
-        .order_by(PatrimonioBem.created_at.desc())
+        .order_by(PatrimonioBem.ordem.asc().nullslast(), PatrimonioBem.created_at.desc())
         .all()
     )
     return cliente.nome, bens

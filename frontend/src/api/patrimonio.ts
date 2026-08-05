@@ -1,8 +1,9 @@
 import api from './client'
 
 export type TipoBem = 'movel' | 'imovel'
-export type ObjetivoBem = 'venda' | 'aluguel' | 'segurar'
+export type ObjetivoBem = 'venda' | 'aluguel' | 'uso_proprio' | 'uso_herdeiro' | 'nao_fazer_nada'
 export type StatusBem = 'em_validacao' | 'validado' | 'incerto'
+export type OrigemTitulo = 'matricula_rgi' | 'escritura_publica' | 'contrato_particular' | 'outro'
 export type TipoDocumentoElo =
   | 'contrato_compra_venda'
   | 'escritura_publica'
@@ -56,6 +57,11 @@ export interface Bem {
   descricao_matricula?: string | null
   numero_matricula?: string | null
   cartorio?: string | null
+  origem_titulo?: OrigemTitulo | null
+  escritura_numero?: string | null
+  escritura_livro?: string | null
+  escritura_folha?: string | null
+  ordem?: number | null
   status: StatusBem
   integralizar_holding: boolean
   proprietario_real?: string | null
@@ -68,6 +74,7 @@ export interface Bem {
   capital_social?: number | null
   valor_balanco?: number | null
   data_balanco?: string | null
+  participacao_cliente_pct?: number | null
   anexos: Anexo[]
   cadeia: CadeiaElo[]
   socios: Socio[]
@@ -125,6 +132,9 @@ export const patrimonioApi = {
     api.patch<Bem>(`/patrimonio/${id}`, data).then((r) => r.data),
 
   deletar: (id: string) => api.delete(`/patrimonio/${id}`),
+
+  reordenar: (clienteId: string, ordem: string[]) =>
+    api.post(`/patrimonio/reordenar`, { ordem }, { params: { cliente_id: clienteId } }).then((r) => r.data),
 
   uploadAnexo: (bemId: string, file: File) => {
     const form = new FormData()

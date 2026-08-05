@@ -38,6 +38,7 @@ class PatrimonioBem(Base):
     # 'movel' | 'imovel'
     tipo_bem: Mapped[str] = mapped_column(String(20), nullable=False, default="imovel")
     nome: Mapped[str] = mapped_column(String(255), nullable=False)
+    ordem: Mapped[int | None] = mapped_column(Integer)
     descricao: Mapped[str | None] = mapped_column(Text)
 
     valor_compra: Mapped[float | None] = mapped_column(Numeric(15, 2))
@@ -45,13 +46,19 @@ class PatrimonioBem(Base):
     valor_ir: Mapped[float | None] = mapped_column(Numeric(15, 2))
     data_compra: Mapped[date | None] = mapped_column(Date)
 
-    # 'venda' | 'aluguel' | 'segurar'
+    # 'venda' | 'aluguel' | 'uso_proprio' | 'uso_herdeiro' | 'nao_fazer_nada'
     objetivo: Mapped[str | None] = mapped_column(String(20))
 
     # Situação registral (relevante para imóveis)
     descricao_matricula: Mapped[str | None] = mapped_column(Text)
     numero_matricula: Mapped[str | None] = mapped_column(String(100))
     cartorio: Mapped[str | None] = mapped_column(String(255))
+    # Origem/título do imóvel: 'matricula_rgi' | 'escritura_publica' | 'contrato_particular' | 'outro'
+    origem_titulo: Mapped[str | None] = mapped_column(String(30))
+    # Referência da escritura pública (última) que originou/valida a propriedade atual
+    escritura_numero: Mapped[str | None] = mapped_column(String(50))
+    escritura_livro: Mapped[str | None] = mapped_column(String(50))
+    escritura_folha: Mapped[str | None] = mapped_column(String(50))
 
     # 'em_validacao' | 'validado' | 'incerto'
     status: Mapped[str] = mapped_column(
@@ -77,6 +84,8 @@ class PatrimonioBem(Base):
     capital_social: Mapped[float | None] = mapped_column(Numeric(15, 2))
     valor_balanco: Mapped[float | None] = mapped_column(Numeric(15, 2))
     data_balanco: Mapped[date | None] = mapped_column(Date)
+    # % de participação do cliente na sociedade (cota social)
+    participacao_cliente_pct: Mapped[float | None] = mapped_column(Numeric(6, 3))
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

@@ -5,8 +5,9 @@ from typing import Literal
 from pydantic import BaseModel
 
 TipoBem = Literal["movel", "imovel"]
-Objetivo = Literal["venda", "aluguel", "segurar"]
+Objetivo = Literal["venda", "aluguel", "uso_proprio", "uso_herdeiro", "nao_fazer_nada", "segurar"]
 StatusBem = Literal["em_validacao", "validado", "incerto"]
+OrigemTitulo = Literal["matricula_rgi", "escritura_publica", "contrato_particular", "outro"]
 TipoDocumentoElo = Literal[
     "contrato_compra_venda",
     "escritura_publica",
@@ -101,6 +102,10 @@ class BemBase(BaseModel):
     descricao_matricula: str | None = None
     numero_matricula: str | None = None
     cartorio: str | None = None
+    origem_titulo: OrigemTitulo | None = None
+    escritura_numero: str | None = None
+    escritura_livro: str | None = None
+    escritura_folha: str | None = None
     status: StatusBem = "em_validacao"
     integralizar_holding: bool = False
     proprietario_real: str | None = None
@@ -114,6 +119,7 @@ class BemBase(BaseModel):
     capital_social: float | None = None
     valor_balanco: float | None = None
     data_balanco: date | None = None
+    participacao_cliente_pct: float | None = None
 
 
 class BemCreate(BemBase):
@@ -132,6 +138,10 @@ class BemUpdate(BaseModel):
     descricao_matricula: str | None = None
     numero_matricula: str | None = None
     cartorio: str | None = None
+    origem_titulo: OrigemTitulo | None = None
+    escritura_numero: str | None = None
+    escritura_livro: str | None = None
+    escritura_folha: str | None = None
     status: StatusBem | None = None
     integralizar_holding: bool | None = None
     proprietario_real: str | None = None
@@ -144,11 +154,13 @@ class BemUpdate(BaseModel):
     capital_social: float | None = None
     valor_balanco: float | None = None
     data_balanco: date | None = None
+    participacao_cliente_pct: float | None = None
 
 
 class BemOut(BemBase):
     id: uuid.UUID
     cliente_id: uuid.UUID
+    ordem: int | None = None
     anexos: list[AnexoOut] = []
     cadeia: list[CadeiaEloOut] = []
     socios: list[SocioOut] = []
