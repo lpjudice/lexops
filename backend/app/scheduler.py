@@ -461,9 +461,12 @@ def start_scheduler() -> None:
         id="refresh_google_master_session",
         replace_existing=True,
     )
+    # Access token do bot dura ~8h; roda a cada 6h pra sempre pegar ele ainda
+    # vivo (evita o load_session() interno já ter refrescado antes da gente
+    # chegar aqui, o que forçava 2 refreshes seguidos no Keycloak por ciclo).
     scheduler.add_job(
         _refresh_andamentos_session,
-        trigger=CronTrigger(hour='*/12', minute=40),
+        trigger=CronTrigger(hour='*/6', minute=40),
         id="refresh_andamentos_session",
         replace_existing=True,
     )
