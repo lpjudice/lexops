@@ -340,10 +340,20 @@ def ler_contratantes(contrato_id: uuid.UUID, db: Session = Depends(get_db)):
     return {"contratantes": saida, "financeiro": resultado.get("financeiro") or {}}
 
 
+# Limites das colunas de `clientes` (evita StringDataRightTruncation → 500 no commit).
+# `endereco` é TEXT (sem limite). Mantido em sincronia com models/cliente.py.
+_CLIENTE_MAXLEN = {"cpf_cnpj": 18, "email": 255, "telefone": 30, "estado_civil": 120, "profissao": 150}
+
+
+def _cap(campo: str, valor: str) -> str:
+    m = _CLIENTE_MAXLEN.get(campo)
+    return valor[:m] if (m and valor) else valor
+
+
 def _preencher_vazios(cli, dados: dict, db: Session) -> None:
     """Preenche apenas os campos VAZIOS do cliente a partir de `dados` (merge não-destrutivo)."""
     from app.models.cliente import Cliente
-    cpf = (dados.get("cpf_cnpj") or "").strip()
+    cpf = _cap("cpf_cnpj", (dados.get("cpf_cnpj") or "").strip())
     if not cli.cpf_cnpj and cpf:
         ja = db.query(Cliente).filter(Cliente.cpf_cnpj == cpf, Cliente.id != cli.id).first()
         if not ja:
@@ -351,7 +361,7 @@ def _preencher_vazios(cli, dados: dict, db: Session) -> None:
     for campo in ("email", "telefone", "endereco", "estado_civil", "profissao"):
         valor = (dados.get(campo) or "").strip()
         if valor and not getattr(cli, campo, None):
-            setattr(cli, campo, valor)
+            setattr(cli, campo, _cap(campo, valor))
 
 
 def _parse_date(s: str | None):
@@ -449,9 +459,10 @@ def aplicar_contratantes(
                 raise HTTPException(status_code=404, detail=f"Cliente {dec.cliente_id} não encontrado.")
             _preencher_vazios(cli, dados, db)
         else:  # criar (mesma inicialização do POST /clientes: incompleto + projeto/worktree)
-            projeto_nome, worktree_nome = _gerar_projeto(dec.nome.strip())
+            nome_novo = dec.nome.strip()[:255]
+            projeto_nome, worktree_nome = _gerar_projeto(nome_novo)
             cli = Cliente(
-                nome=dec.nome.strip(), tipo=dec.tipo, incompleto=True,
+                nome=nome_novo, tipo=dec.tipo, incompleto=True,
                 projeto_nome=projeto_nome, worktree_nome=worktree_nome,
             )
             db.add(cli)

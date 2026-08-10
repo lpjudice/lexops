@@ -1129,6 +1129,9 @@ def _run_migrations() -> None:
             "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS origem_cadastro VARCHAR(30) DEFAULT 'manual'",
         ]:
             conn.execute(text(col_sql))
+        # estado_civil pode vir com regime de bens (ex.: "casado em regime de
+        # comunhão parcial de bens") — alarga de 40 para 120. Idempotente.
+        conn.execute(text("ALTER TABLE clientes ALTER COLUMN estado_civil TYPE VARCHAR(120)"))
 
         # Patrimônio: inventário de bens do cliente (diagnóstico de holding)
         conn.execute(text("""
