@@ -364,12 +364,14 @@ def aplicar_contratantes(
     contratante principal e anota os co-contratantes nas observações desse cliente.
     """
     from app.models.cliente import Cliente
+    from app.routers.clientes import _gerar_projeto
 
     c = db.query(Contrato).filter(Contrato.id == contrato_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Contrato não encontrado")
 
     processados: list[tuple[Cliente, bool]] = []  # (cliente, is_principal)
+    criados: list[Cliente] = []
     for dec in body.decisoes:
         if dec.acao == "ignorar":
             continue
@@ -382,11 +384,16 @@ def aplicar_contratantes(
             if not cli:
                 raise HTTPException(status_code=404, detail=f"Cliente {dec.cliente_id} não encontrado.")
             _preencher_vazios(cli, dados, db)
-        else:  # criar
-            cli = Cliente(nome=dec.nome.strip(), tipo=dec.tipo, incompleto=True)
+        else:  # criar (mesma inicialização do POST /clientes: incompleto + projeto/worktree)
+            projeto_nome, worktree_nome = _gerar_projeto(dec.nome.strip())
+            cli = Cliente(
+                nome=dec.nome.strip(), tipo=dec.tipo, incompleto=True,
+                projeto_nome=projeto_nome, worktree_nome=worktree_nome,
+            )
             db.add(cli)
             db.flush()  # garante id p/ checagem de unicidade em _preencher_vazios
             _preencher_vazios(cli, dados, db)
+            criados.append(cli)
 
         if dec.diferenciador and dec.diferenciador.strip():
             nota = f"[contrato] {dec.diferenciador.strip()}"
@@ -410,6 +417,15 @@ def aplicar_contratantes(
         c.cliente_id = principal.id
 
     db.commit()
+
+    # Cria as pastas no Drive dos clientes novos (best-effort, como no POST /clientes).
+    for cli in criados:
+        try:
+            from app.services.google_drive import ensure_cliente_folder
+            ensure_cliente_folder(cli.nome)
+        except Exception:
+            pass
+
     db.refresh(c)
     return c
 
