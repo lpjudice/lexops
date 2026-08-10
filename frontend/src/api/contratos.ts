@@ -129,6 +129,54 @@ export const contratosApi = {
   sincronizarStatus: (id: string) =>
     api.post<Contrato>(`/contratos/${id}/sincronizar-status`).then((r) => r.data),
 
+  lerContratantes: (id: string) =>
+    api.post<{ contratantes: ContratanteLido[] }>(`/contratos/${id}/ler-contratantes`).then((r) => r.data),
+
+  aplicarContratantes: (id: string, decisoes: ContratanteDecisao[], vincular_contrato = true) =>
+    api.post<Contrato>(`/contratos/${id}/aplicar-contratantes`, { decisoes, vincular_contrato }).then((r) => r.data),
+
   pastaMestra: () =>
     api.get<{ link: string | null }>('/contratos/pasta-mestra').then((r) => r.data),
+}
+
+// ── Leitura de contratantes por IA ────────────────────────────────────────────
+export interface ContratanteExtraido {
+  nome: string
+  tipo: 'PF' | 'PJ'
+  cpf_cnpj?: string
+  email?: string
+  telefone?: string
+  endereco?: string
+  estado_civil?: string
+  profissao?: string
+}
+
+export interface ContratanteCandidato {
+  id: string
+  nome: string
+  tipo: 'PF' | 'PJ'
+  cpf_cnpj?: string | null
+  email?: string | null
+  incompleto?: boolean
+  match: 'cpf' | 'nome'
+}
+
+export interface ContratanteLido {
+  extraido: ContratanteExtraido
+  candidatos: ContratanteCandidato[]
+}
+
+export interface ContratanteDecisao {
+  acao: 'atualizar' | 'criar' | 'ignorar'
+  cliente_id?: string | null
+  nome: string
+  tipo: 'PF' | 'PJ'
+  cpf_cnpj?: string
+  email?: string
+  telefone?: string
+  endereco?: string
+  estado_civil?: string
+  profissao?: string
+  diferenciador?: string
+  principal?: boolean
 }

@@ -6,6 +6,7 @@ import { clientesApi } from '../api/clientes'
 import { processosApi } from '../api/processos'
 import ComboBox from '../components/ComboBox'
 import ClienteCombobox from '../components/ClienteCombobox'
+import ContratantesIAModal from '../components/ContratantesIAModal'
 import CurrencyInput, { formatBRL } from '../components/CurrencyInput'
 import styles from './Page.module.css'
 import cs from './ContratosPage.module.css'
@@ -68,6 +69,7 @@ export default function ContratosPage() {
   const [expandido, setExpandido] = useState<string | null>(null)
   const [sigForms, setSigForms] = useState<Record<string, SignatarioCreate>>({})
   const [gerarAberto, setGerarAberto] = useState<string | null>(null)
+  const [lerIAFor, setLerIAFor] = useState<string | null>(null)
   const [gerarForm, setGerarForm] = useState<GerarPdfRequest>({
     contratante_nome: '',
     contratante_qualificacao: '',
@@ -396,6 +398,13 @@ export default function ContratosPage() {
                                 }}
                               />
                             </label>
+                            {temArquivos(c) && (
+                              <button className={cs.btnSmall}
+                                onClick={() => setLerIAFor(c.id)}
+                                title="A IA lê o PDF e popula/atualiza o cadastro dos contratantes">
+                                🔎 Ler contratantes (IA)
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
@@ -721,6 +730,17 @@ export default function ContratosPage() {
             )
           })}
         </div>
+      )}
+
+      {lerIAFor && (
+        <ContratantesIAModal
+          contratoId={lerIAFor}
+          onClose={() => setLerIAFor(null)}
+          onApplied={() => {
+            qc.invalidateQueries({ queryKey: ['contratos'] })
+            qc.invalidateQueries({ queryKey: ['clientes'] })
+          }}
+        />
       )}
     </div>
   )

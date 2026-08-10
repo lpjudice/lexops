@@ -8,8 +8,8 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.contrato import Contrato, Signatario
 from app.schemas.contrato import (
-    ContratoCreate, ContratoOut, ContratoUpdate, GerarPdfRequest,
-    SignatarioCreate, SignatarioOut,
+    AplicarContratantesRequest, ContratoCreate, ContratoOut, ContratoUpdate,
+    GerarPdfRequest, SignatarioCreate, SignatarioOut,
 )
 from app.services import clicksign
 
@@ -268,6 +268,150 @@ def ver_arquivo(contrato_id: uuid.UUID, filename: str, db: Session = Depends(get
             if path.exists():
                 return FileResponse(str(path), media_type="application/pdf", filename=filename)
     raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+
+
+# ── Leitura de contratantes por IA ───────────────────────────────────────────
+
+def _so_digitos(v: str | None) -> str:
+    return "".join(ch for ch in (v or "") if ch.isdigit())
+
+
+def _primeiro_pdf_path(c: Contrato) -> Path | None:
+    """Caminho local do PDF principal do contrato (para enviar à IA)."""
+    for arq in (c.arquivos or []):
+        p = Path(arq.get("path", ""))
+        if p.exists() and p.suffix.lower() == ".pdf":
+            return p
+    if c.arquivo_path:
+        p = Path(c.arquivo_path)
+        if p.exists():
+            return p
+    return None
+
+
+@router.post("/{contrato_id}/ler-contratantes")
+def ler_contratantes(contrato_id: uuid.UUID, db: Session = Depends(get_db)):
+    """
+    Lê o PDF anexado ao contrato com a IA e retorna os contratantes extraídos,
+    já com candidatos de cliente existente (match por CPF/CNPJ e por nome).
+    NÃO grava nada — só devolve sugestões para a tela de revisão decidir.
+    """
+    from app.models.cliente import Cliente
+    from app.services.ia_contrato import extrair_contratantes
+
+    c = db.query(Contrato).filter(Contrato.id == contrato_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Contrato não encontrado")
+
+    pdf = _primeiro_pdf_path(c)
+    if not pdf:
+        raise HTTPException(status_code=400, detail="Nenhum PDF anexado para ler. Faça o upload do contrato primeiro.")
+
+    resultado = extrair_contratantes(pdf.read_bytes(), "application/pdf")
+    if resultado.get("erro"):
+        raise HTTPException(status_code=502, detail=resultado["erro"])
+
+    todos = db.query(Cliente).all()
+    saida = []
+    for ext in resultado.get("contratantes", []):
+        cpf_dig = _so_digitos(ext.get("cpf_cnpj"))
+        nome_l = (ext.get("nome") or "").strip().lower()
+        candidatos = []
+        for cli in todos:
+            match = None
+            if cpf_dig and _so_digitos(cli.cpf_cnpj) == cpf_dig:
+                match = "cpf"
+            elif nome_l and cli.nome and (
+                nome_l == cli.nome.strip().lower()
+                or nome_l in cli.nome.strip().lower()
+                or cli.nome.strip().lower() in nome_l
+            ):
+                match = "nome"
+            if match:
+                candidatos.append({
+                    "id": str(cli.id), "nome": cli.nome, "tipo": cli.tipo,
+                    "cpf_cnpj": cli.cpf_cnpj, "email": cli.email,
+                    "incompleto": bool(cli.incompleto), "match": match,
+                })
+        # cpf antes de nome
+        candidatos.sort(key=lambda x: 0 if x["match"] == "cpf" else 1)
+        saida.append({"extraido": ext, "candidatos": candidatos})
+
+    return {"contratantes": saida}
+
+
+def _preencher_vazios(cli, dados: dict, db: Session) -> None:
+    """Preenche apenas os campos VAZIOS do cliente a partir de `dados` (merge não-destrutivo)."""
+    from app.models.cliente import Cliente
+    cpf = (dados.get("cpf_cnpj") or "").strip()
+    if not cli.cpf_cnpj and cpf:
+        ja = db.query(Cliente).filter(Cliente.cpf_cnpj == cpf, Cliente.id != cli.id).first()
+        if not ja:
+            cli.cpf_cnpj = cpf
+    for campo in ("email", "telefone", "endereco", "estado_civil", "profissao"):
+        valor = (dados.get(campo) or "").strip()
+        if valor and not getattr(cli, campo, None):
+            setattr(cli, campo, valor)
+
+
+@router.post("/{contrato_id}/aplicar-contratantes", response_model=ContratoOut)
+def aplicar_contratantes(
+    contrato_id: uuid.UUID, body: AplicarContratantesRequest, db: Session = Depends(get_db)
+):
+    """
+    Aplica as decisões da tela de revisão: atualiza clientes existentes (só campos
+    vazios), cria novos (incompletos = pendentes de revisão), vincula o contrato ao
+    contratante principal e anota os co-contratantes nas observações desse cliente.
+    """
+    from app.models.cliente import Cliente
+
+    c = db.query(Contrato).filter(Contrato.id == contrato_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Contrato não encontrado")
+
+    processados: list[tuple[Cliente, bool]] = []  # (cliente, is_principal)
+    for dec in body.decisoes:
+        if dec.acao == "ignorar":
+            continue
+
+        dados = dec.model_dump()
+        if dec.acao == "atualizar":
+            if not dec.cliente_id:
+                raise HTTPException(status_code=400, detail=f"Cliente não informado para atualizar '{dec.nome}'.")
+            cli = db.query(Cliente).filter(Cliente.id == dec.cliente_id).first()
+            if not cli:
+                raise HTTPException(status_code=404, detail=f"Cliente {dec.cliente_id} não encontrado.")
+            _preencher_vazios(cli, dados, db)
+        else:  # criar
+            cli = Cliente(nome=dec.nome.strip(), tipo=dec.tipo, incompleto=True)
+            db.add(cli)
+            db.flush()  # garante id p/ checagem de unicidade em _preencher_vazios
+            _preencher_vazios(cli, dados, db)
+
+        if dec.diferenciador and dec.diferenciador.strip():
+            nota = f"[contrato] {dec.diferenciador.strip()}"
+            cli.observacoes = (cli.observacoes + "\n" + nota).strip() if cli.observacoes else nota
+
+        processados.append((cli, dec.principal))
+
+    if not processados:
+        raise HTTPException(status_code=400, detail="Nenhuma decisão aplicável (todos ignorados).")
+
+    # Contratante principal: o marcado, senão o primeiro processado.
+    principal = next((cli for cli, is_p in processados if is_p), processados[0][0])
+
+    # Anota co-contratantes no cadastro do principal.
+    outros = [cli.nome for cli, _ in processados if cli is not principal]
+    if outros:
+        nota = f"[contrato] Mesmo contrato de: {', '.join(outros)}"
+        principal.observacoes = (principal.observacoes + "\n" + nota).strip() if principal.observacoes else nota
+
+    if body.vincular_contrato:
+        c.cliente_id = principal.id
+
+    db.commit()
+    db.refresh(c)
+    return c
 
 
 # ── Geração de PDF do contrato ────────────────────────────────────────────────

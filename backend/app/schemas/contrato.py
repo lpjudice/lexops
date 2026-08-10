@@ -65,6 +65,32 @@ class GerarPdfRequest(BaseModel):
     data_contrato: str = ""           # YYYY-MM-DD
 
 
+# ── Leitura de contratantes por IA (upload) ──────────────────────────────────
+
+class ContratanteDecisao(BaseModel):
+    """Decisão da tela de revisão para UM contratante lido pela IA."""
+    acao: Literal["atualizar", "criar", "ignorar"] = "criar"
+    cliente_id: uuid.UUID | None = None   # obrigatório quando acao == "atualizar"
+    nome: str
+    tipo: Literal["PF", "PJ"] = "PF"
+    cpf_cnpj: str | None = None
+    email: str | None = None
+    telefone: str | None = None
+    endereco: str | None = None
+    estado_civil: str | None = None
+    profissao: str | None = None
+    # Nota para distinguir um 2º cadastro homônimo (vai para observações).
+    diferenciador: str | None = None
+    # Contratante em nome de quem o contrato fica vinculado (o "principal").
+    principal: bool = False
+
+
+class AplicarContratantesRequest(BaseModel):
+    decisoes: list[ContratanteDecisao]
+    # Se True, o contrato passa a apontar para o cliente do contratante principal.
+    vincular_contrato: bool = True
+
+
 class ContratoOut(ContratoCreate):
     id: uuid.UUID
     arquivo_path: str | None
