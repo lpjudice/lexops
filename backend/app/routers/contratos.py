@@ -322,6 +322,36 @@ async def gerar_pdf_contrato(
     except Exception:
         pass
 
+    # Pré-preenchimento reverso: os dados do contrato preenchem os campos VAZIOS do
+    # cadastro do cliente (nunca sobrescreve o que já existe). Assim, um cliente criado
+    # "só com o nome" pelo próprio contrato já chega à revisão com CPF/e-mail/endereço.
+    try:
+        from app.models.cliente import Cliente
+        cli = db.query(Cliente).filter(Cliente.id == c.cliente_id).first()
+        if cli:
+            mudou = False
+            novo_cpf = (body.contratante_cpf_cnpj or "").strip()
+            if not cli.cpf_cnpj and novo_cpf:
+                # respeita a unicidade de cpf_cnpj
+                ja_usado = db.query(Cliente).filter(
+                    Cliente.cpf_cnpj == novo_cpf, Cliente.id != cli.id
+                ).first()
+                if not ja_usado:
+                    cli.cpf_cnpj = novo_cpf
+                    mudou = True
+            novo_email = (body.contratante_email or "").strip()
+            if not cli.email and novo_email:
+                cli.email = novo_email
+                mudou = True
+            novo_end = (body.contratante_endereco or "").strip()
+            if not cli.endereco and novo_end:
+                cli.endereco = novo_end
+                mudou = True
+            if mudou:
+                db.commit()
+    except Exception:
+        db.rollback()
+
     lista = list(c.arquivos or [])
     lista.append({"filename": nome_arquivo, "path": str(destino), "clicksign_key": None, "drive_link": drive_link})
     c.arquivos = lista

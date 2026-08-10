@@ -5,6 +5,7 @@ import type { ContratoCreate, SignatarioCreate, PapelSignatario, StatusContrato,
 import { clientesApi } from '../api/clientes'
 import { processosApi } from '../api/processos'
 import ComboBox from '../components/ComboBox'
+import ClienteCombobox from '../components/ClienteCombobox'
 import CurrencyInput, { formatBRL } from '../components/CurrencyInput'
 import styles from './Page.module.css'
 import cs from './ContratosPage.module.css'
@@ -208,6 +209,15 @@ export default function ContratosPage() {
 
   const clientePorId = (cid: string) => clientes.find((c) => c.id === cid)
 
+  // Cria um cliente "só com o nome" direto do combobox quando o nome digitado não existe.
+  // Marca incompleto=true (pendente de revisão) — mesmo padrão de Processos/Tarefas.
+  const criarCliente = async (raw: string): Promise<string> => {
+    const [nome, tipo] = raw.split('|')
+    const c = await clientesApi.criar({ nome, tipo: (tipo as 'PF' | 'PJ') ?? 'PF', incompleto: true })
+    qc.invalidateQueries({ queryKey: ['clientes'] })
+    return c.id
+  }
+
   // Sincroniza automaticamente ao abrir um contrato em andamento (uma vez por sessão).
   const toggleExpandido = (c: (typeof contratos)[0]) => {
     const abrindo = expandido !== c.id
@@ -288,7 +298,7 @@ export default function ContratosPage() {
       </div>
 
       {showForm && (
-        <form onSubmit={(e) => { e.preventDefault(); criar.mutate(form) }} className={styles.form}>
+        <form onSubmit={(e) => { e.preventDefault(); if (!form.cliente_id) { alert('Selecione ou crie um cliente'); return } criar.mutate(form) }} className={styles.form}>
           <div className={cs.twoCol}>
             <div className={styles.formRow}>
               <label className={styles.formLabel}>Título *</label>
@@ -297,12 +307,11 @@ export default function ContratosPage() {
             </div>
             <div className={styles.formRow}>
               <label className={styles.formLabel}>Cliente *</label>
-              <ComboBox
-                options={clientes.map((c) => ({ value: c.id, label: c.nome }))}
+              <ClienteCombobox
                 value={form.cliente_id}
                 onChange={(v) => setForm({ ...form, cliente_id: v })}
-                placeholder="Buscar cliente..."
-                required
+                clientes={clientes}
+                onCreateCliente={criarCliente}
               />
             </div>
           </div>
