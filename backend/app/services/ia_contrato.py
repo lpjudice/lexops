@@ -26,6 +26,8 @@ Para CADA contratante, extraia os campos abaixo. Não invente nada: se um campo 
 no documento, use "" (string vazia). CPF/CNPJ e telefone: mantenha só os dígitos e a \
 pontuação como aparecem no documento.
 
+Extraia também os dados FINANCEIROS do contrato (honorários), se constarem.
+
 Responda SOMENTE com JSON válido (sem markdown), neste formato exato:
 {
   "contratantes": [
@@ -39,7 +41,16 @@ Responda SOMENTE com JSON válido (sem markdown), neste formato exato:
       "estado_civil": "somente para PF, se constar",
       "profissao": "somente para PF, se constar"
     }
-  ]
+  ],
+  "financeiro": {
+    "valor_honorarios": <número dos honorários FIXOS em reais, só dígitos e ponto decimal, ou null>,
+    "tem_exito": <true|false — se há honorários de êxito/sucumbência>,
+    "percentual_exito": <percentual de êxito como número (ex.: 15 para 15%), ou null>,
+    "valor_causa": <valor da causa em reais, só dígitos e ponto decimal, ou null>,
+    "data_vencimento": "data de vencimento/pagamento no formato AAAA-MM-DD, ou \\"\\"",
+    "condicao_pagamento": "condição de pagamento em texto (ex.: parcela única, 3x), ou \\"\\"",
+    "data_contrato": "data de assinatura/celebração do contrato em AAAA-MM-DD, ou \\"\\""
+  }
 }
 
 Regras:
@@ -47,7 +58,9 @@ Regras:
 quiser, coloque o representante em "observacao" — mas NÃO crie um campo novo; apenas os \
 campos listados são aceitos.
 - "tipo": use "PJ" quando houver CNPJ/razão social; senão "PF".
-- Não inclua o contratado/escritório na lista."""
+- Não inclua o contratado/escritório na lista.
+- Financeiro: extraia só o que está no documento; se não houver, use null/false/"". \
+"valor_honorarios" é o valor FIXO; se o contrato for só de êxito, use null e tem_exito=true."""
 
 
 def _parse_json(raw: str) -> dict:
@@ -159,4 +172,40 @@ def extrair_contratantes(file_bytes: bytes, mime: str) -> dict:
     if not limpos:
         return {"erro": "A IA não encontrou contratantes com nome no documento."}
 
-    return {"contratantes": limpos}
+    return {"contratantes": limpos, "financeiro": _normalizar_financeiro(parsed.get("financeiro"))}
+
+
+def _num(v) -> float | None:
+    """Coage número da IA (aceita int/float ou string '1.234,56' / '1234.56') para float."""
+    if v is None or v == "":
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v).strip()
+    # remove tudo que não é dígito, vírgula, ponto ou sinal
+    s = re.sub(r"[^\d,.\-]", "", s)
+    if not s:
+        return None
+    # se tem vírgula e ponto, assume ponto=milhar e vírgula=decimal (padrão BR)
+    if "," in s and "." in s:
+        s = s.replace(".", "").replace(",", ".")
+    elif "," in s:
+        s = s.replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _normalizar_financeiro(fin) -> dict:
+    if not isinstance(fin, dict):
+        fin = {}
+    return {
+        "valor_honorarios": _num(fin.get("valor_honorarios")),
+        "tem_exito": bool(fin.get("tem_exito")),
+        "percentual_exito": _num(fin.get("percentual_exito")),
+        "valor_causa": _num(fin.get("valor_causa")),
+        "data_vencimento": str(fin.get("data_vencimento") or "").strip(),
+        "condicao_pagamento": str(fin.get("condicao_pagamento") or "").strip(),
+        "data_contrato": str(fin.get("data_contrato") or "").strip(),
+    }

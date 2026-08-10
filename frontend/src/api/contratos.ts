@@ -130,10 +130,19 @@ export const contratosApi = {
     api.post<Contrato>(`/contratos/${id}/sincronizar-status`).then((r) => r.data),
 
   lerContratantes: (id: string) =>
-    api.post<{ contratantes: ContratanteLido[] }>(`/contratos/${id}/ler-contratantes`).then((r) => r.data),
+    api.post<{ contratantes: ContratanteLido[]; financeiro: ContratoFinanceiroIA }>(`/contratos/${id}/ler-contratantes`).then((r) => r.data),
 
-  aplicarContratantes: (id: string, decisoes: ContratanteDecisao[], vincular_contrato = true) =>
-    api.post<Contrato>(`/contratos/${id}/aplicar-contratantes`, { decisoes, vincular_contrato }).then((r) => r.data),
+  aplicarContratantes: (
+    id: string,
+    decisoes: ContratanteDecisao[],
+    opts?: { vincular_contrato?: boolean; lancar_financeiro?: boolean; financeiro?: ContratoFinanceiroIA },
+  ) =>
+    api.post<Contrato>(`/contratos/${id}/aplicar-contratantes`, {
+      decisoes,
+      vincular_contrato: opts?.vincular_contrato ?? true,
+      lancar_financeiro: opts?.lancar_financeiro ?? false,
+      financeiro: opts?.financeiro,
+    }).then((r) => r.data),
 
   pastaMestra: () =>
     api.get<{ link: string | null }>('/contratos/pasta-mestra').then((r) => r.data),
@@ -164,6 +173,16 @@ export interface ContratanteCandidato {
 export interface ContratanteLido {
   extraido: ContratanteExtraido
   candidatos: ContratanteCandidato[]
+}
+
+export interface ContratoFinanceiroIA {
+  valor_honorarios?: number | null
+  tem_exito?: boolean
+  percentual_exito?: number | null
+  valor_causa?: number | null
+  data_vencimento?: string
+  condicao_pagamento?: string
+  data_contrato?: string
 }
 
 export interface ContratanteDecisao {

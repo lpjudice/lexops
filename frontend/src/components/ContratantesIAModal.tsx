@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { contratosApi } from '../api/contratos'
-import type { ContratanteDecisao, ContratanteLido } from '../api/contratos'
+import type { ContratanteDecisao, ContratanteLido, ContratoFinanceiroIA } from '../api/contratos'
 
 interface Props {
   contratoId: string
@@ -50,6 +50,8 @@ export default function ContratantesIAModal({ contratoId, onClose, onApplied }: 
   const [decisoes, setDecisoes] = useState<DecisaoState[]>([])
   const [principalIdx, setPrincipalIdx] = useState(0)
   const [salvando, setSalvando] = useState(false)
+  const [fin, setFin] = useState<ContratoFinanceiroIA>({})
+  const [lancarFin, setLancarFin] = useState(false)
 
   useEffect(() => {
     let vivo = true
@@ -62,6 +64,10 @@ export default function ContratantesIAModal({ contratoId, onClose, onApplied }: 
         setLidos(r.contratantes)
         setDecisoes(r.contratantes.map(estadoInicial))
         setPrincipalIdx(0)
+        const f = r.financeiro || {}
+        setFin(f)
+        // Pré-marca o lançamento se a IA achou valor fixo ou êxito.
+        setLancarFin(!!(f.valor_honorarios || f.tem_exito))
       })
       .catch((e: any) => {
         if (!vivo) return
@@ -92,7 +98,10 @@ export default function ContratantesIAModal({ contratoId, onClose, onApplied }: 
         diferenciador: d.diferenciador || undefined,
         principal: i === principalIdx,
       }))
-      await contratosApi.aplicarContratantes(contratoId, payload)
+      await contratosApi.aplicarContratantes(contratoId, payload, {
+        lancar_financeiro: lancarFin,
+        financeiro: lancarFin ? fin : undefined,
+      })
       onApplied()
       onClose()
     } catch (e: any) {
@@ -193,6 +202,44 @@ export default function ContratantesIAModal({ contratoId, onClose, onApplied }: 
                 </div>
               )
             })}
+
+            {/* ── Financeiro (honorários) ──────────────────────────────── */}
+            <div style={{ ...bloco, background: '#f9fafb' }}>
+              <label style={{ ...decOpt, fontWeight: 600, marginBottom: lancarFin ? 8 : 0 }}>
+                <input type="checkbox" checked={lancarFin} onChange={(e) => setLancarFin(e.target.checked)} />
+                💰 Lançar honorários no financeiro
+              </label>
+              {lancarFin && (
+                <>
+                  <div style={grid2}>
+                    <input style={inp} type="number" value={fin.valor_honorarios ?? ''}
+                      onChange={(e) => setFin({ ...fin, valor_honorarios: e.target.value === '' ? null : Number(e.target.value) })}
+                      placeholder="Valor dos honorários (R$)" />
+                    <input style={inp} value={fin.data_vencimento ?? ''}
+                      onChange={(e) => setFin({ ...fin, data_vencimento: e.target.value })}
+                      placeholder="Vencimento (AAAA-MM-DD)" />
+                  </div>
+                  <label style={{ ...decOpt, marginTop: 6 }}>
+                    <input type="checkbox" checked={!!fin.tem_exito}
+                      onChange={(e) => setFin({ ...fin, tem_exito: e.target.checked })} />
+                    Tem honorários de êxito
+                  </label>
+                  {fin.tem_exito && (
+                    <div style={grid2}>
+                      <input style={inp} type="number" value={fin.percentual_exito ?? ''}
+                        onChange={(e) => setFin({ ...fin, percentual_exito: e.target.value === '' ? null : Number(e.target.value) })}
+                        placeholder="% de êxito" />
+                      <input style={inp} type="number" value={fin.valor_causa ?? ''}
+                        onChange={(e) => setFin({ ...fin, valor_causa: e.target.value === '' ? null : Number(e.target.value) })}
+                        placeholder="Valor da causa (R$)" />
+                    </div>
+                  )}
+                  <input style={{ ...inp, width: '100%', marginTop: 6 }} value={fin.condicao_pagamento ?? ''}
+                    onChange={(e) => setFin({ ...fin, condicao_pagamento: e.target.value })}
+                    placeholder="Condição de pagamento (ex.: parcela única, 3x)" />
+                </>
+              )}
+            </div>
 
             <div style={footer}>
               <span style={{ fontSize: 12, color: '#6b7280' }}>{ativos} contratante(s) a aplicar</span>

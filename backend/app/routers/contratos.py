@@ -337,7 +337,7 @@ def ler_contratantes(contrato_id: uuid.UUID, db: Session = Depends(get_db)):
         candidatos.sort(key=lambda x: 0 if x["match"] == "cpf" else 1)
         saida.append({"extraido": ext, "candidatos": candidatos})
 
-    return {"contratantes": saida}
+    return {"contratantes": saida, "financeiro": resultado.get("financeiro") or {}}
 
 
 def _preencher_vazios(cli, dados: dict, db: Session) -> None:
@@ -352,6 +352,70 @@ def _preencher_vazios(cli, dados: dict, db: Session) -> None:
         valor = (dados.get(campo) or "").strip()
         if valor and not getattr(cli, campo, None):
             setattr(cli, campo, valor)
+
+
+def _parse_date(s: str | None):
+    """'AAAA-MM-DD' → date, tolerante a vazio/erro."""
+    if not s:
+        return None
+    from datetime import date as _date
+    try:
+        return _date.fromisoformat(str(s).strip()[:10])
+    except Exception:
+        return None
+
+
+def _upsert_honorario_do_contrato(db: Session, contrato: Contrato, fin) -> None:
+    """
+    Cria ou atualiza o Honorário vinculado ao contrato a partir dos dados financeiros
+    lidos pela IA (mesmo espírito do lançamento automático do 'Gerar contrato'). Só age
+    se houver valor fixo ou êxito. Atualiza o existente se já houver um para o contrato.
+    """
+    from datetime import date as _date
+    from app.models.financeiro import Honorario
+
+    if not fin:
+        return
+    valor = fin.valor_honorarios
+    tem_exito = bool(fin.tem_exito)
+    if not valor and not tem_exito:
+        return  # nada financeiro a lançar
+
+    venc = _parse_date(fin.data_vencimento)
+    dcont = _parse_date(fin.data_contrato)
+    pct = fin.percentual_exito
+
+    existente = db.query(Honorario).filter(Honorario.contrato_id == contrato.id).first()
+    if existente:
+        if valor:
+            existente.valor_total = valor
+        if fin.valor_causa is not None:
+            existente.valor_causa = fin.valor_causa
+        if pct is not None:
+            existente.percentual_exito = pct
+        if tem_exito:
+            existente.tipo = "exito"
+        if venc:
+            existente.data_vencimento = venc
+        if dcont:
+            existente.data_contrato = dcont
+        if fin.condicao_pagamento:
+            existente.observacoes = fin.condicao_pagamento
+    else:
+        db.add(Honorario(
+            cliente_id=contrato.cliente_id,
+            processo_id=contrato.processo_id,
+            contrato_id=contrato.id,
+            descricao="Honorários — contrato (lido por IA)",
+            tipo="exito" if tem_exito else "fixo",
+            valor_total=valor or 0,
+            valor_causa=fin.valor_causa,
+            percentual_exito=pct,
+            data_contrato=dcont or _date.today(),
+            data_vencimento=venc,
+            observacoes=(fin.condicao_pagamento or None),
+            pendente_assinatura=True,
+        ))
 
 
 @router.post("/{contrato_id}/aplicar-contratantes", response_model=ContratoOut)
@@ -415,6 +479,10 @@ def aplicar_contratantes(
 
     if body.vincular_contrato:
         c.cliente_id = principal.id
+
+    # Lança/atualiza o Honorário do contrato (opt-in na tela) — usa o cliente já vinculado.
+    if body.lancar_financeiro:
+        _upsert_honorario_do_contrato(db, c, body.financeiro)
 
     db.commit()
 

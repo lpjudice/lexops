@@ -739,6 +739,9 @@ export default function ContratosPage() {
           onApplied={() => {
             qc.invalidateQueries({ queryKey: ['contratos'] })
             qc.invalidateQueries({ queryKey: ['clientes'] })
+            qc.invalidateQueries({ queryKey: ['honorarios'] })
+            qc.invalidateQueries({ queryKey: ['honorarios-pendentes-assinatura'] })
+            qc.invalidateQueries({ queryKey: ['financeiro-resumo'] })
           }}
         />
       )}

@@ -85,10 +85,24 @@ class ContratanteDecisao(BaseModel):
     principal: bool = False
 
 
+class ContratoFinanceiro(BaseModel):
+    """Dados financeiros lidos do contrato (para lançar/atualizar o Honorário)."""
+    valor_honorarios: float | None = None
+    tem_exito: bool = False
+    percentual_exito: float | None = None
+    valor_causa: float | None = None
+    data_vencimento: str | None = None
+    condicao_pagamento: str | None = None
+    data_contrato: str | None = None
+
+
 class AplicarContratantesRequest(BaseModel):
     decisoes: list[ContratanteDecisao]
     # Se True, o contrato passa a apontar para o cliente do contratante principal.
     vincular_contrato: bool = True
+    # Se True, cria/atualiza o Honorário do contrato a partir de `financeiro`.
+    lancar_financeiro: bool = False
+    financeiro: ContratoFinanceiro | None = None
 
 
 class ContratoOut(ContratoCreate):
