@@ -4,8 +4,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { prazosApi } from '../api/prazos'
 import type { PrazoCreate, TipoPrazo, StatusPrazo } from '../api/prazos'
 import { processosApi } from '../api/processos'
+import type { EstadoProcesso } from '../api/processos'
 import { clientesApi } from '../api/clientes'
 import ResponsavelComboBox from '../components/ResponsavelComboBox'
+import ProcessoCombobox from '../components/ProcessoCombobox'
 import { useFiltroMes } from '../components/useFiltroMes'
 import styles from './Page.module.css'
 import prazosStyles from './PrazosPage.module.css'
@@ -111,6 +113,12 @@ export default function PrazosPage() {
     onError: () => alert('Não foi possível remover este prazo.'),
   })
 
+  const criarProcesso = async (data: { numero_cnj: string; cliente_id: string; estado: EstadoProcesso }): Promise<string> => {
+    const p = await processosApi.criar(data)
+    qc.invalidateQueries({ queryKey: ['processos'] })
+    return p.id
+  }
+
   const getProcesso = (id: string) => processos.find((p) => p.id === id)
   const getCliente = (processoId: string) => {
     const proc = getProcesso(processoId)
@@ -152,18 +160,13 @@ export default function PrazosPage() {
         >
           <div className={styles.formRow}>
             <label className={styles.formLabel}>Processo *</label>
-            <select className={styles.input} value={form.processo_id}
-              onChange={(e) => setForm({ ...form, processo_id: e.target.value })} required>
-              <option value="">Selecione...</option>
-              {processos.map((p) => {
-                const cliente = clientes.find((c) => c.id === p.cliente_id)
-                return (
-                  <option key={p.id} value={p.id}>
-                    {p.numero_cnj}{cliente ? ` — ${cliente.nome}` : ''}
-                  </option>
-                )
-              })}
-            </select>
+            <ProcessoCombobox
+              value={form.processo_id}
+              onChange={(id) => setForm({ ...form, processo_id: id })}
+              processos={processos}
+              clientes={clientes}
+              onCreateProcesso={criarProcesso}
+            />
           </div>
           <div className={prazosStyles.twoCol}>
             <div className={styles.formRow}>
