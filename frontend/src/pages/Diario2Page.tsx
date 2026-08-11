@@ -3,8 +3,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { diario2Api } from '../api/diario2'
 import type { Diario2Publicacao, Diario2Dia, Diario2PrazoCreate, StatusPrazoDiario2 } from '../api/diario2'
 import { processosApi } from '../api/processos'
+import type { EstadoProcesso } from '../api/processos'
+import { clientesApi } from '../api/clientes'
 import { usuariosApi } from '../api/usuarios'
 import DespachoStatusResumo from '../components/DespachoStatusResumo'
+import ProcessoCombobox from '../components/ProcessoCombobox'
 import styles from './Page.module.css'
 import diario2Styles from './Diario2Page.module.css'
 
@@ -74,6 +77,10 @@ export default function Diario2Page() {
     queryKey: ['usuarios'],
     queryFn: usuariosApi.listar,
   })
+  const { data: clientes = [] } = useQuery({
+    queryKey: ['clientes'],
+    queryFn: () => clientesApi.listar(),
+  })
 
   const sync = useMutation({
     mutationFn: () => diario2Api.syncGmail(syncDays),
@@ -113,6 +120,12 @@ export default function Diario2Page() {
   const relembre = useMutation({
     mutationFn: () => diario2Api.relembre(relembreDays),
   })
+
+  const criarProcesso = async (data: { numero_cnj: string; cliente_id: string; estado: EstadoProcesso }): Promise<string> => {
+    const p = await processosApi.criar(data)
+    qc.invalidateQueries({ queryKey: ['processos'] })
+    return p.id
+  }
 
   const abrirPrazo = (pub: Diario2Publicacao) => {
     setPrazoPub(pub.id)
@@ -268,10 +281,13 @@ export default function Diario2Page() {
                               criarPrazo.mutate({ id: pub.id, payload: prazoForm })
                             }}
                           >
-                            <select className={styles.input} value={prazoForm.processo_id ?? ''} onChange={(e) => setPrazoForm({ ...prazoForm, processo_id: e.target.value })} required>
-                              <option value="">Processo...</option>
-                              {processos.map((p) => <option key={p.id} value={p.id}>{p.numero_cnj}</option>)}
-                            </select>
+                            <ProcessoCombobox
+                              value={prazoForm.processo_id ?? ''}
+                              onChange={(id) => setPrazoForm({ ...prazoForm, processo_id: id })}
+                              processos={processos}
+                              clientes={clientes}
+                              onCreateProcesso={criarProcesso}
+                            />
                             <select className={styles.input} value={prazoForm.tipo} onChange={(e) => setPrazoForm({ ...prazoForm, tipo: e.target.value })}>
                               {TIPOS.map((tipo) => <option key={tipo} value={tipo}>{tipo}</option>)}
                             </select>
