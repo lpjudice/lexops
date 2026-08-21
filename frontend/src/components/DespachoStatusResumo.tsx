@@ -11,6 +11,16 @@ export default function DespachoStatusResumo({ status }: { status: DespachoStatu
       <div style={{ fontWeight: 700, color: '#334155', marginBottom: 4 }}>⚙️ Tratado no Despacho</div>
       {status.disposicao === 'nao_e_nosso' ? (
         <div style={{ color: '#b91c1c' }}>✕ Não é do escritório</div>
+      ) : status.disposicao === 'nada_a_fazer' ? (
+        <div style={{ color: '#7c3aed' }}>
+          🚫 <strong>Nada a fazer</strong> — publicação encerrada sem providência
+          {status.prazo && <> · <a href="/prazos?tab=nada_a_fazer" style={{ color: 'var(--teal)' }}>ver em Prazos</a></>}
+          {status.tarefas.length > 0 && (
+            <div style={{ color: '#6b7280', marginTop: 2 }}>
+              {status.tarefas.length} tarefa(s) automática(s) cancelada(s) por essa decisão.
+            </div>
+          )}
+        </div>
       ) : status.disposicao === 'sem_acao' ? (
         <div style={{ color: '#6b7280' }}>◯ Revisado — sem necessidade de ação</div>
       ) : (

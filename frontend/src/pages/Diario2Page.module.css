@@ -185,6 +185,21 @@
   font-weight: 650;
 }
 
+/* Publicação encerrada por decisão explícita de "não há o que fazer" —
+   visualmente diferente de "sem prazo" (que é falta de triagem). */
+.chipNadaAFazer {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  background: #f3e8ff;
+  color: #6d28d9;
+  padding: 2px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
 .actions {
   display: flex;
   gap: 4px;

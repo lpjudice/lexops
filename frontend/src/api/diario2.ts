@@ -1,7 +1,14 @@
 import api from './client'
 import type { DespachoStatus } from './diario'
 
-export type StatusPrazoDiario2 = 'pendente' | 'cumprido' | 'perdido'
+export type StatusPrazoDiario2 = 'pendente' | 'cumprido' | 'perdido' | 'ignorado' | 'nada_a_fazer'
+
+export interface NadaAFazerResultado {
+  publicacao_id: string
+  prazo_id: string | null
+  tarefas_canceladas: number
+  aviso: string | null
+}
 
 export interface Diario2Prazo {
   id: string
@@ -121,6 +128,11 @@ export const diario2Api = {
 
   atualizarPrazoStatus: (id: string, status: StatusPrazoDiario2) =>
     api.patch<Diario2Publicacao>(`/diario2/${id}/prazo-status`, { status }).then((r) => r.data),
+
+  nadaAFazer: (id: string) =>
+    api.post<Diario2Publicacao & { resultado_nada_a_fazer: NadaAFazerResultado }>(
+      `/diario2/${id}/nada-a-fazer`,
+    ).then((r) => r.data),
 
   relembre: (daysBack = 7) =>
     api.get<Diario2Relembre>('/diario2/relembre', { params: { days_back: daysBack } }).then((r) => r.data),

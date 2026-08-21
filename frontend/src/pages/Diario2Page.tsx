@@ -7,6 +7,7 @@ import type { EstadoProcesso } from '../api/processos'
 import { clientesApi } from '../api/clientes'
 import { usuariosApi } from '../api/usuarios'
 import DespachoStatusResumo from '../components/DespachoStatusResumo'
+import PrazoEditorInline from '../components/PrazoEditorInline'
 import ProcessoCombobox from '../components/ProcessoCombobox'
 import styles from './Page.module.css'
 import diario2Styles from './Diario2Page.module.css'
@@ -40,11 +41,22 @@ function defaultPrazo(pub: Diario2Publicacao): Diario2PrazoCreate {
   }
 }
 
+const STATUS_LABEL: Record<StatusPrazoDiario2, string> = {
+  pendente: 'pendente',
+  cumprido: 'cumprido',
+  perdido: 'perdido',
+  ignorado: 'ignorado',
+  nada_a_fazer: 'nada a fazer',
+}
+
 function prazoLabel(pub: Diario2Publicacao) {
   if (!pub.tem_publicacao) return 'Sem publicação'
   if (!pub.prazo) return 'Sem prazo'
-  const status = pub.prazo.status === 'cumprido' ? 'cumprido' : pub.prazo.status
-  return `${formatDate(pub.prazo.data_limite)} · ${status}`
+  return `${formatDate(pub.prazo.data_limite)} · ${STATUS_LABEL[pub.prazo.status] ?? pub.prazo.status}`
+}
+
+function ehNadaAFazer(pub: Diario2Publicacao) {
+  return pub.despacho_status?.disposicao === 'nada_a_fazer' || pub.prazo?.status === 'nada_a_fazer'
 }
 
 function nomeCliente(pub: Diario2Publicacao) {
@@ -59,6 +71,7 @@ export default function Diario2Page() {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [prazoPub, setPrazoPub] = useState<string | null>(null)
   const [prazoForm, setPrazoForm] = useState<Diario2PrazoCreate | null>(null)
+  const [editPrazoPub, setEditPrazoPub] = useState<string | null>(null)
   const [msg, setMsg] = useState('')
 
   const { data, isLoading } = useQuery({
@@ -120,6 +133,25 @@ export default function Diario2Page() {
   const relembre = useMutation({
     mutationFn: () => diario2Api.relembre(relembreDays),
   })
+
+  const nadaAFazer = useMutation({
+    mutationFn: (id: string) => diario2Api.nadaAFazer(id),
+    onSuccess: (r) => {
+      const res = r.resultado_nada_a_fazer
+      const canceladas = res.tarefas_canceladas
+        ? ` ${res.tarefas_canceladas} tarefa(s) automática(s) cancelada(s).`
+        : ''
+      setMsg(res.aviso ?? `Marcado como "nada a fazer".${canceladas} Já espelhado na aba Nada a fazer em Prazos.`)
+      qc.invalidateQueries({ queryKey: ['diario2'] })
+      qc.invalidateQueries({ queryKey: ['diario'] })
+      qc.invalidateQueries({ queryKey: ['prazos'] })
+      qc.invalidateQueries({ queryKey: ['tarefas'] })
+      qc.invalidateQueries({ queryKey: ['despacho'] })
+    },
+    onError: (e: { response?: { data?: { detail?: string } } }) =>
+      setMsg(e.response?.data?.detail ?? 'Não foi possível marcar como "nada a fazer".'),
+  })
+
 
   const criarProcesso = async (data: { numero_cnj: string; cliente_id: string; estado: EstadoProcesso }): Promise<string> => {
     const p = await processosApi.criar(data)
@@ -227,6 +259,11 @@ export default function Diario2Page() {
                         <span className={diario2Styles.tribunal}>{pub.tribunal ?? '-'}</span>
                         <span className={diario2Styles.summary}>{pub.resumo_curto}</span>
                         <span className={pub.prazo ? diario2Styles.prazoOk : diario2Styles.prazoMiss}>{prazoLabel(pub)}</span>
+                        {ehNadaAFazer(pub) && (
+                          <span className={diario2Styles.chipNadaAFazer} title="Tratada: revisada e sem providência a tomar">
+                            🚫 Nada a fazer
+                          </span>
+                        )}
                         <div className={diario2Styles.actions}>
                           <button className={diario2Styles.ghostBtn} onClick={() => setExpanded(expanded === pub.id ? null : pub.id)}>
                             {expanded === pub.id ? 'Fechar' : 'Abrir'}
@@ -237,6 +274,22 @@ export default function Diario2Page() {
                           {!pub.prazo && (
                             <button className={diario2Styles.ghostBtn} onClick={() => abrirPrazo(pub)}>
                               + Prazo
+                            </button>
+                          )}
+                          {!ehNadaAFazer(pub) && (
+                            <button
+                              className={diario2Styles.ghostBtn}
+                              disabled={nadaAFazer.isPending}
+                              title="Publicação revisada que não exige providência (ex.: sentença favorável sem embargo a opor). Encerra a publicação e cancela as tarefas automáticas dela."
+                              onClick={() => {
+                                if (confirm(
+                                  'Marcar esta publicação como "Nada a fazer"?\n\n' +
+                                  'Ela é encerrada aqui e no Diário Oficial, aparece na aba "Nada a fazer" da tela de Prazos, ' +
+                                  'e as tarefas criadas automaticamente por causa dela são canceladas.',
+                                )) nadaAFazer.mutate(pub.id)
+                              }}
+                            >
+                              🚫 Nada a fazer
                             </button>
                           )}
                         </div>
@@ -264,13 +317,56 @@ export default function Diario2Page() {
                         {pub.prazo && (
                           <div className={diario2Styles.controls} style={{ marginTop: 8 }}>
                             <span className={diario2Styles.prazoOk}>Prazo: {formatDate(pub.prazo.data_limite)}</span>
-                            <select className={styles.input} style={{ width: 150 }} value={pub.prazo.status} onChange={(e) => statusPrazo.mutate({ id: pub.id, status: e.target.value as StatusPrazoDiario2 })}>
-                              <option value="pendente">pendente</option>
-                              <option value="cumprido">cumprido</option>
-                              <option value="perdido">perdido</option>
+                            <select
+                              className={styles.input}
+                              style={{ width: 150 }}
+                              value={pub.prazo.status}
+                              onChange={(e) => {
+                                const novo = e.target.value as StatusPrazoDiario2
+                                if (novo === 'nada_a_fazer' && !confirm(
+                                  'Marcar como "Nada a fazer"?\n\nA publicação é encerrada e as tarefas automáticas dela são canceladas.',
+                                )) return
+                                statusPrazo.mutate({ id: pub.id, status: novo })
+                              }}
+                            >
+                              {(Object.keys(STATUS_LABEL) as StatusPrazoDiario2[]).map((s) => (
+                                <option key={s} value={s}>{STATUS_LABEL[s]}</option>
+                              ))}
                             </select>
+                            <button
+                              className={diario2Styles.ghostBtn}
+                              onClick={() => setEditPrazoPub(editPrazoPub === pub.id ? null : pub.id)}
+                            >
+                              {editPrazoPub === pub.id ? 'Cancelar edição' : '✎ Alterar prazo'}
+                            </button>
+                            <a className={diario2Styles.ghostBtn} href={`/prazos?destaque=${pub.prazo.id}`} style={{ textDecoration: 'none' }}>
+                              Ver em Prazos
+                            </a>
                           </div>
                         )}
+
+                        {editPrazoPub === pub.id && pub.prazo && (
+                          <PrazoEditorInline
+                            prazo={{
+                              id: pub.prazo.id,
+                              tipo: pub.prazo.tipo,
+                              peca_necessaria: pub.prazo.peca_necessaria ?? null,
+                              descricao: pub.prazo.descricao ?? null,
+                              data_publicacao: pub.data_publicacao,
+                              dias_prazo: pub.prazo.dias_prazo,
+                              tipo_contagem: pub.prazo.tipo_contagem,
+                              responsavel: pub.despacho_status?.prazo?.responsavel ?? null,
+                              status: pub.prazo.status,
+                            }}
+                            dataPublicacaoFallback={pub.data_publicacao}
+                            onCancel={() => setEditPrazoPub(null)}
+                            onSaved={() => {
+                              setEditPrazoPub(null)
+                              setMsg('Prazo atualizado — a alteração já vale na tela de Prazos e no Diário Oficial.')
+                            }}
+                          />
+                        )}
+
                         <DespachoStatusResumo status={pub.despacho_status} />
 
                         {prazoPub === pub.id && prazoForm && (

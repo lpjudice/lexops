@@ -48,11 +48,20 @@ def enriquecer_status_despacho(db: Session, pubs: list[Publicacao]) -> None:
             "tratada": pub.despacho_tratada,
             "rejeitada": pub.rejeitada,
             "disposicao": pub.disposicao,
+            # Campos de edição vêm junto: o Diário Oficial e o Recorte Digital
+            # alteram o prazo direto pelo PATCH /prazos/{id}, e sem eles a tela
+            # não teria como pré-preencher o formulário.
             "prazo": {
                 "id": str(prazo.id),
                 "tipo": prazo.tipo,
                 "data_limite": prazo.data_limite.isoformat() if prazo.data_limite else None,
                 "status": prazo.status,
+                "peca_necessaria": prazo.peca_necessaria,
+                "descricao": prazo.descricao,
+                "data_publicacao": prazo.data_publicacao.isoformat() if prazo.data_publicacao else None,
+                "dias_prazo": prazo.dias_prazo,
+                "tipo_contagem": prazo.tipo_contagem,
+                "responsavel": prazo.responsavel,
             } if prazo else None,
             "tarefa_card": {
                 "id": str(card.id),

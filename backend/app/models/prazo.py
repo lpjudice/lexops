@@ -46,10 +46,19 @@ class Prazo(Base):
     data_limite: Mapped[date | None] = mapped_column(Date)           # com feriados
     data_limite_sem_feriado: Mapped[date | None] = mapped_column(Date)  # sem feriados
 
+    # "nada_a_fazer": revisado e não exige providência (ex.: sentença favorável
+    # sem embargos a opor). É tratamento, não abandono — sai do radar dos
+    # lembretes e some da aba Ativo, igual a cumprido/ignorado.
     status: Mapped[str] = mapped_column(
-        Enum("pendente", "cumprido", "perdido", "ignorado", name="status_prazo"),
+        Enum("pendente", "cumprido", "perdido", "ignorado", "nada_a_fazer", name="status_prazo"),
         nullable=False,
         default="pendente",
+    )
+
+    # Última vez que o lembrete diário (e-mail + Telegram) foi disparado —
+    # garante 1 envio por dia mesmo se o scheduler rodar de novo.
+    ultimo_lembrete_em: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
     created_at: Mapped[datetime] = mapped_column(

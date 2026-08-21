@@ -22,6 +22,7 @@ from app.services.despacho_status import enriquecer_status_despacho
 from app.services.gmail_diario import sincronizar_gmail
 from app.services.google_master_tokens import load_master_google_tokens, save_master_google_tokens
 from app.services.ia_diario import analisar_publicacao
+from app.services.nada_a_fazer import aplicar_status_prazo, marcar_nada_a_fazer
 from app.services.prazo_calc import calcular_prazo
 
 router = APIRouter(prefix="/diario2", tags=["diario2"],
@@ -812,16 +813,33 @@ def atualizar_status_prazo_diario2(pub_id: uuid.UUID, payload: Diario2StatusPraz
     pub = db.query(Publicacao).filter(Publicacao.id == pub_id).first()
     if not pub or not pub.prazo_id:
         raise HTTPException(status_code=404, detail="Prazo da publicação não encontrado")
-    if payload.status not in {"pendente", "cumprido", "perdido"}:
+    if payload.status not in {"pendente", "cumprido", "perdido", "ignorado", "nada_a_fazer"}:
         raise HTTPException(status_code=400, detail="Status inválido")
     prazo = db.query(Prazo).filter(Prazo.id == pub.prazo_id).first()
     if not prazo:
         raise HTTPException(status_code=404, detail="Prazo não encontrado")
     prazo.status = payload.status
+    aplicar_status_prazo(db, prazo, payload.status)
     db.commit()
     db.refresh(pub)
     enriquecer_status_despacho(db, [pub])
     return _publicacao_payload(pub)
+
+
+@router.post("/{pub_id}/nada-a-fazer")
+def marcar_nada_a_fazer_diario2(pub_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Publicação revisada que não pede providência (ex.: sentença favorável).
+
+    Fecha a publicação, joga o prazo para a aba "Nada a fazer" em Prazos e
+    cancela as tarefas que tinham sido criadas automaticamente por ela.
+    """
+    pub = db.query(Publicacao).filter(Publicacao.id == pub_id).first()
+    if not pub:
+        raise HTTPException(status_code=404, detail="Publicação não encontrada")
+    resultado = marcar_nada_a_fazer(db, pub)
+    db.refresh(pub)
+    enriquecer_status_despacho(db, [pub])
+    return {**_publicacao_payload(pub), "resultado_nada_a_fazer": resultado}
 
 
 @router.get("/relembre")

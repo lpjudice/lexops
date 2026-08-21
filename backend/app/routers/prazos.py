@@ -11,10 +11,26 @@ from app.models.publicacao import Publicacao
 from app.models.tarefa import Tarefa
 from app.schemas.prazo import PrazoCreate, PrazoOut, PrazoUpdate
 from app.services.google_calendar import criar_evento, deletar_evento
+from app.services.nada_a_fazer import aplicar_status_prazo
 from app.services.prazo_calc import calcular_prazo
 
 router = APIRouter(prefix="/prazos", tags=["prazos"],
                    dependencies=[Depends(get_current_user)])
+
+
+def _origem_payload(pub: Publicacao) -> dict:
+    return {
+        "id": pub.id,
+        "fonte": pub.fonte,
+        # O Recorte Digital OAB é o que entra por Gmail; o resto é Diário Oficial.
+        "origem_menu": "recorte" if pub.fonte == "gmail" else "diario",
+        "data_publicacao": pub.data_publicacao,
+        "numero_cnj": pub.numero_cnj,
+        "tribunal": pub.tribunal,
+        "texto_resumo": pub.texto_resumo,
+        "url_fonte": pub.url_fonte,
+        "disposicao": pub.disposicao,
+    }
 
 
 def _recalcular(prazo: Prazo, processo: Processo, db: Session) -> None:
@@ -47,12 +63,16 @@ def listar_prazos(
         tarefas_por_prazo.setdefault(t.prazo_id, []).append({"id": t.id, "titulo": t.titulo})
 
     peca_por_prazo: dict = {}
-    for pub in db.query(Publicacao).filter(Publicacao.prazo_id.in_([p.id for p in prazos]), Publicacao.peca_doc_url.isnot(None)).all():
-        peca_por_prazo[pub.prazo_id] = pub.peca_doc_url
+    origem_por_prazo: dict = {}
+    for pub in db.query(Publicacao).filter(Publicacao.prazo_id.in_([p.id for p in prazos])).all():
+        if pub.peca_doc_url:
+            peca_por_prazo[pub.prazo_id] = pub.peca_doc_url
+        origem_por_prazo[pub.prazo_id] = _origem_payload(pub)
 
     for p in prazos:
         p.tarefas_vinculadas = tarefas_por_prazo.get(p.id, [])
         p.peca_doc_url = peca_por_prazo.get(p.id)
+        p.publicacao_origem = origem_por_prazo.get(p.id)
 
     return prazos
 
@@ -99,13 +119,62 @@ def atualizar_prazo(
     if not prazo:
         raise HTTPException(status_code=404, detail="Prazo não encontrado")
 
-    for field, value in data.model_dump(exclude_unset=True).items():
+    alteracoes = data.model_dump(exclude_unset=True)
+
+    novo_processo_id = alteracoes.get("processo_id")
+    if novo_processo_id and novo_processo_id != prazo.processo_id:
+        if not db.query(Processo).filter(Processo.id == novo_processo_id).first():
+            raise HTTPException(status_code=404, detail="Processo não encontrado")
+
+    status_anterior = prazo.status
+    limite_anterior = prazo.data_limite
+
+    for field, value in alteracoes.items():
         setattr(prazo, field, value)
 
-    _recalcular(prazo, prazo.processo, db)
+    db.flush()
+    processo = db.query(Processo).filter(Processo.id == prazo.processo_id).first()
+    if not processo:
+        raise HTTPException(status_code=404, detail="Processo do prazo não encontrado")
+
+    # dias_prazo == 0 é o marcador de "nada a fazer" sem contagem: recalcular
+    # empurraria a data limite pro dia útil seguinte sem motivo nenhum.
+    if prazo.dias_prazo and prazo.dias_prazo > 0:
+        _recalcular(prazo, processo, db)
+
+    novo_status = alteracoes.get("status")
+    if novo_status is not None and novo_status != status_anterior:
+        aplicar_status_prazo(db, prazo, novo_status)
+
     db.commit()
     db.refresh(prazo)
+
+    # A data mudou — o evento no Google Calendar tem que acompanhar, senão a
+    # agenda passa a mentir sobre o prazo editado.
+    if prazo.data_limite and prazo.data_limite != limite_anterior:
+        titulo = f"[PRAZO] {prazo.tipo.upper()} — {processo.numero_cnj}"
+        event_id = criar_evento(
+            titulo, prazo.data_limite, prazo.descricao or "", event_id=prazo.google_event_id
+        )
+        if event_id and event_id != prazo.google_event_id:
+            prazo.google_event_id = event_id
+            db.commit()
+            db.refresh(prazo)
+
+    pub = db.query(Publicacao).filter(Publicacao.prazo_id == prazo.id).first()
+    prazo.publicacao_origem = _origem_payload(pub) if pub else None
     return prazo
+
+
+@router.post("/lembretes/enviar")
+def disparar_lembretes(
+    forcar: bool = Query(False, description="Reenvia mesmo se já foi enviado hoje"),
+    db: Session = Depends(get_db),
+):
+    """Dispara a rodada de lembretes na hora (o scheduler roda sozinho às 07h30)."""
+    from app.services.prazo_lembretes import enviar_lembretes
+
+    return enviar_lembretes(db, forcar=forcar)
 
 
 @router.delete("/{prazo_id}", status_code=status.HTTP_204_NO_CONTENT)

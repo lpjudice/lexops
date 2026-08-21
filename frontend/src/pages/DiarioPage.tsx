@@ -7,6 +7,7 @@ import type { Processo } from '../api/processos'
 import { clientesApi } from '../api/clientes'
 import type { Cliente } from '../api/clientes'
 import DespachoStatusResumo from '../components/DespachoStatusResumo'
+import PrazoEditorInline from '../components/PrazoEditorInline'
 import styles from './Page.module.css'
 import diarioStyles from './DiarioPage.module.css'
 
@@ -300,6 +301,7 @@ export default function DiarioPage() {
   const qc = useQueryClient()
   const [expandido, setExpandido] = useState<string | null>(null)
   const [vincularId, setVincularId] = useState<string | null>(null)
+  const [editPrazoPub, setEditPrazoPub] = useState<string | null>(null)
   const [processoSelecionado, setProcessoSelecionado] = useState('')
   const [filtroEstado, setFiltroEstado] = useState<DiarioEstadoFiltro>('abertas')
   const [filtroComConteudo, setFiltroComConteudo] = useState(false)
@@ -465,6 +467,31 @@ export default function DiarioPage() {
   const reabrir = useMutation({
     mutationFn: (id: string) => diarioApi.reabrir(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['diario'] }),
+  })
+
+  const nadaAFazer = useMutation({
+    mutationFn: (id: string) => diarioApi.nadaAFazer(id),
+    onSuccess: (r, id) => {
+      // O mesmo tratamento aparece no Recorte Digital e na tela de Prazos —
+      // os três leem a mesma publicação/prazo.
+      qc.invalidateQueries({ queryKey: ['diario'] })
+      qc.invalidateQueries({ queryKey: ['diario2'] })
+      qc.invalidateQueries({ queryKey: ['prazos'] })
+      qc.invalidateQueries({ queryKey: ['tarefas'] })
+      qc.invalidateQueries({ queryKey: ['despacho'] })
+      const canceladas = r.tarefas_canceladas
+        ? ` ${r.tarefas_canceladas} tarefa(s) automática(s) cancelada(s).`
+        : ''
+      setAcaoMsg((m) => ({
+        ...m,
+        [id]: r.aviso ?? `🚫 Marcado como "nada a fazer".${canceladas} Espelhado na aba Nada a fazer em Prazos.`,
+      }))
+    },
+    onError: (e: unknown, id) => {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+        ?? 'Erro ao marcar como "nada a fazer"'
+      setAcaoMsg((m) => ({ ...m, [id]: `⚠ ${msg}` }))
+    },
   })
 
   const vincular = useMutation({
@@ -1041,6 +1068,22 @@ export default function DiarioPage() {
                   >
                     Copiar
                   </button>
+                  {pub.despacho_status?.disposicao !== 'nada_a_fazer' && (
+                    <button
+                      className={diarioStyles.btnCopy}
+                      disabled={nadaAFazer.isPending}
+                      title="Publicação revisada que não exige providência (ex.: sentença favorável sem embargo a opor). Encerra a publicação e cancela as tarefas automáticas dela."
+                      onClick={() => {
+                        if (confirm(
+                          'Marcar esta publicação como "Nada a fazer"?\n\n' +
+                          'Ela é encerrada aqui e no Recorte Digital, aparece na aba "Nada a fazer" da tela de Prazos, ' +
+                          'e as tarefas criadas automaticamente por causa dela são canceladas.',
+                        )) nadaAFazer.mutate(pub.id)
+                      }}
+                    >
+                      🚫 Nada a fazer
+                    </button>
+                  )}
                   <button
                     className={styles.btnDanger}
                     onClick={() => { if (confirm('Rejeitar esta publicação?')) rejeitar.mutate(pub.id) }}
@@ -1111,6 +1154,33 @@ export default function DiarioPage() {
               )}
 
               <DespachoStatusResumo status={pub.despacho_status} />
+
+              {/* Alterar o prazo sem sair do Diário: é o mesmo registro da tela
+                  de Prazos e do Recorte Digital, então grava e reflete nos três. */}
+              {pub.despacho_status?.prazo && (
+                editPrazoPub === pub.id ? (
+                  <PrazoEditorInline
+                    prazo={pub.despacho_status.prazo}
+                    dataPublicacaoFallback={pub.data_publicacao}
+                    onCancel={() => setEditPrazoPub(null)}
+                    onSaved={() => {
+                      setEditPrazoPub(null)
+                      setAcaoMsg((m) => ({
+                        ...m,
+                        [pub.id]: '✓ Prazo atualizado — vale também em Prazos e no Recorte Digital.',
+                      }))
+                    }}
+                  />
+                ) : (
+                  <button
+                    className={diarioStyles.btnCopy}
+                    style={{ marginBottom: 8 }}
+                    onClick={() => setEditPrazoPub(pub.id)}
+                  >
+                    ✎ Alterar prazo
+                  </button>
+                )
+              )}
 
               {vincularId === pub.id && (
                 <div className={diarioStyles.vincularForm}>

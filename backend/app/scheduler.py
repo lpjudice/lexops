@@ -422,6 +422,32 @@ def _alerta_falha_relatorio(db, cfg, comp, motivo) -> None:
         logger.warning("Falha ao alertar erro de relatório: %s", exc)
 
 
+def _lembretes_prazos() -> None:
+    """07h30 BRT, todo dia — e-mail + Telegram de cada prazo ainda pendente.
+
+    Todo dia mesmo (inclusive fim de semana): prazo que vence na segunda tem que
+    aparecer no sábado e no domingo. Vencido e ainda pendente continua sendo
+    cobrado até receber tratamento na tela de Prazos.
+    """
+    try:
+        from app.database import SessionLocal
+        from app.services.prazo_lembretes import enviar_lembretes
+
+        db = SessionLocal()
+        try:
+            res = enviar_lembretes(db)
+            logger.info(
+                "Scheduler: lembretes de prazos — %d ativo(s), %d e-mail(s), "
+                "%d já enviados hoje, %d erro(s), telegram=%s",
+                res["prazos_ativos"], res["emails_enviados"],
+                res["pulados_hoje"], res["erros"], res["telegram_enviado"],
+            )
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.warning("Scheduler: falha nos lembretes de prazos: %s", exc)
+
+
 def _gerar_instagram_diario() -> None:
     """07:00 BRT — Agente master gera 3 sugestões de post do dia."""
     try:
@@ -531,8 +557,15 @@ def start_scheduler() -> None:
         id="instagram_sugestoes_diarias",
         replace_existing=True,
     )
+    # Lembrete diário de prazos (e-mail + Telegram) — todo dia, 07h30 BRT
+    scheduler.add_job(
+        _lembretes_prazos,
+        trigger=CronTrigger(hour=7, minute=30, timezone="America/Sao_Paulo"),
+        id="lembretes_prazos_diarios",
+        replace_existing=True,
+    )
     scheduler.start()
-    logger.info("Scheduler iniciado — DataJud 03:00, Diário Oficial 08:00, Recorte Digital (Diário 2) 07/09/11/15h, Drive watch 06:00, lembretes de reembolso 09:10")
+    logger.info("Scheduler iniciado — DataJud 03:00, Diário Oficial 08:00, Recorte Digital (Diário 2) 07/09/11/15h, Drive watch 06:00, lembretes de prazos 07:30, lembretes de reembolso 09:10")
 
 
 def stop_scheduler() -> None:

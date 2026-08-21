@@ -1241,6 +1241,14 @@ def _run_migrations() -> None:
             ) sub WHERE patrimonio_bens.id = sub.id
         """))
 
+        # Prazos: tratamento "Nada a fazer" + controle do lembrete diário
+        conn.execute(text(
+            "ALTER TYPE status_prazo ADD VALUE IF NOT EXISTS 'nada_a_fazer'"
+        ))
+        conn.execute(text(
+            "ALTER TABLE prazos ADD COLUMN IF NOT EXISTS ultimo_lembrete_em TIMESTAMPTZ"
+        ))
+
         conn.commit()
 
 

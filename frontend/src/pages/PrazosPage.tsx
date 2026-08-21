@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { prazosApi } from '../api/prazos'
-import type { PrazoCreate, TipoPrazo, StatusPrazo } from '../api/prazos'
+import type { Prazo, PrazoCreate, PrazoEdit, TipoPrazo, TipoContagem, StatusPrazo } from '../api/prazos'
 import { processosApi } from '../api/processos'
 import type { EstadoProcesso } from '../api/processos'
 import { clientesApi } from '../api/clientes'
@@ -36,7 +36,10 @@ function diasRestantes(data?: string): number | null {
   return Math.ceil(diff / (1000 * 60 * 60 * 24))
 }
 
-function urgenciaClass(dias: number | null): string {
+/** Um prazo só deixa de cobrar atenção quando recebe tratamento. Vencido e
+ * ainda "pendente" é o caso mais grave que existe aqui — vai de vermelho. */
+function urgenciaClass(dias: number | null, status: StatusPrazo): string {
+  if (status !== 'pendente') return prazosStyles.tratado
   if (dias === null) return ''
   if (dias < 0) return prazosStyles.vencido
   if (dias <= 2) return prazosStyles.urgente
@@ -49,17 +52,64 @@ function formatDate(d?: string) {
   return new Date(d + 'T12:00:00').toLocaleDateString('pt-BR')
 }
 
-type TabStatus = 'todas' | 'ativo' | 'pendente' | 'cumprido' | 'perdido' | 'ignorado'
+const STATUS_OPCOES: { valor: StatusPrazo; label: string }[] = [
+  { valor: 'pendente', label: 'pendente' },
+  { valor: 'cumprido', label: 'cumprido' },
+  { valor: 'perdido', label: 'perdido' },
+  { valor: 'ignorado', label: 'ignorado' },
+  { valor: 'nada_a_fazer', label: 'nada a fazer' },
+]
+
+type TabStatus = 'todas' | 'ativo' | 'pendente' | 'cumprido' | 'perdido' | 'ignorado' | 'nada_a_fazer'
+
+const TAB_LABEL: Record<TabStatus, string> = {
+  todas: 'Todas',
+  ativo: 'Ativo',
+  pendente: 'Pendente',
+  cumprido: 'Cumprido',
+  perdido: 'Perdido',
+  ignorado: 'Ignorado',
+  nada_a_fazer: 'Nada a fazer',
+}
+
+const TABS: TabStatus[] = ['todas', 'ativo', 'pendente', 'cumprido', 'perdido', 'ignorado', 'nada_a_fazer']
+
+/** Estado do editor completo do card (não só peça/responsável, como antes). */
+type EditForm = {
+  processo_id: string
+  tipo: TipoPrazo
+  peca_necessaria: string
+  data_publicacao: string
+  dias_prazo: number
+  tipo_contagem: TipoContagem
+  descricao: string
+  responsavel: { nome: string; email: string; id?: string | null }
+}
+
+function editFormDe(p: Prazo): EditForm {
+  return {
+    processo_id: p.processo_id,
+    tipo: p.tipo,
+    peca_necessaria: p.peca_necessaria ?? '',
+    data_publicacao: p.data_publicacao,
+    dias_prazo: p.dias_prazo,
+    tipo_contagem: p.tipo_contagem,
+    descricao: p.descricao ?? '',
+    responsavel: { nome: p.responsavel ?? '', email: '', id: p.responsavel_id ?? null },
+  }
+}
 
 export default function PrazosPage() {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<PrazoCreate>(EMPTY)
   const [editando, setEditando] = useState<string | null>(null)
-  const [editPeca, setEditPeca] = useState('')
-  const [editResponsavel, setEditResponsavel] = useState<{ nome: string; email: string; id?: string | null }>({ nome: '', email: '', id: null })
-  const [tabStatus, setTabStatus] = useState<TabStatus>('ativo')
+  const [editForm, setEditForm] = useState<EditForm | null>(null)
   const [searchParams] = useSearchParams()
+  const tabInicial = searchParams.get('tab')
+  const [tabStatus, setTabStatus] = useState<TabStatus>(
+    TABS.includes(tabInicial as TabStatus) ? (tabInicial as TabStatus) : 'ativo',
+  )
   const destaqueId = searchParams.get('destaque')
   const destaqueRef = useRef<HTMLDivElement | null>(null)
   const [jaFocou, setJaFocou] = useState(false)
@@ -76,7 +126,7 @@ export default function PrazosPage() {
     if (!destaqueId || jaFocou || prazos.length === 0) return
     const alvo = prazos.find((p) => p.id === destaqueId)
     if (alvo) {
-      setTabStatus(alvo.status === 'pendente' ? 'pendente' : (alvo.status as TabStatus))
+      setTabStatus(alvo.status === 'pendente' ? 'ativo' : (alvo.status as TabStatus))
       setJaFocou(true)
       setTimeout(() => destaqueRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100)
     }
@@ -99,13 +149,58 @@ export default function PrazosPage() {
   })
 
   const atualizar = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Parameters<typeof prazosApi.atualizar>[1] }) =>
-      prazosApi.atualizar(id, data),
+    mutationFn: ({ id, data }: { id: string; data: PrazoEdit }) => prazosApi.atualizar(id, data),
     onSuccess: () => {
+      // O prazo é a mesma linha vista no Diário Oficial e no Recorte Digital —
+      // invalida os dois pra edição feita aqui aparecer lá na hora.
       qc.invalidateQueries({ queryKey: ['prazos'] })
+      qc.invalidateQueries({ queryKey: ['diario'] })
+      qc.invalidateQueries({ queryKey: ['diario2'] })
+      qc.invalidateQueries({ queryKey: ['tarefas'] })
       setEditando(null)
+      setEditForm(null)
     },
+    onError: (e: { response?: { data?: { detail?: string } } }) =>
+      alert(e.response?.data?.detail ?? 'Não foi possível salvar as alterações do prazo.'),
   })
+
+  const lembretes = useMutation({
+    mutationFn: () => prazosApi.enviarLembretes(true),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['prazos'] })
+      alert(
+        `Lembretes disparados.\n\n` +
+        `${r.prazos_ativos} prazo(s) em aberto · ${r.emails_enviados} e-mail(s) enviado(s)\n` +
+        `Telegram: ${r.telegram_enviado ? 'enviado' : 'não enviado (bot/chat não configurado)'}` +
+        (r.erros ? `\n${r.erros} falha(s) — veja os logs.` : ''),
+      )
+    },
+    onError: (e: { response?: { data?: { detail?: string } } }) =>
+      alert(e.response?.data?.detail ?? 'Não foi possível disparar os lembretes agora.'),
+  })
+
+  const abrirEditor = (p: Prazo) => {
+    setEditando(p.id)
+    setEditForm(editFormDe(p))
+  }
+
+  const salvarEdicao = (id: string) => {
+    if (!editForm) return
+    atualizar.mutate({
+      id,
+      data: {
+        processo_id: editForm.processo_id,
+        tipo: editForm.tipo,
+        peca_necessaria: editForm.peca_necessaria || undefined,
+        data_publicacao: editForm.data_publicacao,
+        dias_prazo: editForm.dias_prazo,
+        tipo_contagem: editForm.tipo_contagem,
+        descricao: editForm.descricao || undefined,
+        responsavel: editForm.responsavel.nome || undefined,
+        responsavel_id: editForm.responsavel.id ?? undefined,
+      },
+    })
+  }
 
   const deletar = useMutation({
     mutationFn: (id: string) => prazosApi.deletar(id),
@@ -127,31 +222,67 @@ export default function PrazosPage() {
 
   const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
 
+  const estaVencido = (p: typeof prazos[number]) =>
+    p.status === 'pendente' && !!p.data_limite && new Date(p.data_limite + 'T00:00:00') < hoje
+
+  // "Ativo" = tudo que ainda não recebeu tratamento, VENCIDO INCLUSIVE. Antes o
+  // vencido caía fora daqui e só sobrava em "Pendente", que é justamente onde
+  // ninguém olha — prazo estourado sumia da tela em que devia gritar.
+  const ehAtivo = (p: typeof prazos[number]) => p.status === 'pendente'
+
   const tabCounts: Record<TabStatus, number> = {
     todas: prazos.length,
-    ativo: prazos.filter(p => p.status === 'pendente' && p.data_limite && new Date(p.data_limite + 'T00:00:00') >= hoje).length,
+    ativo: prazos.filter(ehAtivo).length,
     pendente: prazos.filter(p => p.status === 'pendente').length,
     cumprido: prazos.filter(p => p.status === 'cumprido').length,
     perdido: prazos.filter(p => p.status === 'perdido').length,
     ignorado: prazos.filter(p => p.status === 'ignorado').length,
+    nada_a_fazer: prazos.filter(p => p.status === 'nada_a_fazer').length,
   }
 
-  const prazosVisiveis = prazos.filter(p => {
-    if (filtroMes.aplicar && !filtroMes.dentro(p.data_limite)) return false
-    if (tabStatus === 'todas') return true
-    if (tabStatus === 'ativo') return p.status === 'pendente' && p.data_limite && new Date(p.data_limite + 'T00:00:00') >= hoje
-    if (tabStatus === 'pendente') return p.status === 'pendente'
-    return p.status === tabStatus
-  })
+  const vencidosSemTratamento = prazos.filter(estaVencido).length
+
+  const prazosVisiveis = prazos
+    .filter(p => {
+      if (filtroMes.aplicar && !filtroMes.dentro(p.data_limite)) return false
+      if (tabStatus === 'todas') return true
+      if (tabStatus === 'ativo') return ehAtivo(p)
+      if (tabStatus === 'pendente') return p.status === 'pendente'
+      return p.status === tabStatus
+    })
+    // Na aba Ativo, vencido vem primeiro: é o que precisa de decisão hoje.
+    .sort((a, b) => (tabStatus === 'ativo' ? Number(estaVencido(b)) - Number(estaVencido(a)) : 0))
 
   return (
     <div>
       <div className={styles.pageHeader}>
         <h1 className={styles.pageTitle}>Prazos</h1>
-        <button className={styles.btnPrimary} onClick={() => setShowForm(!showForm)}>
-          {showForm ? 'Cancelar' : '+ Novo Prazo'}
-        </button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button
+            className={prazosStyles.btnEditar}
+            style={{ padding: '8px 12px', fontSize: 12 }}
+            disabled={lembretes.isPending}
+            title="Dispara agora o e-mail + Telegram de todos os prazos em aberto (a rotina automática roda às 07h30 todo dia)"
+            onClick={() => { if (confirm('Enviar agora o lembrete de TODOS os prazos em aberto, por e-mail e Telegram?')) lembretes.mutate() }}
+          >
+            {lembretes.isPending ? 'Enviando...' : '🔔 Enviar lembretes agora'}
+          </button>
+          <button className={styles.btnPrimary} onClick={() => setShowForm(!showForm)}>
+            {showForm ? 'Cancelar' : '+ Novo Prazo'}
+          </button>
+        </div>
       </div>
+
+      {vencidosSemTratamento > 0 && (
+        <div style={{
+          background: '#fef2f2', border: '1px solid #fecaca', borderLeft: '4px solid #dc2626',
+          borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 13, color: '#7f1d1d',
+        }}>
+          <strong>{vencidosSemTratamento} prazo(s) vencido(s) sem tratamento.</strong>{' '}
+          Eles seguem na aba <em>Ativo</em>, em vermelho, e continuam gerando lembrete diário
+          até serem marcados como cumprido, perdido, ignorado ou nada a fazer.
+        </div>
+      )}
 
       {showForm && (
         <form
@@ -226,13 +357,13 @@ export default function PrazosPage() {
       {/* Status tabs */}
       {!isLoading && prazos.length > 0 && (
         <div className={prazosStyles.tabs}>
-          {(['todas', 'ativo', 'pendente', 'cumprido', 'perdido', 'ignorado'] as TabStatus[]).map((tab) => (
+          {TABS.map((tab) => (
             <button
               key={tab}
               className={`${prazosStyles.tab} ${tabStatus === tab ? prazosStyles.tabActive : ''}`}
               onClick={() => setTabStatus(tab)}
             >
-              {tab === 'todas' ? 'Todas' : tab === 'ativo' ? 'Ativo' : tab === 'pendente' ? 'Pendente' : tab === 'cumprido' ? 'Cumprido' : tab === 'perdido' ? 'Perdido' : 'Ignorado'}
+              {TAB_LABEL[tab]}
               <span className={prazosStyles.tabCount}>{tabCounts[tab]}</span>
             </button>
           ))}
@@ -253,16 +384,33 @@ export default function PrazosPage() {
             const dias = diasRestantes(p.data_limite)
             const proc = getProcesso(p.processo_id)
             const cliente = getCliente(p.processo_id)
+            const urg = urgenciaClass(dias, p.status)
+            const vencido = estaVencido(p)
+            const origem = p.publicacao_origem
             return (
               <div key={p.id} ref={p.id === destaqueId ? destaqueRef : undefined}
-                className={`${prazosStyles.card} ${urgenciaClass(dias)}`}
+                className={`${prazosStyles.card} ${urg}`}
                 style={p.id === destaqueId ? { outline: '2px solid var(--teal)', outlineOffset: 2 } : undefined}>
                 <div className={prazosStyles.cardHeader}>
                   <div className={prazosStyles.cardInfo}>
                     <div className={prazosStyles.cardTop}>
+                      {vencido && <span className={prazosStyles.chipVencido}>⚠ Vencido</span>}
+                      {p.status === 'nada_a_fazer' && (
+                        <span className={prazosStyles.chipNadaAFazer}>🚫 Nada a fazer</span>
+                      )}
                       {cliente && <span className={prazosStyles.clienteNome}>{cliente.nome}</span>}
                       <code className={prazosStyles.cnj}>{proc?.numero_cnj ?? p.processo_id.slice(0,8)}</code>
                       {proc?.materia && <span className={prazosStyles.materia}>{proc.materia}</span>}
+                      {origem && (
+                        <a
+                          className={prazosStyles.origemLink}
+                          href={origem.origem_menu === 'recorte' ? '/diario2' : '/diario'}
+                          title={origem.texto_resumo ?? undefined}
+                        >
+                          {origem.origem_menu === 'recorte' ? '📰 Recorte Digital' : '📰 Diário Oficial'}
+                          {' · '}{formatDate(origem.data_publicacao)}
+                        </a>
+                      )}
                     </div>
                     <div className={prazosStyles.cardBottom}>
                       <span className={`${styles.badge} ${prazosStyles[`tipo_${p.tipo}`]}`}>{p.tipo}</span>
@@ -289,57 +437,124 @@ export default function PrazosPage() {
                           {p.peca_necessaria}
                           <button
                             className={prazosStyles.pecaChipEdit}
-                            title="Alterar peça"
-                            onClick={() => { setEditando(p.id); setEditPeca(p.peca_necessaria ?? ''); setEditResponsavel({ nome: p.responsavel ?? '', email: '', id: p.responsavel_id ?? null }) }}
+                            title="Alterar prazo"
+                            onClick={() => abrirEditor(p)}
                           >✎</button>
                         </span>
                       )}
-                      {!p.peca_necessaria && editando !== p.id && (
-                        <button className={prazosStyles.btnAddPeca}
-                          onClick={() => { setEditando(p.id); setEditPeca(''); setEditResponsavel({ nome: p.responsavel ?? '', email: '', id: p.responsavel_id ?? null }) }}>
-                          + Peça
+                      {editando !== p.id && (
+                        <button className={prazosStyles.btnEditar} onClick={() => abrirEditor(p)}>
+                          ✎ Alterar prazo
                         </button>
                       )}
                       <span className={prazosStyles.datas}>
                         Publicado: {formatDate(p.data_publicacao)}
                         {' · '}
-                        <strong className={urgenciaClass(dias)}>Limite: {formatDate(p.data_limite)}</strong>
+                        <strong className={urg}>Limite: {formatDate(p.data_limite)}</strong>
                         {' · '}
-                        <span className={`${prazosStyles.restam} ${urgenciaClass(dias)}`}>
+                        <span className={`${prazosStyles.restam} ${urg}`}>
                           {dias === null ? '—' : dias < 0 ? `${Math.abs(dias)}d atrás` : `${dias}d restantes`}
                         </span>
                         {p.responsavel && (
                           <span style={{ color: '#6b7280' }}>{' · '}Resp: {p.responsavel}</span>
                         )}
+                        {p.status === 'pendente' && p.ultimo_lembrete_em && (
+                          <span style={{ color: '#6b7280' }} title="Último lembrete enviado por e-mail e Telegram">
+                            {' · '}🔔 {formatDate(p.ultimo_lembrete_em.slice(0, 10))}
+                          </span>
+                        )}
                       </span>
                     </div>
 
-                    {editando === p.id && (
-                      <div className={prazosStyles.pecaEditor}>
-                        <select className={styles.input}
-                          value={editPeca}
-                          onChange={(e) => setEditPeca(e.target.value)}>
-                          <option value="">— Selecione —</option>
-                          {PECAS.map((pc) => <option key={pc} value={pc}>{pc}</option>)}
-                        </select>
-                        <ResponsavelComboBox value={editResponsavel} onChange={setEditResponsavel} />
-                        <button className={styles.btnPrimary} style={{ fontSize: '12px', padding: '6px 12px' }}
-                          disabled={atualizar.isPending}
-                          onClick={() => atualizar.mutate({ id: p.id, data: { peca_necessaria: editPeca || undefined, responsavel: editResponsavel.nome || undefined, responsavel_id: editResponsavel.id ?? undefined } })}>
-                          Salvar
-                        </button>
-                        <button className={styles.btnDanger} onClick={() => setEditando(null)}>Cancelar</button>
+                    {editando === p.id && editForm && (
+                      <div className={prazosStyles.editor}>
+                        <div className={prazosStyles.editorField}>
+                          <span className={prazosStyles.editorLabel}>Processo</span>
+                          <ProcessoCombobox
+                            value={editForm.processo_id}
+                            onChange={(id) => setEditForm({ ...editForm, processo_id: id })}
+                            processos={processos}
+                            clientes={clientes}
+                            onCreateProcesso={criarProcesso}
+                          />
+                        </div>
+                        <div className={prazosStyles.editorGrid}>
+                          <div className={prazosStyles.editorField}>
+                            <span className={prazosStyles.editorLabel}>Tipo</span>
+                            <select className={styles.input} value={editForm.tipo}
+                              onChange={(e) => setEditForm({ ...editForm, tipo: e.target.value as TipoPrazo })}>
+                              {TIPOS.map((t) => <option key={t} value={t}>{t}</option>)}
+                            </select>
+                          </div>
+                          <div className={prazosStyles.editorField}>
+                            <span className={prazosStyles.editorLabel}>Peça necessária</span>
+                            <select className={styles.input} value={editForm.peca_necessaria}
+                              onChange={(e) => setEditForm({ ...editForm, peca_necessaria: e.target.value })}>
+                              <option value="">— Selecione —</option>
+                              {PECAS.map((pc) => <option key={pc} value={pc}>{pc}</option>)}
+                            </select>
+                          </div>
+                          <div className={prazosStyles.editorField}>
+                            <span className={prazosStyles.editorLabel}>Data da publicação</span>
+                            <input type="date" className={styles.input} value={editForm.data_publicacao}
+                              onChange={(e) => setEditForm({ ...editForm, data_publicacao: e.target.value })} />
+                          </div>
+                          <div className={prazosStyles.editorField}>
+                            <span className={prazosStyles.editorLabel}>Dias do prazo</span>
+                            <input type="number" min={0} className={styles.input} value={editForm.dias_prazo}
+                              onChange={(e) => setEditForm({ ...editForm, dias_prazo: Number(e.target.value) })} />
+                          </div>
+                          <div className={prazosStyles.editorField}>
+                            <span className={prazosStyles.editorLabel}>Contagem</span>
+                            <select className={styles.input} value={editForm.tipo_contagem}
+                              onChange={(e) => setEditForm({ ...editForm, tipo_contagem: e.target.value as TipoContagem })}>
+                              <option value="uteis">Dias úteis</option>
+                              <option value="corridos">Dias corridos</option>
+                            </select>
+                          </div>
+                          <div className={prazosStyles.editorField}>
+                            <span className={prazosStyles.editorLabel}>Responsável</span>
+                            <ResponsavelComboBox
+                              value={editForm.responsavel}
+                              onChange={(v) => setEditForm({ ...editForm, responsavel: v })}
+                            />
+                          </div>
+                        </div>
+                        <div className={prazosStyles.editorField}>
+                          <span className={prazosStyles.editorLabel}>Descrição</span>
+                          <textarea className={styles.input} rows={2} value={editForm.descricao}
+                            onChange={(e) => setEditForm({ ...editForm, descricao: e.target.value })} />
+                        </div>
+                        <div className={prazosStyles.editorActions}>
+                          <button className={styles.btnPrimary} style={{ fontSize: 12, padding: '6px 12px' }}
+                            disabled={atualizar.isPending}
+                            onClick={() => salvarEdicao(p.id)}>
+                            {atualizar.isPending ? 'Recalculando...' : 'Salvar'}
+                          </button>
+                          <button className={styles.btnDanger}
+                            onClick={() => { setEditando(null); setEditForm(null) }}>Cancelar</button>
+                          <span className={prazosStyles.editorHint}>
+                            A data limite é recalculada com os feriados do estado do processo.
+                            {origem && ' A alteração aparece também no menu de origem da publicação.'}
+                          </span>
+                        </div>
                       </div>
                     )}
                   </div>
 
                   <div className={prazosStyles.cardActions}>
                     <select className={prazosStyles.statusSelect} value={p.status}
-                      onChange={(e) => atualizar.mutate({ id: p.id, data: { status: e.target.value as StatusPrazo } })}>
-                      <option value="pendente">pendente</option>
-                      <option value="cumprido">cumprido</option>
-                      <option value="perdido">perdido</option>
-                      <option value="ignorado">ignorado</option>
+                      onChange={(e) => {
+                        const novo = e.target.value as StatusPrazo
+                        if (novo === 'nada_a_fazer' && !confirm(
+                          'Marcar como "Nada a fazer"?\n\nA publicação de origem é encerrada e as tarefas automáticas ' +
+                          'ligadas a este prazo são canceladas.',
+                        )) return
+                        atualizar.mutate({ id: p.id, data: { status: novo } })
+                      }}>
+                      {STATUS_OPCOES.map((s) => (
+                        <option key={s.valor} value={s.valor}>{s.label}</option>
+                      ))}
                     </select>
                     <button className={styles.btnDanger}
                       onClick={() => { if (confirm('Remover prazo?')) deletar.mutate(p.id) }}>

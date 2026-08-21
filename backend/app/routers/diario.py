@@ -19,6 +19,7 @@ from app.schemas.publicacao import PublicacaoOut, PublicacaoUpdate, SyncResult
 from app.services.despacho_status import enriquecer_status_despacho
 from app.services.gmail_diario import sincronizar_gmail
 from app.services.ia_diario import analisar_publicacao
+from app.services.nada_a_fazer import marcar_nada_a_fazer
 from app.services.scraping_tribunais import TRIBUNAIS_VALIDOS, scrape_todos
 
 router = APIRouter(prefix="/diario", tags=["diario"],
@@ -546,9 +547,28 @@ def reabrir_publicacao(pub_id: uuid.UUID, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Publicação não encontrada")
     pub.rejeitada = False
     pub.lida = False
+    if pub.disposicao == "nada_a_fazer":
+        pub.disposicao = None
+        pub.despacho_tratada = False
     db.commit()
     db.refresh(pub)
     return pub
+
+
+@router.post("/{pub_id}/nada-a-fazer")
+def marcar_nada_a_fazer_diario(pub_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Publicação revisada que não pede providência (ex.: sentença favorável).
+
+    Mesmo tratamento do Recorte Digital e do Despacho — os três chamam o mesmo
+    serviço, então marcar num menu aparece nos outros e na tela de Prazos.
+    """
+    pub = db.query(Publicacao).filter(Publicacao.id == pub_id).first()
+    if not pub:
+        raise HTTPException(status_code=404, detail="Publicação não encontrada")
+    resultado = marcar_nada_a_fazer(db, pub)
+    db.refresh(pub)
+    enriquecer_status_despacho(db, [pub])
+    return resultado
 
 
 @router.delete("/{pub_id}", status_code=status.HTTP_204_NO_CONTENT)

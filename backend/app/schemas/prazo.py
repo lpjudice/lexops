@@ -9,7 +9,7 @@ TipoPrazo = Literal[
     "audiencia", "pericia", "outro"
 ]
 TipoContagem = Literal["uteis", "corridos"]
-StatusPrazo = Literal["pendente", "cumprido", "perdido", "ignorado"]
+StatusPrazo = Literal["pendente", "cumprido", "perdido", "ignorado", "nada_a_fazer"]
 
 
 class PrazoBase(BaseModel):
@@ -30,6 +30,9 @@ class PrazoCreate(PrazoBase):
 
 
 class PrazoUpdate(BaseModel):
+    # Editável: o prazo pode ter nascido vinculado ao processo errado (match
+    # automático de CNJ na publicação), e antes disso não havia como corrigir.
+    processo_id: uuid.UUID | None = None
     tipo: TipoPrazo | None = None
     descricao: str | None = None
     peca_necessaria: str | None = None
@@ -46,6 +49,20 @@ class TarefaVinculada(BaseModel):
     titulo: str
 
 
+class PublicacaoOrigem(BaseModel):
+    """Publicação (Diário Oficial ou Recorte Digital) que originou o prazo —
+    devolvida junto pra tela de Prazos poder voltar à origem sem outra chamada."""
+    id: uuid.UUID
+    fonte: str
+    origem_menu: Literal["diario", "recorte"]
+    data_publicacao: date
+    numero_cnj: str | None = None
+    tribunal: str | None = None
+    texto_resumo: str | None = None
+    url_fonte: str | None = None
+    disposicao: str | None = None
+
+
 class PrazoOut(PrazoBase):
     id: uuid.UUID
     data_limite: date | None
@@ -57,6 +74,8 @@ class PrazoOut(PrazoBase):
     criado_automaticamente: bool = False
     tarefas_vinculadas: list[TarefaVinculada] = []
     peca_doc_url: str | None = None
+    publicacao_origem: PublicacaoOrigem | None = None
+    ultimo_lembrete_em: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

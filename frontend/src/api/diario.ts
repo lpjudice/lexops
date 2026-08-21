@@ -21,11 +21,29 @@ export interface AnaliseIA {
   erro?: string
 }
 
+export interface NadaAFazerResultado {
+  publicacao_id: string
+  prazo_id: string | null
+  tarefas_canceladas: number
+  aviso: string | null
+}
+
 export interface DespachoStatus {
   tratada: boolean
   rejeitada: boolean
-  disposicao: 'sem_acao' | 'nao_e_nosso' | null
-  prazo: { id: string; tipo: string; data_limite: string | null; status: string } | null
+  disposicao: 'sem_acao' | 'nao_e_nosso' | 'nada_a_fazer' | null
+  prazo: {
+    id: string
+    tipo: string
+    data_limite: string | null
+    status: string
+    peca_necessaria: string | null
+    descricao: string | null
+    data_publicacao: string | null
+    dias_prazo: number
+    tipo_contagem: 'uteis' | 'corridos'
+    responsavel: string | null
+  } | null
   tarefa_card: { id: string; titulo: string; status: string; subtasks: { texto: string; concluida: boolean }[] } | null
   tarefas: { id: string; titulo: string; responsavel: string | null }[]
   peca_doc_url: string | null
@@ -123,6 +141,9 @@ export const diarioApi = {
 
   reabrir: (id: string) =>
     api.patch<Publicacao>(`/diario/${id}/reabrir`).then((r) => r.data),
+
+  nadaAFazer: (id: string) =>
+    api.post<NadaAFazerResultado>(`/diario/${id}/nada-a-fazer`).then((r) => r.data),
 
   vincularProcesso: (id: string, processo_id: string) =>
     api.patch<Publicacao>(`/diario/${id}`, { processo_id }).then((r) => r.data),

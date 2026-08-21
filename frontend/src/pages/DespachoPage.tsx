@@ -125,6 +125,19 @@ export default function DespachoPage() {
     },
   })
 
+  const nadaAFazer = useMutation({
+    mutationFn: (id: string) => despachoApi.nadaAFazer(id),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['despacho-tratadas'] })
+      qc.invalidateQueries({ queryKey: ['despacho-pendentes'] })
+      qc.invalidateQueries({ queryKey: ['prazos'] })
+      qc.invalidateQueries({ queryKey: ['tarefas'] })
+      qc.invalidateQueries({ queryKey: ['diario'] })
+      qc.invalidateQueries({ queryKey: ['diario2'] })
+      if (r.aviso) alert(r.aviso)
+    },
+  })
+
   const gerarSugestao = async (id: string) => {
     setGerandoId(id)
     try {
@@ -243,6 +256,10 @@ export default function DespachoPage() {
               <p style={{ fontSize: 13, color: 'var(--dark)', margin: '0 0 8px', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{p.texto_resumo}</p>
               {p.rejeitada ? (
                 <p style={{ fontSize: 12, color: '#b91c1c', margin: '0 0 8px' }}>✕ Não é do escritório</p>
+              ) : p.disposicao === 'nada_a_fazer' ? (
+                <p style={{ fontSize: 12, color: '#6d28d9', margin: '0 0 8px' }}>
+                  🚫 Nada a fazer — encerrada, prazo e tarefas automáticas cancelados
+                </p>
               ) : p.disposicao === 'sem_acao' ? (
                 <p style={{ fontSize: 12, color: 'var(--gray-mid)', margin: '0 0 8px' }}>◯ Revisada — sem necessidade de ação</p>
               ) : (
@@ -274,13 +291,30 @@ export default function DespachoPage() {
                   )}
                 </>
               )}
-              <button
-                onClick={() => reverter.mutate(p.id)}
-                disabled={reverter.isPending}
-                style={{ fontSize: 12, color: 'var(--gray-mid)', background: 'none', border: '1px solid #ddd', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', marginTop: 8 }}
-              >
-                ↺ Voltar pra pendentes
-              </button>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+                <button
+                  onClick={() => reverter.mutate(p.id)}
+                  disabled={reverter.isPending}
+                  style={{ fontSize: 12, color: 'var(--gray-mid)', background: 'none', border: '1px solid #ddd', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}
+                >
+                  ↺ Voltar pra pendentes
+                </button>
+                {p.disposicao !== 'nada_a_fazer' && !p.rejeitada && (
+                  <button
+                    onClick={() => {
+                      if (confirm(
+                        'Marcar como "Nada a fazer"?\n\n' +
+                        'O prazo desta publicação vai para a aba "Nada a fazer" em Prazos e as tarefas ' +
+                        'criadas automaticamente por ela são canceladas.',
+                      )) nadaAFazer.mutate(p.id)
+                    }}
+                    disabled={nadaAFazer.isPending}
+                    style={{ fontSize: 12, color: '#6d28d9', background: 'none', border: '1px solid #ddd6fe', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}
+                  >
+                    {nadaAFazer.isPending ? 'Encerrando...' : '🚫 Nada a fazer'}
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </>

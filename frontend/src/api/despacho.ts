@@ -53,7 +53,7 @@ export interface PublicacaoPendente {
   peca_gerada: PecaGerada | null
   peca_doc_url: string | null
   rejeitada: boolean
-  disposicao: 'sem_acao' | 'nao_e_nosso' | null
+  disposicao: 'sem_acao' | 'nao_e_nosso' | 'nada_a_fazer' | null
   prazo_id: string | null
   tarefas_criadas: { id: string; titulo: string; responsavel: string | null }[]
 }
@@ -72,6 +72,14 @@ export const despachoApi = {
   rejeitar: (id: string) => api.post(`/despacho/${id}/rejeitar`).then((r) => r.data),
 
   semAcao: (id: string) => api.post(`/despacho/${id}/sem-acao`).then((r) => r.data),
+
+  /** Encerra uma publicação JÁ tratada: o prazo vai pra "Nada a fazer" e as
+   * tarefas automáticas dela são canceladas. Diferente de `semAcao`, que é a
+   * triagem de quem nunca chegou a gerar prazo/tarefa. */
+  nadaAFazer: (id: string) =>
+    api.post<{ prazo_id: string | null; tarefas_canceladas: number; aviso: string | null }>(
+      `/despacho/${id}/nada-a-fazer`,
+    ).then((r) => r.data),
 
   reverter: (id: string) => api.post(`/despacho/${id}/reverter`).then((r) => r.data),
 

@@ -27,6 +27,7 @@ from app.models.tarefa import Tarefa
 from app.models.tarefa_card import TarefaCard, TarefaCardSubtask
 from app.models.tarefa_projeto import TarefaProjeto
 from app.models.usuario import Usuario
+from app.services.nada_a_fazer import marcar_nada_a_fazer
 
 router = APIRouter(prefix="/despacho", tags=["despacho"],
                    dependencies=[Depends(get_current_user)])
@@ -443,6 +444,18 @@ def marcar_sem_acao(publicacao_id: uuid.UUID, db: Session = Depends(get_db)):
     pub.disposicao = "sem_acao"
     db.commit()
     return {"ok": True}
+
+
+@router.post("/{publicacao_id}/nada-a-fazer")
+def marcar_nada_a_fazer_despacho(publicacao_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Diferente de `sem-acao`: aqui a publicação PODE já ter gerado prazo e
+    tarefas, e a decisão é justamente encerrar tudo isso (sentença favorável em
+    que não cabe embargo, por exemplo). O prazo vai pra aba "Nada a fazer" e as
+    tarefas automáticas viram canceladas."""
+    pub = db.query(Publicacao).filter(Publicacao.id == publicacao_id).first()
+    if not pub:
+        raise HTTPException(status_code=404, detail="Publicação não encontrada")
+    return marcar_nada_a_fazer(db, pub)
 
 
 @router.post("/{publicacao_id}/reverter")

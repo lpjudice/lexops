@@ -65,11 +65,14 @@
   gap: 12px;
 }
 
-/* urgência */
+/* urgência — "vencido" é o prazo passado E ainda sem tratamento: alarme,
+   não histórico. Prazo já tratado (cumprido/perdido/ignorado/nada a fazer)
+   usa .tratado, que é o cinza apagado de antes. */
 .ok      { color: #16a34a; }
 .atencao { color: #ca8a04; }
 .urgente { color: #dc2626; }
-.vencido { color: #9ca3af; }
+.vencido { color: #b91c1c; font-weight: 700; }
+.tratado { color: #9ca3af; }
 
 /* ── Lista de prazos como cards ── */
 .lista {
@@ -89,7 +92,101 @@
 .card.ok      { border-left-color: #86efac; }
 .card.atencao { border-left-color: #fde047; }
 .card.urgente { border-left-color: #f87171; background: #fff9f9; }
-.card.vencido { border-left-color: #d1d5db; opacity: 0.7; }
+.card.vencido { border-left-color: #dc2626; background: #fef2f2; }
+.card.tratado { border-left-color: #d1d5db; opacity: 0.7; }
+
+.chipVencido {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  background: #dc2626;
+  color: #fff;
+  padding: 2px 8px;
+  border-radius: 999px;
+  text-transform: uppercase;
+}
+
+.chipNadaAFazer {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  background: #f3e8ff;
+  color: #6d28d9;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.origemLink {
+  font-size: 11px;
+  font-weight: 700;
+  color: #0369a1;
+  background: #e0f2fe;
+  padding: 2px 8px;
+  border-radius: 999px;
+  text-decoration: none;
+}
+.origemLink:hover { background: #bae6fd; }
+
+/* ── Editor completo do prazo ── */
+.editor {
+  margin-top: 8px;
+  padding: 12px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.editorGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.editorField {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.editorLabel {
+  font-size: 11px;
+  font-weight: 700;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.editorActions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.editorHint {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.btnEditar {
+  font-size: 11px;
+  color: #6b7280;
+  background: none;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.btnEditar:hover { border-color: #00b090; color: #00b090; }
 
 .cardHeader {
   display: flex;
