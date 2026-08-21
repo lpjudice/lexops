@@ -494,6 +494,32 @@ export default function DiarioPage() {
     },
   })
 
+  const desfazerNadaAFazer = useMutation({
+    mutationFn: (id: string) => diarioApi.desfazerNadaAFazer(id),
+    onSuccess: (r, id) => {
+      qc.invalidateQueries({ queryKey: ['diario'] })
+      qc.invalidateQueries({ queryKey: ['diario2'] })
+      qc.invalidateQueries({ queryKey: ['prazos'] })
+      qc.invalidateQueries({ queryKey: ['tarefas'] })
+      qc.invalidateQueries({ queryKey: ['despacho'] })
+      const partes = [
+        r.prazo_removido
+          ? 'o marcador de prazo foi removido'
+          : r.prazo_id ? 'prazo de volta em pendente' : null,
+        r.tarefas_reativadas ? `${r.tarefas_reativadas} tarefa(s) reativada(s)` : null,
+      ].filter(Boolean).join(' · ')
+      setAcaoMsg((m) => ({
+        ...m,
+        [id]: r.aviso ?? `↺ Tratamento desfeito${partes ? ` — ${partes}` : ''}.`,
+      }))
+    },
+    onError: (e: unknown, id) => {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+        ?? 'Erro ao desfazer'
+      setAcaoMsg((m) => ({ ...m, [id]: `⚠ ${msg}` }))
+    },
+  })
+
   const vincular = useMutation({
     mutationFn: ({ id, processo_id }: { id: string; processo_id: string }) =>
       diarioApi.vincularProcesso(id, processo_id),
@@ -1068,7 +1094,22 @@ export default function DiarioPage() {
                   >
                     Copiar
                   </button>
-                  {pub.despacho_status?.disposicao !== 'nada_a_fazer' && (
+                  {pub.despacho_status?.disposicao === 'nada_a_fazer' ? (
+                    <button
+                      className={diarioStyles.btnCopy}
+                      disabled={desfazerNadaAFazer.isPending}
+                      title="Reabre a publicação, devolve o prazo para pendente e reativa as tarefas canceladas por este tratamento."
+                      onClick={() => {
+                        if (confirm(
+                          'Desfazer o "Nada a fazer" desta publicação?\n\n' +
+                          'Ela volta a ficar em aberto, o prazo volta para pendente (em vermelho, se já estiver vencido) ' +
+                          'e as tarefas canceladas por este tratamento voltam para pendente.',
+                        )) desfazerNadaAFazer.mutate(pub.id)
+                      }}
+                    >
+                      ↺ Desfazer nada a fazer
+                    </button>
+                  ) : (
                     <button
                       className={diarioStyles.btnCopy}
                       disabled={nadaAFazer.isPending}

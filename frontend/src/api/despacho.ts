@@ -81,6 +81,11 @@ export const despachoApi = {
       `/despacho/${id}/nada-a-fazer`,
     ).then((r) => r.data),
 
+  desfazerNadaAFazer: (id: string) =>
+    api.post<{ revertido: boolean; prazo_removido?: boolean; tarefas_reativadas?: number; aviso: string | null }>(
+      `/despacho/${id}/desfazer-nada-a-fazer`,
+    ).then((r) => r.data),
+
   reverter: (id: string) => api.post(`/despacho/${id}/reverter`).then((r) => r.data),
 
   sugerir: (id: string) =>

@@ -28,6 +28,17 @@ export interface NadaAFazerResultado {
   aviso: string | null
 }
 
+export interface DesfazerNadaAFazerResultado {
+  publicacao_id: string
+  revertido: boolean
+  prazo_id?: string | null
+  /** true quando o prazo era só o marcador de "nada a fazer" (0 dias) e foi
+   * removido em vez de virar um prazo pendente fantasma. */
+  prazo_removido?: boolean
+  tarefas_reativadas?: number
+  aviso: string | null
+}
+
 export interface DespachoStatus {
   tratada: boolean
   rejeitada: boolean
@@ -144,6 +155,9 @@ export const diarioApi = {
 
   nadaAFazer: (id: string) =>
     api.post<NadaAFazerResultado>(`/diario/${id}/nada-a-fazer`).then((r) => r.data),
+
+  desfazerNadaAFazer: (id: string) =>
+    api.post<DesfazerNadaAFazerResultado>(`/diario/${id}/desfazer-nada-a-fazer`).then((r) => r.data),
 
   vincularProcesso: (id: string, processo_id: string) =>
     api.patch<Publicacao>(`/diario/${id}`, { processo_id }).then((r) => r.data),

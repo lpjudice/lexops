@@ -151,6 +151,97 @@ def marcar_nada_a_fazer(db: Session, pub: Publicacao, *, commit: bool = True) ->
     }
 
 
+def _reativar_tarefas(db: Session, pub: Publicacao | None, prazo: Prazo | None) -> int:
+    """Inverso de `_cancelar_tarefas`: devolve as canceladas para `pendente`.
+
+    Limitação assumida: não guardamos quais tarefas ESTE tratamento cancelou,
+    então uma tarefa que já estava cancelada por outro motivo também volta a
+    pendente. É raro (a tarefa teria que ser da mesma publicação) e o usuário
+    consegue recancelar; a alternativa seria uma coluna de auditoria só pra
+    isso. O aviso no confirm da tela diz exatamente isso.
+    """
+    ids: set[uuid.UUID] = set()
+    if prazo is not None:
+        for (tid,) in db.query(Tarefa.id).filter(Tarefa.prazo_id == prazo.id).all():
+            ids.add(tid)
+    if pub is not None and pub.tarefas_criadas:
+        try:
+            for item in json.loads(pub.tarefas_criadas):
+                try:
+                    ids.add(uuid.UUID(str(item.get("id"))))
+                except (ValueError, TypeError, AttributeError):
+                    continue
+        except (ValueError, TypeError):
+            pass
+
+    if not ids:
+        return 0
+
+    reativadas = 0
+    for tarefa in db.query(Tarefa).filter(Tarefa.id.in_(ids)).all():
+        if tarefa.status == "cancelado":
+            tarefa.status = "pendente"
+            reativadas += 1
+
+    if pub is not None and pub.tarefa_card_id:
+        card = db.query(TarefaCard).filter(TarefaCard.id == pub.tarefa_card_id).first()
+        if card is not None and card.status == "cancelado":
+            card.status = "pendente"
+
+    return reativadas
+
+
+def desfazer_nada_a_fazer(db: Session, pub: Publicacao, *, commit: bool = True) -> dict:
+    """Volta atrás no tratamento: publicação reabre, prazo volta a `pendente`
+    e as tarefas canceladas por causa dele são reativadas.
+
+    O prazo volta a pendente mesmo se já estiver vencido — é justamente esse o
+    ponto: ele reaparece em vermelho na aba Ativo e volta a gerar lembrete.
+    """
+    if pub.disposicao != DISPOSICAO:
+        return {
+            "publicacao_id": str(pub.id),
+            "revertido": False,
+            "aviso": 'Esta publicação não está marcada como "nada a fazer".',
+        }
+
+    prazo = db.query(Prazo).filter(Prazo.id == pub.prazo_id).first() if pub.prazo_id else None
+
+    prazo_removido = False
+    if prazo is not None:
+        # O prazo "placeholder" (dias_prazo == 0) só existiu pra representar o
+        # tratamento na tela de Prazos. Desfazendo, ele não deve virar um prazo
+        # pendente fantasma de 0 dias — some junto.
+        if prazo.dias_prazo == 0:
+            pub.prazo_id = None
+            pub.gera_prazo = False
+            db.delete(prazo)
+            prazo_removido = True
+            prazo = None
+        else:
+            prazo.status = "pendente"
+            # Zera o controle diário pra o lembrete voltar já na próxima rodada,
+            # em vez de esperar a virada do dia.
+            prazo.ultimo_lembrete_em = None
+
+    reativadas = _reativar_tarefas(db, pub, prazo)
+
+    pub.disposicao = None
+    pub.despacho_tratada = False
+
+    if commit:
+        db.commit()
+
+    return {
+        "publicacao_id": str(pub.id),
+        "revertido": True,
+        "prazo_id": str(prazo.id) if prazo else None,
+        "prazo_removido": prazo_removido,
+        "tarefas_reativadas": reativadas,
+        "aviso": None,
+    }
+
+
 def aplicar_status_prazo(db: Session, prazo: Prazo, novo_status: str) -> None:
     """Entrada pela tela de Prazos — propaga o status de volta pra publicação.
 
@@ -170,8 +261,12 @@ def aplicar_status_prazo(db: Session, prazo: Prazo, novo_status: str) -> None:
             _cancelar_tarefas(db, None, prazo)
         return
 
-    # Saiu de "nada a fazer" — devolve a publicação ao fluxo normal.
+    # Saiu de "nada a fazer" — devolve a publicação ao fluxo normal e traz de
+    # volta as tarefas canceladas por causa dela (mesmo efeito do botão
+    # "Desfazer" nos menus de publicação, pra não haver dois comportamentos).
     if pub is not None and pub.disposicao == DISPOSICAO:
+        _reativar_tarefas(db, pub, prazo)
         pub.disposicao = None
         if novo_status == "pendente":
             pub.despacho_tratada = False
+            prazo.ultimo_lembrete_em = None

@@ -186,18 +186,25 @@
 }
 
 /* Publicação encerrada por decisão explícita de "não há o que fazer" —
-   visualmente diferente de "sem prazo" (que é falta de triagem). */
+   visualmente diferente de "sem prazo" (que é falta de triagem).
+   Vive na célula do prazo (126px), então precisa caber ali sem esticar o
+   grid: fonte menor, padding curto e nada de quebra de linha. */
 .chipNadaAFazer {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: 10px;
+  gap: 3px;
+  width: fit-content;
+  max-width: 100%;
+  font-size: 9.5px;
   font-weight: 700;
+  line-height: 1.4;
   background: #f3e8ff;
   color: #6d28d9;
-  padding: 2px 7px;
+  padding: 1px 6px;
   border-radius: 999px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .actions {

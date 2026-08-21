@@ -10,6 +10,15 @@ export interface NadaAFazerResultado {
   aviso: string | null
 }
 
+export interface DesfazerNadaAFazerResultado {
+  publicacao_id: string
+  revertido: boolean
+  prazo_id?: string | null
+  prazo_removido?: boolean
+  tarefas_reativadas?: number
+  aviso: string | null
+}
+
 export interface Diario2Prazo {
   id: string
   tipo: string
@@ -132,6 +141,11 @@ export const diario2Api = {
   nadaAFazer: (id: string) =>
     api.post<Diario2Publicacao & { resultado_nada_a_fazer: NadaAFazerResultado }>(
       `/diario2/${id}/nada-a-fazer`,
+    ).then((r) => r.data),
+
+  desfazerNadaAFazer: (id: string) =>
+    api.post<Diario2Publicacao & { resultado_nada_a_fazer: DesfazerNadaAFazerResultado }>(
+      `/diario2/${id}/desfazer-nada-a-fazer`,
     ).then((r) => r.data),
 
   relembre: (daysBack = 7) =>

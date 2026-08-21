@@ -27,7 +27,7 @@ from app.models.tarefa import Tarefa
 from app.models.tarefa_card import TarefaCard, TarefaCardSubtask
 from app.models.tarefa_projeto import TarefaProjeto
 from app.models.usuario import Usuario
-from app.services.nada_a_fazer import marcar_nada_a_fazer
+from app.services.nada_a_fazer import desfazer_nada_a_fazer, marcar_nada_a_fazer
 
 router = APIRouter(prefix="/despacho", tags=["despacho"],
                    dependencies=[Depends(get_current_user)])
@@ -456,6 +456,16 @@ def marcar_nada_a_fazer_despacho(publicacao_id: uuid.UUID, db: Session = Depends
     if not pub:
         raise HTTPException(status_code=404, detail="Publicação não encontrada")
     return marcar_nada_a_fazer(db, pub)
+
+
+@router.post("/{publicacao_id}/desfazer-nada-a-fazer")
+def desfazer_nada_a_fazer_despacho(publicacao_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Volta atrás: a publicação reabre, o prazo volta a pendente e as tarefas
+    canceladas pelo tratamento são reativadas."""
+    pub = db.query(Publicacao).filter(Publicacao.id == publicacao_id).first()
+    if not pub:
+        raise HTTPException(status_code=404, detail="Publicação não encontrada")
+    return desfazer_nada_a_fazer(db, pub)
 
 
 @router.post("/{publicacao_id}/reverter")

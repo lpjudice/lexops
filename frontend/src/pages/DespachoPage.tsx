@@ -138,6 +138,19 @@ export default function DespachoPage() {
     },
   })
 
+  const desfazerNadaAFazer = useMutation({
+    mutationFn: (id: string) => despachoApi.desfazerNadaAFazer(id),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['despacho-tratadas'] })
+      qc.invalidateQueries({ queryKey: ['despacho-pendentes'] })
+      qc.invalidateQueries({ queryKey: ['prazos'] })
+      qc.invalidateQueries({ queryKey: ['tarefas'] })
+      qc.invalidateQueries({ queryKey: ['diario'] })
+      qc.invalidateQueries({ queryKey: ['diario2'] })
+      if (r.aviso) alert(r.aviso)
+    },
+  })
+
   const gerarSugestao = async (id: string) => {
     setGerandoId(id)
     try {
@@ -299,7 +312,21 @@ export default function DespachoPage() {
                 >
                   ↺ Voltar pra pendentes
                 </button>
-                {p.disposicao !== 'nada_a_fazer' && !p.rejeitada && (
+                {p.disposicao === 'nada_a_fazer' ? (
+                  <button
+                    onClick={() => {
+                      if (confirm(
+                        'Desfazer o "Nada a fazer"?\n\n' +
+                        'A publicação volta a ficar em aberto, o prazo volta para pendente e as tarefas ' +
+                        'canceladas por este tratamento voltam para pendente.',
+                      )) desfazerNadaAFazer.mutate(p.id)
+                    }}
+                    disabled={desfazerNadaAFazer.isPending}
+                    style={{ fontSize: 12, color: '#6d28d9', background: 'none', border: '1px solid #ddd6fe', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}
+                  >
+                    {desfazerNadaAFazer.isPending ? 'Desfazendo...' : '↺ Desfazer nada a fazer'}
+                  </button>
+                ) : !p.rejeitada && (
                   <button
                     onClick={() => {
                       if (confirm(

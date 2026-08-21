@@ -19,7 +19,7 @@ from app.schemas.publicacao import PublicacaoOut, PublicacaoUpdate, SyncResult
 from app.services.despacho_status import enriquecer_status_despacho
 from app.services.gmail_diario import sincronizar_gmail
 from app.services.ia_diario import analisar_publicacao
-from app.services.nada_a_fazer import marcar_nada_a_fazer
+from app.services.nada_a_fazer import desfazer_nada_a_fazer, marcar_nada_a_fazer
 from app.services.scraping_tribunais import TRIBUNAIS_VALIDOS, scrape_todos
 
 router = APIRouter(prefix="/diario", tags=["diario"],
@@ -566,6 +566,19 @@ def marcar_nada_a_fazer_diario(pub_id: uuid.UUID, db: Session = Depends(get_db))
     if not pub:
         raise HTTPException(status_code=404, detail="Publicação não encontrada")
     resultado = marcar_nada_a_fazer(db, pub)
+    db.refresh(pub)
+    enriquecer_status_despacho(db, [pub])
+    return resultado
+
+
+@router.post("/{pub_id}/desfazer-nada-a-fazer")
+def desfazer_nada_a_fazer_diario(pub_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Volta atrás: a publicação reabre, o prazo volta a pendente e as tarefas
+    canceladas pelo tratamento são reativadas."""
+    pub = db.query(Publicacao).filter(Publicacao.id == pub_id).first()
+    if not pub:
+        raise HTTPException(status_code=404, detail="Publicação não encontrada")
+    resultado = desfazer_nada_a_fazer(db, pub)
     db.refresh(pub)
     enriquecer_status_despacho(db, [pub])
     return resultado

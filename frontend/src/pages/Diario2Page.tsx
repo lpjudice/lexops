@@ -152,6 +152,27 @@ export default function Diario2Page() {
       setMsg(e.response?.data?.detail ?? 'Não foi possível marcar como "nada a fazer".'),
   })
 
+  const desfazerNadaAFazer = useMutation({
+    mutationFn: (id: string) => diario2Api.desfazerNadaAFazer(id),
+    onSuccess: (r) => {
+      const res = r.resultado_nada_a_fazer
+      const partes = [
+        res.prazo_removido
+          ? 'o marcador de prazo foi removido'
+          : res.prazo_id ? 'prazo de volta em pendente' : null,
+        res.tarefas_reativadas ? `${res.tarefas_reativadas} tarefa(s) reativada(s)` : null,
+      ].filter(Boolean).join(' · ')
+      setMsg(res.aviso ?? `Tratamento desfeito${partes ? ` — ${partes}` : ''}.`)
+      qc.invalidateQueries({ queryKey: ['diario2'] })
+      qc.invalidateQueries({ queryKey: ['diario'] })
+      qc.invalidateQueries({ queryKey: ['prazos'] })
+      qc.invalidateQueries({ queryKey: ['tarefas'] })
+      qc.invalidateQueries({ queryKey: ['despacho'] })
+    },
+    onError: (e: { response?: { data?: { detail?: string } } }) =>
+      setMsg(e.response?.data?.detail ?? 'Não foi possível desfazer o tratamento.'),
+  })
+
 
   const criarProcesso = async (data: { numero_cnj: string; cliente_id: string; estado: EstadoProcesso }): Promise<string> => {
     const p = await processosApi.criar(data)
@@ -258,11 +279,19 @@ export default function Diario2Page() {
                         <span className={diario2Styles.mainText}>{nomeCliente(pub)}</span>
                         <span className={diario2Styles.tribunal}>{pub.tribunal ?? '-'}</span>
                         <span className={diario2Styles.summary}>{pub.resumo_curto}</span>
-                        <span className={pub.prazo ? diario2Styles.prazoOk : diario2Styles.prazoMiss}>{prazoLabel(pub)}</span>
-                        {ehNadaAFazer(pub) && (
-                          <span className={diario2Styles.chipNadaAFazer} title="Tratada: revisada e sem providência a tomar">
+                        {/* Ocupa a MESMA célula do prazo (o grid tem 6 colunas
+                            fixas — um item extra criava uma 7ª e quebrava a
+                            linha). Quando é nada a fazer, o chip substitui o
+                            rótulo do prazo, que já diria "· nada a fazer". */}
+                        {ehNadaAFazer(pub) ? (
+                          <span
+                            className={diario2Styles.chipNadaAFazer}
+                            title={`Tratada: revisada e sem providência a tomar${pub.prazo ? ` · prazo ${formatDate(pub.prazo.data_limite)}` : ''}`}
+                          >
                             🚫 Nada a fazer
                           </span>
+                        ) : (
+                          <span className={pub.prazo ? diario2Styles.prazoOk : diario2Styles.prazoMiss}>{prazoLabel(pub)}</span>
                         )}
                         <div className={diario2Styles.actions}>
                           <button className={diario2Styles.ghostBtn} onClick={() => setExpanded(expanded === pub.id ? null : pub.id)}>
@@ -276,7 +305,22 @@ export default function Diario2Page() {
                               + Prazo
                             </button>
                           )}
-                          {!ehNadaAFazer(pub) && (
+                          {ehNadaAFazer(pub) ? (
+                            <button
+                              className={diario2Styles.ghostBtn}
+                              disabled={desfazerNadaAFazer.isPending}
+                              title="Reabre a publicação, devolve o prazo para pendente e reativa as tarefas canceladas por este tratamento."
+                              onClick={() => {
+                                if (confirm(
+                                  'Desfazer o "Nada a fazer" desta publicação?\n\n' +
+                                  'Ela volta a ficar em aberto, o prazo volta para pendente (em vermelho, se já estiver vencido) ' +
+                                  'e as tarefas canceladas por este tratamento voltam para pendente.',
+                                )) desfazerNadaAFazer.mutate(pub.id)
+                              }}
+                            >
+                              ↺ Desfazer
+                            </button>
+                          ) : (
                             <button
                               className={diario2Styles.ghostBtn}
                               disabled={nadaAFazer.isPending}

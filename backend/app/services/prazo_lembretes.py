@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import html
 import logging
+import re
 from datetime import date, datetime, timezone
 
 from sqlalchemy.orm import Session
@@ -132,6 +133,43 @@ def _br(d: date | None) -> str | None:
     return d.strftime("%d/%m/%Y") if d else None
 
 
+# Rótulos como aparecem no corpo do diário. Regex própria (e não o parser do
+# router diario2) de propósito: importar de lá arrastaria httpx e a árvore
+# inteira de deps do router pra dentro de um job de e-mail, e uma falha de
+# import sumiria com as datas sem ninguém perceber. São duas linhas de texto —
+# ler aqui é mais barato e mais robusto que o acoplamento.
+_RE_DISPONIBILIZACAO = re.compile(
+    r"Data\s+de\s+Disponibiliza(?:ç|c)[aã]o\s*:?\s*(\d{2}/\d{2}/\d{4})", re.IGNORECASE
+)
+_RE_PUBLICACAO = re.compile(
+    r"Data\s+de\s+Publica(?:ç|c)[aã]o\s*:?\s*(\d{2}/\d{2}/\d{4})", re.IGNORECASE
+)
+
+
+def datas_do_diario(pub: Publicacao | None) -> tuple[str | None, str | None]:
+    """(disponibilização, publicação) como vêm escritas no corpo do diário.
+
+    O Lucas confere a contagem do prazo por essas duas datas, e elas não são
+    colunas do banco: vivem no texto da publicação.
+    """
+    if pub is None:
+        return None, None
+
+    texto = pub.texto_completo or pub.texto_resumo or ""
+    m_disp = _RE_DISPONIBILIZACAO.search(texto)
+    m_publ = _RE_PUBLICACAO.search(texto)
+
+    disp = m_disp.group(1) if m_disp else None
+    publ = m_publ.group(1) if m_publ else None
+
+    # Sem a data no texto, cai pra coluna do banco — que é a que o sistema
+    # usou de fato pra contar. Rotulada como tal pra não passar por citação
+    # literal do diário.
+    if not publ and pub.data_publicacao:
+        publ = f"{_br(pub.data_publicacao)} (registro do sistema)"
+    return disp, publ
+
+
 def corpo_html(
     prazo: Prazo,
     processo: Processo | None,
@@ -155,7 +193,7 @@ def corpo_html(
         ] if x) or None),
         _linha("Tipo", prazo.tipo),
         _linha("Peça necessária", prazo.peca_necessaria),
-        _linha("Publicação", _br(prazo.data_publicacao)),
+        _linha("Publicação (base da contagem)", _br(prazo.data_publicacao)),
         _linha("Contagem", f"{prazo.dias_prazo} dia(s) {prazo.tipo_contagem}"),
         _linha("Data limite", _br(prazo.data_limite)),
         _linha("Limite sem feriado", _br(prazo.data_limite_sem_feriado)),
@@ -165,9 +203,13 @@ def corpo_html(
 
     if pub is not None:
         origem = "Recorte Digital OAB" if pub.fonte == "gmail" else "Diário Oficial"
+        disp_txt, publ_txt = datas_do_diario(pub)
         detalhes_pub = "".join([
             _linha("Origem", origem),
-            _linha("Data da publicação", _br(pub.data_publicacao)),
+            # As duas datas do diário vêm primeiro: é por elas que se confere
+            # se a contagem do prazo partiu do dia certo.
+            _linha("Disponibilização no diário", disp_txt or "não informada no texto"),
+            _linha("Publicação no diário", publ_txt or "não informada no texto"),
             _linha("Tribunal", pub.tribunal),
             _linha("Vara", pub.vara),
             _linha("Tipo de ato", pub.tipo_ato),
@@ -239,6 +281,7 @@ def texto_telegram(
     processo: Processo | None,
     cliente: Cliente | None,
     dias: int | None,
+    pub: Publicacao | None = None,
 ) -> str:
     nome = (cliente.nome if cliente else None) or "Cliente não vinculado"
     icone = "🔴" if (dias is not None and dias < 0) else "🟠" if (dias is not None and dias <= 2) else "🟡"
@@ -246,6 +289,12 @@ def texto_telegram(
         f"{icone} *{nome}* — {_materia(prazo, processo)}",
         f"⏳ {_rotulo_prazo(dias)} · limite {_br(prazo.data_limite) or '—'}",
     ]
+    # Disp./Pub. do diário: é o que permite conferir a contagem sem abrir o
+    # sistema. Só entra quando veio de publicação — prazo manual não tem.
+    disp_txt, publ_txt = datas_do_diario(pub)
+    if disp_txt or publ_txt:
+        linhas.append(f"🗞 Disp. {disp_txt or '—'} · Pub. {publ_txt or '—'}")
+    linhas.append(f"📆 Contagem a partir de {_br(prazo.data_publicacao)} · {prazo.dias_prazo}d {prazo.tipo_contagem}")
     if processo and processo.numero_cnj:
         linhas.append(f"⚖️ {processo.numero_cnj}")
     if prazo.peca_necessaria:
@@ -336,7 +385,7 @@ def enviar_lembretes(db: Session, *, hoje: date | None = None, forcar: bool = Fa
 
         # O Telegram não depende do e-mail: se o Gmail estiver fora do ar, o
         # aviso ainda tem que chegar por algum canal.
-        mensagens_telegram.append(texto_telegram(prazo, processo, cliente, dias))
+        mensagens_telegram.append(texto_telegram(prazo, processo, cliente, dias, pub))
 
         try:
             _enviar_email(
