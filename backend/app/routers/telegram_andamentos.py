@@ -969,10 +969,11 @@ async def _send_push_documentos(bot: Bot, chat_id: int, kind: str, ref_id: str, 
             arquivo_nome = a.arquivo_nome or "documento.pdf"
             if a.arquivo_drive_link:
                 # Manda o link Drive (clicável). É o caminho mais leve.
-                await _safe_send(
-                    bot, chat_id,
-                    f"{caption}\n\n📎 *{arquivo_nome}*\n{a.arquivo_drive_link}",
-                )
+                # URL em mensagem SEPARADA, sem parse_mode — o Markdown legado
+                # do Telegram interpreta "_" (comum em IDs de arquivo do Drive)
+                # como itálico e quebra o link em pedaços, silenciosamente.
+                await _safe_send(bot, chat_id, f"{caption}\n\n📎 *{arquivo_nome}*")
+                await bot.send_message(chat_id, a.arquivo_drive_link, disable_web_page_preview=True)
                 continue
             if a.arquivo_path:
                 # Documento existe local — tenta ler e enviar
