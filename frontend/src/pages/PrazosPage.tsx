@@ -8,6 +8,10 @@ import type { EstadoProcesso } from '../api/processos'
 import { clientesApi } from '../api/clientes'
 import ResponsavelComboBox from '../components/ResponsavelComboBox'
 import ProcessoCombobox from '../components/ProcessoCombobox'
+import LegendaPrazos from '../components/LegendaPrazos'
+import {
+  useCatalogoPrazos, sugestaoDaPeca, divergeDaLei, textoConfirmacaoDivergencia,
+} from '../api/prazosLegais'
 import { useFiltroMes } from '../components/useFiltroMes'
 import styles from './Page.module.css'
 import prazosStyles from './PrazosPage.module.css'
@@ -114,6 +118,28 @@ export default function PrazosPage() {
   const destaqueRef = useRef<HTMLDivElement | null>(null)
   const [jaFocou, setJaFocou] = useState(false)
 
+  const { data: catalogoLegal } = useCatalogoPrazos()
+
+  // Escolher a peça já traz o prazo da lei — é o caminho normal; digitar outro
+  // número continua permitido, só passa por confirmação na hora de salvar.
+  const aplicarPecaNoForm = (peca: string) => {
+    const sug = sugestaoDaPeca(catalogoLegal, peca)
+    setForm((f) => ({
+      ...f,
+      peca_necessaria: peca,
+      ...(sug?.dias != null
+        ? { dias_prazo: sug.dias, tipo_contagem: (sug.contagem ?? 'uteis') as 'uteis' | 'corridos' }
+        : {}),
+    }))
+  }
+
+  /** Deixa passar se o prazo bate com a lei; senão pede confirmação explícita. */
+  const confirmaSeDiverge = (peca: string | undefined, dias: number, contagem: string): boolean => {
+    const sug = sugestaoDaPeca(catalogoLegal, peca)
+    if (!sug || !divergeDaLei(sug, dias, contagem)) return true
+    return confirm(textoConfirmacaoDivergencia(sug, dias, contagem))
+  }
+
   const filtroMes = useFiltroMes()  // filtra por data do prazo (cumpridos/perdidos/ignorados)
   const { data: prazos = [], isLoading } = useQuery({
     queryKey: ['prazos'],
@@ -186,6 +212,7 @@ export default function PrazosPage() {
 
   const salvarEdicao = (id: string) => {
     if (!editForm) return
+    if (!confirmaSeDiverge(editForm.peca_necessaria, editForm.dias_prazo, editForm.tipo_contagem)) return
     atualizar.mutate({
       id,
       data: {
@@ -258,6 +285,7 @@ export default function PrazosPage() {
       <div className={styles.pageHeader}>
         <h1 className={styles.pageTitle}>Prazos</h1>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <LegendaPrazos />
           <button
             className={prazosStyles.btnEditar}
             style={{ padding: '8px 12px', fontSize: 12 }}
@@ -286,7 +314,11 @@ export default function PrazosPage() {
 
       {showForm && (
         <form
-          onSubmit={(e) => { e.preventDefault(); criar.mutate(form) }}
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (!confirmaSeDiverge(form.peca_necessaria, form.dias_prazo, form.tipo_contagem ?? 'uteis')) return
+            criar.mutate(form)
+          }}
           className={styles.form}
         >
           <div className={styles.formRow}>
@@ -310,12 +342,30 @@ export default function PrazosPage() {
             <div className={styles.formRow}>
               <label className={styles.formLabel}>Peça necessária</label>
               <select className={styles.input} value={form.peca_necessaria ?? ''}
-                onChange={(e) => setForm({ ...form, peca_necessaria: e.target.value })}>
+                onChange={(e) => aplicarPecaNoForm(e.target.value)}>
                 <option value="">— Selecione —</option>
                 {PECAS.map((p) => <option key={p} value={p}>{p}</option>)}
               </select>
             </div>
           </div>
+
+          {(() => {
+            const sug = sugestaoDaPeca(catalogoLegal, form.peca_necessaria)
+            if (!sug) return null
+            const diverge = divergeDaLei(sug, form.dias_prazo, form.tipo_contagem ?? 'uteis')
+            return (
+              <div className={diverge ? prazosStyles.avisoDiverge : prazosStyles.avisoLegal}>
+                <strong>
+                  {sug.dias == null
+                    ? `${sug.rotulo}: sem prazo em dias`
+                    : `${sug.rotulo}: ${sug.dias} dia(s) ${sug.contagem === 'corridos' ? 'corridos' : 'úteis'}`}
+                </strong>{' '}
+                · {sug.fundamento}
+                {diverge && <> — <strong>você lançou {form.dias_prazo} dia(s) {form.tipo_contagem === 'corridos' ? 'corridos' : 'úteis'}</strong>; será pedida confirmação ao salvar.</>}
+                {sug.observacao && <div className={prazosStyles.avisoObs}>{sug.observacao}</div>}
+              </div>
+            )
+          })()}
           <div className={styles.formRow}>
             <label className={styles.formLabel}>Data da Publicação *</label>
             <input type="date" className={styles.input} value={form.data_publicacao}
@@ -489,7 +539,17 @@ export default function PrazosPage() {
                           <div className={prazosStyles.editorField}>
                             <span className={prazosStyles.editorLabel}>Peça necessária</span>
                             <select className={styles.input} value={editForm.peca_necessaria}
-                              onChange={(e) => setEditForm({ ...editForm, peca_necessaria: e.target.value })}>
+                              onChange={(e) => {
+                                const peca = e.target.value
+                                const sug = sugestaoDaPeca(catalogoLegal, peca)
+                                setEditForm({
+                                  ...editForm,
+                                  peca_necessaria: peca,
+                                  ...(sug?.dias != null
+                                    ? { dias_prazo: sug.dias, tipo_contagem: (sug.contagem ?? 'uteis') as TipoContagem }
+                                    : {}),
+                                })
+                              }}>
                               <option value="">— Selecione —</option>
                               {PECAS.map((pc) => <option key={pc} value={pc}>{pc}</option>)}
                             </select>
@@ -525,6 +585,21 @@ export default function PrazosPage() {
                           <textarea className={styles.input} rows={2} value={editForm.descricao}
                             onChange={(e) => setEditForm({ ...editForm, descricao: e.target.value })} />
                         </div>
+                        {(() => {
+                          const sug = sugestaoDaPeca(catalogoLegal, editForm.peca_necessaria)
+                          if (!sug) return null
+                          const diverge = divergeDaLei(sug, editForm.dias_prazo, editForm.tipo_contagem)
+                          return (
+                            <div className={diverge ? prazosStyles.avisoDiverge : prazosStyles.avisoLegal}>
+                              <strong>
+                                {sug.dias == null
+                                  ? `${sug.rotulo}: sem prazo em dias`
+                                  : `${sug.rotulo}: ${sug.dias} dia(s) ${sug.contagem === 'corridos' ? 'corridos' : 'úteis'}`}
+                              </strong>{' '}· {sug.fundamento}
+                              {diverge && <> — <strong>fora do prazo legal</strong>; será pedida confirmação.</>}
+                            </div>
+                          )
+                        })()}
                         <div className={prazosStyles.editorActions}>
                           <button className={styles.btnPrimary} style={{ fontSize: 12, padding: '6px 12px' }}
                             disabled={atualizar.isPending}

@@ -3,6 +3,9 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { prazosApi } from '../api/prazos'
 import type { StatusPrazo, TipoContagem, TipoPrazo } from '../api/prazos'
 import ResponsavelComboBox from './ResponsavelComboBox'
+import {
+  useCatalogoPrazos, sugestaoDaPeca, divergeDaLei, textoConfirmacaoDivergencia,
+} from '../api/prazosLegais'
 import styles from '../pages/Page.module.css'
 
 /** Editor do prazo usado dentro do Diário Oficial e do Recorte Digital.
@@ -69,6 +72,20 @@ export default function PrazoEditorInline({
     nome: prazo.responsavel ?? '', email: '', id: null,
   })
   const [erro, setErro] = useState('')
+  const { data: catalogoLegal } = useCatalogoPrazos()
+  const sugestao = sugestaoDaPeca(catalogoLegal, peca)
+  const diverge = divergeDaLei(sugestao, dias, contagem)
+
+  /** Trocar a peça traz o prazo da lei junto — mesmo comportamento da tela de
+   * Prazos, pra não haver dois jeitos de lançar a mesma coisa. */
+  const escolherPeca = (nova: string) => {
+    setPeca(nova)
+    const sug = sugestaoDaPeca(catalogoLegal, nova)
+    if (sug?.dias != null) {
+      setDias(sug.dias)
+      setContagem((sug.contagem ?? 'uteis') as TipoContagem)
+    }
+  }
 
   const salvar = useMutation({
     mutationFn: () =>
@@ -117,7 +134,7 @@ export default function PrazoEditorInline({
           </select>
         ))}
         {campo('Peça necessária', (
-          <select className={styles.input} value={peca} onChange={(e) => setPeca(e.target.value)}>
+          <select className={styles.input} value={peca} onChange={(e) => escolherPeca(e.target.value)}>
             <option value="">— Selecione —</option>
             {PECAS.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
@@ -146,6 +163,25 @@ export default function PrazoEditorInline({
         <textarea className={styles.input} rows={2} value={descricao} onChange={(e) => setDescricao(e.target.value)} />
       ))}
 
+      {sugestao && (
+        <div style={{
+          fontSize: 11.5, lineHeight: 1.5, padding: '7px 10px', borderRadius: 6,
+          borderLeft: `3px solid ${diverge ? '#f59e0b' : '#0d9488'}`,
+          background: diverge ? '#fffbeb' : '#ecfdf5',
+          color: diverge ? '#92400e' : '#065f46',
+        }}>
+          <strong>
+            {sugestao.dias == null
+              ? `${sugestao.rotulo}: sem prazo em dias`
+              : `${sugestao.rotulo}: ${sugestao.dias} dia(s) ${sugestao.contagem === 'corridos' ? 'corridos' : 'úteis'}`}
+          </strong>{' '}· {sugestao.fundamento}
+          {diverge && <> — <strong>fora do prazo legal</strong>; será pedida confirmação ao salvar.</>}
+          {sugestao.observacao && (
+            <div style={{ marginTop: 4, fontSize: 11, opacity: 0.85 }}>{sugestao.observacao}</div>
+          )}
+        </div>
+      )}
+
       {erro && <div style={{ fontSize: 12, color: '#b91c1c' }}>{erro}</div>}
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -158,6 +194,7 @@ export default function PrazoEditorInline({
             if (status === 'nada_a_fazer' && prazo.status !== 'nada_a_fazer' && !confirm(
               'Marcar como "Nada a fazer"?\n\nA publicação é encerrada e as tarefas automáticas dela são canceladas.',
             )) return
+            if (sugestao && diverge && !confirm(textoConfirmacaoDivergencia(sugestao, dias, contagem))) return
             salvar.mutate()
           }}
         >
