@@ -13,14 +13,19 @@ import LegendaPrazos from '../components/LegendaPrazos'
 import {
   useCatalogoPrazos, sugestaoDaPeca, divergeDaLei, textoConfirmacaoDivergencia,
 } from '../api/prazosLegais'
+import PecaCombobox from '../components/PecaCombobox'
 import styles from './Page.module.css'
 import diario2Styles from './Diario2Page.module.css'
 
 const TIPOS = ['contestacao', 'recurso', 'contrarrazoes', 'manifestacao', 'audiencia', 'pericia', 'outro']
 const PECAS = [
-  'Contestação', 'Recurso de Apelação', 'Agravo Interno', 'Embargos de Declaração',
-  'Contrarrazões', 'Manifestação', 'Impugnação', 'Réplica', 'Memorial', 'Audiência', 'Outro',
-]
+  'Agravo de Instrumento', 'Agravo Interno', 'Agravo em Recurso Especial', 'Agravo em Recurso Extraordinário',
+  'Alegações Finais', 'Audiência', 'Contestação', 'Contrarrazões', 'Contrarrazões de Agravo',
+  'Contrarrazões de Apelação', 'Cumprimento de Sentença', 'Embargos de Declaração', 'Embargos de Divergência',
+  'Embargos Infringentes', 'Exceção de Pré-Executividade', 'Impugnação', 'Impugnação ao Cumprimento de Sentença',
+  'Manifestação', 'Memorial', 'Petição Intermediária', 'Quesitos', 'Recurso de Apelação', 'Recurso Especial',
+  'Recurso Extraordinário', 'Recurso Ordinário', 'Réplica',
+].sort((a, b) => a.localeCompare(b, 'pt-BR'))
 
 function formatDate(date?: string | null) {
   if (!date) return '-'
@@ -453,20 +458,23 @@ export default function Diario2Page() {
                               <option value="uteis">úteis</option>
                               <option value="corridos">corridos</option>
                             </select>
-                            <select className={styles.input} value={prazoForm.peca_necessaria ?? ''} onChange={(e) => {
-                              const peca = e.target.value
-                              const sug = sugestaoDaPeca(catalogoLegal, peca)
-                              setPrazoForm({
-                                ...prazoForm,
-                                peca_necessaria: peca,
-                                ...(sug?.dias != null
-                                  ? { dias_prazo: sug.dias, tipo_contagem: (sug.contagem ?? 'uteis') as 'uteis' | 'corridos' }
-                                  : {}),
-                              })
-                            }}>
-                              <option value="">Peça...</option>
-                              {PECAS.map((peca) => <option key={peca} value={peca}>{peca}</option>)}
-                            </select>
+                            <PecaCombobox
+                              value={prazoForm.peca_necessaria ?? ''}
+                              onChange={(peca) => {
+                                const sug = sugestaoDaPeca(catalogoLegal, peca)
+                                setPrazoForm({
+                                  ...prazoForm,
+                                  peca_necessaria: peca,
+                                  ...(sug?.dias != null
+                                    ? { dias_prazo: sug.dias, tipo_contagem: (sug.contagem ?? 'uteis') as 'uteis' | 'corridos' }
+                                    : {}),
+                                })
+                              }}
+                              baseOptions={PECAS}
+                              onApplyDefault={(dias, tipoContagem) =>
+                                setPrazoForm((prev) => prev ? { ...prev, dias_prazo: dias, tipo_contagem: tipoContagem } : prev)
+                              }
+                            />
                             <select className={styles.input} value={prazoForm.responsavel ?? ''} onChange={(e) => setPrazoForm({ ...prazoForm, responsavel: e.target.value })}>
                               <option value="">Resp.</option>
                               {usuarios.filter(u => u.ativo).map((u) => <option key={u.id} value={u.nome}>{u.nome}</option>)}
