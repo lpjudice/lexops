@@ -9,6 +9,10 @@ import { usuariosApi } from '../api/usuarios'
 import DespachoStatusResumo from '../components/DespachoStatusResumo'
 import PrazoEditorInline from '../components/PrazoEditorInline'
 import ProcessoCombobox from '../components/ProcessoCombobox'
+import LegendaPrazos from '../components/LegendaPrazos'
+import {
+  useCatalogoPrazos, sugestaoDaPeca, divergeDaLei, textoConfirmacaoDivergencia,
+} from '../api/prazosLegais'
 import styles from './Page.module.css'
 import diario2Styles from './Diario2Page.module.css'
 
@@ -73,6 +77,7 @@ export default function Diario2Page() {
   const [prazoForm, setPrazoForm] = useState<Diario2PrazoCreate | null>(null)
   const [editPrazoPub, setEditPrazoPub] = useState<string | null>(null)
   const [msg, setMsg] = useState('')
+  const { data: catalogoLegal } = useCatalogoPrazos()
 
   const { data, isLoading } = useQuery({
     queryKey: ['diario2', daysBack],
@@ -182,7 +187,15 @@ export default function Diario2Page() {
 
   const abrirPrazo = (pub: Diario2Publicacao) => {
     setPrazoPub(pub.id)
-    setPrazoForm(defaultPrazo(pub))
+    // A sugestão da IA vem primeiro; se ela não trouxe dias, usa o prazo legal
+    // da peça que ela indicou, em vez do chute fixo de 5 dias.
+    const base = defaultPrazo(pub)
+    const sug = sugestaoDaPeca(catalogoLegal, base.peca_necessaria)
+    setPrazoForm(
+      !pub.analise_ia?.dias_prazo && sug?.dias != null
+        ? { ...base, dias_prazo: sug.dias, tipo_contagem: (sug.contagem ?? 'uteis') as 'uteis' | 'corridos' }
+        : base,
+    )
     setExpanded(pub.id)
   }
 
@@ -200,6 +213,7 @@ export default function Diario2Page() {
           >
             Gmail: {gmailStatus?.email ?? 'não conectado'}
           </span>
+          <LegendaPrazos />
           <a className={styles.btnPrimary} href="/api/auth/google">Conectar Gmail master</a>
         </div>
       </div>
@@ -418,6 +432,9 @@ export default function Diario2Page() {
                             className={diario2Styles.prazoForm}
                             onSubmit={(e) => {
                               e.preventDefault()
+                              const sug = sugestaoDaPeca(catalogoLegal, prazoForm.peca_necessaria)
+                              if (sug && divergeDaLei(sug, prazoForm.dias_prazo, prazoForm.tipo_contagem)
+                                  && !confirm(textoConfirmacaoDivergencia(sug, prazoForm.dias_prazo, prazoForm.tipo_contagem))) return
                               criarPrazo.mutate({ id: pub.id, payload: prazoForm })
                             }}
                           >
@@ -436,7 +453,17 @@ export default function Diario2Page() {
                               <option value="uteis">úteis</option>
                               <option value="corridos">corridos</option>
                             </select>
-                            <select className={styles.input} value={prazoForm.peca_necessaria ?? ''} onChange={(e) => setPrazoForm({ ...prazoForm, peca_necessaria: e.target.value })}>
+                            <select className={styles.input} value={prazoForm.peca_necessaria ?? ''} onChange={(e) => {
+                              const peca = e.target.value
+                              const sug = sugestaoDaPeca(catalogoLegal, peca)
+                              setPrazoForm({
+                                ...prazoForm,
+                                peca_necessaria: peca,
+                                ...(sug?.dias != null
+                                  ? { dias_prazo: sug.dias, tipo_contagem: (sug.contagem ?? 'uteis') as 'uteis' | 'corridos' }
+                                  : {}),
+                              })
+                            }}>
                               <option value="">Peça...</option>
                               {PECAS.map((peca) => <option key={peca} value={peca}>{peca}</option>)}
                             </select>
@@ -448,6 +475,25 @@ export default function Diario2Page() {
                             <button className={styles.btnPrimary} disabled={criarPrazo.isPending}>
                               Criar
                             </button>
+                            {(() => {
+                              const sug = sugestaoDaPeca(catalogoLegal, prazoForm.peca_necessaria)
+                              if (!sug) return null
+                              const div = divergeDaLei(sug, prazoForm.dias_prazo, prazoForm.tipo_contagem)
+                              return (
+                                <div style={{
+                                  flexBasis: '100%', fontSize: 11, lineHeight: 1.5, padding: '6px 9px',
+                                  borderRadius: 6, borderLeft: `3px solid ${div ? '#f59e0b' : '#0d9488'}`,
+                                  background: div ? '#fffbeb' : '#ecfdf5', color: div ? '#92400e' : '#065f46',
+                                }}>
+                                  <strong>
+                                    {sug.dias == null
+                                      ? `${sug.rotulo}: sem prazo em dias`
+                                      : `${sug.rotulo}: ${sug.dias} dia(s) ${sug.contagem === 'corridos' ? 'corridos' : 'úteis'}`}
+                                  </strong>{' '}· {sug.fundamento}
+                                  {div && <> — <strong>fora do prazo legal</strong>; será pedida confirmação.</>}
+                                </div>
+                              )
+                            })()}
                           </form>
                         )}
                         <div className={diario2Styles.detailsText}>{pub.texto_relevante || pub.texto_completo || pub.texto_resumo || 'Sem texto.'}</div>

@@ -166,6 +166,19 @@ def atualizar_prazo(
     return prazo
 
 
+@router.get("/legais")
+def catalogo_prazos_legais():
+    """Catálogo de prazos do CPC e dos Juizados — legenda + sugestão automática.
+
+    Estático (não toca o banco): é texto de lei. Serve os dois usos pela mesma
+    fonte de propósito — legenda e auto-preenchimento divergentes seriam pior
+    do que não ter legenda.
+    """
+    from app.services.prazos_legais import catalogo
+
+    return catalogo()
+
+
 @router.post("/lembretes/enviar")
 def disparar_lembretes(
     forcar: bool = Query(False, description="Reenvia mesmo se já foi enviado hoje"),

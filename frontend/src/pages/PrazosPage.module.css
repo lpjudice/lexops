@@ -176,6 +176,36 @@
   color: #6b7280;
 }
 
+/* Fundamento legal da peça escolhida, mostrado junto ao formulário.
+   Verde = bate com a lei; âmbar = você saiu do prazo legal de propósito
+   (prazo em dobro, despacho com prazo próprio, contagem de Juizado). */
+.avisoLegal,
+.avisoDiverge {
+  font-size: 11.5px;
+  line-height: 1.5;
+  padding: 7px 10px;
+  border-radius: 6px;
+  border-left: 3px solid;
+}
+
+.avisoLegal {
+  background: #ecfdf5;
+  border-left-color: #0d9488;
+  color: #065f46;
+}
+
+.avisoDiverge {
+  background: #fffbeb;
+  border-left-color: #f59e0b;
+  color: #92400e;
+}
+
+.avisoObs {
+  margin-top: 4px;
+  font-size: 11px;
+  opacity: 0.85;
+}
+
 .btnEditar {
   font-size: 11px;
   color: #6b7280;

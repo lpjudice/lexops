@@ -8,6 +8,8 @@ import { clientesApi } from '../api/clientes'
 import type { Cliente } from '../api/clientes'
 import DespachoStatusResumo from '../components/DespachoStatusResumo'
 import PrazoEditorInline from '../components/PrazoEditorInline'
+import LegendaPrazos from '../components/LegendaPrazos'
+import { useCatalogoPrazos, sugestaoDaPeca } from '../api/prazosLegais'
 import styles from './Page.module.css'
 import diarioStyles from './DiarioPage.module.css'
 
@@ -302,6 +304,7 @@ export default function DiarioPage() {
   const [expandido, setExpandido] = useState<string | null>(null)
   const [vincularId, setVincularId] = useState<string | null>(null)
   const [editPrazoPub, setEditPrazoPub] = useState<string | null>(null)
+  const { data: catalogoLegal } = useCatalogoPrazos()
   const [processoSelecionado, setProcessoSelecionado] = useState('')
   const [filtroEstado, setFiltroEstado] = useState<DiarioEstadoFiltro>('abertas')
   const [filtroComConteudo, setFiltroComConteudo] = useState(false)
@@ -667,6 +670,7 @@ export default function DiarioPage() {
           )}
         </h1>
         <div className={diarioStyles.headerActions}>
+          <LegendaPrazos />
           <div className={diarioStyles.daysControl}>
             <span className={diarioStyles.daysLabel}>dias</span>
             <input
@@ -1309,6 +1313,33 @@ export default function DiarioPage() {
                           )}
                         </div>
                         <p className={diarioStyles.iaResumo}>{analise.resumo}</p>
+
+                        {/* Confere a sugestão da IA contra o prazo da lei ANTES
+                            de o prazo ser criado — aqui não há formulário, o
+                            botão cria direto a partir da análise. */}
+                        {(() => {
+                          if (!analise.requer_resposta || pub.prazo_id) return null
+                          const sug = sugestaoDaPeca(catalogoLegal, analise.peca_necessaria)
+                          if (!sug || sug.dias == null) return null
+                          const diasIA = analise.dias_prazo
+                          const conflito = diasIA != null && diasIA !== sug.dias
+                          return (
+                            <div style={{
+                              fontSize: 11.5, lineHeight: 1.5, padding: '6px 10px', margin: '0 0 8px',
+                              borderRadius: 6, borderLeft: `3px solid ${conflito ? '#f59e0b' : '#0d9488'}`,
+                              background: conflito ? '#fffbeb' : '#ecfdf5',
+                              color: conflito ? '#92400e' : '#065f46',
+                            }}>
+                              ⚖️ <strong>{sug.rotulo}: {sug.dias} dia(s) {sug.contagem === 'corridos' ? 'corridos' : 'úteis'}</strong>
+                              {' '}· {sug.fundamento}
+                              {conflito && (
+                                <> — <strong>a IA sugeriu {diasIA} dia(s)</strong>. Confira antes de criar;
+                                  dá pra ajustar depois em “Alterar prazo”.</>
+                              )}
+                            </div>
+                          )
+                        })()}
+
                         <div className={diarioStyles.iaAcoes}>
                           <button
                             className={diarioStyles.btnCriarPrazo}
