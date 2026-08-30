@@ -103,6 +103,24 @@ def criar_prazo(data: PrazoCreate, db: Session = Depends(get_db)):
     return prazo
 
 
+# ── ATENÇÃO À ORDEM ──────────────────────────────────────────────────────────
+# Rotas de caminho FIXO precisam vir ANTES de "/{prazo_id}". O FastAPI casa as
+# rotas na ordem de registro, então "/legais" registrado depois seria capturado
+# por "/{prazo_id}" com prazo_id="legais" e devolveria 422 (não é UUID).
+# Foi exatamente o bug da legenda em v440. Novas rotas fixas: coloque aqui.
+@router.get("/legais")
+def catalogo_prazos_legais():
+    """Catálogo de prazos do CPC e dos Juizados — legenda + sugestão automática.
+
+    Estático (não toca o banco): é texto de lei. Serve os dois usos pela mesma
+    fonte de propósito — legenda e auto-preenchimento divergentes seriam pior
+    do que não ter legenda.
+    """
+    from app.services.prazos_legais import catalogo
+
+    return catalogo()
+
+
 @router.get("/{prazo_id}", response_model=PrazoOut)
 def obter_prazo(prazo_id: uuid.UUID, db: Session = Depends(get_db)):
     prazo = db.query(Prazo).filter(Prazo.id == prazo_id).first()
@@ -164,19 +182,6 @@ def atualizar_prazo(
     pub = db.query(Publicacao).filter(Publicacao.prazo_id == prazo.id).first()
     prazo.publicacao_origem = _origem_payload(pub) if pub else None
     return prazo
-
-
-@router.get("/legais")
-def catalogo_prazos_legais():
-    """Catálogo de prazos do CPC e dos Juizados — legenda + sugestão automática.
-
-    Estático (não toca o banco): é texto de lei. Serve os dois usos pela mesma
-    fonte de propósito — legenda e auto-preenchimento divergentes seriam pior
-    do que não ter legenda.
-    """
-    from app.services.prazos_legais import catalogo
-
-    return catalogo()
 
 
 @router.post("/lembretes/enviar")
