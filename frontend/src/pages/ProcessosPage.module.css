@@ -39,10 +39,27 @@
 
 .cardInfo {
   display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Linha 1: identificação do processo (CNJ, cliente, polo, tribunal). */
+.cardInfoLinha1 {
+  display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  flex: 1;
+}
+
+/* Linha 2: sempre nesta ordem — resumo curto, status, última movimentação.
+   Fixo por design; não varia com o tamanho do texto. */
+.cardInfoLinha2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .cnj {

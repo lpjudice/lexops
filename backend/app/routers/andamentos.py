@@ -139,6 +139,38 @@ def _erro_transitorio(msg: str | None) -> bool:
     )
 
 
+async def _atualizar_parte_contraria(
+    processo: Processo, db: Session, token: str | None, session_data: dict | None,
+) -> None:
+    """Busca as partes do processo no PDPJ e atualiza `processo.parte_contraria`.
+
+    Aditivo ao sync de andamentos: usa o coletor independente do PDPJ
+    (processo_partes_collector — não mexe no orchestrator/pdpj travados) e
+    nunca deixa uma falha aqui derrubar a sincronização principal. Sempre
+    sobrescreve com o que vier do jus.br, mesmo que o campo já tenha sido
+    editado à mão (comportamento escolhido pelo Lucas).
+    """
+    from app.services.processo_partes_collector import fetch_resumo
+    from app.services.processo_partes_store import identificar_cliente_e_contraria, salvar_partes
+
+    tok = token or (session_data or {}).get("token")
+    if not tok:
+        return
+    try:
+        resumo = await fetch_resumo(processo.numero_cnj, tok)
+        if not resumo or not resumo.get("partes"):
+            return
+        salvar_partes(db, processo_id=processo.id, partes=resumo["partes"])
+        _cliente, contraria = identificar_cliente_e_contraria(db, processo)
+        if contraria:
+            processo.parte_contraria = contraria
+            db.commit()
+    except Exception:
+        logger.warning(
+            "auto-popular parte_contraria falhou para %s", processo.numero_cnj, exc_info=True
+        )
+
+
 async def _sincronizar_jusbr_com_retomada(processo, db, token, session_data, progress_callback):
     """Sincroniza e re-executa automaticamente enquanto faltarem documentos E
     houver progresso. A dedup é idempotente, então cada rodada pula o que já foi
@@ -171,6 +203,9 @@ async def _sincronizar_jusbr_com_retomada(processo, db, token, session_data, pro
             break  # rodada sem progresso → para
         prev_enviados = enviados
         await asyncio.sleep(PROCESS_DELAY_SECONDS or 1.5)
+
+    if ultimo_log is not None and ultimo_log.status != "erro":
+        await _atualizar_parte_contraria(processo, db, token, session_data)
     return ultimo_log
 
 
@@ -628,6 +663,8 @@ async def sincronizar_jusbr(
 
     log = await _sync(p, db, token=body.token, session_data=session_data)
     db.refresh(p)
+    if log.status != "erro":
+        await _atualizar_parte_contraria(p, db, body.token, session_data)
     return SincronizacaoResult(
         processo_id=str(log.processo_id),
         tribunal=log.tribunal,
@@ -722,6 +759,8 @@ async def sincronizar_batch_jusbr(
             await asyncio.sleep(PROCESS_DELAY_SECONDS)
         log = await _sync(p, db, token=body.token, session_data=session_data)
         db.refresh(p)
+        if log.status != "erro":
+            await _atualizar_parte_contraria(p, db, body.token, session_data)
         results.append(SincronizacaoResult(
             processo_id=str(log.processo_id),
             tribunal=log.tribunal,

@@ -378,6 +378,10 @@ def _run_migrations() -> None:
         conn.execute(text(
             "ALTER TABLE processos ADD COLUMN IF NOT EXISTS notificar_telegram BOOLEAN NOT NULL DEFAULT TRUE"
         ))
+        # Parte contrária — texto livre, editável na mão ou sugerido após sync jus.br.
+        conn.execute(text(
+            "ALTER TABLE processos ADD COLUMN IF NOT EXISTS parte_contraria VARCHAR(500)"
+        ))
         # CNJs adicionados via /add no bot que não estão na carteira do escritório.
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS processos_telegram_extras (

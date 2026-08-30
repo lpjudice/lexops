@@ -38,6 +38,9 @@ class Processo(Base):
     tribunal: Mapped[str | None] = mapped_column(String(20))  # TJES, TJSP, TJAM, TJRJ
 
     materia: Mapped[str | None] = mapped_column(String(255))
+    # Texto livre; editável na mão ou sugerido automaticamente após sync do
+    # jus.br a partir de ProcessoParte (ver services/processo_partes_store.py).
+    parte_contraria: Mapped[str | None] = mapped_column(String(500))
     fase: Mapped[str | None] = mapped_column(
         Enum(
             "conhecimento",

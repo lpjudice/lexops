@@ -35,6 +35,7 @@ export interface Processo {
   estado: EstadoProcesso
   tribunal?: string
   materia?: string
+  parte_contraria?: string | null
   fase?: FaseProcesso
   status: StatusProcesso
   objeto?: string
@@ -73,6 +74,7 @@ export interface ProcessoCreate {
   estado: EstadoProcesso
   tribunal?: string
   materia?: string
+  parte_contraria?: string | null
   fase?: FaseProcesso
   status?: StatusProcesso
   objeto?: string
