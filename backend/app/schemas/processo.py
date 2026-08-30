@@ -46,6 +46,7 @@ class ProcessoBase(BaseModel):
     estado: EstadoProcesso
     tribunal: str | None = None
     materia: str | None = None
+    parte_contraria: str | None = None
     fase: FaseProcesso | None = None
     status: StatusProcesso = "ativo"
     objeto: str | None = None
@@ -72,6 +73,7 @@ class ProcessoUpdate(BaseModel):
     estado: EstadoProcesso | None = None
     tribunal: str | None = None
     materia: str | None = None
+    parte_contraria: str | None = None
     fase: FaseProcesso | None = None
     status: StatusProcesso | None = None
     objeto: str | None = None

@@ -3,6 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.prazo import Prazo
@@ -27,6 +28,112 @@ def _recalcular(prazo: Prazo, processo: Processo, db: Session) -> None:
     )
     prazo.data_limite = data_com
     prazo.data_limite_sem_feriado = data_sem
+
+
+_TIPO_LABEL = {
+    "contestacao": "Contestação",
+    "recurso": "Recurso",
+    "contrarrazoes": "Contrarrazões",
+    "manifestacao": "Manifestação",
+    "audiencia": "Audiência",
+    "pericia": "Perícia",
+    "outro": "Prazo",
+}
+
+def _montar_evento(db: Session, prazo: Prazo, processo: Processo) -> tuple[str, str]:
+    """Monta (título, descrição) do evento com o que existir no banco.
+
+    Cada linha some quando o dado não existe — nada de "Vara: None".
+    """
+    cliente_nome = processo.cliente.nome if processo.cliente else None
+    parte_contraria = processo.parte_contraria
+    tipo_label = _TIPO_LABEL.get(prazo.tipo, prazo.tipo.capitalize())
+
+    # Título curto de propósito: o Google trunca por volta de 30 caracteres
+    # na visão de mês, então o CNJ fica no corpo.
+    partes_titulo = " x ".join(x for x in (cliente_nome, parte_contraria) if x)
+    titulo = f"[PRAZO] {tipo_label}"
+    if partes_titulo:
+        titulo += f" — {partes_titulo}"
+
+    linhas: list[str] = []
+    if cliente_nome:
+        papel = f" ({processo.polo})" if processo.polo else ""
+        linhas.append(f"Cliente: {cliente_nome}{papel}")
+    if parte_contraria:
+        linhas.append(f"Parte contrária: {parte_contraria}")
+    linhas.append(f"Processo: {processo.numero_cnj}")
+
+    foro = " — ".join(x for x in (processo.vara, processo.comarca) if x)
+    if processo.estado and foro:
+        foro += f"/{processo.estado}"
+    if foro:
+        linhas.append(f"Vara: {foro}")
+    if processo.materia:
+        linhas.append(f"Matéria: {processo.materia}")
+
+    peca_resp = " · ".join(
+        x for x in (
+            f"Peça: {prazo.peca_necessaria}" if prazo.peca_necessaria else None,
+            f"Responsável: {prazo.responsavel}" if prazo.responsavel else None,
+        ) if x
+    )
+    if peca_resp:
+        linhas.append(peca_resp)
+
+    contagem = "úteis" if prazo.tipo_contagem == "uteis" else "corridos"
+    linhas.append(
+        f"Prazo: {prazo.dias_prazo} dias {contagem} a partir de "
+        f"{prazo.data_publicacao.strftime('%d/%m/%Y')}"
+    )
+
+    if prazo.descricao:
+        linhas.append(f"\nNotas: {prazo.descricao}")
+
+    pub = (
+        db.query(Publicacao)
+        .filter(Publicacao.prazo_id == prazo.id)
+        .order_by(Publicacao.data_publicacao.desc())
+        .first()
+    )
+    if pub:
+        if pub.texto_resumo:
+            resumo = pub.texto_resumo.strip()
+            if len(resumo) > 1500:
+                resumo = resumo[:1500] + "…"
+            linhas.append(f"\nPublicação: {resumo}")
+        if pub.peca_doc_url:
+            linhas.append(f"Documento: {pub.peca_doc_url}")
+
+    linhas.append(f"\nAbrir no LexOps: {settings.frontend_url}/prazos")
+    return titulo, "\n".join(linhas)
+
+
+def _sincronizar_evento(db: Session, prazo: Prazo, processo: Processo) -> bool:
+    """Cria ou atualiza o evento do prazo no Google Calendar.
+
+    Silencioso: qualquer falha (sem autenticação, rede fora, evento apagado
+    na mão) é ignorada — o prazo continua salvo no banco.
+    Retorna True se o google_event_id mudou (chamador precisa dar commit).
+    """
+    if not prazo.data_limite:
+        return False
+
+    try:
+        titulo, descricao = _montar_evento(db, prazo, processo)
+        event_id = criar_evento(
+            titulo,
+            prazo.data_limite,
+            descricao,
+            prazo.google_event_id,
+        )
+    except Exception:
+        return False
+
+    if event_id and event_id != prazo.google_event_id:
+        prazo.google_event_id = event_id
+        return True
+    return False
 
 
 @router.get("/", response_model=list[PrazoOut])
@@ -71,14 +178,9 @@ def criar_prazo(data: PrazoCreate, db: Session = Depends(get_db)):
     db.refresh(prazo)
 
     # Tenta criar evento no Google Calendar (silencioso se não autenticado)
-    if prazo.data_limite:
-        titulo = f"[PRAZO] {prazo.tipo.upper()} — {processo.numero_cnj}"
-        descricao = prazo.descricao or ""
-        event_id = criar_evento(titulo, prazo.data_limite, descricao)
-        if event_id:
-            prazo.google_event_id = event_id
-            db.commit()
-            db.refresh(prazo)
+    if _sincronizar_evento(db, prazo, processo):
+        db.commit()
+        db.refresh(prazo)
 
     return prazo
 
@@ -105,6 +207,12 @@ def atualizar_prazo(
     _recalcular(prazo, prazo.processo, db)
     db.commit()
     db.refresh(prazo)
+
+    # Reflete tipo/descrição/data novos no evento do Google Calendar
+    if _sincronizar_evento(db, prazo, prazo.processo):
+        db.commit()
+        db.refresh(prazo)
+
     return prazo
 
 
@@ -113,6 +221,14 @@ def deletar_prazo(prazo_id: uuid.UUID, db: Session = Depends(get_db)):
     prazo = db.query(Prazo).filter(Prazo.id == prazo_id).first()
     if not prazo:
         raise HTTPException(status_code=404, detail="Prazo não encontrado")
+
+    # Remove o evento do Google Calendar (silencioso se não autenticado)
+    if prazo.google_event_id:
+        try:
+            deletar_evento(prazo.google_event_id)
+        except Exception:
+            pass
+
     db.delete(prazo)
     db.commit()
 
@@ -126,4 +242,10 @@ def recalcular_prazo(prazo_id: uuid.UUID, db: Session = Depends(get_db)):
     _recalcular(prazo, prazo.processo, db)
     db.commit()
     db.refresh(prazo)
+
+    # A data mudou — o evento na agenda precisa acompanhar
+    if _sincronizar_evento(db, prazo, prazo.processo):
+        db.commit()
+        db.refresh(prazo)
+
     return prazo

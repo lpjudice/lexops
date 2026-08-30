@@ -66,7 +66,7 @@ const ORGAO_LABEL: Record<OrgaoJulgadorTipo, string> = Object.fromEntries(
 
 const EMPTY: ProcessoCreate = {
   numero_cnj: '', cliente_id: '', vara: '', comarca: '',
-  estado: 'ES', tribunal: 'TJES', materia: '', fase: undefined, status: 'ativo', objeto: '',
+  estado: 'ES', tribunal: 'TJES', materia: '', parte_contraria: '', fase: undefined, status: 'ativo', objeto: '',
   orgao_julgador_tipo: 'vara', serventia: '', foro: '', sistema_juridico: null, grau: null, grau_texto: '',
   clientes_litisconsorcio: [],
 }
@@ -116,6 +116,26 @@ export default function ProcessosPage() {
     queryFn: () => clientesApi.listar(),
   })
 
+  // Decide qual das duas partes principais é a contrária: se o cliente já
+  // selecionado no form bate com um dos nomes vindos do jus.br, usa o outro
+  // lado; senão chuta o polo passivo (mais comum quando o escritório
+  // representa o autor), deixando o campo livre pra corrigir na mão.
+  const sugerirParteContraria = (data: ProcessoJusbrPrefill, clienteId: string): string | undefined => {
+    const clienteNome = clientes.find((c) => c.id === clienteId)?.nome
+    const normalizar = (s: string) =>
+      s.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
+    if (clienteNome) {
+      const alvo = normalizar(clienteNome)
+      if (data.parte_ativa_principal && normalizar(data.parte_ativa_principal).includes(alvo)) {
+        return data.parte_passiva_principal ?? undefined
+      }
+      if (data.parte_passiva_principal && normalizar(data.parte_passiva_principal).includes(alvo)) {
+        return data.parte_ativa_principal ?? undefined
+      }
+    }
+    return data.parte_passiva_principal ?? data.parte_ativa_principal ?? undefined
+  }
+
   const preencherViaJusbr = useMutation({
     mutationFn: (numeroCnj: string) => processosApi.preencherViaJusbr(numeroCnj),
     onSuccess: (data: ProcessoJusbrPrefill) => {
@@ -128,6 +148,7 @@ export default function ProcessosPage() {
         vara: data.vara ?? prev.vara,
         comarca: data.comarca ?? prev.comarca,
         materia: data.materia ?? prev.materia,
+        parte_contraria: sugerirParteContraria(data, prev.cliente_id) ?? prev.parte_contraria,
         objeto: data.objeto ?? prev.objeto,
         serventia: data.serventia ?? prev.serventia,
         foro: data.foro ?? prev.foro,
@@ -505,9 +526,16 @@ export default function ProcessosPage() {
           </div>
 
           <div className={styles.formRow}>
-            <label className={styles.formLabel}>Matéria</label>
+            <label className={styles.formLabel}>Resumo Curto</label>
             <input className={styles.input} value={form.materia}
               onChange={(e) => setForm({ ...form, materia: e.target.value })} />
+          </div>
+
+          <div className={styles.formRow}>
+            <label className={styles.formLabel}>Parte contrária</label>
+            <input className={styles.input} value={form.parte_contraria ?? ''}
+              placeholder="Preenchido automaticamente ao buscar via jus.br"
+              onChange={(e) => setForm({ ...form, parte_contraria: e.target.value })} />
           </div>
 
           <div className={styles.formRow}>
@@ -610,42 +638,46 @@ export default function ProcessosPage() {
                   title="Clique para ver detalhes"
                   onClick={() => setDetalheAberto(detalheAberto === p.id ? null : p.id)}
                 >
-                  <span
-                    className={`${ps.syncDot} ${
-                      p.ultimo_sync_status === 'ok'
-                        ? ps.syncDotOk
-                        : p.ultimo_sync_status === 'incompleto'
-                        ? ps.syncDotIncompleto
-                        : p.ultimo_sync_status === 'erro'
-                        ? ps.syncDotErro
-                        : ps.syncDotNone
-                    }`}
-                    title={
-                      p.ultimo_sync_status === 'ok'
-                        ? 'Última sincronização: OK (todos os documentos baixados)'
-                        : p.ultimo_sync_status === 'incompleto'
-                        ? 'Última sincronização: faltaram documentos — verificar manualmente'
-                        : p.ultimo_sync_status === 'erro'
-                        ? 'Última sincronização: erro — verificar manualmente'
-                        : 'Ainda não sincronizado'
-                    }
-                  />
-                  <code className={ps.cnj}>{p.numero_cnj}</code>
-                  <span className={ps.clienteNome}>{clienteNome(p.cliente_id)}</span>
-                  {p.polo && <span className={ps.poloTag}>{POLO_LABEL[p.polo as PoloProcesso]}</span>}
-                  {(p.clientes_litisconsorcio ?? []).length > 0 && (
-                    <span className={ps.litisTag}>
-                      +{(p.clientes_litisconsorcio ?? []).length} litisconsorte{(p.clientes_litisconsorcio ?? []).length > 1 ? 's' : ''}
-                    </span>
-                  )}
-                  {p.tribunal && <span className={ps.chip}>{p.tribunal}</span>}
-                  {p.materia && <span className={ps.materia}>{p.materia}</span>}
-                  <span className={`${styles.badge} ${styles[`status_${p.status}`]}`}>{p.status}</span>
-                  {p.ultimo_andamento_data && (
-                    <span className={ps.ultimoAndamento} title={p.ultimo_andamento_desc ?? ''}>
-                      {p.ultimo_andamento_data.split('-').reverse().join('/')}
-                    </span>
-                  )}
+                  <div className={ps.cardInfoLinha1}>
+                    <span
+                      className={`${ps.syncDot} ${
+                        p.ultimo_sync_status === 'ok'
+                          ? ps.syncDotOk
+                          : p.ultimo_sync_status === 'incompleto'
+                          ? ps.syncDotIncompleto
+                          : p.ultimo_sync_status === 'erro'
+                          ? ps.syncDotErro
+                          : ps.syncDotNone
+                      }`}
+                      title={
+                        p.ultimo_sync_status === 'ok'
+                          ? 'Última sincronização: OK (todos os documentos baixados)'
+                          : p.ultimo_sync_status === 'incompleto'
+                          ? 'Última sincronização: faltaram documentos — verificar manualmente'
+                          : p.ultimo_sync_status === 'erro'
+                          ? 'Última sincronização: erro — verificar manualmente'
+                          : 'Ainda não sincronizado'
+                      }
+                    />
+                    <code className={ps.cnj}>{p.numero_cnj}</code>
+                    <span className={ps.clienteNome}>{clienteNome(p.cliente_id)}</span>
+                    {p.polo && <span className={ps.poloTag}>{POLO_LABEL[p.polo as PoloProcesso]}</span>}
+                    {(p.clientes_litisconsorcio ?? []).length > 0 && (
+                      <span className={ps.litisTag}>
+                        +{(p.clientes_litisconsorcio ?? []).length} litisconsorte{(p.clientes_litisconsorcio ?? []).length > 1 ? 's' : ''}
+                      </span>
+                    )}
+                    {p.tribunal && <span className={ps.chip}>{p.tribunal}</span>}
+                  </div>
+                  <div className={ps.cardInfoLinha2}>
+                    {p.materia && <span className={ps.materia}>{p.materia}</span>}
+                    <span className={`${styles.badge} ${styles[`status_${p.status}`]}`}>{p.status}</span>
+                    {p.ultimo_andamento_data && (
+                      <span className={ps.ultimoAndamento} title={p.ultimo_andamento_desc ?? ''}>
+                        Ult. {p.ultimo_andamento_data.split('-').reverse().join('/')}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className={ps.cardActions}>
                   <button
@@ -692,7 +724,7 @@ export default function ProcessosPage() {
                   <button className={styles.btnTable}
                     onClick={() => {
                       setEditando(editando === p.id ? null : p.id)
-                      setEditForm({ numero_cnj: p.numero_cnj, cliente_id: p.cliente_id, orgao_julgador_tipo: p.orgao_julgador_tipo, vara: p.vara, comarca: p.comarca, estado: p.estado, tribunal: p.tribunal, materia: p.materia, fase: p.fase, status: p.status, objeto: p.objeto, polo: p.polo, serventia: p.serventia, foro: p.foro, sistema_juridico: p.sistema_juridico, grau: p.grau, grau_texto: p.grau_texto })
+                      setEditForm({ numero_cnj: p.numero_cnj, cliente_id: p.cliente_id, orgao_julgador_tipo: p.orgao_julgador_tipo, vara: p.vara, comarca: p.comarca, estado: p.estado, tribunal: p.tribunal, materia: p.materia, parte_contraria: p.parte_contraria, fase: p.fase, status: p.status, objeto: p.objeto, polo: p.polo, serventia: p.serventia, foro: p.foro, sistema_juridico: p.sistema_juridico, grau: p.grau, grau_texto: p.grau_texto })
                       setEditLitis((p.clientes_litisconsorcio ?? []).map((cl) => ({ cliente_id: cl.cliente_id, polo: (cl.polo as PoloProcesso | null) ?? null, principal: cl.principal ?? false })))
                       setDocsChatAberto(null)
                       setAndamentosAberto(null)
@@ -709,6 +741,12 @@ export default function ProcessosPage() {
               {/* Painel de detalhes do processo */}
               {detalheAberto === p.id && (
                 <div className={ps.infoPanel}>
+                  {p.parte_contraria && (
+                    <div className={ps.infoField}>
+                      <span className={ps.infoLabel}>Parte contrária</span>
+                      <span className={ps.infoValue}>{p.parte_contraria}</span>
+                    </div>
+                  )}
                   {(p.vara || p.serventia) && (
                     <div className={ps.infoField}>
                       <span className={ps.infoLabel}>Órgão julgador</span>
@@ -813,9 +851,14 @@ export default function ProcessosPage() {
                     </div>
                   </div>
                   <div className={styles.formRow}>
-                    <label className={styles.formLabel}>Matéria</label>
+                    <label className={styles.formLabel}>Resumo Curto</label>
                     <input className={styles.input} value={editForm.materia ?? ''}
                       onChange={(e) => setEditForm({ ...editForm, materia: e.target.value })} />
+                  </div>
+                  <div className={styles.formRow}>
+                    <label className={styles.formLabel}>Parte contrária</label>
+                    <input className={styles.input} value={editForm.parte_contraria ?? ''}
+                      onChange={(e) => setEditForm({ ...editForm, parte_contraria: e.target.value })} />
                   </div>
                   <div className={ps.twoCol}>
                     <div className={styles.formRow}>
