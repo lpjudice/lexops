@@ -93,7 +93,7 @@ _COMUM: list[PrazoLegal] = [
         "CPC, art. 1.003, §5º c/c art. 1.015", "comum", True,
         "Cabimento restrito às hipóteses do art. 1.015. Contraminuta: 15 dias "
         "(art. 1.019, II).",
-        [],
+        ["Agravo de Instrumento", "Contrarrazões de Agravo"],
     ),
     PrazoLegal(
         "agravo_interno", "Agravo interno", 15, "uteis", "CPC, art. 1.021, §2º",
@@ -111,7 +111,7 @@ _COMUM: list[PrazoLegal] = [
         "recurso_especial", "Recurso especial / extraordinário", 15, "uteis",
         "CPC, art. 1.003, §5º", "comum", True,
         "Agravo em REsp/RE contra decisão que inadmite: também 15 dias (art. 1.042).",
-        [],
+        ["Recurso Especial", "Recurso Extraordinário"],
     ),
     PrazoLegal(
         "recurso_ordinario", "Recurso ordinário", 15, "uteis",
@@ -122,14 +122,14 @@ _COMUM: list[PrazoLegal] = [
         "cumprimento_pagamento", "Cumprimento de sentença — pagamento voluntário",
         15, "uteis", "CPC, art. 523", "comum", True,
         "Não pago no prazo: multa de 10% + honorários de 10% (art. 523, §1º).",
-        [],
+        ["Cumprimento de Sentença"],
     ),
     PrazoLegal(
         "impugnacao_cumprimento", "Impugnação ao cumprimento de sentença", 15,
         "uteis", "CPC, art. 525", "comum", True,
         "Corre após o decurso dos 15 dias do art. 523, independentemente de "
         "penhora ou nova intimação.",
-        ["Impugnação"],
+        ["Impugnação", "Impugnação ao Cumprimento de Sentença"],
     ),
     PrazoLegal(
         "embargos_execucao", "Embargos à execução", 15, "uteis", "CPC, art. 915",
@@ -148,7 +148,7 @@ _COMUM: list[PrazoLegal] = [
         "Regra de fechamento: quando a lei é omissa e o juiz não fixou prazo, são "
         "5 dias úteis. É o padrão razoável para uma intimação genérica de "
         '"manifeste-se" — mas CONFIRA se o despacho fixou prazo próprio.',
-        ["Manifestação", "Petição Simples", "manifestacao"],
+        ["Manifestação", "Petição Simples", "Petição Intermediária", "manifestacao"],
     ),
 ]
 
@@ -249,6 +249,49 @@ _OUTROS: list[PrazoLegal] = [
         "Não tem prazo próprio — deve ser protocolado ANTES do vencimento do "
         "prazo que se quer dilatar (art. 223: o prazo precluso não se devolve).",
         ["Pedido de Prazo"],
+    ),
+    PrazoLegal(
+        "quesitos_pericia", "Quesitos e indicação de assistente técnico", 15,
+        "uteis", "CPC, art. 465, §1º", "comum", False,
+        "Contados da intimação do despacho de nomeação do perito — não da "
+        "juntada do laudo (isso é o prazo de manifestação sobre o laudo, "
+        "art. 477, §1º, que não tem número fixo de dias na lei).",
+        ["Quesitos"],
+    ),
+    PrazoLegal(
+        "agravo_resp_re", "Agravo em recurso especial / extraordinário", 15,
+        "uteis", "CPC, art. 1.042 c/c art. 1.003, §5º", "comum", False,
+        "Cabe contra a decisão que INADMITE o recurso especial ou "
+        "extraordinário — segue a regra geral de prazo dos recursos.",
+        ["Agravo em Recurso Especial", "Agravo em Recurso Extraordinário"],
+    ),
+    PrazoLegal(
+        "embargos_divergencia", "Embargos de divergência (STJ/STF)", 15,
+        "uteis", "CPC, arts. 1.043 e 1.003, §5º", "especial", False,
+        "Cabe contra acórdão de órgão fracionário que diverge de outro "
+        "julgado do mesmo tribunal. Regimento interno do STJ/STF pode trazer "
+        "peculiaridades de admissibilidade — confira antes de protocolar.",
+        ["Embargos de Divergência"],
+    ),
+    PrazoLegal(
+        "embargos_infringentes", "Embargos infringentes", None, None, "—",
+        "especial", False,
+        "O CPC/2015 ABOLIU este recurso no rito comum. Se apareceu numa "
+        "publicação, confira se não é processo ainda regido pelo CPC/73, ou "
+        "hipótese de regimento interno específico do tribunal (ex.: ação "
+        "rescisória de competência originária) — não lance prazo sem achar "
+        "o fundamento exato.",
+        ["Embargos Infringentes"],
+    ),
+    PrazoLegal(
+        "excecao_pre_executividade", "Exceção de pré-executividade", None,
+        None, "—", "comum", False,
+        "Defesa atípica do executado, de construção doutrinária/"
+        "jurisprudencial — sem prazo legal fixo. Pode ser oposta a qualquer "
+        "tempo enquanto pendente a execução (idealmente antes da "
+        "penhora/arrematação), restrita a matéria de ordem pública ou prova "
+        "pré-constituída.",
+        ["Exceção de Pré-Executividade"],
     ),
 ]
 
