@@ -247,6 +247,65 @@ def _build_cadastro_html(cadastro_url: str, nome: str | None, is_update: bool) -
 </body></html>"""
 
 
+def build_cobranca_html(
+    *, nome: str, descricao: str, parcela_numero: int, parcela_valor: str,
+    parcela_venc: str, saldo: str, n_parcelas_pend: int, pos_vencimento: bool,
+) -> str:
+    """
+    Lembrete de parcela — mesma identidade visual dos outros e-mails, com acento
+    próprio (dourado sóbrio). Tom amigável, não de cobrança. `pos_vencimento`=True
+    muda o texto para o lembrete único enviado alguns dias após o vencimento.
+    """
+    ACENTO = "#b0894f"
+    saud = f"Olá{(' ' + nome) if nome else ''},"
+    if pos_vencimento:
+        corpo = (
+            f"Notamos que a parcela {parcela_numero} de <b>{descricao}</b>, com vencimento "
+            f"em <b>{parcela_venc}</b> ({parcela_valor}), ainda não consta como paga em nosso "
+            f"sistema. Se você já efetuou o pagamento, por favor desconsidere — e, se puder, "
+            f"nos envie o comprovante para darmos baixa. Caso ainda não, os dados para "
+            f"pagamento estão no PDF em anexo."
+        )
+    else:
+        corpo = (
+            f"Passando só para lembrar, com tranquilidade, que a parcela {parcela_numero} "
+            f"referente a <b>{descricao}</b> vence em <b>{parcela_venc}</b>, no valor de "
+            f"<b>{parcela_valor}</b>. Em anexo segue um resumo com o cronograma e os dados "
+            f"para pagamento (PIX)."
+        )
+    saldo_txt = f"Saldo a pagar: <b>{saldo}</b>" + (
+        f" — a ser pago em {n_parcelas_pend} parcela(s)." if n_parcelas_pend > 1 else ".")
+    return f"""<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Lembrete — Pimenta Judice</title></head>
+<body style="margin:0;padding:0;background:#111111;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#111111;">
+    <tr><td align="center" style="padding:48px 16px;">
+      <table width="100%" cellpadding="0" cellspacing="0" role="presentation"
+             style="max-width:480px;background:#1a1a1a;border-radius:16px;border:1px solid #2a2a2a;overflow:hidden;">
+        <tr><td style="background:#141414;padding:24px 32px;border-bottom:1px solid #2a2a2a;">
+          <p style="margin:0;font-size:13px;font-weight:800;letter-spacing:0.14em;text-transform:uppercase;color:#f5f5f5;">PIMENTA JUDICE</p>
+          <p style="margin:2px 0 0;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:#555;">Advogados</p>
+        </td></tr>
+        <tr><td style="padding:30px 32px 8px;">
+          <p style="margin:0 0 18px;font-size:11px;color:#666;line-height:1.5;">Esta é uma mensagem automática — não é preciso respondê-la, mas fique à vontade se tiver qualquer dúvida.</p>
+          <h1 style="margin:0 0 10px;font-size:20px;font-weight:700;color:#f5f5f5;line-height:1.3;">{saud}</h1>
+          <p style="margin:0 0 20px;font-size:14px;color:#9a9a9a;line-height:1.65;">{corpo}</p>
+          <table cellpadding="0" cellspacing="0" role="presentation" width="100%" style="margin-bottom:22px;">
+            <tr><td style="border-left:3px solid {ACENTO};background:#141414;border-radius:8px;padding:14px 16px;">
+              <p style="margin:0;font-size:13px;color:#cbb892;line-height:1.6;">{saldo_txt}</p>
+            </td></tr>
+          </table>
+        </td></tr>
+        <tr><td style="padding:18px 32px 26px;border-top:1px solid #2a2a2a;">
+          <p style="margin:0;font-size:11px;color:#444;line-height:1.6;text-align:center;">Pimenta Judice Advogados</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>"""
+
+
 def send_cadastro_email(
     to_email: str, cadastro_url: str, nome: str | None = None,
     cc: list[str] | None = None, is_update: bool = False,

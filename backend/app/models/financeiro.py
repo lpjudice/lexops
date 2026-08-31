@@ -138,6 +138,8 @@ class Parcela(Base):
     observacao: Mapped[str | None] = mapped_column(String(500))
     # Controle de cobrança: última vez que o lembrete desta parcela saiu.
     ultimo_lembrete_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Estágio de lembrete já enviado: 0=nenhum, 1=D-15, 2=D-7, 3=D-2, 4=pós-vencimento (D+5).
+    cobranca_estagio: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

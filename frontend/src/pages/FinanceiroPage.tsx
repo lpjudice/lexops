@@ -711,6 +711,9 @@ export default function FinanceiroPage() {
             const vencido = h.data_vencimento &&
               new Date(h.data_vencimento) < new Date() &&
               h.status !== 'pago'
+            const parcelasVencidas = (h.parcelas || []).filter(
+              (p) => p.status === 'pendente' && new Date(p.data_vencimento + 'T12:00:00') < new Date()
+            )
 
             return (
               <div key={h.id} className={`${cs.card} ${h.contrato_orfao ? cs.cardOrfao : ''}`}>
@@ -727,7 +730,14 @@ export default function FinanceiroPage() {
                 )}
                 <div className={cs.cardTop}>
                   <div className={cs.cardLeft}>
-                    <div className={cs.cardTitulo}>{h.descricao}</div>
+                    <div className={cs.cardTitulo}>
+                      {h.descricao}
+                      {parcelasVencidas.length > 0 && (
+                        <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: '#a2585e', background: '#fbeeee', border: '1px solid #f3d6d6', borderRadius: 999, padding: '2px 9px' }}>
+                          ⚠ {parcelasVencidas.length} parcela(s) vencida(s)
+                        </span>
+                      )}
+                    </div>
                     <div className={cs.cardMeta}>
                       {clienteNome(h.cliente_id)} · {TIPO_LABEL[h.tipo]}
                       {h.data_vencimento && (
@@ -958,7 +968,7 @@ export default function FinanceiroPage() {
                                         ) : fmtVal(p.valor)}
                                       </td>
                                       <td>
-                                        <span style={{ fontSize: 11, fontWeight: 700, color: p.status === 'pago' ? '#065f46' : atrasada ? '#b91c1c' : '#6b7280' }}>
+                                        <span style={{ fontSize: 11, fontWeight: 700, color: p.status === 'pago' ? '#2f6f5e' : atrasada ? '#a2585e' : '#6b7280' }}>
                                           {p.status === 'pago' ? '✓ Paga' : atrasada ? 'Vencida' : 'A vencer'}
                                         </span>
                                       </td>

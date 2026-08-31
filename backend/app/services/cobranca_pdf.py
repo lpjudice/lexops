@@ -64,76 +64,93 @@ def gerar_pdf_cobranca(
     label = ParagraphStyle("label", fontName="Helvetica", fontSize=10, alignment=TA_LEFT, spaceAfter=2)
     body = ParagraphStyle("body", fontName="Helvetica", fontSize=10, alignment=TA_LEFT, spaceAfter=6, leading=14)
 
+    verde = colors.HexColor("#2f6f5e")   # acento sóbrio (paga)
+    venc_bg = colors.HexColor("#fbeeee")  # vermelho MUITO suave (só vencida)
+    venc_fg = colors.HexColor("#a2585e")
+
     el = []
     if os.path.exists(_LOGO_PATH):
         try:
-            logo = Image(_LOGO_PATH, width=45 * mm, height=22 * mm, kind="proportional")
+            logo = Image(_LOGO_PATH, width=48 * mm, height=24 * mm, kind="proportional")
             logo.hAlign = "CENTER"
             el.append(logo)
-            el.append(Spacer(1, 0.3 * cm))
+            el.append(Spacer(1, 0.5 * cm))
         except Exception:
             pass
-    el.append(Paragraph(escritorio.get("razao_social") or "Pimenta Júdice Advogados", h1))
-    linha2 = " · ".join(x for x in [escritorio.get("cnpj"), escritorio.get("endereco")] if x)
-    if linha2:
-        el.append(Paragraph(linha2, small))
-    el.append(Spacer(1, 0.5 * cm))
-    el.append(Paragraph("AVISO DE COBRANÇA", ParagraphStyle("t", parent=h1, fontSize=13)))
-    el.append(Spacer(1, 0.3 * cm))
+    # Sem repetir nome/CNPJ do escritório — a logo acima já identifica.
+    el.append(Paragraph("LEMBRETE", ParagraphStyle(
+        "t", fontName="Helvetica-Bold", fontSize=13, alignment=TA_CENTER,
+        textColor=colors.HexColor("#374151"), spaceAfter=2)))
+    el.append(Spacer(1, 0.4 * cm))
 
     el.append(Paragraph(f"<b>Cliente:</b> {cliente_nome}", label))
     el.append(Paragraph(f"<b>Referente a:</b> {descricao}", label))
-    el.append(Paragraph(f"<b>Emitido em:</b> {_fmt_data(date.today())}", label))
+    el.append(Paragraph(f"<b>Data:</b> {_fmt_data(date.today())}", label))
     el.append(Spacer(1, 0.4 * cm))
 
     # Tabela de parcelas
     dados = [["#", "Vencimento", "Valor", "Situação"]]
     for p in parcelas:
-        sit = "PAGA" if p.get("status") == "pago" else ("VENCIDA" if p.get("atrasada") else "A vencer")
+        sit = "Paga" if p.get("status") == "pago" else ("Vencida" if p.get("atrasada") else "A vencer")
         dados.append([str(p.get("numero", "")), _fmt_data(p.get("vencimento")), _brl(p.get("valor", 0)), sit])
     tab = Table(dados, colWidths=[1.2 * cm, 4 * cm, 4 * cm, 4 * cm])
     estilo = [
         ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 9.5),
         ("FONT", (0, 1), (-1, -1), "Helvetica", 9.5),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f2937")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#374151")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("ALIGN", (2, 0), (3, -1), "CENTER"),
         ("ALIGN", (0, 0), (1, -1), "CENTER"),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#d1d5db")),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f9fafb")]),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e5e7eb")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#fafafa")]),
         ("TOPPADDING", (0, 0), (-1, -1), 5),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
     ]
-    # Destaca a linha da parcela em cobrança
-    if destaque_numero is not None:
-        for i, p in enumerate(parcelas, start=1):
-            if p.get("numero") == destaque_numero:
-                estilo.append(("BACKGROUND", (0, i), (-1, i), colors.HexColor("#fee2e2")))
-                estilo.append(("FONT", (0, i), (-1, i), "Helvetica-Bold", 9.5))
+    # Vermelho suave só nas parcelas JÁ vencidas (nunca nas a vencer).
+    for i, p in enumerate(parcelas, start=1):
+        if p.get("status") != "pago" and p.get("atrasada"):
+            estilo.append(("BACKGROUND", (0, i), (-1, i), venc_bg))
+            estilo.append(("TEXTCOLOR", (3, i), (3, i), venc_fg))
+            estilo.append(("FONT", (3, i), (3, i), "Helvetica-Bold", 9.5))
+        elif p.get("status") == "pago":
+            estilo.append(("TEXTCOLOR", (3, i), (3, i), verde))
     tab.setStyle(TableStyle(estilo))
     el.append(tab)
     el.append(Spacer(1, 0.5 * cm))
 
-    el.append(Paragraph(f"<b>Total do recebível:</b> {_brl(total)}", body))
-    el.append(Paragraph(f"<b>Saldo em aberto:</b> {_brl(saldo)}", body))
-    el.append(Spacer(1, 0.4 * cm))
+    n_pend = sum(1 for p in parcelas if p.get("status") != "pago")
+    el.append(Paragraph(
+        f"<b>Saldo a pagar:</b> {_brl(saldo)}"
+        + (f" — em {n_pend} parcela(s)" if n_pend > 1 else ""), body))
+    el.append(Spacer(1, 0.45 * cm))
 
-    # ── Como pagar (PIX + contato) ──────────────────────────────────────────
+    # ── Como pagar (caixa arredondada) ──────────────────────────────────────
     if pagamento and (pagamento.get("pix_chave") or pagamento.get("contato")):
-        el.append(Paragraph("Como pagar", ParagraphStyle("hp", fontName="Helvetica-Bold", fontSize=11, spaceAfter=4)))
+        cont = [Paragraph("Como pagar", ParagraphStyle(
+            "hp", fontName="Helvetica-Bold", fontSize=10.5, textColor=colors.HexColor("#374151"), spaceAfter=5))]
         if pagamento.get("pix_chave"):
             tipo = pagamento.get("pix_tipo")
-            el.append(Paragraph(
-                f"<b>PIX{(' (' + tipo + ')') if tipo else ''}:</b> {pagamento['pix_chave']}", body))
+            cont.append(Paragraph(f"<b>PIX{(' (' + tipo + ')') if tipo else ''}:</b> {pagamento['pix_chave']}", body))
         if pagamento.get("favorecido"):
-            el.append(Paragraph(f"<b>Favorecido:</b> {pagamento['favorecido']}", body))
+            cont.append(Paragraph(f"<b>Favorecido:</b> {pagamento['favorecido']}", body))
         if pagamento.get("contato"):
-            el.append(Paragraph(
-                f"<b>Dúvidas e envio de comprovante:</b> {pagamento['contato']}", body))
-        el.append(Spacer(1, 0.3 * cm))
+            cont.append(Paragraph(f"<b>Contato:</b> {pagamento['contato']}", body))
+        caixa = Table([[cont]], colWidths=[doc.width])
+        caixa.setStyle(TableStyle([
+            ("BOX", (0, 0), (-1, -1), 0.8, colors.HexColor("#d8d8d8")),
+            ("ROUNDEDCORNERS", [8, 8, 8, 8]),
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#fafafa")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 14),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 14),
+            ("TOPPADDING", (0, 0), (-1, -1), 12),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+        ]))
+        el.append(caixa)
+        el.append(Spacer(1, 0.4 * cm))
 
     el.append(Paragraph(
-        "Caso o pagamento já tenha sido realizado, por favor desconsidere este aviso.", body))
+        "Se o pagamento já tiver sido feito, é só desconsiderar — e, se puder, nos avise. Obrigado!",
+        ParagraphStyle("f", parent=body, textColor=colors.HexColor("#6b7280"), fontSize=9.5)))
 
     doc.build(el)
     return buf.getvalue()
