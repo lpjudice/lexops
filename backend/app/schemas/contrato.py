@@ -93,6 +93,7 @@ class ContratoFinanceiro(BaseModel):
     valor_causa: float | None = None
     data_vencimento: str | None = None
     condicao_pagamento: str | None = None
+    num_parcelas: int | None = None
     data_contrato: str | None = None
 
 

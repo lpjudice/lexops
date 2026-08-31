@@ -7,6 +7,7 @@ from pydantic import BaseModel
 TipoHonorario = Literal["fixo", "percentual", "exito"]
 StatusHonorario = Literal["pendente", "parcial", "pago", "cancelado"]
 FormaPagamento = Literal["pix", "ted", "boleto", "cheque", "dinheiro", "outro"]
+StatusParcela = Literal["pendente", "pago", "cancelado"]
 
 
 class RecebimentoCreate(BaseModel):
@@ -14,15 +15,54 @@ class RecebimentoCreate(BaseModel):
     data_recebimento: date
     forma_pagamento: FormaPagamento = "pix"
     observacao: str | None = None
+    parcela_id: uuid.UUID | None = None
 
 
 class RecebimentoOut(BaseModel):
     id: uuid.UUID
     honorario_id: uuid.UUID
+    parcela_id: uuid.UUID | None = None
     valor: float
     data_recebimento: date
     forma_pagamento: FormaPagamento
     observacao: str | None
+
+    model_config = {"from_attributes": True}
+
+
+# ── Parcelas ──────────────────────────────────────────────────────────────────
+
+class ParcelaInput(BaseModel):
+    """Uma parcela no cronograma (criação/edição em lote pelo form do recebível)."""
+    numero: int
+    valor: float
+    data_vencimento: date
+    observacao: str | None = None
+
+
+class ParcelaUpdate(BaseModel):
+    valor: float | None = None
+    data_vencimento: date | None = None
+    observacao: str | None = None
+
+
+class ParcelaPagar(BaseModel):
+    data_recebimento: date | None = None
+    forma_pagamento: FormaPagamento = "pix"
+    valor: float | None = None          # default = valor da parcela
+    observacao: str | None = None
+
+
+class ParcelaOut(BaseModel):
+    id: uuid.UUID
+    honorario_id: uuid.UUID
+    numero: int
+    valor: float
+    data_vencimento: date
+    status: StatusParcela
+    data_pagamento: date | None
+    observacao: str | None
+    ultimo_lembrete_em: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -40,6 +80,13 @@ class HonorarioCreate(BaseModel):
     valor_causa: float | None = None
     percentual_exito: float | None = None
     data_estimada_sentenca: date | None = None
+    # Vínculo com contrato existente + cobrança
+    contrato_id: uuid.UUID | None = None
+    cobranca_ativa: bool = False
+    cobranca_email: str | None = None
+    # Cronograma de parcelas (opcional). Quando informado, valor_total = soma das parcelas
+    # e o vencimento simples é ignorado em favor do cronograma.
+    parcelas: list[ParcelaInput] | None = None
 
 
 class HonorarioUpdate(BaseModel):
@@ -54,6 +101,9 @@ class HonorarioUpdate(BaseModel):
     percentual_exito: float | None = None
     data_estimada_sentenca: date | None = None
     contrato_orfao: bool | None = None
+    contrato_id: uuid.UUID | None = None
+    cobranca_ativa: bool | None = None
+    cobranca_email: str | None = None
 
 
 class HonorarioOut(BaseModel):
@@ -75,7 +125,10 @@ class HonorarioOut(BaseModel):
     contrato_id: uuid.UUID | None = None
     pendente_assinatura: bool = False
     contrato_orfao: bool = False
+    cobranca_ativa: bool = False
+    cobranca_email: str | None = None
     recebimentos: list[RecebimentoOut]
+    parcelas: list[ParcelaOut] = []
     created_at: datetime
     updated_at: datetime
 

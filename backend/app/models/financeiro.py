@@ -51,6 +51,13 @@ class Honorario(Base):
     pendente_assinatura: Mapped[bool] = mapped_column(default=False, server_default="false")
     contrato_orfao: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
+    # ── Cobrança automática (lembretes ao cliente até o pagamento) ──────────────
+    # Opt-in por recebível. Quando ativa, o cron diário envia e-mail + PDF de
+    # cobrança para as parcelas pendentes vencidas, até serem marcadas como pagas.
+    cobranca_ativa: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # E-mail para onde enviar a cobrança (override); se vazio, usa o e-mail do cliente.
+    cobranca_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -64,6 +71,11 @@ class Honorario(Base):
         "Recebimento", back_populates="honorario",
         cascade="all, delete-orphan",
         order_by="Recebimento.data_recebimento",
+    )
+    parcelas: Mapped[list["Parcela"]] = relationship(
+        "Parcela", back_populates="honorario",
+        cascade="all, delete-orphan",
+        order_by="Parcela.numero",
     )
 
     @property
@@ -84,6 +96,11 @@ class Recebimento(Base):
     honorario_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("honorarios.id"), nullable=False
     )
+    # Parcela que este pagamento quita (opcional). Pagar uma parcela cria um
+    # Recebimento com este vínculo — e a NF continua se ligando ao recebimento.
+    parcela_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("parcelas.id"), nullable=True
+    )
 
     valor: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
     data_recebimento: Mapped[date] = mapped_column(Date, nullable=False)
@@ -96,3 +113,37 @@ class Recebimento(Base):
     observacao: Mapped[str | None] = mapped_column(String(500))
 
     honorario: Mapped["Honorario"] = relationship("Honorario", back_populates="recebimentos")
+
+
+class Parcela(Base):
+    """Parcela agendada (a vencer) de um recebível (Honorário). O pagamento de uma
+    parcela gera um Recebimento vinculado; a NF continua sendo emitida por recebimento."""
+    __tablename__ = "parcelas"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    honorario_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("honorarios.id"), nullable=False
+    )
+
+    numero: Mapped[int] = mapped_column(nullable=False, default=1)
+    valor: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    data_vencimento: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(
+        Enum("pendente", "pago", "cancelado", name="status_parcela"),
+        nullable=False, default="pendente",
+    )
+    data_pagamento: Mapped[date | None] = mapped_column(Date, nullable=True)
+    observacao: Mapped[str | None] = mapped_column(String(500))
+    # Controle de cobrança: última vez que o lembrete desta parcela saiu.
+    ultimo_lembrete_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    honorario: Mapped["Honorario"] = relationship("Honorario", back_populates="parcelas")

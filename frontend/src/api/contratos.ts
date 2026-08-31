@@ -182,6 +182,7 @@ export interface ContratoFinanceiroIA {
   valor_causa?: number | null
   data_vencimento?: string
   condicao_pagamento?: string
+  num_parcelas?: number | null
   data_contrato?: string
 }
 

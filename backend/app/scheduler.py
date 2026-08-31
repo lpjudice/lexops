@@ -464,6 +464,21 @@ def _gerar_instagram_diario() -> None:
         logger.warning("Scheduler: falha ao gerar sugestões de Instagram: %s", exc)
 
 
+def _enviar_cobrancas_parcelas() -> None:
+    """Cobrança diária: e-mail + PDF das parcelas vencidas dos recebíveis com cobrança ativa."""
+    try:
+        from app.database import SessionLocal
+        from app.services.cobranca_lembretes import enviar_cobrancas
+        db = SessionLocal()
+        try:
+            res = enviar_cobrancas(db)
+            logger.info("Scheduler: cobranças de parcelas — %s", res)
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.warning("Scheduler: falha geral nas cobranças de parcelas: %s", exc)
+
+
 def start_scheduler() -> None:
     if scheduler.running:
         logger.info("Scheduler já estava ativo")
@@ -562,6 +577,13 @@ def start_scheduler() -> None:
         _lembretes_prazos,
         trigger=CronTrigger(hour=7, minute=30, timezone="America/Sao_Paulo"),
         id="lembretes_prazos_diarios",
+        replace_existing=True,
+    )
+    # Cobrança diária de parcelas vencidas (e-mail + PDF) — todo dia, 09h20 BRT
+    scheduler.add_job(
+        _enviar_cobrancas_parcelas,
+        trigger=CronTrigger(hour=9, minute=20, timezone="America/Sao_Paulo"),
+        id="cobrancas_parcelas_diarias",
         replace_existing=True,
     )
     scheduler.start()

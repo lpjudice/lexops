@@ -8,9 +8,10 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.cliente import Cliente
-from app.models.financeiro import Honorario, Recebimento
+from app.models.financeiro import Honorario, Parcela, Recebimento
 from app.schemas.financeiro import (
     HonorarioCreate, HonorarioOut, HonorarioUpdate,
+    ParcelaInput, ParcelaOut, ParcelaPagar, ParcelaUpdate,
     RecebimentoCreate, RecebimentoOut,
     ResumoCliente, ResumoFinanceiro, ResumoMensal,
 )
@@ -41,8 +42,20 @@ def listar_honorarios(
 
 @router.post("/honorarios/", response_model=HonorarioOut, status_code=status.HTTP_201_CREATED)
 def criar_honorario(data: HonorarioCreate, db: Session = Depends(get_db)):
-    h = Honorario(**data.model_dump())
+    parcelas_in = data.parcelas or []
+    payload = data.model_dump(exclude={"parcelas"})
+    if parcelas_in:
+        # Com cronograma: valor_total = soma das parcelas; vencimento simples = 1ª parcela.
+        payload["valor_total"] = round(sum(float(p.valor) for p in parcelas_in), 2)
+        payload["data_vencimento"] = min(p.data_vencimento for p in parcelas_in)
+    h = Honorario(**payload)
     db.add(h)
+    db.flush()
+    for p in parcelas_in:
+        db.add(Parcela(
+            honorario_id=h.id, numero=p.numero, valor=p.valor,
+            data_vencimento=p.data_vencimento, observacao=p.observacao,
+        ))
     db.commit()
     db.refresh(h)
     return h
@@ -133,6 +146,141 @@ def remover_recebimento(
             h.status = "pago"
 
     db.commit()
+
+
+# ── Parcelas ──────────────────────────────────────────────────────────────────
+
+def _recalc_status_honorario(h: Honorario) -> None:
+    """Deriva o status do recebível dos recebimentos (pagar parcela cria recebimento)."""
+    total_rec = sum(float(r.valor) for r in h.recebimentos)
+    if total_rec <= 0:
+        h.status = "pendente"
+    elif total_rec < float(h.valor_total):
+        h.status = "parcial"
+    else:
+        h.status = "pago"
+
+
+def _sync_valor_total(h: Honorario) -> None:
+    """Quando há cronograma, o valor_total do recebível acompanha a soma das parcelas."""
+    if h.parcelas:
+        h.valor_total = round(sum(float(p.valor) for p in h.parcelas), 2)
+
+
+@router.post("/honorarios/{honorario_id}/parcelas/", response_model=ParcelaOut,
+             status_code=status.HTTP_201_CREATED)
+def adicionar_parcela(honorario_id: uuid.UUID, data: ParcelaInput, db: Session = Depends(get_db)):
+    h = db.query(Honorario).filter(Honorario.id == honorario_id).first()
+    if not h:
+        raise HTTPException(status_code=404, detail="Honorário não encontrado")
+    p = Parcela(honorario_id=honorario_id, numero=data.numero, valor=data.valor,
+                data_vencimento=data.data_vencimento, observacao=data.observacao)
+    db.add(p)
+    db.flush()
+    db.refresh(h)
+    _sync_valor_total(h)
+    db.commit()
+    db.refresh(p)
+    return p
+
+
+@router.patch("/parcelas/{parcela_id}", response_model=ParcelaOut)
+def editar_parcela(parcela_id: uuid.UUID, data: ParcelaUpdate, db: Session = Depends(get_db)):
+    p = db.query(Parcela).filter(Parcela.id == parcela_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Parcela não encontrada")
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(p, field, value)
+    db.flush()
+    h = db.query(Honorario).filter(Honorario.id == p.honorario_id).first()
+    if h:
+        db.refresh(h)
+        _sync_valor_total(h)
+    db.commit()
+    db.refresh(p)
+    return p
+
+
+@router.delete("/parcelas/{parcela_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remover_parcela(parcela_id: uuid.UUID, db: Session = Depends(get_db)):
+    p = db.query(Parcela).filter(Parcela.id == parcela_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Parcela não encontrada")
+    hid = p.honorario_id
+    # solta recebimentos vinculados (não apaga o pagamento; só desvincula da parcela)
+    for rec in db.query(Recebimento).filter(Recebimento.parcela_id == p.id).all():
+        rec.parcela_id = None
+    db.delete(p)
+    db.flush()
+    h = db.query(Honorario).filter(Honorario.id == hid).first()
+    if h:
+        db.refresh(h)
+        _sync_valor_total(h)
+    db.commit()
+
+
+@router.post("/parcelas/{parcela_id}/pagar", response_model=ParcelaOut)
+def pagar_parcela(parcela_id: uuid.UUID, data: ParcelaPagar, db: Session = Depends(get_db)):
+    """Marca a parcela como paga: cria um Recebimento vinculado (a NF é emitida por recebimento)."""
+    p = db.query(Parcela).filter(Parcela.id == parcela_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Parcela não encontrada")
+    if p.status == "pago":
+        raise HTTPException(status_code=400, detail="Parcela já está paga")
+    valor = float(data.valor) if data.valor is not None else float(p.valor)
+    rec = Recebimento(
+        honorario_id=p.honorario_id, parcela_id=p.id, valor=valor,
+        data_recebimento=data.data_recebimento or date.today(),
+        forma_pagamento=data.forma_pagamento, observacao=data.observacao,
+    )
+    db.add(rec)
+    p.status = "pago"
+    p.data_pagamento = rec.data_recebimento
+    db.flush()
+    h = db.query(Honorario).filter(Honorario.id == p.honorario_id).first()
+    if h:
+        db.refresh(h)
+        _recalc_status_honorario(h)
+    db.commit()
+    db.refresh(p)
+    return p
+
+
+@router.post("/parcelas/{parcela_id}/reabrir", response_model=ParcelaOut)
+def reabrir_parcela(parcela_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Desfaz o pagamento: remove o(s) recebimento(s) gerados por esta parcela."""
+    p = db.query(Parcela).filter(Parcela.id == parcela_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Parcela não encontrada")
+    for rec in db.query(Recebimento).filter(Recebimento.parcela_id == p.id).all():
+        db.delete(rec)
+    p.status = "pendente"
+    p.data_pagamento = None
+    db.flush()
+    h = db.query(Honorario).filter(Honorario.id == p.honorario_id).first()
+    if h:
+        db.refresh(h)
+        _recalc_status_honorario(h)
+    db.commit()
+    db.refresh(p)
+    return p
+
+
+# ── Cobrança (envio manual) ───────────────────────────────────────────────────
+
+@router.post("/honorarios/{honorario_id}/enviar-cobranca")
+def enviar_cobranca_manual(honorario_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Envia agora o e-mail de cobrança (com PDF) das parcelas vencidas deste recebível.
+    Ignora o opt-in e o dedup diário — é o botão 'enviar cobrança' da tela."""
+    from app.services.cobranca_lembretes import enviar_cobrancas
+    resultado = enviar_cobrancas(db, forcar=True, honorario_id=honorario_id)
+    if resultado["enviados"] == 0 and resultado["erros"]:
+        raise HTTPException(status_code=502, detail="; ".join(resultado["erros"])[:300])
+    if resultado["enviados"] == 0 and resultado["pulados"]:
+        raise HTTPException(status_code=400, detail="Sem e-mail de destino (defina o e-mail do cliente ou o e-mail de cobrança).")
+    if resultado["enviados"] == 0:
+        raise HTTPException(status_code=400, detail="Nenhuma parcela vencida pendente para cobrar.")
+    return resultado
 
 
 # ── Resumo financeiro ─────────────────────────────────────────────────────────

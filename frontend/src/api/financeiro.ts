@@ -3,13 +3,35 @@ import api from './client'
 export type TipoHonorario = 'fixo' | 'percentual' | 'exito'
 export type StatusHonorario = 'pendente' | 'parcial' | 'pago' | 'cancelado'
 export type FormaPagamento = 'pix' | 'ted' | 'boleto' | 'cheque' | 'dinheiro' | 'outro'
+export type StatusParcela = 'pendente' | 'pago' | 'cancelado'
 
 export interface Recebimento {
   id: string
   honorario_id: string
+  parcela_id?: string | null
   valor: number
   data_recebimento: string
   forma_pagamento: FormaPagamento
+  observacao?: string
+}
+
+export interface Parcela {
+  id: string
+  honorario_id: string
+  numero: number
+  valor: number
+  data_vencimento: string
+  status: StatusParcela
+  data_pagamento?: string | null
+  observacao?: string
+  ultimo_lembrete_em?: string | null
+}
+
+/** Uma parcela no cronograma enviado ao criar o recebível. */
+export interface ParcelaInput {
+  numero: number
+  valor: number
+  data_vencimento: string
   observacao?: string
 }
 
@@ -32,7 +54,10 @@ export interface Honorario {
   contrato_id?: string | null
   pendente_assinatura?: boolean
   contrato_orfao?: boolean
+  cobranca_ativa?: boolean
+  cobranca_email?: string | null
   recebimentos: Recebimento[]
+  parcelas: Parcela[]
   created_at: string
   updated_at: string
 }
@@ -49,6 +74,10 @@ export interface HonorarioCreate {
   valor_causa?: number
   percentual_exito?: number
   data_estimada_sentenca?: string
+  contrato_id?: string | null
+  cobranca_ativa?: boolean
+  cobranca_email?: string | null
+  parcelas?: ParcelaInput[]
 }
 
 export interface RecebimentoCreate {
@@ -100,6 +129,25 @@ export const financeiroApi = {
 
   removerRecebimento: (honorarioId: string, recId: string) =>
     api.delete(`/financeiro/honorarios/${honorarioId}/recebimentos/${recId}`),
+
+  // ── Parcelas ──
+  adicionarParcela: (honorarioId: string, data: ParcelaInput) =>
+    api.post<Parcela>(`/financeiro/honorarios/${honorarioId}/parcelas/`, data).then((r) => r.data),
+
+  editarParcela: (parcelaId: string, data: Partial<Pick<ParcelaInput, 'valor' | 'data_vencimento' | 'observacao'>>) =>
+    api.patch<Parcela>(`/financeiro/parcelas/${parcelaId}`, data).then((r) => r.data),
+
+  removerParcela: (parcelaId: string) =>
+    api.delete(`/financeiro/parcelas/${parcelaId}`),
+
+  pagarParcela: (parcelaId: string, data: { data_recebimento?: string; forma_pagamento?: FormaPagamento; valor?: number; observacao?: string }) =>
+    api.post<Parcela>(`/financeiro/parcelas/${parcelaId}/pagar`, data).then((r) => r.data),
+
+  reabrirParcela: (parcelaId: string) =>
+    api.post<Parcela>(`/financeiro/parcelas/${parcelaId}/reabrir`).then((r) => r.data),
+
+  enviarCobranca: (honorarioId: string) =>
+    api.post<{ enviados: number; pulados: number; erros: string[] }>(`/financeiro/honorarios/${honorarioId}/enviar-cobranca`).then((r) => r.data),
 
   resumo: () =>
     api.get<ResumoFinanceiro>('/financeiro/resumo/').then((r) => r.data),

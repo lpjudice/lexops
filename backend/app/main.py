@@ -1268,6 +1268,26 @@ def _run_migrations() -> None:
               AND fonte::text LIKE 'scraping%'
         """))
 
+        # ── Financeiro: parcelamento de recebíveis + cobrança automática ──────
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS parcelas (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                honorario_id UUID NOT NULL REFERENCES honorarios(id) ON DELETE CASCADE,
+                numero INTEGER NOT NULL DEFAULT 1,
+                valor NUMERIC(14,2) NOT NULL,
+                data_vencimento DATE NOT NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'pendente',
+                data_pagamento DATE,
+                observacao VARCHAR(500),
+                ultimo_lembrete_em TIMESTAMPTZ,
+                created_at TIMESTAMPTZ DEFAULT now(),
+                updated_at TIMESTAMPTZ DEFAULT now()
+            )
+        """))
+        conn.execute(text("ALTER TABLE recebimentos ADD COLUMN IF NOT EXISTS parcela_id UUID"))
+        conn.execute(text("ALTER TABLE honorarios ADD COLUMN IF NOT EXISTS cobranca_ativa BOOLEAN NOT NULL DEFAULT false"))
+        conn.execute(text("ALTER TABLE honorarios ADD COLUMN IF NOT EXISTS cobranca_email VARCHAR(255)"))
+
         conn.commit()
 
 

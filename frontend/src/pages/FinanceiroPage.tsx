@@ -2,10 +2,11 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { financeiroApi } from '../api/financeiro'
-import type { HonorarioCreate, RecebimentoCreate, StatusHonorario, TipoHonorario, FormaPagamento, FluxoMes } from '../api/financeiro'
+import type { HonorarioCreate, ParcelaInput, RecebimentoCreate, StatusHonorario, TipoHonorario, FormaPagamento, FluxoMes } from '../api/financeiro'
 import { fiscalApi } from '../api/fiscal'
 import { clientesApi } from '../api/clientes'
 import { processosApi } from '../api/processos'
+import { contratosApi } from '../api/contratos'
 import CurrencyInput from '../components/CurrencyInput'
 import ComboBox from '../components/ComboBox'
 import type { ComboOption } from '../components/ComboBox'
@@ -53,6 +54,12 @@ export default function FinanceiroPage() {
   const [novoClienteNome, setNovoClienteNome] = useState('')
   const [showNovoCliente, setShowNovoCliente] = useState(false)
   const [novoClienteEmail, setNovoClienteEmail] = useState('')
+  // Parcelamento no novo recebível
+  const [parcN, setParcN] = useState(1)
+  const [parc1Venc, setParc1Venc] = useState('')
+  const [parcelasEdit, setParcelasEdit] = useState<ParcelaInput[]>([])
+  // Edição inline de parcelas no card (id → {valor, data})
+  const [parcEdits, setParcEdits] = useState<Record<string, { valor: number; data_vencimento: string }>>({})
 
   const { data: honorarios = [], isLoading } = useQuery({
     queryKey: ['honorarios', filtroStatus],
@@ -111,7 +118,63 @@ export default function FinanceiroPage() {
       qc.invalidateQueries({ queryKey: ['financeiro-resumo'] })
       setShowForm(false)
       setForm(EMPTY_H)
+      setParcN(1); setParc1Venc(''); setParcelasEdit([])
     },
+  })
+
+  const { data: contratos = [] } = useQuery({
+    queryKey: ['contratos'],
+    queryFn: () => contratosApi.listar(),
+  })
+
+  // Gera o cronograma de parcelas (divisão mensal a partir do 1º vencimento).
+  const gerarParcelas = (n: number, primeiro: string, total: number) => {
+    if (n < 2 || !primeiro) { setParcelasEdit([]); return }
+    const base = Math.round((total / n) * 100) / 100
+    const [y, m, d] = primeiro.split('-').map(Number)
+    const itens: ParcelaInput[] = []
+    let acc = 0
+    for (let i = 0; i < n; i++) {
+      const v = i === n - 1 ? Math.round((total - acc) * 100) / 100 : base
+      if (i < n - 1) acc = Math.round((acc + base) * 100) / 100
+      const dt = new Date(y, (m - 1) + i, d)
+      const iso = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
+      itens.push({ numero: i + 1, valor: v, data_vencimento: iso })
+    }
+    setParcelasEdit(itens)
+  }
+
+  const invalidarFin = () => {
+    qc.invalidateQueries({ queryKey: ['honorarios'] })
+    qc.invalidateQueries({ queryKey: ['financeiro-resumo'] })
+  }
+  const pagarParcela = useMutation({
+    mutationFn: ({ id, data_recebimento, forma }: { id: string; data_recebimento: string; forma: FormaPagamento }) =>
+      financeiroApi.pagarParcela(id, { data_recebimento, forma_pagamento: forma }),
+    onSuccess: invalidarFin,
+  })
+  const reabrirParcela = useMutation({
+    mutationFn: (id: string) => financeiroApi.reabrirParcela(id),
+    onSuccess: invalidarFin,
+  })
+  const editarParcela = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: { valor?: number; data_vencimento?: string } }) =>
+      financeiroApi.editarParcela(id, data),
+    onSuccess: invalidarFin,
+  })
+  const removerParcela = useMutation({
+    mutationFn: (id: string) => financeiroApi.removerParcela(id),
+    onSuccess: invalidarFin,
+  })
+  const enviarCobranca = useMutation({
+    mutationFn: (id: string) => financeiroApi.enviarCobranca(id),
+    onSuccess: (r) => { invalidarFin(); alert(`Cobrança enviada (${r.enviados}).`) },
+    onError: (e: any) => alert(`Erro ao enviar cobrança:\n${e?.response?.data?.detail || e?.message || 'Erro'}`),
+  })
+  const toggleCobranca = useMutation({
+    mutationFn: ({ id, ativa }: { id: string; ativa: boolean }) =>
+      financeiroApi.atualizarHonorario(id, { cobranca_ativa: ativa } as any),
+    onSuccess: invalidarFin,
   })
 
   const deletar = useMutation({
@@ -365,7 +428,14 @@ export default function FinanceiroPage() {
       {/* Formulário novo honorário */}
       {aba === 'recebiveis' && showForm && (
         <form
-          onSubmit={(e) => { e.preventDefault(); criar.mutate(form) }}
+          onSubmit={(e) => {
+            e.preventDefault()
+            const usaParcelas = parcN >= 2 && parcelasEdit.length > 0
+            const payload: HonorarioCreate = usaParcelas
+              ? { ...form, parcelas: parcelasEdit, valor_total: parcelasEdit.reduce((s, p) => s + p.valor, 0) }
+              : form
+            criar.mutate(payload)
+          }}
           className={styles.form}
         >
           <div className={styles.formRow}>
@@ -505,6 +575,89 @@ export default function FinanceiroPage() {
               onChange={(e) => setForm({ ...form, data_vencimento: e.target.value || undefined })}
             />
           </div>
+          {/* ── Parcelamento ─────────────────────────────────────────── */}
+          <div className={styles.formRow}>
+            <label className={styles.formLabel}>Parcelamento</label>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <input type="number" min={1} className={styles.input} style={{ width: 90 }}
+                value={parcN}
+                onChange={(e) => { const n = Math.max(1, parseInt(e.target.value) || 1); setParcN(n); gerarParcelas(n, parc1Venc, form.valor_total) }}
+                title="Nº de parcelas" />
+              <span style={{ fontSize: 12, color: '#6b7280' }}>parcela(s), 1º venc.:</span>
+              <input type="date" className={styles.input} style={{ width: 170 }}
+                value={parc1Venc}
+                onChange={(e) => { setParc1Venc(e.target.value); gerarParcelas(parcN, e.target.value, form.valor_total) }} />
+              {parcN >= 2 && (
+                <button type="button" className={styles.btnTable}
+                  onClick={() => gerarParcelas(parcN, parc1Venc, form.valor_total)}>↻ Recalcular</button>
+              )}
+            </div>
+            {parcN >= 2 && parcelasEdit.length > 0 && (
+              <div style={{ marginTop: 8, border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
+                <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: '#f9fafb' }}>
+                      <th style={{ padding: 6, textAlign: 'left' }}>#</th>
+                      <th style={{ padding: 6, textAlign: 'left' }}>Vencimento</th>
+                      <th style={{ padding: 6, textAlign: 'left' }}>Valor</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {parcelasEdit.map((p, i) => (
+                      <tr key={i} style={{ borderTop: '1px solid #eee' }}>
+                        <td style={{ padding: 6 }}>{p.numero}</td>
+                        <td style={{ padding: 6 }}>
+                          <input type="date" className={styles.input} style={{ padding: '4px 6px' }}
+                            value={p.data_vencimento}
+                            onChange={(e) => setParcelasEdit(parcelasEdit.map((x, j) => j === i ? { ...x, data_vencimento: e.target.value } : x))} />
+                        </td>
+                        <td style={{ padding: 6, width: 160 }}>
+                          <CurrencyInput className={styles.input} style={{ padding: '4px 6px' }}
+                            value={p.valor}
+                            onChange={(v) => setParcelasEdit(parcelasEdit.map((x, j) => j === i ? { ...x, valor: v } : x))} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div style={{ padding: '6px 8px', fontSize: 12, textAlign: 'right', background: '#f9fafb', color: '#374151' }}>
+                  Soma das parcelas: <b>{fmtVal(parcelasEdit.reduce((s, p) => s + p.valor, 0))}</b>
+                  {Math.abs(parcelasEdit.reduce((s, p) => s + p.valor, 0) - form.valor_total) > 0.01 && (
+                    <span style={{ color: '#b45309' }}> · será o novo valor total</span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Vínculo com contrato ─────────────────────────────────── */}
+          <div className={styles.formRow}>
+            <label className={styles.formLabel}>Vincular a contrato (opcional)</label>
+            <ComboBox
+              options={contratos
+                .filter((c) => !form.cliente_id || c.cliente_id === form.cliente_id)
+                .map((c) => ({ value: c.id, label: c.titulo, sublabel: c.status }))}
+              value={form.contrato_id ?? ''}
+              onChange={(v) => setForm({ ...form, contrato_id: v || undefined })}
+              placeholder="Buscar contrato..."
+            />
+          </div>
+
+          {/* ── Cobrança automática ──────────────────────────────────── */}
+          <div className={styles.formRow}>
+            <label className={styles.formLabel} style={{ display: 'flex', gap: 8, alignItems: 'center', cursor: 'pointer' }}>
+              <input type="checkbox" checked={!!form.cobranca_ativa}
+                onChange={(e) => setForm({ ...form, cobranca_ativa: e.target.checked })} />
+              Cobrança automática (e-mail + PDF ao cliente até o pagamento)
+            </label>
+            {form.cobranca_ativa && (
+              <input className={styles.input} style={{ marginTop: 6 }} type="email"
+                value={form.cobranca_email ?? ''}
+                onChange={(e) => setForm({ ...form, cobranca_email: e.target.value || undefined })}
+                placeholder="E-mail de cobrança (vazio = e-mail do cliente)" />
+            )}
+          </div>
+
           <div className={styles.formRow}>
             <label className={styles.formLabel}>Observações</label>
             <textarea
@@ -754,6 +907,90 @@ export default function FinanceiroPage() {
                           onClick={() => { setEditandoHonorario(h.id); setEditForm({}) }}>
                           ✎ Editar honorário
                         </button>
+                      </div>
+                    )}
+
+                    {/* Cobrança automática + Parcelas (cronograma) */}
+                    {(h.parcelas?.length > 0 || h.cobranca_ativa) && (
+                      <div style={{ marginBottom: 14 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
+                          <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, cursor: 'pointer' }}>
+                            <input type="checkbox" checked={!!h.cobranca_ativa}
+                              onChange={(e) => toggleCobranca.mutate({ id: h.id, ativa: e.target.checked })} />
+                            💌 Cobrança automática
+                          </label>
+                          {h.cobranca_ativa && (
+                            <button className={styles.btnTable}
+                              disabled={enviarCobranca.isPending}
+                              onClick={() => enviarCobranca.mutate(h.id)}
+                              title="Envia agora o e-mail + PDF das parcelas vencidas">
+                              📧 Enviar cobrança agora
+                            </button>
+                          )}
+                        </div>
+                        {h.parcelas?.length > 0 && (
+                          <>
+                            <div className={cs.sectionTitle}>Parcelas</div>
+                            <table className={cs.recTable}>
+                              <thead>
+                                <tr><th>#</th><th>Vencimento</th><th style={{ textAlign: 'right' }}>Valor</th><th>Situação</th><th></th></tr>
+                              </thead>
+                              <tbody>
+                                {h.parcelas.map((p) => {
+                                  const ed = parcEdits[p.id]
+                                  const atrasada = p.status === 'pendente' && new Date(p.data_vencimento + 'T12:00:00') < new Date()
+                                  return (
+                                    <tr key={p.id}>
+                                      <td>{p.numero}</td>
+                                      <td>
+                                        {p.status === 'pendente' ? (
+                                          <input type="date" className={styles.input} style={{ padding: '3px 6px' }}
+                                            value={ed?.data_vencimento ?? p.data_vencimento}
+                                            onChange={(e) => setParcEdits({ ...parcEdits, [p.id]: { valor: ed?.valor ?? p.valor, data_vencimento: e.target.value } })} />
+                                        ) : fmtData(p.data_vencimento)}
+                                      </td>
+                                      <td className={cs.tdValor}>
+                                        {p.status === 'pendente' ? (
+                                          <CurrencyInput className={styles.input} style={{ padding: '3px 6px', width: 130 }}
+                                            value={ed?.valor ?? p.valor}
+                                            onChange={(v) => setParcEdits({ ...parcEdits, [p.id]: { data_vencimento: ed?.data_vencimento ?? p.data_vencimento, valor: v } })} />
+                                        ) : fmtVal(p.valor)}
+                                      </td>
+                                      <td>
+                                        <span style={{ fontSize: 11, fontWeight: 700, color: p.status === 'pago' ? '#065f46' : atrasada ? '#b91c1c' : '#6b7280' }}>
+                                          {p.status === 'pago' ? '✓ Paga' : atrasada ? 'Vencida' : 'A vencer'}
+                                        </span>
+                                      </td>
+                                      <td style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                        {p.status === 'pendente' ? (
+                                          <>
+                                            {ed && (ed.valor !== p.valor || ed.data_vencimento !== p.data_vencimento) && (
+                                              <button className={styles.btnTable} title="Salvar alterações da parcela"
+                                                onClick={() => { editarParcela.mutate({ id: p.id, data: ed }); const { [p.id]: _, ...rest } = parcEdits; setParcEdits(rest) }}>💾</button>
+                                            )}
+                                            <button className={styles.btnPrimary} style={{ padding: '3px 10px', fontSize: 12 }}
+                                              title="Marcar parcela como paga (gera recebimento)"
+                                              onClick={() => pagarParcela.mutate({ id: p.id, data_recebimento: new Date().toISOString().slice(0, 10), forma: 'pix' })}>
+                                              ✓ Pagar
+                                            </button>
+                                            <button className={styles.btnDanger}
+                                              onClick={() => { if (confirm('Remover esta parcela?')) removerParcela.mutate(p.id) }}>×</button>
+                                          </>
+                                        ) : (
+                                          <button className={styles.btnTable} title="Reabrir (desfaz o pagamento)"
+                                            onClick={() => reabrirParcela.mutate(p.id)}>↩ Reabrir</button>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  )
+                                })}
+                              </tbody>
+                            </table>
+                            <div style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>
+                              Ao pagar uma parcela, é criado um recebimento — a NFS-e é emitida por recebimento na lista abaixo.
+                            </div>
+                          </>
+                        )}
                       </div>
                     )}
 

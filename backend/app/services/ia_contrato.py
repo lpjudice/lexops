@@ -47,8 +47,9 @@ Responda SOMENTE com JSON válido (sem markdown), neste formato exato:
     "tem_exito": <true|false — se há honorários de êxito/sucumbência>,
     "percentual_exito": <percentual de êxito como número (ex.: 15 para 15%), ou null>,
     "valor_causa": <valor da causa em reais, só dígitos e ponto decimal, ou null>,
-    "data_vencimento": "data de vencimento/pagamento no formato AAAA-MM-DD, ou \\"\\"",
+    "data_vencimento": "data de vencimento/pagamento (ou do 1º vencimento, se parcelado) no formato AAAA-MM-DD, ou \\"\\"",
     "condicao_pagamento": "condição de pagamento em texto (ex.: parcela única, 3x), ou \\"\\"",
+    "num_parcelas": <número de parcelas do pagamento (1 se à vista), ou null>,
     "data_contrato": "data de assinatura/celebração do contrato em AAAA-MM-DD, ou \\"\\""
   }
 }
@@ -207,5 +208,6 @@ def _normalizar_financeiro(fin) -> dict:
         "valor_causa": _num(fin.get("valor_causa")),
         "data_vencimento": str(fin.get("data_vencimento") or "").strip(),
         "condicao_pagamento": str(fin.get("condicao_pagamento") or "").strip(),
+        "num_parcelas": int(_num(fin.get("num_parcelas")) or 0) or None,
         "data_contrato": str(fin.get("data_contrato") or "").strip(),
     }

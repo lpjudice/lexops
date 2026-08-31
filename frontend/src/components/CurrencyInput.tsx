@@ -22,6 +22,7 @@ interface Props {
   className?: string
   required?: boolean
   disabled?: boolean
+  style?: React.CSSProperties
 }
 
 export default function CurrencyInput({
@@ -31,6 +32,7 @@ export default function CurrencyInput({
   className,
   required,
   disabled,
+  style,
 }: Props) {
   const [raw, setRaw] = useState(value > 0 ? formatBRL(value) : '')
   const focused = useRef(false)
@@ -47,6 +49,7 @@ export default function CurrencyInput({
       type="text"
       inputMode="decimal"
       className={className}
+      style={style}
       placeholder={placeholder}
       value={raw}
       required={required}

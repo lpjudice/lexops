@@ -217,8 +217,12 @@ export default function ContratantesIAModal({ contratoId, onClose, onApplied }: 
                       placeholder="Valor dos honorários (R$)" />
                     <input style={inp} value={fin.data_vencimento ?? ''}
                       onChange={(e) => setFin({ ...fin, data_vencimento: e.target.value })}
-                      placeholder="Vencimento (AAAA-MM-DD)" />
+                      placeholder="1º vencimento (AAAA-MM-DD)" />
                   </div>
+                  <input style={{ ...inp, width: '100%', marginTop: 6 }} type="number" min={1}
+                    value={fin.num_parcelas ?? ''}
+                    onChange={(e) => setFin({ ...fin, num_parcelas: e.target.value === '' ? null : Number(e.target.value) })}
+                    placeholder="Nº de parcelas (1 = à vista; 2+ gera cronograma mensal)" />
                   <label style={{ ...decOpt, marginTop: 6 }}>
                     <input type="checkbox" checked={!!fin.tem_exito}
                       onChange={(e) => setFin({ ...fin, tem_exito: e.target.checked })} />

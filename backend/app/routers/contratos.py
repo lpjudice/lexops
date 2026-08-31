@@ -375,6 +375,33 @@ def _parse_date(s: str | None):
         return None
 
 
+def _add_months(d, n: int):
+    """Soma n meses a uma data, ajustando o dia ao último dia do mês quando preciso."""
+    import calendar
+    from datetime import date as _date
+    m = d.month - 1 + n
+    y = d.year + m // 12
+    m = m % 12 + 1
+    dia = min(d.day, calendar.monthrange(y, m)[1])
+    return _date(y, m, dia)
+
+
+def _dividir_parcelas(total: float, n: int, primeiro_venc):
+    """Divide `total` em n parcelas mensais a partir de `primeiro_venc`.
+    A última parcela absorve o arredondamento. Retorna [(valor, data_vencimento)]."""
+    base = round(total / n, 2)
+    out = []
+    acumulado = 0.0
+    for i in range(n):
+        if i == n - 1:
+            v = round(total - acumulado, 2)
+        else:
+            v = base
+            acumulado = round(acumulado + base, 2)
+        out.append((v, _add_months(primeiro_venc, i)))
+    return out
+
+
 def _upsert_honorario_do_contrato(db: Session, contrato: Contrato, fin) -> None:
     """
     Cria ou atualiza o Honorário vinculado ao contrato a partir dos dados financeiros
@@ -382,7 +409,7 @@ def _upsert_honorario_do_contrato(db: Session, contrato: Contrato, fin) -> None:
     se houver valor fixo ou êxito. Atualiza o existente se já houver um para o contrato.
     """
     from datetime import date as _date
-    from app.models.financeiro import Honorario
+    from app.models.financeiro import Honorario, Parcela
 
     if not fin:
         return
@@ -412,7 +439,7 @@ def _upsert_honorario_do_contrato(db: Session, contrato: Contrato, fin) -> None:
         if fin.condicao_pagamento:
             existente.observacoes = fin.condicao_pagamento
     else:
-        db.add(Honorario(
+        h = Honorario(
             cliente_id=contrato.cliente_id,
             processo_id=contrato.processo_id,
             contrato_id=contrato.id,
@@ -425,7 +452,15 @@ def _upsert_honorario_do_contrato(db: Session, contrato: Contrato, fin) -> None:
             data_vencimento=venc,
             observacoes=(fin.condicao_pagamento or None),
             pendente_assinatura=True,
-        ))
+        )
+        db.add(h)
+        db.flush()
+        # Se o contrato indicar parcelamento (>1) e houver valor fixo e 1º vencimento,
+        # gera o cronograma de parcelas (ajustável depois na tela do Financeiro).
+        n = int(getattr(fin, "num_parcelas", None) or 0)
+        if valor and n >= 2 and venc:
+            for numero, (pv, pd) in enumerate(_dividir_parcelas(float(valor), n, venc), start=1):
+                db.add(Parcela(honorario_id=h.id, numero=numero, valor=pv, data_vencimento=pd))
 
 
 @router.post("/{contrato_id}/aplicar-contratantes", response_model=ContratoOut)

@@ -142,9 +142,14 @@ def _build_invite_html(invite_url: str, inviter_name: str, to_email: str) -> str
 
 
 def _send_via_gmail_oauth(
-    to_email: str, subject: str, html: str, cc: list[str] | None = None
+    to_email: str, subject: str, html: str, cc: list[str] | None = None,
+    attachments: list[tuple[str, bytes]] | None = None,
 ) -> None:
-    """Send using the same stored Google OAuth tokens as the reembolsos flow."""
+    """Send using the same stored Google OAuth tokens as the reembolsos flow.
+
+    `attachments`: lista de (nome_do_arquivo, conteúdo_pdf_bytes). Quando presente,
+    o e-mail vira multipart/mixed com os PDFs anexados.
+    """
     import httpx
     from app.services.google_calendar import _load_tokens, _refresh_token
 
@@ -161,13 +166,25 @@ def _send_via_gmail_oauth(
     if not access_token:
         raise RuntimeError("Não foi possível obter access_token do Google")
 
-    msg = mime_multi.MIMEMultipart("alternative")
+    corpo = mime_multi.MIMEMultipart("alternative")
+    corpo.attach(mime_text.MIMEText(html, "html", "utf-8"))
+
+    if attachments:
+        from email.mime.application import MIMEApplication
+        msg = mime_multi.MIMEMultipart("mixed")
+        msg.attach(corpo)
+        for nome, conteudo in attachments:
+            parte = MIMEApplication(conteudo, _subtype="pdf")
+            parte.add_header("Content-Disposition", "attachment", filename=nome)
+            msg.attach(parte)
+    else:
+        msg = corpo
+
     msg["to"] = to_email
     if cc:
         msg["cc"] = ", ".join(cc)
     msg["from"] = "me"
     msg["subject"] = subject
-    msg.attach(mime_text.MIMEText(html, "html", "utf-8"))
 
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
     resp = httpx.post(
