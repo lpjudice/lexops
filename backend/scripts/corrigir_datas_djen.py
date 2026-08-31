@@ -24,6 +24,27 @@ from datetime import timedelta
 sys.path.insert(0, "/app/backend")
 sys.path.insert(0, ".")
 
+
+def _registrar_todos_os_models() -> None:
+    """Importa todo o pacote app.models antes de usar o ORM.
+
+    O SQLAlchemy resolve os relacionamentos por NOME de classe, então basta um
+    model ausente para o mapeamento inteiro falhar (Anotacao -> 'Reuniao'
+    falhou aqui). `app.models.__init__` não cobre todos — o main.py importa os
+    que faltam um a um. Varrer o pacote evita que este script volte a quebrar
+    quando alguém adicionar um model novo.
+    """
+    import importlib
+    import pkgutil
+
+    import app.models as pacote
+
+    for mod in pkgutil.iter_modules(pacote.__path__):
+        importlib.import_module(f"app.models.{mod.name}")
+
+
+_registrar_todos_os_models()
+
 from app.database import SessionLocal  # noqa: E402
 from app.models.prazo import Prazo  # noqa: E402
 from app.models.processo import Processo  # noqa: E402
