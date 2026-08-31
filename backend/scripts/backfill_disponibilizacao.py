@@ -75,12 +75,22 @@ def main() -> None:
         # Critério estreito: só onde o prazo vinculado JÁ tem a data certa e a
         # publicação ficou para trás. Não recalcula nada nem toca em quem não
         # passou pelo corrigir_datas_djen.py.
+        # Dois filtros extras, ambos aprendidos no dry-run:
+        #
+        # - `Prazo.status == 'pendente'`: sem isso o script alcançava prazos já
+        #   cumpridos, contra a decisão de não reescrever histórico.
+        # - `Prazo.data_publicacao > data_disponibilizacao`: a correção do
+        #   art. 224, §2º sempre empurra a data para FRENTE. Apareceu um prazo
+        #   cumprido com data ANTERIOR à disponibilização (ajuste manual antigo);
+        #   alinhar por ele gravaria uma publicação anterior à própria
+        #   disponibilização, que é impossível.
         desalinhadas = (
             db.query(Publicacao, Prazo)
             .join(Prazo, Publicacao.prazo_id == Prazo.id)
+            .filter(Prazo.status == "pendente")
             .filter(Publicacao.data_disponibilizacao.isnot(None))
             .filter(Publicacao.data_publicacao == Publicacao.data_disponibilizacao)
-            .filter(Prazo.data_publicacao != Publicacao.data_publicacao)
+            .filter(Prazo.data_publicacao > Publicacao.data_disponibilizacao)
             .all()
         )
         print(f"\n2) Publicações do DJEN desalinhadas do próprio prazo: {len(desalinhadas)}")
