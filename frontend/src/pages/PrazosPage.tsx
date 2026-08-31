@@ -269,6 +269,21 @@ export default function PrazosPage() {
 
   const vencidosSemTratamento = prazos.filter(estaVencido).length
 
+  // Possível duplicata: o Diário Oficial (DJEN) e o Recorte Digital leem a mesma
+  // comunicação e cada um gera seu prazo. Não unificamos nada automaticamente —
+  // só sinalizamos, porque dois prazos no mesmo processo em dias próximos também
+  // podem ser publicações realmente distintas (ex.: despacho + decisão).
+  const chaveDuplicata = (p: typeof prazos[number]) =>
+    `${p.processo_id}|${p.data_limite ?? ''}`
+  const duplicados = new Set(
+    prazos
+      .filter((p) => p.status === 'pendente' && p.data_limite)
+      .map(chaveDuplicata)
+      .filter((k, i, arr) => arr.indexOf(k) !== i),
+  )
+  const ehPossivelDuplicata = (p: typeof prazos[number]) =>
+    p.status === 'pendente' && !!p.data_limite && duplicados.has(chaveDuplicata(p))
+
   const prazosVisiveis = prazos
     .filter(p => {
       if (filtroMes.aplicar && !filtroMes.dentro(p.data_limite)) return false
@@ -445,6 +460,14 @@ export default function PrazosPage() {
                   <div className={prazosStyles.cardInfo}>
                     <div className={prazosStyles.cardTop}>
                       {vencido && <span className={prazosStyles.chipVencido}>⚠ Vencido</span>}
+                      {ehPossivelDuplicata(p) && (
+                        <span
+                          className={prazosStyles.chipDuplicata}
+                          title="Outro prazo pendente deste mesmo processo tem a mesma data limite — provavelmente a mesma publicação capturada pelo Diário Oficial e pelo Recorte Digital. Confira e trate um dos dois (ex.: 'ignorado')."
+                        >
+                          ⧉ Possível duplicata
+                        </span>
+                      )}
                       {p.status === 'nada_a_fazer' && (
                         <span className={prazosStyles.chipNadaAFazer}>🚫 Nada a fazer</span>
                       )}
@@ -498,7 +521,19 @@ export default function PrazosPage() {
                         </button>
                       )}
                       <span className={prazosStyles.datas}>
-                        Publicado: {formatDate(p.data_publicacao)}
+                        {/* Disponibilização ao lado da publicação: é a conferência
+                            do art. 224, §2º (publicação = 1º dia útil seguinte). */}
+                        {origem?.data_disponibilizacao && (
+                          <>
+                            <span title="Data de disponibilização no diário">
+                              Disp.: {formatDate(origem.data_disponibilizacao)}
+                            </span>
+                            {' · '}
+                          </>
+                        )}
+                        <span title="Data da publicação — base da contagem do prazo">
+                          Publicado: {formatDate(p.data_publicacao)}
+                        </span>
                         {' · '}
                         <strong className={urg}>Limite: {formatDate(p.data_limite)}</strong>
                         {' · '}

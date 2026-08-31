@@ -26,6 +26,9 @@ def _origem_payload(pub: Publicacao) -> dict:
         # O Recorte Digital OAB é o que entra por Gmail; o resto é Diário Oficial.
         "origem_menu": "recorte" if pub.fonte == "gmail" else "diario",
         "data_publicacao": pub.data_publicacao,
+        # Mostrada ao lado da publicação no card pra dar conferir a contagem na
+        # hora (art. 224, §2º: publicação = 1º dia útil após a disponibilização).
+        "data_disponibilizacao": pub.data_disponibilizacao,
         "numero_cnj": pub.numero_cnj,
         "tribunal": pub.tribunal,
         "texto_resumo": pub.texto_resumo,

@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import uuid
 import time
@@ -291,6 +292,58 @@ def _texto_chave_publicacao(texto: str | None) -> str:
     return texto_norm[:300]
 
 
+def _resolver_datas_publicacao(item: dict, db: Session) -> tuple[date, date | None]:
+    """Devolve (data_publicacao, data_disponibilizacao) para gravar.
+
+    O DJEN/Comunica entrega a DISPONIBILIZAÇÃO. A data que serve de base para o
+    prazo é a PUBLICAÇÃO, que pelo art. 224, §2º do CPC é o primeiro dia útil
+    seguinte à disponibilização — e a contagem só começa no dia útil seguinte a
+    ela (§3º), o que `calcular_prazo` já faz.
+
+    Antes disso gravávamos a disponibilização como se fosse publicação, e todo
+    prazo nascido do Diário Oficial saía um dia útil adiantado (o Recorte
+    Digital, que já recebe a publicação pronta, mostrava a data certa — era a
+    divergência visível entre os dois menus).
+
+    Feriados entram na conta: disponibilizado na véspera de feriado, a
+    publicação é no primeiro dia realmente útil depois.
+    """
+    data_pub = item["data_publicacao"]
+    if not item.get("data_publicacao_e_disponibilizacao"):
+        # Fonte que já entrega a publicação (Gmail/Recorte, manual): mantém.
+        return data_pub, item.get("data_disponibilizacao")
+
+    disponibilizacao = item.get("data_disponibilizacao") or data_pub
+    try:
+        from app.services.prazo_calc import _carregar_feriados, _proximo_dia_util
+
+        estado = _estado_do_tribunal(item.get("tribunal"))
+        feriados = _carregar_feriados(db, estado, disponibilizacao.year)
+        feriados |= _carregar_feriados(db, estado, disponibilizacao.year + 1)
+        publicacao = _proximo_dia_util(disponibilizacao + timedelta(days=1), feriados)
+    except Exception:
+        # Sem a tabela de feriados a conversão não é confiável — melhor manter a
+        # data original (prazo um dia adiantado, que é o lado seguro) do que
+        # arriscar uma data inventada.
+        logging.getLogger(__name__).warning(
+            "Falha ao converter disponibilização em publicação; mantendo a data original"
+        )
+        return data_pub, disponibilizacao
+
+    return publicacao, disponibilizacao
+
+
+# Feriado é estadual: a publicação do TJSP não pula um feriado capixaba. Sem
+# tribunal reconhecido, só os nacionais entram (via "outro").
+_UF_POR_TRIBUNAL = {
+    "TJES": "ES", "TJSP": "SP", "TJAM": "AM", "TJRJ": "RJ",
+}
+
+
+def _estado_do_tribunal(tribunal: str | None) -> str:
+    return _UF_POR_TRIBUNAL.get((tribunal or "").upper(), "outro")
+
+
 def _inserir_publicacoes(itens: list[dict], db: Session) -> tuple[int, int, int]:
     """Insere publicações evitando duplicatas. Retorna (inseridas, duplicatas, erros)."""
     inseridas = duplicatas = erros = 0
@@ -351,9 +404,12 @@ def _inserir_publicacoes(itens: list[dict], db: Session) -> tuple[int, int, int]
                 if proc:
                     processo_id = proc.id
 
+            data_pub, data_disp = _resolver_datas_publicacao(item, db)
+
             pub = Publicacao(
                 fonte=item["fonte"],
-                data_publicacao=item["data_publicacao"],
+                data_publicacao=data_pub,
+                data_disponibilizacao=data_disp,
                 numero_cnj=item.get("numero_cnj"),
                 tipo_ato=item.get("tipo_ato"),
                 tribunal=item.get("tribunal"),

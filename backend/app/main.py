@@ -1253,6 +1253,21 @@ def _run_migrations() -> None:
             "ALTER TABLE prazos ADD COLUMN IF NOT EXISTS ultimo_lembrete_em TIMESTAMPTZ"
         ))
 
+        # Data de disponibilização no diário — guardada à parte da publicação
+        # (art. 224, §2º CPC). Só para conferência; não entra no cálculo.
+        conn.execute(text(
+            "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS data_disponibilizacao DATE"
+        ))
+        # Backfill do histórico do DJEN: até aqui, data_publicacao guardava a
+        # DISPONIBILIZAÇÃO. Copia para a coluna certa, sem alterar
+        # data_publicacao — mexer nela mudaria prazos já calculados, e a decisão
+        # do Lucas foi não reescrever histórico (só os 3 pendentes, à parte).
+        conn.execute(text("""
+            UPDATE publicacoes SET data_disponibilizacao = data_publicacao
+            WHERE data_disponibilizacao IS NULL
+              AND fonte::text LIKE 'scraping%'
+        """))
+
         conn.commit()
 
 

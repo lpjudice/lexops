@@ -162,6 +162,11 @@ def datas_do_diario(pub: Publicacao | None) -> tuple[str | None, str | None]:
     disp = m_disp.group(1) if m_disp else None
     publ = m_publ.group(1) if m_publ else None
 
+    # A coluna manda mais que o texto: no DJEN não há rótulo de data no corpo,
+    # e é ela que o cálculo do prazo usa de fato.
+    if not disp and getattr(pub, "data_disponibilizacao", None):
+        disp = _br(pub.data_disponibilizacao)
+
     # Sem a data no texto, cai pra coluna do banco — que é a que o sistema
     # usou de fato pra contar. Rotulada como tal pra não passar por citação
     # literal do diário.

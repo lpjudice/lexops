@@ -11,6 +11,7 @@ export interface PublicacaoOrigem {
   fonte: string
   origem_menu: 'diario' | 'recorte'
   data_publicacao: string
+  data_disponibilizacao?: string | null
   numero_cnj?: string | null
   tribunal?: string | null
   texto_resumo?: string | null

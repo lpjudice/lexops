@@ -56,6 +56,7 @@ class PublicacaoOrigem(BaseModel):
     fonte: str
     origem_menu: Literal["diario", "recorte"]
     data_publicacao: date
+    data_disponibilizacao: date | None = None
     numero_cnj: str | None = None
     tribunal: str | None = None
     texto_resumo: str | None = None

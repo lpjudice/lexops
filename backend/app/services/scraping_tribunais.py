@@ -386,6 +386,12 @@ def _comunica_para_publicacao(item: dict, tribunal_alvo: str) -> dict | None:
     pub["url_fonte"] = url_fonte
     # ID estável da comunicação — base de dedup à prova de duplicata
     pub["comunica_id"] = str(item.get("hash") or item.get("id") or "").strip() or None
+    # O DJEN entrega DISPONIBILIZAÇÃO. A data que conta pro prazo é a
+    # PUBLICAÇÃO — 1º dia útil seguinte (CPC, art. 224, §2º) —, mas converter
+    # exige a tabela de feriados, que só existe no banco. Então marcamos aqui e
+    # a conversão acontece em _inserir_publicacoes (diario.py), que tem sessão.
+    pub["data_disponibilizacao"] = data_pub
+    pub["data_publicacao_e_disponibilizacao"] = True
     return pub
 
 

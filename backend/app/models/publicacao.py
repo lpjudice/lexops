@@ -20,7 +20,14 @@ class Publicacao(Base):
         Enum("gmail", "scraping_tjes", "scraping_tjsp", "scraping_tjam", "scraping_tjrj", "scraping_djen", "pje_comunica", "manual", name="fonte_publicacao"),
         nullable=False,
     )
+    # Data que o prazo usa como base de contagem. Pelo art. 224, §2º do CPC é o
+    # PRIMEIRO DIA ÚTIL SEGUINTE à disponibilização — não a disponibilização.
+    # O Recorte Digital já entrega essa data pronta; o DJEN entrega a
+    # disponibilização e a conversão é feita na inserção (ver diario.py).
     data_publicacao: Mapped[date] = mapped_column(Date, nullable=False)
+    # Guardada só para conferência humana (aparece no card do prazo e no
+    # lembrete). Nunca entra no cálculo.
+    data_disponibilizacao: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     # Conteúdo extraído
     numero_cnj: Mapped[str | None] = mapped_column(String(25))
