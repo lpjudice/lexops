@@ -43,10 +43,12 @@ def gerar_pdf_cobranca(
     total: float,
     saldo: float,
     destaque_numero: int | None = None,
+    pagamento: dict | None = None,
 ) -> bytes:
     """
     escritorio: {"razao_social", "cnpj", "endereco"}
     parcelas: [{"numero", "valor", "vencimento", "status", "atrasada"(bool)}]
+    pagamento: {"pix_chave", "pix_tipo", "favorecido", "contato"} — dados p/ pagamento.
     """
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -102,10 +104,24 @@ def gerar_pdf_cobranca(
 
     el.append(Paragraph(f"<b>Total do recebível:</b> {_brl(total)}", body))
     el.append(Paragraph(f"<b>Saldo em aberto:</b> {_brl(saldo)}", body))
-    el.append(Spacer(1, 0.5 * cm))
+    el.append(Spacer(1, 0.4 * cm))
+
+    # ── Como pagar (PIX + contato) ──────────────────────────────────────────
+    if pagamento and (pagamento.get("pix_chave") or pagamento.get("contato")):
+        el.append(Paragraph("Como pagar", ParagraphStyle("hp", fontName="Helvetica-Bold", fontSize=11, spaceAfter=4)))
+        if pagamento.get("pix_chave"):
+            tipo = pagamento.get("pix_tipo")
+            el.append(Paragraph(
+                f"<b>PIX{(' (' + tipo + ')') if tipo else ''}:</b> {pagamento['pix_chave']}", body))
+        if pagamento.get("favorecido"):
+            el.append(Paragraph(f"<b>Favorecido:</b> {pagamento['favorecido']}", body))
+        if pagamento.get("contato"):
+            el.append(Paragraph(
+                f"<b>Dúvidas e envio de comprovante:</b> {pagamento['contato']}", body))
+        el.append(Spacer(1, 0.3 * cm))
+
     el.append(Paragraph(
-        "Caso o pagamento já tenha sido realizado, por favor desconsidere este aviso. "
-        "Para dúvidas ou envio do comprovante, responda a este e-mail.", body))
+        "Caso o pagamento já tenha sido realizado, por favor desconsidere este aviso.", body))
 
     doc.build(el)
     return buf.getvalue()

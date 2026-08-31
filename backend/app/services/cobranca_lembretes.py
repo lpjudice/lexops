@@ -7,11 +7,26 @@ parcela (dedup por `ultimo_lembrete_em`), até a parcela ser marcada como paga.
 Espelha o padrão de `prazo_lembretes`/reembolsos.
 """
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
+
+# ── Cadência da cobrança ──────────────────────────────────────────────────────
+# Começa a lembrar esta quantidade de dias ANTES do vencimento (e segue depois de
+# vencida), reenviando a cada INTERVALO_DIAS dias, até a parcela ser paga.
+DIAS_ANTES_VENCIMENTO = 7
+INTERVALO_DIAS = 3
+
+# ── Dados de pagamento exibidos no PDF/e-mail (comunicação com a Monielly) ────
+# Preencher com a chave PIX real do escritório.
+PAGAMENTO = {
+    "pix_chave": "",          # ex.: CNPJ 10.901.611/0001-64 ou chave aleatória
+    "pix_tipo": "",           # ex.: "CNPJ", "e-mail", "aleatória"
+    "favorecido": "PIMENTA JUDICE SOCIEDADE INDIVIDUAL DE ADVOCACIA",
+    "contato": "Monielly Moreira Vieira — moni@pimentajudice.com.br",
+}
 
 
 def _escritorio_dict(db: Session) -> dict:
@@ -72,19 +87,32 @@ def enviar_cobrancas(db: Session, *, hoje: date | None = None, forcar: bool = Fa
     enviados, pulados = 0, 0
     erros: list[str] = []
 
+    manual = honorario_id is not None
+    limite_janela = hoje + timedelta(days=DIAS_ANTES_VENCIMENTO)
+
     for h in honorarios:
         if h.status in ("pago", "cancelado"):
             continue
         if not h.parcelas:
             continue
-        vencidas = [p for p in h.parcelas if p.status == "pendente" and p.data_vencimento <= hoje]
-        if not vencidas:
+        pendentes_todas = [p for p in h.parcelas if p.status == "pendente"]
+        if not pendentes_todas:
             continue
-        pendentes = [
-            p for p in vencidas
-            if forcar or not p.ultimo_lembrete_em or p.ultimo_lembrete_em.date() != hoje
-        ]
-        if not pendentes:
+        # No envio manual, qualquer parcela pendente pode ser cobrada; no cron, só as
+        # que já entraram na janela (a vencer em até DIAS_ANTES ou já vencidas).
+        elegiveis = pendentes_todas if manual else [p for p in pendentes_todas if p.data_vencimento <= limite_janela]
+        if not elegiveis:
+            continue
+
+        def _pode(p):
+            if forcar:
+                return True
+            if not p.ultimo_lembrete_em:
+                return True
+            return (hoje - p.ultimo_lembrete_em.date()).days >= INTERVALO_DIAS
+
+        a_enviar = [p for p in elegiveis if _pode(p)]
+        if not a_enviar:
             continue
 
         cliente = db.query(Cliente).filter(Cliente.id == h.cliente_id).first()
@@ -94,7 +122,8 @@ def enviar_cobrancas(db: Session, *, hoje: date | None = None, forcar: bool = Fa
             logger.info("Cobrança: honorário %s sem e-mail de destino — pulado", h.id)
             continue
 
-        alvo = sorted(pendentes, key=lambda p: p.data_vencimento)[0]
+        # Cobra a próxima parcela a vencer (ou a mais atrasada) da vez.
+        alvo = sorted(a_enviar, key=lambda p: p.data_vencimento)[0]
         parcelas_info = [
             {
                 "numero": p.numero, "valor": float(p.valor), "vencimento": p.data_vencimento,
@@ -112,6 +141,7 @@ def enviar_cobrancas(db: Session, *, hoje: date | None = None, forcar: bool = Fa
                 total=float(h.valor_total),
                 saldo=h.saldo_pendente,
                 destaque_numero=alvo.numero,
+                pagamento=PAGAMENTO,
             )
             html = _html_cobranca(
                 cliente.nome if cliente else "Cliente", h.descricao,
@@ -121,8 +151,7 @@ def enviar_cobrancas(db: Session, *, hoje: date | None = None, forcar: bool = Fa
                 destino, f"Cobrança — {h.descricao}", html,
                 attachments=[(f"cobranca_parcela_{alvo.numero}.pdf", pdf)],
             )
-            for p in pendentes:
-                p.ultimo_lembrete_em = agora
+            alvo.ultimo_lembrete_em = agora
             db.commit()
             enviados += 1
         except Exception as e:  # noqa: BLE001

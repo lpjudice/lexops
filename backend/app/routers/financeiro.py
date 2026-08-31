@@ -279,7 +279,7 @@ def enviar_cobranca_manual(honorario_id: uuid.UUID, db: Session = Depends(get_db
     if resultado["enviados"] == 0 and resultado["pulados"]:
         raise HTTPException(status_code=400, detail="Sem e-mail de destino (defina o e-mail do cliente ou o e-mail de cobrança).")
     if resultado["enviados"] == 0:
-        raise HTTPException(status_code=400, detail="Nenhuma parcela vencida pendente para cobrar.")
+        raise HTTPException(status_code=400, detail="Nenhuma parcela pendente para cobrar (todas pagas?).")
     return resultado
 
 

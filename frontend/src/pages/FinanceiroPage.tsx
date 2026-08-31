@@ -623,7 +623,7 @@ export default function FinanceiroPage() {
                 <div style={{ padding: '6px 8px', fontSize: 12, textAlign: 'right', background: '#f9fafb', color: '#374151' }}>
                   Soma das parcelas: <b>{fmtVal(parcelasEdit.reduce((s, p) => s + p.valor, 0))}</b>
                   {Math.abs(parcelasEdit.reduce((s, p) => s + p.valor, 0) - form.valor_total) > 0.01 && (
-                    <span style={{ color: '#b45309' }}> · será o novo valor total</span>
+                    <span style={{ color: '#b91c1c', fontWeight: 700 }}> · ⚠ soma total incorreta</span>
                   )}
                 </div>
               </div>
@@ -667,7 +667,8 @@ export default function FinanceiroPage() {
               onChange={(e) => setForm({ ...form, observacoes: e.target.value || undefined })}
             />
           </div>
-          <button type="submit" className={styles.btnPrimary} disabled={criar.isPending}>
+          <button type="submit" className={styles.btnPrimary}
+            disabled={criar.isPending || (parcN >= 2 && parcelasEdit.length > 0 && Math.abs(parcelasEdit.reduce((s, p) => s + p.valor, 0) - form.valor_total) > 0.01)}>
             {criar.isPending ? 'Salvando...' : 'Salvar'}
           </button>
         </form>
