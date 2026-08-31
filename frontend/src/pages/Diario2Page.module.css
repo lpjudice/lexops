@@ -288,13 +288,26 @@
   padding: 2px;
 }
 
+/* flex + wrap em vez de grid de larguras fixas: numa tela mais estreita (ou
+   100% de zoom) os campos quebram linha em vez de empurrar o botão "Criar"
+   pra fora da área visível. Larguras por campo via nth-child, na ordem em
+   que aparecem no JSX: processo, tipo, dias, contagem, peça, responsável,
+   botão — e a barra de sugestão legal (flexBasis 100% inline) sempre cai
+   numa linha própria. */
 .prazoForm {
-  display: grid;
-  grid-template-columns: 1.3fr 150px 130px 140px 260px 170px auto;
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   align-items: end;
   margin-top: 8px;
 }
+.prazoForm > *:nth-child(1) { flex: 1 1 220px; }   /* processo */
+.prazoForm > *:nth-child(2) { flex: 0 0 120px; }   /* tipo */
+.prazoForm > *:nth-child(3) { flex: 0 0 64px; }    /* dias — só precisa caber 1-3 dígitos */
+.prazoForm > *:nth-child(4) { flex: 0 0 100px; }   /* úteis / corridos */
+.prazoForm > *:nth-child(5) { flex: 1 1 200px; }   /* peça */
+.prazoForm > *:nth-child(6) { flex: 0 0 140px; }   /* responsável */
+.prazoForm > *:nth-child(7) { flex: 0 0 auto; }    /* botão Criar */
 
 .relembreBox {
   margin-top: 10px;
@@ -322,7 +335,6 @@
 
 @media (max-width: 1100px) {
   .cardTop,
-  .prazoForm,
   .relembreItem {
     grid-template-columns: 1fr;
   }
