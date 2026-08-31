@@ -21,6 +21,7 @@ from app.models.publicacao import Publicacao
 from app.services.despacho_status import enriquecer_status_despacho
 from app.services.gmail_diario import sincronizar_gmail
 from app.services.google_master_tokens import load_master_google_tokens, save_master_google_tokens
+from app.services.datas_publicacao import extrair_datas
 from app.services.ia_diario import analisar_publicacao
 from app.services.nada_a_fazer import (
     aplicar_status_prazo,
@@ -521,9 +522,14 @@ def _inserir_publicacoes_gmail(itens: list[dict[str, Any]], db: Session) -> tupl
                 sem_publicacoes += 1
 
             processo_id = item.get("processo_id") or _vincular_processo(db, item)
+            # O Recorte traz as duas datas no corpo; guardar a disponibilização
+            # deixa o card do prazo igual ao do Diário Oficial (mesma informação
+            # independente da fonte, que é o que dá pra conferir a contagem).
+            disp_texto, _ = extrair_datas(texto_completo or texto_resumo)
             pub = Publicacao(
                 fonte="gmail",
                 data_publicacao=_extrair_data_publicacao(item),
+                data_disponibilizacao=disp_texto,
                 numero_cnj=item.get("numero_cnj"),
                 tipo_ato=item.get("tipo_ato") or "outro",
                 tribunal=item.get("tribunal"),

@@ -112,6 +112,68 @@
 /* Aviso de que o mesmo processo tem outro prazo pendente com a mesma data —
    sinalização, não veredito: pode ser duplicata das duas fontes ou duas
    publicações realmente distintas. Quem decide é o usuário. */
+/* ── Agrupamento visual das duplicatas ──
+   Faixa âmbar do lado direito ligando os cards vizinhos que compartilham
+   processo + data limite. Arredonda só nas pontas, formando um "colchete" que
+   mostra onde o grupo começa e termina, sem gritar mais que o vermelho de
+   vencido (que é o alerta que importa de verdade). */
+.cardDup {
+  position: relative;
+  border-right: 3px solid #fdba74;
+}
+.cardDup::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -3px;
+  width: 3px;
+  background: #fdba74;
+}
+.cardDupTopo { border-top-right-radius: 10px; }
+.cardDupBase { border-bottom-right-radius: 10px; }
+.cardDup:not(.cardDupTopo) { border-top-right-radius: 0; }
+.cardDup:not(.cardDupBase) { border-bottom-right-radius: 0; }
+
+/* ── Linha de datas: mesma ordem e mesmas posições em todos os cards ── */
+.cardDatas {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 18px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed #eef2f7;
+  font-size: 12px;
+  color: #4b5563;
+}
+
+.dataItem {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.dataRotulo {
+  font-size: 9.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #9ca3af;
+}
+
+.origemManual {
+  font-size: 11px;
+  font-weight: 700;
+  color: #6b7280;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
 .chipDuplicata {
   display: inline-flex;
   align-items: center;

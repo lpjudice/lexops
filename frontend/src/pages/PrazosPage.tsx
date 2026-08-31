@@ -292,8 +292,20 @@ export default function PrazosPage() {
       if (tabStatus === 'pendente') return p.status === 'pendente'
       return p.status === tabStatus
     })
-    // Na aba Ativo, vencido vem primeiro: é o que precisa de decisão hoje.
-    .sort((a, b) => (tabStatus === 'ativo' ? Number(estaVencido(b)) - Number(estaVencido(a)) : 0))
+    .sort((a, b) => {
+      // Vencido primeiro (é o que precisa de decisão hoje), depois por data
+      // limite. Duplicatas caem juntas naturalmente porque a chave de duplicata
+      // é processo+data_limite: ordenar por data e desempatar por processo põe
+      // as pendentes lado a lado, em vez de espalhadas pela lista.
+      if (tabStatus === 'ativo') {
+        const v = Number(estaVencido(b)) - Number(estaVencido(a))
+        if (v !== 0) return v
+      }
+      const da = a.data_limite ?? '9999-12-31'
+      const db = b.data_limite ?? '9999-12-31'
+      if (da !== db) return da < db ? -1 : 1
+      return a.processo_id < b.processo_id ? -1 : a.processo_id > b.processo_id ? 1 : 0
+    })
 
   return (
     <div>
@@ -445,16 +457,28 @@ export default function PrazosPage() {
         <p className={styles.empty}>Nenhum prazo nesta categoria.</p>
       ) : (
         <div className={prazosStyles.lista}>
-          {prazosVisiveis.map((p) => {
+          {prazosVisiveis.map((p, idx) => {
             const dias = diasRestantes(p.data_limite)
             const proc = getProcesso(p.processo_id)
             const cliente = getCliente(p.processo_id)
             const urg = urgenciaClass(dias, p.status)
             const vencido = estaVencido(p)
             const origem = p.publicacao_origem
+            // Marca de agrupamento: como a lista está ordenada por data limite,
+            // as duplicatas ficam vizinhas — a faixa lateral só precisa saber se
+            // o card anterior/seguinte é do mesmo par pra desenhar o "colchete".
+            const dup = ehPossivelDuplicata(p)
+            const mesmaChave = (o?: typeof p) => !!o && ehPossivelDuplicata(o) && chaveDuplicata(o) === chaveDuplicata(p)
+            const dupPrimeiro = dup && !mesmaChave(prazosVisiveis[idx - 1])
+            const dupUltimo = dup && !mesmaChave(prazosVisiveis[idx + 1])
             return (
               <div key={p.id} ref={p.id === destaqueId ? destaqueRef : undefined}
-                className={`${prazosStyles.card} ${urg}`}
+                className={[
+                  prazosStyles.card, urg,
+                  dup ? prazosStyles.cardDup : '',
+                  dupPrimeiro ? prazosStyles.cardDupTopo : '',
+                  dupUltimo ? prazosStyles.cardDupBase : '',
+                ].filter(Boolean).join(' ')}
                 style={p.id === destaqueId ? { outline: '2px solid var(--teal)', outlineOffset: 2 } : undefined}>
                 <div className={prazosStyles.cardHeader}>
                   <div className={prazosStyles.cardInfo}>
@@ -474,7 +498,7 @@ export default function PrazosPage() {
                       {cliente && <span className={prazosStyles.clienteNome}>{cliente.nome}</span>}
                       <code className={prazosStyles.cnj}>{proc?.numero_cnj ?? p.processo_id.slice(0,8)}</code>
                       {proc?.materia && <span className={prazosStyles.materia}>{proc.materia}</span>}
-                      {origem && (
+                      {origem ? (
                         <a
                           className={prazosStyles.origemLink}
                           href={origem.origem_menu === 'recorte' ? '/diario2' : '/diario'}
@@ -483,6 +507,16 @@ export default function PrazosPage() {
                           {origem.origem_menu === 'recorte' ? '📰 Recorte Digital' : '📰 Diário Oficial'}
                           {' · '}{formatDate(origem.data_publicacao)}
                         </a>
+                      ) : (
+                        /* Sem publicação vinculada: foi lançado à mão. Antes o card
+                           simplesmente não trazia chip nenhum, e não dava pra saber
+                           se era manual ou se o vínculo tinha se perdido. */
+                        <span
+                          className={prazosStyles.origemManual}
+                          title="Prazo lançado manualmente — não veio de publicação do Diário Oficial nem do Recorte Digital"
+                        >
+                          ✍️ Manual · {formatDate(p.created_at.slice(0, 10))}
+                        </span>
                       )}
                     </div>
                     <div className={prazosStyles.cardBottom}>
@@ -520,34 +554,39 @@ export default function PrazosPage() {
                           ✎ Alterar prazo
                         </button>
                       )}
-                      <span className={prazosStyles.datas}>
-                        {/* Disponibilização ao lado da publicação: é a conferência
-                            do art. 224, §2º (publicação = 1º dia útil seguinte). */}
-                        {origem?.data_disponibilizacao && (
-                          <>
-                            <span title="Data de disponibilização no diário">
-                              Disp.: {formatDate(origem.data_disponibilizacao)}
-                            </span>
-                            {' · '}
-                          </>
-                        )}
-                        <span title="Data da publicação — base da contagem do prazo">
-                          Publicado: {formatDate(p.data_publicacao)}
-                        </span>
-                        {' · '}
-                        <strong className={urg}>Limite: {formatDate(p.data_limite)}</strong>
-                        {' · '}
-                        <span className={`${prazosStyles.restam} ${urg}`}>
-                          {dias === null ? '—' : dias < 0 ? `${Math.abs(dias)}d atrás` : `${dias}d restantes`}
-                        </span>
-                        {p.responsavel && (
-                          <span style={{ color: '#6b7280' }}>{' · '}Resp: {p.responsavel}</span>
-                        )}
-                        {p.status === 'pendente' && p.ultimo_lembrete_em && (
-                          <span style={{ color: '#6b7280' }} title="Último lembrete enviado por e-mail e Telegram">
-                            {' · '}🔔 {formatDate(p.ultimo_lembrete_em.slice(0, 10))}
-                          </span>
-                        )}
+                    </div>
+
+                    {/* Linha própria e SEMPRE na mesma ordem: Disp. · Publicado ·
+                        Limite · restantes · Resp. · lembrete. Antes as datas
+                        dividiam a linha com os chips e, num card com mais chips
+                        (Automático, tarefas), eram empurradas pra baixo — dois
+                        cards vizinhos ficavam impossíveis de comparar a olho.
+                        Cada campo ocupa a posição mesmo quando vazio ("—"). */}
+                    <div className={prazosStyles.cardDatas}>
+                      <span className={prazosStyles.dataItem} title="Data de disponibilização no diário">
+                        <span className={prazosStyles.dataRotulo}>Disp.</span>
+                        {origem?.data_disponibilizacao ? formatDate(origem.data_disponibilizacao) : '—'}
+                      </span>
+                      <span className={prazosStyles.dataItem} title="Data da publicação — base da contagem do prazo">
+                        <span className={prazosStyles.dataRotulo}>Publicado</span>
+                        {formatDate(p.data_publicacao)}
+                      </span>
+                      <span className={`${prazosStyles.dataItem} ${urg}`} title="Data limite do prazo">
+                        <span className={prazosStyles.dataRotulo}>Limite</span>
+                        <strong>{formatDate(p.data_limite)}</strong>
+                      </span>
+                      <span className={`${prazosStyles.dataItem} ${prazosStyles.restam} ${urg}`}>
+                        {dias === null ? '—' : dias < 0 ? `${Math.abs(dias)}d atrás` : `${dias}d restantes`}
+                      </span>
+                      <span className={prazosStyles.dataItem} title="Responsável pelo prazo">
+                        <span className={prazosStyles.dataRotulo}>Resp.</span>
+                        {p.responsavel || '—'}
+                      </span>
+                      <span className={prazosStyles.dataItem} title="Último lembrete enviado por e-mail e Telegram">
+                        <span className={prazosStyles.dataRotulo}>🔔</span>
+                        {p.status === 'pendente' && p.ultimo_lembrete_em
+                          ? formatDate(p.ultimo_lembrete_em.slice(0, 10))
+                          : '—'}
                       </span>
                     </div>
 
