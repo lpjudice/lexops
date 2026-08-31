@@ -22,10 +22,10 @@ INTERVALO_DIAS = 3
 # ── Dados de pagamento exibidos no PDF/e-mail (comunicação com a Monielly) ────
 # Preencher com a chave PIX real do escritório.
 PAGAMENTO = {
-    "pix_chave": "",          # ex.: CNPJ 10.901.611/0001-64 ou chave aleatória
-    "pix_tipo": "",           # ex.: "CNPJ", "e-mail", "aleatória"
-    "favorecido": "PIMENTA JUDICE SOCIEDADE INDIVIDUAL DE ADVOCACIA",
-    "contato": "Monielly Moreira Vieira — moni@pimentajudice.com.br",
+    "pix_chave": "10.901.611/0001-64",
+    "pix_tipo": "CNPJ",
+    "favorecido": "Pimenta Judice Advogados",
+    "contato": "Monielly Moreira Vieira — moni@pimentajudice.com.br · WhatsApp (27) 9.9756-8819",
 }
 
 

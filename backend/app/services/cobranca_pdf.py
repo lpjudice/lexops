@@ -6,16 +6,20 @@ mesmo ferramental (reportlab/platypus) do contrato_pdf. Destaca a parcela em
 cobrança e lista o cronograma para o cliente.
 """
 import io
+import os
 from datetime import date
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib.units import cm
+from reportlab.lib.units import cm, mm
 from reportlab.platypus import (
-    Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
+    Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
 )
+
+# Mesma logo usada no DANFSe (raiz do backend).
+_LOGO_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "logo.png")
 
 
 def _brl(v: float) -> str:
@@ -61,6 +65,14 @@ def gerar_pdf_cobranca(
     body = ParagraphStyle("body", fontName="Helvetica", fontSize=10, alignment=TA_LEFT, spaceAfter=6, leading=14)
 
     el = []
+    if os.path.exists(_LOGO_PATH):
+        try:
+            logo = Image(_LOGO_PATH, width=45 * mm, height=22 * mm, kind="proportional")
+            logo.hAlign = "CENTER"
+            el.append(logo)
+            el.append(Spacer(1, 0.3 * cm))
+        except Exception:
+            pass
     el.append(Paragraph(escritorio.get("razao_social") or "Pimenta Júdice Advogados", h1))
     linha2 = " · ".join(x for x in [escritorio.get("cnpj"), escritorio.get("endereco")] if x)
     if linha2:
