@@ -19,6 +19,25 @@ logger = logging.getLogger(__name__)
 
 _PDPJ_BASE = "https://portaldeservicos.pdpj.jus.br/api/v2"
 
+# O portal fica atrás de um WAF que devolve um "<html>403 Forbidden" genérico
+# (não é erro do PDPJ) pra requisição que não pareça vir de um navegador — o
+# gatilho mais comum é o User-Agent padrão do httpx. Mesmo contorno usado em
+# consulta_processual/pdpj.py (travado), duplicado aqui de propósito: este
+# módulo é independente daquele por design (ver docstring acima).
+_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "pt-BR,pt;q=0.9",
+    "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+}
+
 
 def _digits(s: str) -> str:
     return re.sub(r"\D", "", s or "")
@@ -31,6 +50,7 @@ async def fetch_processo(cnj: str, token: str) -> dict | None:
     ident = _digits(cnj)
     url = f"{_PDPJ_BASE}/processos/{ident}"
     headers = {
+        **_BROWSER_HEADERS,
         "Authorization": f"Bearer {token}",
         "Accept": "application/json",
         "Referer": "https://portaldeservicos.pdpj.jus.br/home",
