@@ -305,15 +305,29 @@ def build_cobranca_html(
         if n_parcelas_total > 1 else "")
 
     pagamento_box = ""
-    if pagamento and (pagamento.get("pix_chave") or pagamento.get("contato")):
+    tem_contato = pagamento and (
+        pagamento.get("contato_nome") or pagamento.get("contato_email") or pagamento.get("contato_whatsapp")
+    )
+    if pagamento and (pagamento.get("pix_chave") or tem_contato):
         linhas = []
         if pagamento.get("pix_chave"):
             tipo = pagamento.get("pix_tipo")
             linhas.append(f"<b>PIX{(' (' + tipo + ')') if tipo else ''}:</b> {pagamento['pix_chave']}")
         if pagamento.get("favorecido"):
             linhas.append(f"<b>Favorecido:</b> {pagamento['favorecido']}")
-        if pagamento.get("contato"):
-            linhas.append(f"<b>Contato:</b> {pagamento['contato']}")
+        if tem_contato:
+            contato_linhas = []
+            if pagamento.get("contato_nome"):
+                contato_linhas.append(pagamento["contato_nome"])
+            if pagamento.get("contato_email"):
+                contato_linhas.append(pagamento["contato_email"])
+            if pagamento.get("contato_whatsapp"):
+                wa_url = f"https://wa.me/{pagamento['contato_whatsapp']}"
+                wa_disp = pagamento.get("contato_whatsapp_fmt") or pagamento["contato_whatsapp"]
+                contato_linhas.append(
+                    f'WhatsApp: <a href="{wa_url}" style="color:#2563eb;text-decoration:underline;">{wa_disp}</a>'
+                )
+            linhas.append("<b>Contato:</b><br/>" + "<br/>".join(contato_linhas))
         linhas_html = "<br/>".join(linhas)
         pagamento_box = f"""
           <table cellpadding="0" cellspacing="0" role="presentation" width="100%" style="margin-bottom:20px;">
@@ -344,7 +358,7 @@ def build_cobranca_html(
             <tr><td style="background:{TEAL};border-radius:10px;padding:16px 20px;">
               <p style="margin:0;font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:rgba(255,255,255,0.85);">{rotulo_data} {parcela_venc}</p>
               <p style="margin:4px 0 0;font-size:26px;font-weight:800;color:#ffffff;line-height:1.2;">{parcela_valor}</p>
-              <p style="margin:2px 0 0;font-size:12px;color:rgba(255,255,255,0.85);">Parcela {parcela_numero} de {n_parcelas_total}</p>
+              {f'<p style="margin:2px 0 0;font-size:12px;color:rgba(255,255,255,0.85);">Parcela {parcela_numero} de {n_parcelas_total}</p>' if n_parcelas_total > 1 else ''}
             </td></tr>
           </table>
           <p style="margin:0 0 16px;font-size:13px;color:#6b7280;line-height:1.6;">{plano_txt}</p>

@@ -1288,6 +1288,7 @@ def _run_migrations() -> None:
         conn.execute(text("ALTER TABLE honorarios ADD COLUMN IF NOT EXISTS cobranca_ativa BOOLEAN NOT NULL DEFAULT false"))
         conn.execute(text("ALTER TABLE honorarios ADD COLUMN IF NOT EXISTS cobranca_email VARCHAR(255)"))
         conn.execute(text("ALTER TABLE parcelas ADD COLUMN IF NOT EXISTS cobranca_estagio INTEGER NOT NULL DEFAULT 0"))
+        conn.execute(text("ALTER TABLE honorarios ADD COLUMN IF NOT EXISTS cobranca_estagio INTEGER NOT NULL DEFAULT 0"))
 
         conn.commit()
 

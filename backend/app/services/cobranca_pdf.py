@@ -52,7 +52,8 @@ def gerar_pdf_cobranca(
     """
     escritorio: {"razao_social", "cnpj", "endereco"}
     parcelas: [{"numero", "valor", "vencimento", "status", "atrasada"(bool)}]
-    pagamento: {"pix_chave", "pix_tipo", "favorecido", "contato"} — dados p/ pagamento.
+    pagamento: {"pix_chave", "pix_tipo", "favorecido", "contato_nome", "contato_email",
+                "contato_whatsapp" (dígitos p/ wa.me), "contato_whatsapp_fmt"} — dados p/ pagamento.
     """
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -125,7 +126,10 @@ def gerar_pdf_cobranca(
     el.append(Spacer(1, 0.45 * cm))
 
     # ── Como pagar (caixa arredondada) ──────────────────────────────────────
-    if pagamento and (pagamento.get("pix_chave") or pagamento.get("contato")):
+    tem_contato = pagamento and (
+        pagamento.get("contato_nome") or pagamento.get("contato_email") or pagamento.get("contato_whatsapp")
+    )
+    if pagamento and (pagamento.get("pix_chave") or tem_contato):
         cont = [Paragraph("Como pagar", ParagraphStyle(
             "hp", fontName="Helvetica-Bold", fontSize=10.5, textColor=colors.HexColor("#374151"), spaceAfter=5))]
         if pagamento.get("pix_chave"):
@@ -133,8 +137,16 @@ def gerar_pdf_cobranca(
             cont.append(Paragraph(f"<b>PIX{(' (' + tipo + ')') if tipo else ''}:</b> {pagamento['pix_chave']}", body))
         if pagamento.get("favorecido"):
             cont.append(Paragraph(f"<b>Favorecido:</b> {pagamento['favorecido']}", body))
-        if pagamento.get("contato"):
-            cont.append(Paragraph(f"<b>Contato:</b> {pagamento['contato']}", body))
+        if tem_contato:
+            cont.append(Paragraph("<b>Contato:</b>", body))
+            if pagamento.get("contato_nome"):
+                cont.append(Paragraph(pagamento["contato_nome"], body))
+            if pagamento.get("contato_email"):
+                cont.append(Paragraph(pagamento["contato_email"], body))
+            if pagamento.get("contato_whatsapp"):
+                wa_url = f"https://wa.me/{pagamento['contato_whatsapp']}"
+                wa_disp = pagamento.get("contato_whatsapp_fmt") or pagamento["contato_whatsapp"]
+                cont.append(Paragraph(f'WhatsApp: <a href="{wa_url}" color="#2563eb">{wa_disp}</a>', body))
         caixa = Table([[cont]], colWidths=[doc.width])
         caixa.setStyle(TableStyle([
             ("BOX", (0, 0), (-1, -1), 0.8, colors.HexColor("#d8d8d8")),

@@ -56,6 +56,7 @@ export default function FinanceiroPage() {
   const [novoClienteEmail, setNovoClienteEmail] = useState('')
   // Parcelamento no novo recebível
   const [parcN, setParcN] = useState(1)
+  const [parcNStr, setParcNStr] = useState('1')
   const [parc1Venc, setParc1Venc] = useState('')
   const [parcelasEdit, setParcelasEdit] = useState<ParcelaInput[]>([])
   // Edição inline de parcelas no card (id → {valor, data})
@@ -118,7 +119,7 @@ export default function FinanceiroPage() {
       qc.invalidateQueries({ queryKey: ['financeiro-resumo'] })
       setShowForm(false)
       setForm(EMPTY_H)
-      setParcN(1); setParc1Venc(''); setParcelasEdit([])
+      setParcN(1); setParcNStr('1'); setParc1Venc(''); setParcelasEdit([])
     },
   })
 
@@ -580,8 +581,15 @@ export default function FinanceiroPage() {
             <label className={styles.formLabel}>Parcelamento</label>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <input type="number" min={1} className={styles.input} style={{ width: 90 }}
-                value={parcN}
-                onChange={(e) => { const n = Math.max(1, parseInt(e.target.value) || 1); setParcN(n); gerarParcelas(n, parc1Venc, form.valor_total) }}
+                value={parcNStr}
+                onChange={(e) => {
+                  const raw = e.target.value
+                  setParcNStr(raw)
+                  const n = Math.max(1, parseInt(raw) || 1)
+                  setParcN(n)
+                  gerarParcelas(n, parc1Venc, form.valor_total)
+                }}
+                onBlur={() => setParcNStr(String(parcN))}
                 title="Nº de parcelas" />
               <span style={{ fontSize: 12, color: '#6b7280' }}>parcela(s), 1º venc.:</span>
               <input type="date" className={styles.input} style={{ width: 170 }}
@@ -650,12 +658,50 @@ export default function FinanceiroPage() {
                 onChange={(e) => setForm({ ...form, cobranca_ativa: e.target.checked })} />
               Cobrança automática (e-mail + PDF ao cliente até o pagamento)
             </label>
-            {form.cobranca_ativa && (
-              <input className={styles.input} style={{ marginTop: 6 }} type="email"
-                value={form.cobranca_email ?? ''}
-                onChange={(e) => setForm({ ...form, cobranca_email: e.target.value || undefined })}
-                placeholder="E-mail de cobrança (vazio = e-mail do cliente)" />
-            )}
+            {form.cobranca_ativa && (() => {
+              const clienteSel = clientes.find((c) => c.id === form.cliente_id)
+              const candidatos = [clienteSel?.email, clienteSel?.responsavel_email]
+                .filter((e): e is string => !!e)
+              const usandoOutro = !!form.cobranca_email && !candidatos.includes(form.cobranca_email)
+              return (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Enviar cobrança para:</div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                    {candidatos.length === 0 && !usandoOutro && (
+                      <span style={{ fontSize: 12, color: '#b45309' }}>⚠ Cliente sem e-mail cadastrado — informe abaixo</span>
+                    )}
+                    {candidatos.map((email) => (
+                      <button key={email} type="button"
+                        onClick={() => setForm({ ...form, cobranca_email: email })}
+                        style={{
+                          padding: '5px 12px', borderRadius: 999, fontSize: 12, cursor: 'pointer',
+                          border: form.cobranca_email === email ? '1px solid #7c3aed' : '1px solid #d1d5db',
+                          background: form.cobranca_email === email ? '#f5f3ff' : '#fff',
+                          color: form.cobranca_email === email ? '#5b21b6' : '#374151',
+                        }}>
+                        📧 {email}
+                      </button>
+                    ))}
+                    <button type="button"
+                      onClick={() => setForm({ ...form, cobranca_email: usandoOutro ? (candidatos[0] ?? undefined) : '' })}
+                      style={{
+                        padding: '5px 12px', borderRadius: 999, fontSize: 12, cursor: 'pointer',
+                        border: usandoOutro ? '1px solid #7c3aed' : '1px dashed #d1d5db',
+                        background: usandoOutro ? '#f5f3ff' : '#fff',
+                        color: usandoOutro ? '#5b21b6' : '#374151',
+                      }}>
+                      + outro e-mail
+                    </button>
+                  </div>
+                  {usandoOutro && (
+                    <input className={styles.input} style={{ marginTop: 8 }} type="email"
+                      value={form.cobranca_email ?? ''}
+                      onChange={(e) => setForm({ ...form, cobranca_email: e.target.value || undefined })}
+                      placeholder="Digite o e-mail de cobrança" autoFocus />
+                  )}
+                </div>
+              )
+            })()}
           </div>
 
           <div className={styles.formRow}>
