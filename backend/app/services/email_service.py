@@ -295,9 +295,9 @@ def build_cobranca_html(
         )
     else:
         corpo = (
-            f"Passando só para lembrar que a parcela {parcela_numero} referente a "
+            f"Este é um lembrete automático de que a parcela {parcela_numero} referente a "
             f"<b>{descricao}</b> vence em <b>{parcela_venc}</b>. Em anexo segue um resumo "
-            f"com o cronograma e os dados para pagamento (PIX)."
+            f"com o cronograma e os dados para pagamento (PIX), que também segue abaixo."
         )
     rotulo_data = "Venceu em" if pos_vencimento else "Vence em"
     plano_txt = f"Valor total dos honorários: <b style=\"color:#374151\">{valor_total}</b>" + (

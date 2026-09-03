@@ -72,17 +72,19 @@ def gerar_pdf_cobranca(
     el = []
     if os.path.exists(_LOGO_PATH):
         try:
-            logo = Image(_LOGO_PATH, width=48 * mm, height=24 * mm, kind="proportional")
+            # O PNG tem uma margem interna generosa acima/abaixo do texto — usar uma
+            # altura pequena evita um vão grande antes do título (a imagem já "respira").
+            logo = Image(_LOGO_PATH, width=40 * mm, height=14 * mm, kind="proportional")
             logo.hAlign = "CENTER"
             el.append(logo)
-            el.append(Spacer(1, 0.5 * cm))
+            el.append(Spacer(1, 0.05 * cm))
         except Exception:
             pass
     # Sem repetir nome/CNPJ do escritório — a logo acima já identifica.
     el.append(Paragraph("LEMBRETE", ParagraphStyle(
         "t", fontName="Helvetica-Bold", fontSize=13, alignment=TA_CENTER,
         textColor=colors.HexColor("#374151"), spaceAfter=2)))
-    el.append(Spacer(1, 0.4 * cm))
+    el.append(Spacer(1, 0.2 * cm))
 
     el.append(Paragraph(f"<b>Cliente:</b> {cliente_nome}", label))
     el.append(Paragraph(f"<b>Referente a:</b> {descricao}", label))
