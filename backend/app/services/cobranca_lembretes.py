@@ -152,11 +152,15 @@ def enviar_cobrancas(db: Session, *, hoje: date | None = None, forcar: bool = Fa
             continue
 
         cliente = db.query(Cliente).filter(Cliente.id == h.cliente_id).first()
-        destino = (h.cobranca_email or (cliente.email if cliente else None) or "").strip()
-        if not destino:
+        # Prioridade: lista de e-mails (nova) → e-mail único (legado) → e-mail do cliente.
+        destinos_brutos = h.cobranca_emails or ([h.cobranca_email] if h.cobranca_email else None) \
+            or ([cliente.email] if cliente and cliente.email else [])
+        destinos = [d.strip() for d in destinos_brutos if d and d.strip()]
+        if not destinos:
             pulados += 1
             logger.info("Lembrete: honorário %s sem e-mail de destino — pulado", h.id)
             continue
+        destino = ", ".join(destinos)
 
         if h.parcelas:
             # ── Recebível parcelado: um estágio por parcela ──────────────────

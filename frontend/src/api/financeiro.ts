@@ -56,6 +56,7 @@ export interface Honorario {
   contrato_orfao?: boolean
   cobranca_ativa?: boolean
   cobranca_email?: string | null
+  cobranca_emails?: string[]
   recebimentos: Recebimento[]
   parcelas: Parcela[]
   created_at: string
@@ -76,7 +77,7 @@ export interface HonorarioCreate {
   data_estimada_sentenca?: string
   contrato_id?: string | null
   cobranca_ativa?: boolean
-  cobranca_email?: string | null
+  cobranca_emails?: string[]
   parcelas?: ParcelaInput[]
 }
 

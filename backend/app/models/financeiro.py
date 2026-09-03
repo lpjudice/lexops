@@ -1,8 +1,8 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Numeric, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Numeric, String, Text, func, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -55,8 +55,12 @@ class Honorario(Base):
     # Opt-in por recebível. Quando ativa, o cron diário envia e-mail + PDF de
     # cobrança para as parcelas pendentes vencidas, até serem marcadas como pagas.
     cobranca_ativa: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
-    # E-mail para onde enviar a cobrança (override); se vazio, usa o e-mail do cliente.
+    # E-mail para onde enviar a cobrança (legado, um único endereço — mantido por
+    # compatibilidade). Superado por cobranca_emails; se ambos vazios, usa cliente.email.
     cobranca_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Lista de e-mails de destino da cobrança (registrados do cliente selecionados
+    # + endereços extras digitados). Vazio = usa cliente.email.
+    cobranca_emails: Mapped[list] = mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))
     # Estágio do lembrete já enviado quando o recebível NÃO tem parcelas (pagamento
     # à vista, usa data_vencimento do próprio honorário). Mesma escala de Parcela.cobranca_estagio.
     cobranca_estagio: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)

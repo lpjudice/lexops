@@ -57,7 +57,6 @@ export default function FinanceiroPage() {
   // Parcelamento no novo recebível
   const [parcN, setParcN] = useState(1)
   const [parcNStr, setParcNStr] = useState('1')
-  const [emailModoOutro, setEmailModoOutro] = useState(false)
   const [parc1Venc, setParc1Venc] = useState('')
   const [parcelasEdit, setParcelasEdit] = useState<ParcelaInput[]>([])
   // Edição inline de parcelas no card (id → {valor, data})
@@ -120,7 +119,7 @@ export default function FinanceiroPage() {
       qc.invalidateQueries({ queryKey: ['financeiro-resumo'] })
       setShowForm(false)
       setForm(EMPTY_H)
-      setParcN(1); setParcNStr('1'); setParc1Venc(''); setParcelasEdit([]); setEmailModoOutro(false)
+      setParcN(1); setParcNStr('1'); setParc1Venc(''); setParcelasEdit([])
     },
   })
 
@@ -433,9 +432,13 @@ export default function FinanceiroPage() {
           onSubmit={(e) => {
             e.preventDefault()
             const usaParcelas = parcN >= 2 && parcelasEdit.length > 0
+            const base: HonorarioCreate = {
+              ...form,
+              cobranca_emails: (form.cobranca_emails ?? []).map((e) => e.trim()).filter(Boolean),
+            }
             const payload: HonorarioCreate = usaParcelas
-              ? { ...form, parcelas: parcelasEdit, valor_total: parcelasEdit.reduce((s, p) => s + p.valor, 0) }
-              : form
+              ? { ...base, parcelas: parcelasEdit, valor_total: parcelasEdit.reduce((s, p) => s + p.valor, 0) }
+              : base
             criar.mutate(payload)
           }}
           className={styles.form}
@@ -656,48 +659,88 @@ export default function FinanceiroPage() {
           <div className={styles.formRow}>
             <label className={styles.formLabel} style={{ display: 'flex', gap: 8, alignItems: 'center', cursor: 'pointer' }}>
               <input type="checkbox" checked={!!form.cobranca_ativa}
-                onChange={(e) => setForm({ ...form, cobranca_ativa: e.target.checked })} />
+                onChange={(e) => {
+                  const ativa = e.target.checked
+                  const clienteSel = clientes.find((c) => c.id === form.cliente_id)
+                  const jaTemEmails = (form.cobranca_emails ?? []).length > 0
+                  setForm({
+                    ...form,
+                    cobranca_ativa: ativa,
+                    cobranca_emails: ativa && !jaTemEmails && clienteSel?.email
+                      ? [clienteSel.email]
+                      : form.cobranca_emails,
+                  })
+                }} />
               Cobrança automática (e-mail + PDF ao cliente até o pagamento)
             </label>
             {form.cobranca_ativa && (() => {
               const clienteSel = clientes.find((c) => c.id === form.cliente_id)
               const candidatos = [clienteSel?.email, clienteSel?.responsavel_email]
                 .filter((e): e is string => !!e)
+              const selecionados = form.cobranca_emails ?? []
+              const extras = selecionados
+                .map((email, idx) => ({ email, idx }))
+                .filter(({ email }) => !candidatos.includes(email))
+
+              const toggleCandidato = (email: string) => {
+                setForm({
+                  ...form,
+                  cobranca_emails: selecionados.includes(email)
+                    ? selecionados.filter((e) => e !== email)
+                    : [...selecionados, email],
+                })
+              }
+              const addExtra = () => setForm({ ...form, cobranca_emails: [...selecionados, ''] })
+              const updateExtraAt = (idx: number, value: string) => {
+                const novo = [...selecionados]
+                novo[idx] = value
+                setForm({ ...form, cobranca_emails: novo })
+              }
+              const removeAt = (idx: number) => {
+                setForm({ ...form, cobranca_emails: selecionados.filter((_, i) => i !== idx) })
+              }
+
               return (
                 <div style={{ marginTop: 8 }}>
                   <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Enviar cobrança para:</div>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-                    {candidatos.length === 0 && !emailModoOutro && (
-                      <span style={{ fontSize: 12, color: '#b45309' }}>⚠ Cliente sem e-mail cadastrado — informe abaixo</span>
+                    {candidatos.length === 0 && extras.length === 0 && (
+                      <span style={{ fontSize: 12, color: '#b45309' }}>⚠ Cliente sem e-mail cadastrado — adicione abaixo</span>
                     )}
-                    {candidatos.map((email) => (
-                      <button key={email} type="button"
-                        onClick={() => { setEmailModoOutro(false); setForm({ ...form, cobranca_email: email }) }}
-                        style={{
-                          padding: '5px 12px', borderRadius: 999, fontSize: 12, cursor: 'pointer',
-                          border: !emailModoOutro && form.cobranca_email === email ? '1px solid #7c3aed' : '1px solid #d1d5db',
-                          background: !emailModoOutro && form.cobranca_email === email ? '#f5f3ff' : '#fff',
-                          color: !emailModoOutro && form.cobranca_email === email ? '#5b21b6' : '#374151',
-                        }}>
-                        📧 {email}
-                      </button>
-                    ))}
-                    <button type="button"
-                      onClick={() => { setEmailModoOutro(true); setForm({ ...form, cobranca_email: undefined }) }}
+                    {candidatos.map((email) => {
+                      const ativo = selecionados.includes(email)
+                      return (
+                        <button key={email} type="button"
+                          onClick={() => toggleCandidato(email)}
+                          style={{
+                            padding: '5px 12px', borderRadius: 999, fontSize: 12, cursor: 'pointer',
+                            border: ativo ? '1px solid #7c3aed' : '1px solid #d1d5db',
+                            background: ativo ? '#f5f3ff' : '#fff',
+                            color: ativo ? '#5b21b6' : '#374151',
+                          }}>
+                          {ativo ? '✓ ' : ''}📧 {email}
+                        </button>
+                      )
+                    })}
+                    <button type="button" onClick={addExtra}
                       style={{
                         padding: '5px 12px', borderRadius: 999, fontSize: 12, cursor: 'pointer',
-                        border: emailModoOutro ? '1px solid #7c3aed' : '1px dashed #d1d5db',
-                        background: emailModoOutro ? '#f5f3ff' : '#fff',
-                        color: emailModoOutro ? '#5b21b6' : '#374151',
+                        border: '1px dashed #d1d5db', background: '#fff', color: '#374151',
                       }}>
-                      + outro e-mail
+                      + adicionar e-mail
                     </button>
                   </div>
-                  {emailModoOutro && (
-                    <input className={styles.input} style={{ marginTop: 8 }} type="email"
-                      value={form.cobranca_email ?? ''}
-                      onChange={(e) => setForm({ ...form, cobranca_email: e.target.value || undefined })}
-                      placeholder="Digite o e-mail de cobrança" autoFocus />
+                  {extras.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+                      {extras.map(({ email, idx }) => (
+                        <div key={idx} style={{ display: 'flex', gap: 6 }}>
+                          <input className={styles.input} type="email" value={email}
+                            onChange={(e) => updateExtraAt(idx, e.target.value)}
+                            placeholder="E-mail adicional" autoFocus={email === ''} />
+                          <button type="button" className={styles.btnDanger} onClick={() => removeAt(idx)}>×</button>
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
               )

@@ -83,7 +83,7 @@ class HonorarioCreate(BaseModel):
     # Vínculo com contrato existente + cobrança
     contrato_id: uuid.UUID | None = None
     cobranca_ativa: bool = False
-    cobranca_email: str | None = None
+    cobranca_emails: list[str] | None = None
     # Cronograma de parcelas (opcional). Quando informado, valor_total = soma das parcelas
     # e o vencimento simples é ignorado em favor do cronograma.
     parcelas: list[ParcelaInput] | None = None
@@ -103,7 +103,7 @@ class HonorarioUpdate(BaseModel):
     contrato_orfao: bool | None = None
     contrato_id: uuid.UUID | None = None
     cobranca_ativa: bool | None = None
-    cobranca_email: str | None = None
+    cobranca_emails: list[str] | None = None
 
 
 class HonorarioOut(BaseModel):
@@ -127,6 +127,7 @@ class HonorarioOut(BaseModel):
     contrato_orfao: bool = False
     cobranca_ativa: bool = False
     cobranca_email: str | None = None
+    cobranca_emails: list[str] = []
     recebimentos: list[RecebimentoOut]
     parcelas: list[ParcelaOut] = []
     created_at: datetime
