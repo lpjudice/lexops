@@ -65,6 +65,7 @@ export default function ContratosPage() {
   const autoSyncRef = useRef<Set<string>>(new Set())
 
   const [showForm, setShowForm] = useState(false)
+  const [filtroStatus, setFiltroStatus] = useState<StatusContrato | ''>('')
   const [form, setForm] = useState<ContratoCreate>(EMPTY_CONTRATO)
   const [expandido, setExpandido] = useState<string | null>(null)
   const [sigForms, setSigForms] = useState<Record<string, SignatarioCreate>>({})
@@ -283,6 +284,10 @@ export default function ContratosPage() {
   const temArquivos = (c: (typeof contratos)[0]) =>
     (c.arquivos?.length ?? 0) > 0 || !!c.arquivo_path
 
+  const contratosFiltrados = filtroStatus
+    ? contratos.filter((c) => c.status === filtroStatus)
+    : contratos
+
   return (
     <div>
       <div className={styles.pageHeader}>
@@ -335,10 +340,37 @@ export default function ContratosPage() {
         </form>
       )}
 
+      {contratos.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+          {(['', ...Object.keys(STATUS_LABEL)] as (StatusContrato | '')[]).map((s) => {
+            const count = s === '' ? contratos.length : contratos.filter((c) => c.status === s).length
+            return (
+              <button
+                key={s || 'todos'}
+                onClick={() => setFiltroStatus(s)}
+                style={{
+                  padding: '4px 12px',
+                  borderRadius: 999,
+                  border: '1px solid #e5e7eb',
+                  background: filtroStatus === s ? '#7c3aed' : '#f3f4f6',
+                  color: filtroStatus === s ? '#fff' : '#6b7280',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                {s === '' ? 'Todos' : STATUS_LABEL[s]} ({count})
+              </button>
+            )
+          })}
+        </div>
+      )}
+
       {isLoading ? <p className={styles.empty}>Carregando...</p> :
-       contratos.length === 0 ? <p className={styles.empty}>Nenhum contrato cadastrado.</p> : (
+       contratos.length === 0 ? <p className={styles.empty}>Nenhum contrato cadastrado.</p> :
+       contratosFiltrados.length === 0 ? <p className={styles.empty}>Nenhum contrato com esse status.</p> : (
         <div className={cs.lista}>
-          {contratos.map((c) => {
+          {contratosFiltrados.map((c) => {
             const isOpen = expandido === c.id
             const sf = sigForms[c.id] ?? EMPTY_SIG
             const cliente = clientePorId(c.cliente_id)
@@ -380,33 +412,33 @@ export default function ContratosPage() {
                     <div className={cs.section}>
                       <div className={cs.sectionHeader}>
                         <span className={cs.sectionTitle}>Documentos PDF</span>
-                        {c.status === 'rascunho' && (
-                          <div className={cs.sectionActions}>
+                        <div className={cs.sectionActions}>
+                          {c.status === 'rascunho' && (
                             <button className={cs.btnSmall}
                               onClick={() => abrirGerar(c.id, c.cliente_id)}>
                               ✨ Gerar contrato
                             </button>
-                            <label className={cs.btnSmall}>
-                              ↑ Upload
-                              <input
-                                ref={(el) => { fileRefs.current[c.id] = el }}
-                                type="file" accept=".pdf" multiple style={{ display: 'none' }}
-                                onChange={(e) => {
-                                  const files = Array.from(e.target.files ?? [])
-                                  if (files.length) uploadPdfs.mutate({ id: c.id, files })
-                                  if (fileRefs.current[c.id]) fileRefs.current[c.id]!.value = ''
-                                }}
-                              />
-                            </label>
-                            {temArquivos(c) && (
-                              <button className={cs.btnSmall}
-                                onClick={() => setLerIAFor(c.id)}
-                                title="A IA lê o PDF e popula/atualiza o cadastro dos contratantes">
-                                🔎 Ler contratantes (IA)
-                              </button>
-                            )}
-                          </div>
-                        )}
+                          )}
+                          <label className={cs.btnSmall}>
+                            ↑ Upload
+                            <input
+                              ref={(el) => { fileRefs.current[c.id] = el }}
+                              type="file" accept=".pdf" multiple style={{ display: 'none' }}
+                              onChange={(e) => {
+                                const files = Array.from(e.target.files ?? [])
+                                if (files.length) uploadPdfs.mutate({ id: c.id, files })
+                                if (fileRefs.current[c.id]) fileRefs.current[c.id]!.value = ''
+                              }}
+                            />
+                          </label>
+                          {temArquivos(c) && (
+                            <button className={cs.btnSmall}
+                              onClick={() => setLerIAFor(c.id)}
+                              title="A IA lê o PDF e popula/atualiza o cadastro dos contratantes">
+                              🔎 Ler contratantes (IA)
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                       {arquivos.length === 0 ? (
