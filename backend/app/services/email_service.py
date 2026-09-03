@@ -10,11 +10,27 @@ import base64
 import email.mime.multipart as mime_multi
 import email.mime.text as mime_text
 import logging
+import pathlib
 
 logger = logging.getLogger(__name__)
 
 TEAL = "#00b090"
 TEAL_DARK = "#007a62"
+
+_ASSETS = pathlib.Path(__file__).resolve().parent.parent / "assets"
+_LOGO_CACHE: dict[str, str] = {}
+
+
+def _logo_data_uri(nome: str = "logo_light.png") -> str:
+    """Logo (letras claras, fundo transparente) como data-URI base64, para usar
+    em faixas coloridas de e-mail — mesmo padrão do brinde_instagram."""
+    if nome not in _LOGO_CACHE:
+        try:
+            data = (_ASSETS / nome).read_bytes()
+            _LOGO_CACHE[nome] = "data:image/png;base64," + base64.b64encode(data).decode()
+        except Exception:
+            _LOGO_CACHE[nome] = ""
+    return _LOGO_CACHE[nome]
 
 
 def _build_invite_html(invite_url: str, inviter_name: str, to_email: str) -> str:
@@ -252,11 +268,18 @@ def build_cobranca_html(
     parcela_venc: str, saldo: str, n_parcelas_pend: int, pos_vencimento: bool,
 ) -> str:
     """
-    Lembrete de parcela — mesma identidade visual dos outros e-mails, com acento
-    próprio (dourado sóbrio). Tom amigável, não de cobrança. `pos_vencimento`=True
-    muda o texto para o lembrete único enviado alguns dias após o vencimento.
+    Lembrete de parcela — mesmo padrão visual dos outros e-mails automáticos
+    (fundo claro, card branco, faixa colorida no topo com a logo), não o tema
+    escuro do e-mail de cadastro. Tom amigável, não de cobrança. `pos_vencimento`
+    =True muda o texto para o lembrete único enviado alguns dias após o vencimento.
     """
-    ACENTO = "#b0894f"
+    logo = _logo_data_uri("logo_light.png")
+    logo_img = (
+        f'<img src="{logo}" width="130" alt="Pimenta Judice Advogados" style="display:block;"/>'
+        if logo else
+        '<p style="margin:0;font-size:13px;font-weight:800;letter-spacing:0.14em;'
+        'text-transform:uppercase;color:#ffffff;">PIMENTA JUDICE ADVOGADOS</p>'
+    )
     saud = f"Olá{(' ' + nome) if nome else ''},"
     if pos_vencimento:
         corpo = (
@@ -268,8 +291,8 @@ def build_cobranca_html(
         )
     else:
         corpo = (
-            f"Passando só para lembrar, com tranquilidade, que a parcela {parcela_numero} "
-            f"referente a <b>{descricao}</b> vence em <b>{parcela_venc}</b>, no valor de "
+            f"Passando só para lembrar que a parcela {parcela_numero} referente a "
+            f"<b>{descricao}</b> vence em <b>{parcela_venc}</b>, no valor de "
             f"<b>{parcela_valor}</b>. Em anexo segue um resumo com o cronograma e os dados "
             f"para pagamento (PIX)."
         )
@@ -278,27 +301,28 @@ def build_cobranca_html(
     return f"""<!DOCTYPE html>
 <html lang="pt-BR"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Lembrete — Pimenta Judice</title></head>
-<body style="margin:0;padding:0;background:#111111;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#111111;">
-    <tr><td align="center" style="padding:48px 16px;">
-      <table width="100%" cellpadding="0" cellspacing="0" role="presentation"
-             style="max-width:480px;background:#1a1a1a;border-radius:16px;border:1px solid #2a2a2a;overflow:hidden;">
-        <tr><td style="background:#141414;padding:24px 32px;border-bottom:1px solid #2a2a2a;">
-          <p style="margin:0;font-size:13px;font-weight:800;letter-spacing:0.14em;text-transform:uppercase;color:#f5f5f5;">PIMENTA JUDICE</p>
-          <p style="margin:2px 0 0;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:#555;">Advogados</p>
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:'Helvetica Neue',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#f5f5f5;padding:32px 0;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" role="presentation"
+             style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+        <tr><td style="background:#141414;padding:26px 36px;">
+          {logo_img}
         </td></tr>
-        <tr><td style="padding:30px 32px 8px;">
-          <p style="margin:0 0 18px;font-size:11px;color:#666;line-height:1.5;">Esta é uma mensagem automática — não é preciso respondê-la, mas fique à vontade se tiver qualquer dúvida.</p>
-          <h1 style="margin:0 0 10px;font-size:20px;font-weight:700;color:#f5f5f5;line-height:1.3;">{saud}</h1>
-          <p style="margin:0 0 20px;font-size:14px;color:#9a9a9a;line-height:1.65;">{corpo}</p>
-          <table cellpadding="0" cellspacing="0" role="presentation" width="100%" style="margin-bottom:22px;">
-            <tr><td style="border-left:3px solid {ACENTO};background:#141414;border-radius:8px;padding:14px 16px;">
-              <p style="margin:0;font-size:13px;color:#cbb892;line-height:1.6;">{saldo_txt}</p>
+        <tr><td style="padding:28px 36px 8px;">
+          <p style="margin:0 0 18px;">
+            <span style="display:inline-block;background:#fef3c7;color:#92400e;font-size:11px;font-weight:800;letter-spacing:0.05em;text-transform:uppercase;padding:5px 11px;border-radius:999px;">Mensagem automática</span>
+          </p>
+          <h1 style="margin:0 0 10px;font-size:20px;font-weight:700;color:#111827;line-height:1.3;">{saud}</h1>
+          <p style="margin:0 0 20px;font-size:14px;color:#374151;line-height:1.65;">{corpo}</p>
+          <table cellpadding="0" cellspacing="0" role="presentation" width="100%" style="margin-bottom:8px;">
+            <tr><td style="border-left:3px solid {TEAL};background:#f9fafb;border-radius:8px;padding:14px 16px;">
+              <p style="margin:0;font-size:13px;color:#1f2937;line-height:1.6;">{saldo_txt}</p>
             </td></tr>
           </table>
         </td></tr>
-        <tr><td style="padding:18px 32px 26px;border-top:1px solid #2a2a2a;">
-          <p style="margin:0;font-size:11px;color:#444;line-height:1.6;text-align:center;">Pimenta Judice Advogados</p>
+        <tr><td style="padding:20px 36px 28px;border-top:1px solid #f3f4f6;">
+          <p style="margin:0;font-size:11px;color:#9ca3af;line-height:1.6;text-align:center;">Pimenta Judice Advogados</p>
         </td></tr>
       </table>
     </td></tr>
