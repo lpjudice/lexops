@@ -66,6 +66,9 @@ export default function ContratosPage() {
 
   const [showForm, setShowForm] = useState(false)
   const [filtroStatus, setFiltroStatus] = useState<StatusContrato | ''>('')
+  const [editandoTitulo, setEditandoTitulo] = useState<string | null>(null)
+  const [editTitulo, setEditTitulo] = useState('')
+  const [editDescricao, setEditDescricao] = useState('')
   const [form, setForm] = useState<ContratoCreate>(EMPTY_CONTRATO)
   const [expandido, setExpandido] = useState<string | null>(null)
   const [sigForms, setSigForms] = useState<Record<string, SignatarioCreate>>({})
@@ -193,6 +196,16 @@ export default function ContratosPage() {
   const deletar = useMutation({
     mutationFn: (id: string) => contratosApi.deletar(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['contratos'] }),
+  })
+
+  const atualizarContrato = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: { titulo: string; descricao?: string } }) =>
+      contratosApi.atualizar(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['contratos'] })
+      setEditandoTitulo(null)
+    },
+    onError: (e: any) => alert(`Erro ao salvar:\n${e?.response?.data?.detail || e?.message || 'Erro desconhecido'}`),
   })
 
   const sincronizar = useMutation({
@@ -382,10 +395,45 @@ export default function ContratosPage() {
               <div key={c.id} className={cs.card}>
                 {/* Cabeçalho */}
                 <div className={cs.cardTop}>
-                  <div>
-                    <div className={cs.cardTitulo}>{c.titulo}</div>
+                  <div style={{ flex: 1 }}>
+                    {editandoTitulo === c.id ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 480 }}>
+                        <input className={styles.input} value={editTitulo}
+                          onChange={(e) => setEditTitulo(e.target.value)}
+                          placeholder="Título do contrato" autoFocus />
+                        <textarea className={styles.input} rows={2} value={editDescricao}
+                          onChange={(e) => setEditDescricao(e.target.value)}
+                          placeholder="Descrição (opcional)" />
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button className={styles.btnPrimary} style={{ padding: '5px 14px', fontSize: 12 }}
+                            disabled={!editTitulo.trim() || atualizarContrato.isPending}
+                            onClick={() => atualizarContrato.mutate({
+                              id: c.id,
+                              data: { titulo: editTitulo.trim(), descricao: editDescricao.trim() || undefined },
+                            })}>
+                            {atualizarContrato.isPending ? 'Salvando...' : 'Salvar'}
+                          </button>
+                          <button className={styles.btnTable} onClick={() => setEditandoTitulo(null)}>
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div className={cs.cardTitulo}>{c.titulo}</div>
+                        <button className={cs.btnExpand} title="Editar nome/descrição"
+                          onClick={() => {
+                            setEditandoTitulo(c.id)
+                            setEditTitulo(c.titulo)
+                            setEditDescricao(c.descricao ?? '')
+                          }}>
+                          ✎
+                        </button>
+                      </div>
+                    )}
                     <div className={cs.cardMeta}>
                       {cliente?.nome ?? '—'} · {formatDate(c.created_at)}
+                      {c.descricao && editandoTitulo !== c.id && ` · ${c.descricao}`}
                     </div>
                   </div>
                   <div className={cs.cardActions}>
