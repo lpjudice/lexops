@@ -1,8 +1,9 @@
 import uuid
 from collections import defaultdict
 from datetime import date
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -15,6 +16,9 @@ from app.schemas.financeiro import (
     RecebimentoCreate, RecebimentoOut,
     ResumoCliente, ResumoFinanceiro, ResumoMensal,
 )
+
+UPLOADS_DIR = Path("/app/uploads/financeiro")
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Auth obrigatória em todo o módulo financeiro (antes os endpoints estavam abertos).
 router = APIRouter(prefix="/financeiro", tags=["financeiro"],
@@ -146,6 +150,87 @@ def remover_recebimento(
             h.status = "pago"
 
     db.commit()
+
+
+@router.post("/recebimentos/{rec_id}/comprovante", response_model=RecebimentoOut)
+def upload_comprovante_recebimento(
+    rec_id: uuid.UUID, file: UploadFile = File(...), db: Session = Depends(get_db)
+):
+    """
+    Anexa o comprovante de pagamento a um recebimento (parcela paga ou recebível à
+    vista). Sobe para a pasta do cliente (Financeiro/Comprovantes) e para a pasta
+    mestra /Financeiro/Comprovantes/{cliente} (best-effort, não bloqueia o upload).
+    """
+    rec = db.query(Recebimento).filter(Recebimento.id == rec_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Recebimento não encontrado")
+    h = db.query(Honorario).filter(Honorario.id == rec.honorario_id).first()
+
+    conteudo = file.file.read()
+    ext = Path(file.filename or "comprovante.pdf").suffix or ".pdf"
+    nome_arquivo = f"comprovante_{rec_id}{ext}"
+
+    destino_local = UPLOADS_DIR / nome_arquivo
+    destino_local.write_bytes(conteudo)
+    rec.comprovante_path = str(destino_local)
+    rec.comprovante_filename = file.filename or nome_arquivo
+    db.commit()
+    db.refresh(rec)
+
+    try:
+        from app.services.google_drive import upload_arquivo, upload_arquivo_raiz
+        ext_lower = ext.lower()
+        mime = ("image/jpeg" if ext_lower in (".jpg", ".jpeg") else
+                "image/png" if ext_lower == ".png" else "application/pdf")
+        cliente = db.query(Cliente).filter(Cliente.id == h.cliente_id).first() if h else None
+        if cliente:
+            link = upload_arquivo(conteudo, nome_arquivo, cliente.nome, "Financeiro",
+                                  mime, sub_subfolder="Comprovantes")
+            if link:
+                rec.comprovante_drive_link = link
+            upload_arquivo_raiz(conteudo, nome_arquivo,
+                                subpath=["Financeiro", "Comprovantes", cliente.nome], mimetype=mime)
+            db.commit()
+            db.refresh(rec)
+    except Exception:
+        pass
+
+    return rec
+
+
+@router.delete("/recebimentos/{rec_id}/comprovante", response_model=RecebimentoOut)
+def remover_comprovante_recebimento(rec_id: uuid.UUID, db: Session = Depends(get_db)):
+    rec = db.query(Recebimento).filter(Recebimento.id == rec_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Recebimento não encontrado")
+    if rec.comprovante_path:
+        try:
+            Path(rec.comprovante_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+    try:
+        if rec.comprovante_drive_link:
+            from app.services.google_drive import deletar_arquivo
+            h = db.query(Honorario).filter(Honorario.id == rec.honorario_id).first()
+            cliente = db.query(Cliente).filter(Cliente.id == h.cliente_id).first() if h else None
+            if cliente and rec.comprovante_path:
+                deletar_arquivo(cliente.nome, "Financeiro", Path(rec.comprovante_path).name,
+                                sub_subfolder="Comprovantes")
+    except Exception:
+        pass
+    rec.comprovante_path = None
+    rec.comprovante_filename = None
+    rec.comprovante_drive_link = None
+    db.commit()
+    db.refresh(rec)
+    return rec
+
+
+@router.get("/pasta-mestra")
+def obter_pasta_mestra_financeiro():
+    """Link da pasta mestra /Financeiro (Comprovantes + cópias das cobranças) no Drive."""
+    from app.services.google_drive import get_folder_link_raiz
+    return {"link": get_folder_link_raiz(["Financeiro"])}
 
 
 # ── Parcelas ──────────────────────────────────────────────────────────────────

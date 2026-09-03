@@ -1290,6 +1290,9 @@ def _run_migrations() -> None:
         conn.execute(text("ALTER TABLE parcelas ADD COLUMN IF NOT EXISTS cobranca_estagio INTEGER NOT NULL DEFAULT 0"))
         conn.execute(text("ALTER TABLE honorarios ADD COLUMN IF NOT EXISTS cobranca_estagio INTEGER NOT NULL DEFAULT 0"))
         conn.execute(text("ALTER TABLE honorarios ADD COLUMN IF NOT EXISTS cobranca_emails JSONB DEFAULT '[]'::jsonb"))
+        conn.execute(text("ALTER TABLE recebimentos ADD COLUMN IF NOT EXISTS comprovante_filename VARCHAR(500)"))
+        conn.execute(text("ALTER TABLE recebimentos ADD COLUMN IF NOT EXISTS comprovante_path VARCHAR(1000)"))
+        conn.execute(text("ALTER TABLE recebimentos ADD COLUMN IF NOT EXISTS comprovante_drive_link VARCHAR(1000)"))
 
         conn.commit()
 

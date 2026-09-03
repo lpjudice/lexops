@@ -26,6 +26,9 @@ class RecebimentoOut(BaseModel):
     data_recebimento: date
     forma_pagamento: FormaPagamento
     observacao: str | None
+    comprovante_filename: str | None = None
+    comprovante_path: str | None = None
+    comprovante_drive_link: str | None = None
 
     model_config = {"from_attributes": True}
 

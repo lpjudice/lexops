@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { financeiroApi } from '../api/financeiro'
@@ -39,6 +39,7 @@ function fmtData(d: string) {
 export default function FinanceiroPage() {
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const comprovanteRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const [aba, setAba] = useState<'recebiveis' | 'fluxo'>('recebiveis')
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<HonorarioCreate>(EMPTY_H)
@@ -251,6 +252,23 @@ export default function FinanceiroPage() {
     },
   })
 
+  const uploadComprovante = useMutation({
+    mutationFn: ({ recId, file }: { recId: string; file: File }) =>
+      financeiroApi.uploadComprovante(recId, file),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['honorarios'] }),
+    onError: (e: any) => alert(`Erro ao enviar comprovante:\n${e?.response?.data?.detail || e?.message || 'Erro'}`),
+  })
+
+  const removerComprovante = useMutation({
+    mutationFn: (recId: string) => financeiroApi.removerComprovante(recId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['honorarios'] }),
+  })
+
+  const { data: pastaMestraFin } = useQuery({
+    queryKey: ['financeiro-pasta-mestra'],
+    queryFn: () => financeiroApi.pastaMestra(),
+  })
+
   const clienteNome = (id: string) => clientes.find((c) => c.id === id)?.nome ?? '—'
 
   // Barra de meses: normaliza altura relativa
@@ -262,11 +280,24 @@ export default function FinanceiroPage() {
     <div>
       <div className={styles.pageHeader}>
         <h1 className={styles.pageTitle}>Financeiro</h1>
-        {aba === 'recebiveis' && (
-          <button className={styles.btnPrimary} onClick={() => setShowForm(!showForm)}>
-            {showForm ? 'Cancelar' : '+ Novo Honorário'}
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {pastaMestraFin?.link && (
+            <a href={pastaMestraFin.link} target="_blank" rel="noreferrer"
+              title="Comprovantes e cópias das cobranças organizados por cliente"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13,
+                padding: '7px 14px', borderRadius: 8, border: '1px solid #d1d5db',
+                color: '#374151', textDecoration: 'none', background: '#fff',
+              }}>
+              ☁ Pasta mestra do Financeiro
+            </a>
+          )}
+          {aba === 'recebiveis' && (
+            <button className={styles.btnPrimary} onClick={() => setShowForm(!showForm)}>
+              {showForm ? 'Cancelar' : '+ Novo Honorário'}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Abas: Recebíveis (contratos/honorários) × Fluxo de Caixa (entradas reais) */}
@@ -1111,6 +1142,7 @@ export default function FinanceiroPage() {
                             <th>Forma</th>
                             <th>Observação</th>
                             <th style={{ textAlign: 'right' }}>Valor</th>
+                            <th>Comprovante</th>
                             <th></th>
                           </tr>
                         </thead>
@@ -1121,6 +1153,38 @@ export default function FinanceiroPage() {
                               <td style={{ textTransform: 'uppercase', fontSize: 11 }}>{rec.forma_pagamento}</td>
                               <td>{rec.observacao || '—'}</td>
                               <td className={cs.tdValor}>{fmtVal(rec.valor)}</td>
+                              <td>
+                                {rec.comprovante_filename ? (
+                                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                    {rec.comprovante_drive_link ? (
+                                      <a href={rec.comprovante_drive_link} target="_blank" rel="noreferrer"
+                                        style={{ fontSize: 12, color: '#2563eb' }}>
+                                        📎 {rec.comprovante_filename}
+                                      </a>
+                                    ) : (
+                                      <span style={{ fontSize: 12, color: '#6b7280' }}>📎 {rec.comprovante_filename}</span>
+                                    )}
+                                    <button className={styles.btnDanger}
+                                      title="Remover comprovante"
+                                      onClick={() => { if (confirm('Remover comprovante?')) removerComprovante.mutate(rec.id) }}>
+                                      ×
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <label className={styles.btnTable} style={{ cursor: 'pointer', display: 'inline-block' }}>
+                                    {uploadComprovante.isPending ? '⏳' : '📎 Anexar'}
+                                    <input
+                                      ref={(el) => { comprovanteRefs.current[rec.id] = el }}
+                                      type="file" accept="image/*,.pdf" style={{ display: 'none' }}
+                                      onChange={(e) => {
+                                        const file = e.target.files?.[0]
+                                        if (file) uploadComprovante.mutate({ recId: rec.id, file })
+                                        if (comprovanteRefs.current[rec.id]) comprovanteRefs.current[rec.id]!.value = ''
+                                      }}
+                                    />
+                                  </label>
+                                )}
+                              </td>
                               <td style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                                 <button
                                   className={styles.btnTable}
@@ -1142,7 +1206,7 @@ export default function FinanceiroPage() {
                           ))}
                           {h.recebimentos.length === 0 && (
                             <tr>
-                              <td colSpan={5} style={{ color: '#9ca3af', textAlign: 'center', padding: 14 }}>
+                              <td colSpan={6} style={{ color: '#9ca3af', textAlign: 'center', padding: 14 }}>
                                 Nenhum recebimento registrado.
                               </td>
                             </tr>

@@ -114,12 +114,23 @@ def _enviar_parcela(*, db, h, cliente, alvo, destino, escr, pos_vencimento, hoje
         pagamento=PAGAMENTO,
     )
     assunto = f"Lembrete de pagamento — {h.descricao}" if pos_vencimento else f"Lembrete — {h.descricao}"
-    _send_via_gmail_oauth(
-        destino, assunto, html,
-        attachments=[(f"lembrete_parcela_{alvo.numero}.pdf", pdf)],
-    )
+    nome_pdf = f"lembrete_parcela_{alvo.numero}.pdf"
+    _send_via_gmail_oauth(destino, assunto, html, attachments=[(nome_pdf, pdf)])
     if hasattr(alvo, "ultimo_lembrete_em"):
         alvo.ultimo_lembrete_em = agora
+
+    # Cópia da cobrança no Drive: pasta do cliente + pasta mestra /Financeiro/Cobrancas
+    # (best-effort — não deve derrubar o envio do e-mail se o Drive falhar).
+    try:
+        from app.services.google_drive import upload_arquivo, upload_arquivo_raiz
+        if cliente:
+            nome_unico = f"{date.today().isoformat()}_{h.id}_{nome_pdf}"
+            upload_arquivo(pdf, nome_unico, cliente.nome, "Financeiro",
+                           "application/pdf", sub_subfolder="Cobrancas")
+            upload_arquivo_raiz(pdf, nome_unico,
+                                subpath=["Financeiro", "Cobrancas", cliente.nome], mimetype="application/pdf")
+    except Exception:
+        pass
 
 
 def enviar_cobrancas(db: Session, *, hoje: date | None = None, forcar: bool = False,

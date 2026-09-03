@@ -119,6 +119,12 @@ class Recebimento(Base):
     )
     observacao: Mapped[str | None] = mapped_column(String(500))
 
+    # Comprovante de pagamento (upload). Sobe para a pasta do cliente e para a
+    # pasta mestra /Financeiro/Comprovantes no Drive (best-effort).
+    comprovante_filename: Mapped[str | None] = mapped_column(String(500))
+    comprovante_path: Mapped[str | None] = mapped_column(String(1000))
+    comprovante_drive_link: Mapped[str | None] = mapped_column(String(1000))
+
     honorario: Mapped["Honorario"] = relationship("Honorario", back_populates="recebimentos")
 
 

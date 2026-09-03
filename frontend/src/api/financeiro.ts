@@ -13,6 +13,9 @@ export interface Recebimento {
   data_recebimento: string
   forma_pagamento: FormaPagamento
   observacao?: string
+  comprovante_filename?: string | null
+  comprovante_path?: string | null
+  comprovante_drive_link?: string | null
 }
 
 export interface Parcela {
@@ -149,6 +152,20 @@ export const financeiroApi = {
 
   enviarCobranca: (honorarioId: string) =>
     api.post<{ enviados: number; pulados: number; erros: string[] }>(`/financeiro/honorarios/${honorarioId}/enviar-cobranca`).then((r) => r.data),
+
+  uploadComprovante: (recebimentoId: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post<Recebimento>(`/financeiro/recebimentos/${recebimentoId}/comprovante`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then((r) => r.data)
+  },
+
+  removerComprovante: (recebimentoId: string) =>
+    api.delete<Recebimento>(`/financeiro/recebimentos/${recebimentoId}/comprovante`).then((r) => r.data),
+
+  pastaMestra: () =>
+    api.get<{ link: string | null }>('/financeiro/pasta-mestra').then((r) => r.data),
 
   resumo: () =>
     api.get<ResumoFinanceiro>('/financeiro/resumo/').then((r) => r.data),
