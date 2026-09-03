@@ -265,13 +265,15 @@ def _build_cadastro_html(cadastro_url: str, nome: str | None, is_update: bool) -
 
 def build_cobranca_html(
     *, nome: str, descricao: str, parcela_numero: int, parcela_valor: str,
-    parcela_venc: str, saldo: str, n_parcelas_pend: int, pos_vencimento: bool,
+    parcela_venc: str, valor_total: str, n_parcelas_total: int, n_parcelas_pend: int,
+    pos_vencimento: bool,
 ) -> str:
     """
     Lembrete de parcela — mesmo padrão visual dos outros e-mails automáticos
-    (fundo claro, card branco, faixa colorida no topo com a logo), não o tema
-    escuro do e-mail de cadastro. Tom amigável, não de cobrança. `pos_vencimento`
-    =True muda o texto para o lembrete único enviado alguns dias após o vencimento.
+    (fundo claro, card branco, faixa escura no topo com a logo). Tom amigável,
+    não de cobrança. `pos_vencimento`=True muda o texto para o lembrete único
+    enviado alguns dias após o vencimento. O destaque (chip) mostra o valor da
+    parcela que está vencendo agora; abaixo, o contexto do plano completo.
     """
     logo = _logo_data_uri("logo_light.png")
     logo_img = (
@@ -284,20 +286,21 @@ def build_cobranca_html(
     if pos_vencimento:
         corpo = (
             f"Notamos que a parcela {parcela_numero} de <b>{descricao}</b>, com vencimento "
-            f"em <b>{parcela_venc}</b> ({parcela_valor}), ainda não consta como paga em nosso "
-            f"sistema. Se você já efetuou o pagamento, por favor desconsidere — e, se puder, "
-            f"nos envie o comprovante para darmos baixa. Caso ainda não, os dados para "
-            f"pagamento estão no PDF em anexo."
+            f"em <b>{parcela_venc}</b>, ainda não consta como paga em nosso sistema. Se você "
+            f"já efetuou o pagamento, por favor desconsidere — e, se puder, nos envie o "
+            f"comprovante para darmos baixa. Caso ainda não, os dados para pagamento estão "
+            f"no PDF em anexo."
         )
     else:
         corpo = (
             f"Passando só para lembrar que a parcela {parcela_numero} referente a "
-            f"<b>{descricao}</b> vence em <b>{parcela_venc}</b>, no valor de "
-            f"<b>{parcela_valor}</b>. Em anexo segue um resumo com o cronograma e os dados "
-            f"para pagamento (PIX)."
+            f"<b>{descricao}</b> vence em <b>{parcela_venc}</b>. Em anexo segue um resumo "
+            f"com o cronograma e os dados para pagamento (PIX)."
         )
-    saldo_txt = f"Saldo a pagar: <b>{saldo}</b>" + (
-        f" — a ser pago em {n_parcelas_pend} parcela(s)." if n_parcelas_pend > 1 else ".")
+    rotulo_data = "Venceu em" if pos_vencimento else "Vence em"
+    plano_txt = f"Valor total do plano: <b style=\"color:#374151\">{valor_total}</b>" + (
+        f" · {n_parcelas_total} parcelas, {n_parcelas_pend} em aberto"
+        if n_parcelas_total > 1 else "")
     return f"""<!DOCTYPE html>
 <html lang="pt-BR"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Lembrete — Pimenta Judice</title></head>
@@ -315,11 +318,14 @@ def build_cobranca_html(
           </p>
           <h1 style="margin:0 0 10px;font-size:20px;font-weight:700;color:#111827;line-height:1.3;">{saud}</h1>
           <p style="margin:0 0 20px;font-size:14px;color:#374151;line-height:1.65;">{corpo}</p>
-          <table cellpadding="0" cellspacing="0" role="presentation" width="100%" style="margin-bottom:8px;">
-            <tr><td style="border-left:3px solid {TEAL};background:#f9fafb;border-radius:8px;padding:14px 16px;">
-              <p style="margin:0;font-size:13px;color:#1f2937;line-height:1.6;">{saldo_txt}</p>
+          <table cellpadding="0" cellspacing="0" role="presentation" width="100%" style="margin-bottom:10px;">
+            <tr><td style="background:{TEAL};border-radius:10px;padding:16px 20px;">
+              <p style="margin:0;font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:rgba(255,255,255,0.85);">{rotulo_data} {parcela_venc}</p>
+              <p style="margin:4px 0 0;font-size:26px;font-weight:800;color:#ffffff;line-height:1.2;">{parcela_valor}</p>
+              <p style="margin:2px 0 0;font-size:12px;color:rgba(255,255,255,0.85);">Parcela {parcela_numero} de {n_parcelas_total}</p>
             </td></tr>
           </table>
+          <p style="margin:0 0 20px;font-size:13px;color:#6b7280;line-height:1.6;">{plano_txt}</p>
         </td></tr>
         <tr><td style="padding:20px 36px 28px;border-top:1px solid #f3f4f6;">
           <p style="margin:0;font-size:11px;color:#9ca3af;line-height:1.6;text-align:center;">Pimenta Judice Advogados</p>

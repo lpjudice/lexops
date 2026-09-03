@@ -90,7 +90,8 @@ def _enviar_parcela(*, db, h, cliente, alvo, destino, escr, pos_vencimento, hoje
         parcela_numero=alvo.numero,
         parcela_valor=_brl(float(alvo.valor)),
         parcela_venc=_fmt_data(alvo.data_vencimento),
-        saldo=_brl(h.saldo_pendente),
+        valor_total=_brl(float(h.valor_total)),
+        n_parcelas_total=len(h.parcelas),
         n_parcelas_pend=n_parcelas_pend,
         pos_vencimento=pos_vencimento,
     )
