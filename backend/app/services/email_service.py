@@ -266,14 +266,16 @@ def _build_cadastro_html(cadastro_url: str, nome: str | None, is_update: bool) -
 def build_cobranca_html(
     *, nome: str, descricao: str, parcela_numero: int, parcela_valor: str,
     parcela_venc: str, valor_total: str, n_parcelas_total: int, n_parcelas_pend: int,
-    pos_vencimento: bool,
+    pos_vencimento: bool, pagamento: dict | None = None,
 ) -> str:
     """
     Lembrete de parcela — mesmo padrão visual dos outros e-mails automáticos
     (fundo claro, card branco, faixa escura no topo com a logo). Tom amigável,
     não de cobrança. `pos_vencimento`=True muda o texto para o lembrete único
     enviado alguns dias após o vencimento. O destaque (chip) mostra o valor da
-    parcela que está vencendo agora; abaixo, o contexto do plano completo.
+    parcela que está vencendo agora; abaixo, o contexto do total dos honorários.
+    `pagamento`: {"pix_chave", "pix_tipo", "favorecido", "contato"} — mostrados
+    também no corpo do e-mail (além do PDF em anexo).
     """
     logo = _logo_data_uri("logo_light.png")
     logo_img = (
@@ -298,9 +300,29 @@ def build_cobranca_html(
             f"com o cronograma e os dados para pagamento (PIX)."
         )
     rotulo_data = "Venceu em" if pos_vencimento else "Vence em"
-    plano_txt = f"Valor total do plano: <b style=\"color:#374151\">{valor_total}</b>" + (
+    plano_txt = f"Valor total dos honorários: <b style=\"color:#374151\">{valor_total}</b>" + (
         f" · {n_parcelas_total} parcelas, {n_parcelas_pend} em aberto"
         if n_parcelas_total > 1 else "")
+
+    pagamento_box = ""
+    if pagamento and (pagamento.get("pix_chave") or pagamento.get("contato")):
+        linhas = []
+        if pagamento.get("pix_chave"):
+            tipo = pagamento.get("pix_tipo")
+            linhas.append(f"<b>PIX{(' (' + tipo + ')') if tipo else ''}:</b> {pagamento['pix_chave']}")
+        if pagamento.get("favorecido"):
+            linhas.append(f"<b>Favorecido:</b> {pagamento['favorecido']}")
+        if pagamento.get("contato"):
+            linhas.append(f"<b>Contato:</b> {pagamento['contato']}")
+        linhas_html = "<br/>".join(linhas)
+        pagamento_box = f"""
+          <table cellpadding="0" cellspacing="0" role="presentation" width="100%" style="margin-bottom:20px;">
+            <tr><td style="border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;background:#fafafa;">
+              <p style="margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:#6b7280;">Como pagar</p>
+              <p style="margin:0;font-size:13px;color:#374151;line-height:1.7;">{linhas_html}</p>
+            </td></tr>
+          </table>"""
+
     return f"""<!DOCTYPE html>
 <html lang="pt-BR"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Lembrete — Pimenta Judice</title></head>
@@ -325,7 +347,8 @@ def build_cobranca_html(
               <p style="margin:2px 0 0;font-size:12px;color:rgba(255,255,255,0.85);">Parcela {parcela_numero} de {n_parcelas_total}</p>
             </td></tr>
           </table>
-          <p style="margin:0 0 20px;font-size:13px;color:#6b7280;line-height:1.6;">{plano_txt}</p>
+          <p style="margin:0 0 16px;font-size:13px;color:#6b7280;line-height:1.6;">{plano_txt}</p>
+          {pagamento_box}
         </td></tr>
         <tr><td style="padding:20px 36px 28px;border-top:1px solid #f3f4f6;">
           <p style="margin:0;font-size:11px;color:#9ca3af;line-height:1.6;text-align:center;">Pimenta Judice Advogados</p>

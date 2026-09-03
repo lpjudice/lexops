@@ -94,6 +94,7 @@ def _enviar_parcela(*, db, h, cliente, alvo, destino, escr, pos_vencimento, hoje
         n_parcelas_total=len(h.parcelas),
         n_parcelas_pend=n_parcelas_pend,
         pos_vencimento=pos_vencimento,
+        pagamento=PAGAMENTO,
     )
     assunto = f"Lembrete de pagamento — {h.descricao}" if pos_vencimento else f"Lembrete — {h.descricao}"
     _send_via_gmail_oauth(
