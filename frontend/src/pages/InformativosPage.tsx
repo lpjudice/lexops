@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { informativosApi } from '../api/informativos'
 import type { Informativo, StatusInformativo } from '../api/informativos'
+import { instagramApi } from '../api/instagram'
 import ResponsavelComboBox from '../components/ResponsavelComboBox'
 import type { ResponsavelValue } from '../components/ResponsavelComboBox'
 import Modal from '../components/Modal'
@@ -139,16 +140,31 @@ function ModalCriar({
 }: {
   responsavelPadrao: { id: string; nome: string; email: string | null } | null
   onFechar: () => void
-  onCriar: (dados: { mes_referencia: string; titulo: string; responsavel_id: string | null }) => void
+  onCriar: (dados: {
+    mes_referencia: string
+    titulo: string
+    responsavel_id: string | null
+    tema_resumido?: string | null
+    tema_sugestao_id?: string | null
+  }) => void
   salvando: boolean
 }) {
   const [mesReferencia, setMesReferencia] = useState(proximoMesReferencia())
   const [titulo, setTitulo] = useState('')
+  const [temaSugestaoId, setTemaSugestaoId] = useState('')
   const [responsavel, setResponsavel] = useState<ResponsavelValue>({
     id: responsavelPadrao?.id ?? null,
     nome: responsavelPadrao?.nome ?? '',
     email: responsavelPadrao?.email ?? '',
   })
+
+  const { data: sugestoesInstagram = [] } = useQuery({
+    queryKey: ['instagram', 'sugestoes-tema'],
+    queryFn: () => instagramApi.listar(),
+    staleTime: 30_000,
+  })
+
+  const sugestaoSelecionada = sugestoesInstagram.find((s) => s.id === temaSugestaoId)
 
   return (
     <Modal onClose={onFechar} title="Novo informativo">
@@ -162,6 +178,25 @@ function ModalCriar({
             onChange={(e) => setMesReferencia(`${e.target.value}-01`)}
           />
         </div>
+        {sugestoesInstagram.length > 0 && (
+          <div className={styles.fieldGroup}>
+            <label className={styles.formLabel}>Partir de um tema já sugerido no Instagram (opcional)</label>
+            <select
+              className={styles.input}
+              value={temaSugestaoId}
+              onChange={(e) => {
+                setTemaSugestaoId(e.target.value)
+                const s = sugestoesInstagram.find((x) => x.id === e.target.value)
+                if (s && !titulo.trim()) setTitulo(s.titulo)
+              }}
+            >
+              <option value="">— Nenhum, título livre —</option>
+              {sugestoesInstagram.map((s) => (
+                <option key={s.id} value={s.id}>{s.titulo}</option>
+              ))}
+            </select>
+          </div>
+        )}
         <div className={styles.fieldGroup}>
           <label className={styles.formLabel}>Título</label>
           <input
@@ -179,7 +214,13 @@ function ModalCriar({
           className={styles.btnPrimary}
           disabled={salvando || !titulo.trim()}
           onClick={() =>
-            onCriar({ mes_referencia: mesReferencia, titulo: titulo.trim(), responsavel_id: responsavel.id ?? null })
+            onCriar({
+              mes_referencia: mesReferencia,
+              titulo: titulo.trim(),
+              responsavel_id: responsavel.id ?? null,
+              tema_resumido: sugestaoSelecionada?.tema || titulo.trim(),
+              tema_sugestao_id: temaSugestaoId || null,
+            })
           }
         >
           {salvando ? 'Criando...' : 'Criar (Google Doc + pasta no Drive)'}
@@ -196,6 +237,10 @@ function DetalheInformativo({ informativo, onFechar }: { informativo: Informativ
 
   const invalidar = () => qc.invalidateQueries({ queryKey: ['informativos'] })
 
+  const rascunhoIAMutation = useMutation({
+    mutationFn: () => informativosApi.gerarRascunhoIA(informativo.id),
+    onSuccess: invalidar,
+  })
   const sincronizarMutation = useMutation({
     mutationFn: () => informativosApi.sincronizarDoc(informativo.id),
     onSuccess: invalidar,
@@ -242,12 +287,14 @@ function DetalheInformativo({ informativo, onFechar }: { informativo: Informativ
         )}
 
         <div className={styles.fieldGroup}>
-          <label className={styles.formLabel}>Material de apoio (imagem, vídeo, PDF)</label>
+          <label className={styles.formLabel}>Material de apoio (imagem, vídeo, PDF) — pode selecionar vários</label>
           <input
             type="file"
+            multiple
             onChange={(e) => {
-              const file = e.target.files?.[0]
-              if (file) uploadMutation.mutate(file)
+              const files = Array.from(e.target.files ?? [])
+              files.forEach((file) => uploadMutation.mutate(file))
+              e.target.value = ''
             }}
           />
           {informativo.arquivos_referencia.length > 0 && (
@@ -262,6 +309,9 @@ function DetalheInformativo({ informativo, onFechar }: { informativo: Informativ
         </div>
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className={styles.btnSmall} onClick={() => rascunhoIAMutation.mutate()} disabled={rascunhoIAMutation.isPending}>
+            {rascunhoIAMutation.isPending ? 'Gerando rascunho...' : 'Gerar rascunho com IA'}
+          </button>
           <button className={styles.btnSmall} onClick={() => sincronizarMutation.mutate()} disabled={sincronizarMutation.isPending}>
             {sincronizarMutation.isPending ? 'Sincronizando...' : 'Sincronizar do Doc'}
           </button>

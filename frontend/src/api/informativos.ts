@@ -63,6 +63,9 @@ export const informativosApi = {
     return api.post<Informativo>(`/informativos/${id}/upload`, form).then((r) => r.data)
   },
 
+  gerarRascunhoIA: (id: string) =>
+    api.post<{ conteudo_texto: string }>(`/informativos/${id}/gerar-rascunho-ia`, undefined, { timeout: 120000 }).then((r) => r.data),
+
   sincronizarDoc: (id: string) =>
     api.post<{ conteudo_texto: string }>(`/informativos/${id}/sincronizar-doc`).then((r) => r.data),
 

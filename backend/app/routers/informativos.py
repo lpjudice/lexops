@@ -102,6 +102,19 @@ def upload_arquivo(informativo_id: uuid.UUID, file: UploadFile = File(...), db: 
     return informativo
 
 
+@router.post("/{informativo_id}/gerar-rascunho-ia", response_model=SincronizarResponse)
+def gerar_rascunho_ia(informativo_id: uuid.UUID, db: Session = Depends(get_db)):
+    informativo = _get(db, informativo_id)
+    try:
+        texto = informativo_service.gerar_rascunho_e_gravar(informativo)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Falha ao gerar rascunho: {exc}")
+    db.commit()
+    return SincronizarResponse(conteudo_texto=texto)
+
+
 @router.post("/{informativo_id}/sincronizar-doc", response_model=SincronizarResponse)
 def sincronizar_doc(informativo_id: uuid.UUID, db: Session = Depends(get_db)):
     informativo = _get(db, informativo_id)
