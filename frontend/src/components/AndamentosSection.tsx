@@ -110,6 +110,7 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
   const [jusbrJobResult, setJusbrJobResult] = useState<SincronizacaoResult | null>(null)
   const [jusbrJobError, setJusbrJobError] = useState<string | null>(null)
   const [abrindoPasta, setAbrindoPasta] = useState(false)
+  const [showCodexPainel, setShowCodexPainel] = useState(false)
   const PAGE = 10
 
   // Abre a pasta deste processo no Drive. Abre a aba na hora (evita bloqueio de
@@ -149,6 +150,25 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
     queryKey: ['andamentos-count', processoId, fonte],
     queryFn: () => andamentosApi.contar(processoId, fonteParam),
     staleTime: 30_000,
+  })
+
+  // Indicador discreto de documentos salvos com erro do "Codex" (PDPJ). Barato
+  // (só lê a flag já marcada pela faxina/reparo anterior) — não renderiza nada
+  // quando não há corrompidos.
+  const { data: codexStatus, refetch: refetchCodexStatus } = useQuery({
+    queryKey: ['codex-status', processoId],
+    queryFn: () => andamentosApi.codexStatus(processoId),
+    staleTime: 5 * 60_000,
+  })
+  const codexCorrompidos = codexStatus?.corrompidos ?? []
+
+  const repararCodex = useMutation({
+    mutationFn: () => andamentosApi.repararCodex(processoId),
+    onSuccess: () => {
+      refetchCodexStatus()
+      qc.invalidateQueries({ queryKey: ['andamentos', processoId] })
+      qc.invalidateQueries({ queryKey: ['andamentos-count', processoId] })
+    },
   })
 
   const syncDataJud = useMutation({
@@ -321,6 +341,66 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
           >
             {abrindoPasta ? '⏳' : '📁'} Pasta no Drive
           </button>
+
+          {/* Indicador discreto: só aparece se houver documento com erro Codex. */}
+          {codexCorrompidos.length > 0 && (
+            <div style={{ position: 'relative' }}>
+              <button
+                onClick={() => setShowCodexPainel((v) => !v)}
+                title={`${codexCorrompidos.length} documento(s) salvos com erro do jus.br (Codex) — clique para ver/reparar`}
+                style={{
+                  fontSize: 12, padding: '4px 8px', borderRadius: 6,
+                  border: '1px solid #f5c451', background: '#fff8e1', color: '#8a5b00',
+                  cursor: 'pointer',
+                }}
+              >
+                ⚠️ {codexCorrompidos.length}
+              </button>
+              {showCodexPainel && (
+                <div style={{
+                  position: 'absolute', top: '100%', right: 0, marginTop: 4, zIndex: 20,
+                  width: 320, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8,
+                  boxShadow: '0 4px 16px rgba(0,0,0,0.12)', padding: 12, fontSize: 12.5,
+                }}>
+                  <div style={{ fontWeight: 600, marginBottom: 6, color: '#374151' }}>
+                    Documentos com erro do jus.br (Codex)
+                  </div>
+                  <div style={{ color: '#6b7280', marginBottom: 8 }}>
+                    O portal jus.br não conseguiu servir o binário desses documentos
+                    (indisponibilidade temporária). Não é um problema com o arquivo em si.
+                  </div>
+                  <div style={{ maxHeight: 180, overflowY: 'auto', marginBottom: 10 }}>
+                    {codexCorrompidos.map((c) => (
+                      <div key={c.id} style={{ padding: '4px 0', borderBottom: '1px solid #f3f4f6', color: '#374151' }}>
+                        {c.data ? `${formatDate(c.data)} — ` : ''}{c.nome || 'documento'}
+                      </div>
+                    ))}
+                  </div>
+                  {repararCodex.data && (
+                    <div style={{
+                      marginBottom: 8, color: repararCodex.data.pendentes ? '#8a5b00' : '#00875a',
+                    }}>
+                      {repararCodex.data.ok
+                        ? `Reparados: ${repararCodex.data.reparados ?? 0} / ${repararCodex.data.detectados ?? 0}` +
+                          (repararCodex.data.pendentes ? ` — ${repararCodex.data.pendentes} ainda pendente(s).` : '.')
+                        : (repararCodex.data.msg || 'Não foi possível reparar agora.')}
+                    </div>
+                  )}
+                  <button
+                    onClick={() => repararCodex.mutate()}
+                    disabled={repararCodex.isPending}
+                    style={{
+                      width: '100%', fontSize: 12.5, padding: '6px 10px', borderRadius: 6,
+                      border: '1px solid #00875a', background: repararCodex.isPending ? '#e6f7f1' : '#00875a',
+                      color: repararCodex.isPending ? '#00875a' : '#fff', cursor: 'pointer',
+                    }}
+                  >
+                    {repararCodex.isPending ? '⏳ Reparando...' : '🔧 Reparar documentos'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Sync / token button */}
           {fonte === 'jusbr' && jusbrAtivo && (

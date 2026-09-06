@@ -195,4 +195,23 @@ export const andamentosApi = {
     api
       .post<SincronizacaoResult>(`/andamentos/processo/${processoId}/importar-jusbr`, { payload })
       .then((r) => r.data),
+
+  codexStatus: (processoId: string) =>
+    api
+      .get<{ corrompidos: Array<{ id: string; nome: string | null; documento_id: string | null; data: string | null }> }>(
+        `/andamentos/processo/${processoId}/codex-status`
+      )
+      .then((r) => r.data),
+
+  repararCodex: (processoId: string) =>
+    api
+      .post<{
+        ok: boolean
+        erro?: string
+        msg?: string
+        detectados?: number
+        reparados?: number
+        pendentes?: number
+      }>(`/andamentos/processo/${processoId}/reparar-codex`)
+      .then((r) => r.data),
 }

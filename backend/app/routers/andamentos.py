@@ -534,6 +534,43 @@ async def sincronizar_processo(processo_id: uuid.UUID, db: Session = Depends(get
     )
 
 
+# ── Reparo de documentos com erro "Codex" (fora da lógica travada) ─────────────
+
+@router.get("/processo/{processo_id}/codex-status")
+def codex_status(processo_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Indicador barato p/ a tela: lista os andamentos marcados com erro Codex."""
+    rows = (
+        db.query(AndamentoProcesso)
+        .filter(AndamentoProcesso.processo_id == processo_id,
+                AndamentoProcesso.codex_erro.is_(True))
+        .order_by(AndamentoProcesso.data_andamento)
+        .all()
+    )
+    return {
+        "corrompidos": [
+            {
+                "id": str(a.id),
+                "nome": a.arquivo_nome,
+                "documento_id": a.documento_id,
+                "data": a.data_andamento.isoformat() if a.data_andamento else None,
+            }
+            for a in rows
+        ]
+    }
+
+
+@router.post("/processo/{processo_id}/reparar-codex")
+def reparar_codex(processo_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Detecta os stubs de erro Codex do processo e re-baixa os documentos certos.
+    Correção manual caso a caso — não altera a lógica travada."""
+    from app.services import codex_repair
+
+    p = db.query(Processo).filter(Processo.id == processo_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+    return codex_repair.reparar_processo(processo_id)
+
+
 # ── Batch sync ────────────────────────────────────────────────────────────────
 
 @router.post("/sincronizar-batch", response_model=list[SincronizacaoResult])

@@ -106,6 +106,64 @@ def _push_andamentos_telegram() -> None:
         logger.warning("Scheduler: push_andamentos_telegram falhou: %s", exc)
 
 
+def _faxina_codex() -> None:
+    """19h15 BRT — após o push, varre documentos recentes salvos com o erro do
+    repositório PDPJ ("Codex") no lugar do binário, re-baixa os corretos e avisa
+    no Telegram quais processos/documentos foram afetados."""
+    try:
+        from app.services.codex_repair import faxina
+        rel = faxina(dias=3)
+        afetados = rel.get("afetados") or []
+        if not afetados:
+            logger.info("Scheduler: faxina Codex sem stubs (verificados=%d)",
+                        rel.get("processos_verificados", 0))
+            return
+        logger.info("Scheduler: faxina Codex achou %d processo(s) afetado(s)", len(afetados))
+        _alert_codex(afetados)
+    except Exception:
+        logger.exception("Scheduler: faxina Codex falhou")
+
+
+def _alert_codex(afetados: list[dict]) -> None:
+    """Manda no privado do admin quais documentos deram erro Codex e se foram
+    reparados ou ficaram pendentes."""
+    try:
+        from aiogram import Bot
+        from app.config import settings
+        bot_token = settings.andamentos_bot_token
+        if not bot_token:
+            return
+        admin_id = None
+        for x in settings.andamentos_allowed_user_ids.split(","):
+            if x.strip():
+                admin_id = int(x.strip()); break
+        if not admin_id:
+            return
+
+        linhas = ["⚠️ *Documentos com erro de download (Codex)*", ""]
+        for a in afetados:
+            det = a.get("detectados", 0); rep = a.get("reparados", 0); pend = a.get("pendentes", 0)
+            status = "✅ reparados" if pend == 0 else f"⚠️ {rep} reparados, {pend} pendentes"
+            linhas.append(f"• `{a.get('cnj')}` — {det} doc(s) — {status}")
+            for nome in (a.get("itens") or [])[:8]:
+                linhas.append(f"   · {nome}")
+        if any(a.get("pendentes", 0) for a in afetados):
+            linhas.append("")
+            linhas.append("_Pendentes: reconecte a sessão jus.br e rode o reparo na tela do processo._")
+        texto = "\n".join(linhas)
+
+        async def _send():
+            bot = Bot(token=bot_token)
+            try:
+                await bot.send_message(admin_id, texto, parse_mode="Markdown")
+            finally:
+                await bot.session.close()
+
+        asyncio.run(_send())
+    except Exception:
+        logger.exception("Scheduler: alerta Codex falhou")
+
+
 def _refresh_andamentos_session() -> None:
     """Mantém vivo o offline token do bot @jusbr_andamentos_bot (sessão id=2).
 
@@ -522,6 +580,12 @@ def start_scheduler() -> None:
         _push_andamentos_telegram,
         trigger=CronTrigger(hour=19, minute=0, timezone="America/Sao_Paulo"),
         id="push_andamentos_telegram",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _faxina_codex,
+        trigger=CronTrigger(hour=19, minute=15, timezone="America/Sao_Paulo"),
+        id="faxina_codex",
         replace_existing=True,
     )
     scheduler.add_job(

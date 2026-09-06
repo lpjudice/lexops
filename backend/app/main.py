@@ -1037,6 +1037,10 @@ def _run_migrations() -> None:
         ))
 
         conn.execute(text(
+            "ALTER TABLE andamentos_processo ADD COLUMN IF NOT EXISTS codex_erro BOOLEAN NOT NULL DEFAULT false"
+        ))
+
+        conn.execute(text(
             "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS vinculo_confirmado BOOLEAN NOT NULL DEFAULT false"
         ))
         conn.execute(text(
