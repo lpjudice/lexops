@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, ForeignKey, String, Text, func
+from sqlalchemy import Date, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -36,6 +36,10 @@ class Informativo(Base):
     # Primeiro dia do mês a que o informativo se refere (ex.: informativo de
     # janeiro/2026 → 2026-01-01). Usado para calcular os prazos internos.
     mes_referencia: Mapped[date] = mapped_column(Date, nullable=False)
+
+    # Número sequencial do informativo (ex.: "Informativo nº 12"), atribuído
+    # na criação a partir de InformativoConfig.proximo_numero.
+    numero: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     titulo: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     # Título resumido puxado de uma sugestão do Instagram (opcional, só referência)
@@ -78,6 +82,28 @@ class Informativo(Base):
     publicado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class InformativoConfig(Base):
+    """Configuração única do módulo (linha id=1): o modelo (Google Doc) usado
+    como base de cada informativo novo, e o contador do número sequencial.
+
+    O modelo é criado automaticamente na primeira vez (cópia do timbrado do
+    escritório + esqueleto: número/mês, tema/subtema, resumo estruturado,
+    separador, corpo). É só um Google Doc — pode ser aberto e ajustado
+    livremente (fonte, cores, logo) a qualquer momento; os próximos
+    informativos vão copiar a versão mais recente dele.
+    """
+
+    __tablename__ = "informativo_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    template_doc_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    template_doc_link: Mapped[str | None] = mapped_column(Text, nullable=True)
+    proximo_numero: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )

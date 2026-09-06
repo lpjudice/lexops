@@ -118,98 +118,128 @@ def _com_refresh(fn):
             return None
 
 
-def criar_documento_informativo(titulo: str, parent_folder_id: str | None = None) -> dict | None:
-    """Copia o timbrado do escritório (mesmo usado nas peças) pra dentro da
-    pasta do informativo — garante que o Doc já nasça com a identidade visual
-    do escritório em vez de em branco."""
-    return copiar_arquivo_por_id(TIMBRADO_TEMPLATE_ID, titulo, parent_folder_id=parent_folder_id)
+# Marcador que separa o cabeçalho estruturado do corpo do informativo no
+# Doc — usado pra localizar onde o corpo começa (não é conteúdo real, some
+# visualmente por causa da borda inferior aplicada no parágrafo).
+SEPARADOR_INFORMATIVO = "•••"
 
 
-def escrever_conteudo_documento(doc_id: str, titulo: str, texto: str) -> bool:
-    """Substitui o corpo do Doc (mantendo o timbrado, que fica no header) por
-    um título centralizado em negrito + parágrafos justificados com
-    espaçamento 150% — mesmo padrão visual usado nas peças. Retorna True se
-    conseguiu escrever."""
-    paragrafos = [p.strip() for p in re.split(r"\n{2,}", texto or "") if p.strip()]
-    corpo = "\n\n".join(paragrafos)
-    texto_final = f"{titulo}\n\n{corpo}" if titulo else corpo
+def provisionar_template_informativo(parent_folder_id: str | None = None) -> dict | None:
+    """Cria (uma vez só) o modelo-base dos informativos: cópia do timbrado do
+    escritório + esqueleto com número/mês, tema/subtema, resumo estruturado,
+    uma linha separadora e o corpo. É só um Google Doc — pode ser aberto e
+    ajustado livremente (fonte, cores, logo) depois de criado; os próximos
+    informativos copiam a versão mais recente dele."""
+    copia = copiar_arquivo_por_id(TIMBRADO_TEMPLATE_ID, "Modelo Base — Informativo (não usar diretamente)",
+                                   parent_folder_id=parent_folder_id)
+    if not copia:
+        return None
+    doc_id = copia["id"]
 
-    def _escrever(tokens: dict):
+    cabecalho = "INFORMATIVO Nº {{NUMERO}} — {{MES}}"
+    esqueleto = (
+        f"{cabecalho}\n\n"
+        "TEMA: {{TEMA}}\n"
+        "SUBTEMA: {{SUBTEMA}}\n\n"
+        "RESUMO ESTRUTURADO\n"
+        "{{RESUMO}}\n\n"
+        f"{SEPARADOR_INFORMATIVO}\n\n"
+        "{{CORPO}}"
+    )
+
+    def _montar(tokens: dict):
         doc = _docs_request("GET", f"/{doc_id}", tokens)
         end_index = doc["body"]["content"][-1]["endIndex"]
 
         requests = []
         if end_index > 2:
             requests.append({"deleteContentRange": {"range": {"startIndex": 1, "endIndex": end_index - 1}}})
-        requests.append({"insertText": {"location": {"index": 1}, "text": texto_final}})
-        requests.append({"deleteParagraphBullets": {"range": {"startIndex": 1, "endIndex": 1 + len(texto_final)}}})
+        requests.append({"insertText": {"location": {"index": 1}, "text": esqueleto}})
+        requests.append({"deleteParagraphBullets": {"range": {"startIndex": 1, "endIndex": 1 + len(esqueleto)}}})
         _docs_request("POST", f"/{doc_id}:batchUpdate", tokens, json={"requests": requests})
 
-        titulo_end = 1 + len(titulo)
-        corpo_start = titulo_end + 2
-        corpo_end = 1 + len(texto_final)
+        titulo_end = 1 + len(cabecalho)
+        sep_start = 1 + esqueleto.index(SEPARADOR_INFORMATIVO)
+        sep_end = sep_start + len(SEPARADOR_INFORMATIVO)
         fmt_requests = [
-            {
-                "updateTextStyle": {
-                    "range": {"startIndex": 1, "endIndex": titulo_end},
-                    "textStyle": {"bold": True, "fontSize": {"magnitude": 16, "unit": "PT"}},
-                    "fields": "bold,fontSize",
-                }
-            },
-            {
-                "updateParagraphStyle": {
-                    "range": {"startIndex": 1, "endIndex": titulo_end},
-                    "paragraphStyle": {"alignment": "CENTER"},
-                    "fields": "alignment",
-                }
-            },
+            {"updateTextStyle": {
+                "range": {"startIndex": 1, "endIndex": titulo_end},
+                "textStyle": {"bold": True, "fontSize": {"magnitude": 14, "unit": "PT"}},
+                "fields": "bold,fontSize",
+            }},
+            {"updateTextStyle": {
+                "range": {"startIndex": 1 + esqueleto.index("RESUMO ESTRUTURADO"),
+                          "endIndex": 1 + esqueleto.index("RESUMO ESTRUTURADO") + len("RESUMO ESTRUTURADO")},
+                "textStyle": {"bold": True},
+                "fields": "bold",
+            }},
+            # Linha separadora: borda inferior no parágrafo do marcador (o
+            # texto do marcador em si não deve aparecer — cor branca).
+            {"updateTextStyle": {
+                "range": {"startIndex": sep_start, "endIndex": sep_end},
+                "textStyle": {"foregroundColor": {"color": {"rgbColor": {"red": 1, "green": 1, "blue": 1}}}, "fontSize": {"magnitude": 1, "unit": "PT"}},
+                "fields": "foregroundColor,fontSize",
+            }},
+            {"updateParagraphStyle": {
+                "range": {"startIndex": sep_start, "endIndex": sep_end},
+                "paragraphStyle": {
+                    "borderBottom": {
+                        "color": {"color": {"rgbColor": {"red": 0.6, "green": 0.6, "blue": 0.6}}},
+                        "width": {"magnitude": 1, "unit": "PT"},
+                        "padding": {"magnitude": 4, "unit": "PT"},
+                        "dashStyle": "SOLID",
+                    },
+                },
+                "fields": "borderBottom",
+            }},
         ]
-        if corpo_end > corpo_start:
-            fmt_requests.append({
-                "updateParagraphStyle": {
-                    "range": {"startIndex": corpo_start, "endIndex": corpo_end},
-                    "paragraphStyle": {"alignment": "JUSTIFIED", "lineSpacing": 150},
-                    "fields": "alignment,lineSpacing",
-                }
-            })
         _docs_request("POST", f"/{doc_id}:batchUpdate", tokens, json={"requests": fmt_requests})
         return True
 
-    return bool(_com_refresh(_escrever))
+    _com_refresh(_montar)
+    return {"id": doc_id, "webViewLink": copia.get("webViewLink")}
 
 
-def criar_documento_em_branco(titulo: str, parent_folder_id: str | None = None) -> dict | None:
-    """Cria um Google Doc em branco (POST documents:create) e, se informado,
-    move para dentro de `parent_folder_id` no Drive. Retorna
-    {"id", "webViewLink"} ou None se falhar."""
-    def _criar(tokens: dict):
-        return _docs_request("POST", "", tokens, json={"title": titulo})
+def preencher_cabecalho_informativo(
+    doc_id: str, numero: int, mes_label: str, tema: str, subtema: str, resumo: str | None = None,
+) -> bool:
+    """Preenche os marcadores {{NUMERO}}/{{MES}}/{{TEMA}}/{{SUBTEMA}}/{{RESUMO}}
+    de um Doc recém-copiado do template. Usa replaceAllText — não precisa
+    calcular índice nenhum."""
+    valores = {
+        "{{NUMERO}}": str(numero),
+        "{{MES}}": mes_label,
+        "{{TEMA}}": tema or "",
+        "{{SUBTEMA}}": subtema or "—",
+        "{{RESUMO}}": resumo or "(resumo pendente — preencha depois de escrever o corpo)",
+    }
+    requests = [
+        {"replaceAllText": {"containsText": {"text": token, "matchCase": True}, "replaceText": valor}}
+        for token, valor in valores.items()
+    ]
 
-    doc = _com_refresh(_criar)
-    if not doc or not doc.get("documentId"):
-        return None
-    doc_id = doc["documentId"]
+    def _fazer(tokens: dict):
+        _docs_request("POST", f"/{doc_id}:batchUpdate", tokens, json={"requests": requests})
+        return True
 
-    if parent_folder_id:
-        try:
-            h = _auth_headers(_load_tokens())
-            r = httpx.patch(
-                f"https://www.googleapis.com/drive/v3/files/{doc_id}",
-                headers=h,
-                params={"supportsAllDrives": True, "addParents": parent_folder_id, "fields": "id,webViewLink"},
-                timeout=30,
-            )
-            r.raise_for_status()
-            return {"id": doc_id, "webViewLink": r.json().get("webViewLink", f"https://docs.google.com/document/d/{doc_id}/edit")}
-        except Exception as exc:
-            logger.warning("Falha ao mover doc em branco para a pasta: %s", exc)
-
-    return {"id": doc_id, "webViewLink": f"https://docs.google.com/document/d/{doc_id}/edit"}
+    return bool(_com_refresh(_fazer))
 
 
-def ler_texto_documento(doc_id: str) -> str | None:
-    """Lê o texto puro de um Google Doc (concatena os textRun de cada
-    parágrafo). Retorna None se não conseguir ler."""
+def _paragrafos_do_doc(doc: dict) -> list[tuple[str, int, int]]:
+    """[(texto_do_paragrafo, startIndex, endIndex), ...] de um Doc já lido."""
+    saida = []
+    for elemento in doc.get("body", {}).get("content", []):
+        paragrafo = elemento.get("paragraph")
+        if not paragrafo:
+            continue
+        texto = "".join((it.get("textRun") or {}).get("content", "") for it in paragrafo.get("elements", []))
+        saida.append((texto, elemento.get("startIndex", 0), elemento["endIndex"]))
+    return saida
+
+
+def ler_corpo_documento(doc_id: str) -> str | None:
+    """Lê só o corpo do informativo (texto depois do separador). Docs
+    antigos sem separador (ou o template original) devolvem o texto inteiro."""
     def _ler(tokens: dict):
         return _docs_request("GET", f"/{doc_id}", tokens)
 
@@ -218,15 +248,70 @@ def ler_texto_documento(doc_id: str) -> str | None:
         return None
 
     partes: list[str] = []
-    for elemento in doc.get("body", {}).get("content", []):
-        paragrafo = elemento.get("paragraph")
-        if not paragrafo:
-            continue
-        for item in paragrafo.get("elements", []):
-            texto = (item.get("textRun") or {}).get("content")
-            if texto:
-                partes.append(texto)
-    return "".join(partes)
+    achou = False
+    for texto, _start, _end in _paragrafos_do_doc(doc):
+        if achou:
+            partes.append(texto)
+        elif SEPARADOR_INFORMATIVO in texto:
+            achou = True
+    if achou:
+        return "".join(partes).strip()
+
+    return "".join(t for t, _s, _e in _paragrafos_do_doc(doc)).strip()
+
+
+def ler_texto_documento(doc_id: str) -> str | None:
+    """Lê o texto puro (todo o Doc, cabeçalho incluso) — usado só por
+    `gerar_documento_peca`."""
+    def _ler(tokens: dict):
+        return _docs_request("GET", f"/{doc_id}", tokens)
+
+    doc = _com_refresh(_ler)
+    if not doc:
+        return None
+    return "".join(t for t, _s, _e in _paragrafos_do_doc(doc))
+
+
+def substituir_corpo_informativo(doc_id: str, texto: str) -> bool:
+    """Substitui só o corpo (tudo depois do separador) pelo texto informado,
+    preservando o cabeçalho estruturado acima. Pode ser chamado várias vezes
+    (regenerar rascunho) — sempre localiza o separador de novo."""
+    def _achar_corte(tokens: dict):
+        doc = _docs_request("GET", f"/{doc_id}", tokens)
+        content = doc.get("body", {}).get("content", [])
+        fim_doc = content[-1]["endIndex"] if content else 2
+        corte = None
+        for txt, _start, end in _paragrafos_do_doc(doc):
+            if SEPARADOR_INFORMATIVO in txt:
+                corte = end
+                break
+        return corte, fim_doc
+
+    resultado = _com_refresh(_achar_corte)
+    if not resultado:
+        return False
+    corte, fim_doc = resultado
+    if corte is None:
+        corte = 1  # doc legado sem separador — sobrescreve tudo
+
+    def _escrever(tokens: dict):
+        requests = []
+        if fim_doc - 1 > corte:
+            requests.append({"deleteContentRange": {"range": {"startIndex": corte, "endIndex": fim_doc - 1}}})
+        if texto:
+            requests.append({"insertText": {"location": {"index": corte}, "text": texto}})
+        if requests:
+            _docs_request("POST", f"/{doc_id}:batchUpdate", tokens, json={"requests": requests})
+        if texto:
+            fmt = [{"updateParagraphStyle": {
+                "range": {"startIndex": corte, "endIndex": corte + len(texto)},
+                "paragraphStyle": {"alignment": "JUSTIFIED", "lineSpacing": 150},
+                "fields": "alignment,lineSpacing",
+            }}]
+            _docs_request("POST", f"/{doc_id}:batchUpdate", tokens, json={"requests": fmt})
+        return True
+
+    return bool(_com_refresh(_escrever))
 
 
 def gerar_documento_peca(

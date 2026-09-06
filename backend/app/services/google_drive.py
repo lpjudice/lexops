@@ -944,6 +944,41 @@ def listar_filhos(folder_id: str | None = None) -> list[dict] | None:
             return None
 
 
+def exportar_arquivo(file_id: str, mime_type: str) -> bytes | None:
+    """Exporta um Google Doc/Sheet/Slide nativo pra outro formato (ex.:
+    application/pdf, text/html, text/plain) via Drive `files.export`. É o
+    jeito certo de gerar o PDF/HTML "de verdade" de um Google Doc — sai
+    exatamente como o Doc está (timbrado, formatação, tudo), sem depender de
+    nenhum layout HTML construído à parte."""
+    tokens = _load_tokens()
+    if not tokens:
+        return None
+
+    def _do(tkns: dict) -> bytes:
+        h = _auth_headers(tkns)
+        r = httpx.get(
+            f"{DRIVE_META}/files/{file_id}/export",
+            headers=h,
+            params={"mimeType": mime_type},
+            timeout=60,
+        )
+        r.raise_for_status()
+        return r.content
+
+    try:
+        return _do(tokens)
+    except Exception as exc:
+        if not _is_unauthorized(exc):
+            logger.warning("Falha ao exportar arquivo %s (%s) do Drive: %s", file_id, mime_type, exc)
+            return None
+        tokens2 = _refresh(tokens)
+        try:
+            return _do(tokens2)
+        except Exception as exc2:
+            logger.warning("Falha ao exportar arquivo %s apos refresh: %s", file_id, exc2)
+            return None
+
+
 def extrair_file_id(drive_link: str) -> str | None:
     """Extrai o ID do arquivo de uma URL do Drive (formatos /d/<id>/ ou ?id=<id>)."""
     import re

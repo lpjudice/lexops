@@ -1,19 +1,19 @@
 """Informativo jurídico mensal — geração, sincronização com Google Docs,
 validação de citações e publicação (PDF + Drive + rota pública do site).
 
-Fluxo: cria-se um Google Doc (a partir do timbrado do escritório) na pasta
-/Informativos/{AAAA-MM} do Drive; opcionalmente a IA lê os arquivos de
-referência enviados e grava um primeiro rascunho no Doc; o responsável edita
-lá; "sincronizar" traz o texto para o sistema; citações de lei/julgado são
-conferidas (PrecedentCheck, com fallback de busca na web para citações de
-lei) antes de liberar; "publicar" renderiza o HTML no layout padrão do
-escritório, converte em PDF, salva no Drive e disponibiliza a versão
-pública (site → seção Informativos).
+Fluxo: cria-se um Google Doc a partir do MODELO de informativo (copiado uma
+vez do timbrado do escritório, com cabeçalho estruturado — número, mês,
+tema/subtema, resumo, separador, corpo) na pasta /Informativos/{AAAA-MM} do
+Drive; opcionalmente a IA lê os arquivos de referência enviados e grava um
+primeiro rascunho no corpo do Doc; o responsável edita lá; "sincronizar"
+traz o corpo para o sistema; citações de lei/julgado são conferidas
+(PrecedentCheck, com fallback de busca na web para citações de lei) antes
+de liberar; "publicar" EXPORTA o próprio Google Doc (PDF e HTML) — o PDF
+final é sempre o Doc timbrado tal como está, nunca um layout à parte.
 """
 from __future__ import annotations
 
 import base64
-import html as _html
 import io
 import logging
 import re
@@ -21,8 +21,17 @@ from datetime import date, datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from app.models.informativo import RESPONSAVEL_PADRAO_NOME, Informativo
+from app.models.informativo import RESPONSAVEL_PADRAO_NOME, Informativo, InformativoConfig
 from app.models.responsavel import Responsavel
+
+MESES_PT = {
+    1: "Janeiro", 2: "Fevereiro", 3: "Março", 4: "Abril", 5: "Maio", 6: "Junho",
+    7: "Julho", 8: "Agosto", 9: "Setembro", 10: "Outubro", 11: "Novembro", 12: "Dezembro",
+}
+
+
+def _mes_label(mes_referencia: date) -> str:
+    return f"{MESES_PT[mes_referencia.month]}/{mes_referencia.year}"
 
 logger = logging.getLogger(__name__)
 
@@ -85,18 +94,54 @@ def criar_informativo(
     db.commit()
     db.refresh(informativo)
 
-    _provisionar_drive_e_doc(informativo)
+    _provisionar_drive_e_doc(db, informativo)
     db.commit()
     db.refresh(informativo)
     return informativo
 
 
-def _provisionar_drive_e_doc(informativo: Informativo) -> None:
+def obter_config(db: Session) -> InformativoConfig:
+    cfg = db.get(InformativoConfig, 1)
+    if not cfg:
+        cfg = InformativoConfig(id=1)
+        db.add(cfg)
+        db.commit()
+        db.refresh(cfg)
+    return cfg
+
+
+def _garantir_template(db: Session) -> str | None:
+    """Retorna o id do Google Doc-modelo dos informativos, criando-o (uma
+    vez só) se ainda não existir."""
+    cfg = obter_config(db)
+    if cfg.template_doc_id:
+        return cfg.template_doc_id
+
+    try:
+        from app.services.google_drive import resolver_pasta_id_raiz
+        from app.services.google_docs import provisionar_template_informativo
+
+        pasta_templates_id = resolver_pasta_id_raiz([DRIVE_ROOT_SUBPASTA, "Templates"])
+        template = provisionar_template_informativo(parent_folder_id=pasta_templates_id)
+    except Exception as exc:
+        logger.warning("Falha ao provisionar o modelo de Informativo: %s", exc)
+        template = None
+
+    if not template:
+        return None
+    cfg.template_doc_id = template["id"]
+    cfg.template_doc_link = template["webViewLink"]
+    db.commit()
+    return cfg.template_doc_id
+
+
+def _provisionar_drive_e_doc(db: Session, informativo: Informativo) -> None:
     """Best-effort: cria a pasta do mês no Drive e, dentro dela, um Google
-    Doc a partir do timbrado do escritório. Resolve a pasta UMA VEZ só (id) e
-    deriva o link dela do mesmo id — evita qualquer divergência entre o link
-    mostrado e a pasta onde o Doc/PDF realmente vão parar. Falhas ficam em
-    log — o usuário pode tentar de novo depois."""
+    Doc a partir do MODELO de informativo (com cabeçalho já preenchido).
+    Resolve a pasta UMA VEZ só (id) e deriva o link dela do mesmo id — evita
+    qualquer divergência entre o link mostrado e a pasta onde o Doc/PDF
+    realmente vão parar. Falhas ficam em log — o usuário pode tentar de novo
+    depois (ou escrever manualmente e vincular)."""
     pasta_id = None
     try:
         from app.services.google_drive import resolver_pasta_id_raiz
@@ -107,12 +152,31 @@ def _provisionar_drive_e_doc(informativo: Informativo) -> None:
     except Exception as exc:
         logger.warning("Informativo %s: falha ao preparar pasta no Drive: %s", informativo.id, exc)
 
+    template_doc_id = _garantir_template(db)
+    if not template_doc_id:
+        logger.warning("Informativo %s: sem modelo disponível, Doc não criado.", informativo.id)
+        return
+
     try:
-        from app.services.google_docs import criar_documento_informativo
-        doc = criar_documento_informativo(f"Informativo {informativo.titulo}", parent_folder_id=pasta_id)
-        if doc:
-            informativo.google_doc_id = doc["id"]
-            informativo.google_doc_link = doc["webViewLink"]
+        from app.services.google_docs import preencher_cabecalho_informativo
+        from app.services.google_drive import copiar_arquivo_por_id
+
+        cfg = obter_config(db)
+        numero = cfg.proximo_numero
+        cfg.proximo_numero = numero + 1
+        db.commit()
+
+        copia = copiar_arquivo_por_id(
+            template_doc_id, f"Informativo nº {numero} — {informativo.titulo}", parent_folder_id=pasta_id
+        )
+        if copia:
+            informativo.google_doc_id = copia["id"]
+            informativo.google_doc_link = copia.get("webViewLink")
+            informativo.numero = numero
+            preencher_cabecalho_informativo(
+                copia["id"], numero, _mes_label(informativo.mes_referencia),
+                informativo.titulo, informativo.tema_resumido or "",
+            )
     except Exception as exc:
         logger.warning("Informativo %s: falha ao criar Google Doc: %s", informativo.id, exc)
 
@@ -207,13 +271,14 @@ def gerar_rascunho_ia(informativo: Informativo) -> tuple[str, float]:
 
 
 def gerar_rascunho_e_gravar(informativo: Informativo) -> str:
-    """Gera o rascunho com IA e já grava no Google Doc vinculado (some com o
-    conteúdo de exemplo do timbrado, se houver)."""
+    """Gera o rascunho com IA e já grava no CORPO do Google Doc vinculado
+    (o cabeçalho estruturado acima do separador não é tocado). Pode ser
+    chamado de novo pra regenerar — sempre substitui só o corpo."""
     if not informativo.google_doc_id:
         raise RuntimeError("Este informativo ainda não tem um Google Doc vinculado.")
     texto, _custo = gerar_rascunho_ia(informativo)
-    from app.services.google_docs import escrever_conteudo_documento
-    if not escrever_conteudo_documento(informativo.google_doc_id, informativo.titulo, texto):
+    from app.services.google_docs import substituir_corpo_informativo
+    if not substituir_corpo_informativo(informativo.google_doc_id, texto):
         raise RuntimeError("Rascunho gerado, mas falhou ao gravar no Google Doc (verifique a autenticação Google).")
     informativo.conteudo_texto = texto
     if informativo.status == "rascunho":
@@ -223,11 +288,14 @@ def gerar_rascunho_e_gravar(informativo: Informativo) -> str:
 
 # ── Sincronização com o Google Doc ──────────────────────────────────────────
 def sincronizar_do_doc(informativo: Informativo) -> str:
+    """Traz só o CORPO do Doc (texto depois do separador) pro sistema —
+    usado antes de validar citações. Não é necessário pra publicar: publicar
+    exporta o Doc inteiro direto."""
     if not informativo.google_doc_id:
         raise RuntimeError("Este informativo ainda não tem um Google Doc vinculado.")
-    from app.services.google_docs import ler_texto_documento
+    from app.services.google_docs import ler_corpo_documento
 
-    texto = ler_texto_documento(informativo.google_doc_id)
+    texto = ler_corpo_documento(informativo.google_doc_id)
     if texto is None:
         raise RuntimeError("Não foi possível ler o Google Doc (verifique a autenticação Google).")
     informativo.conteudo_texto = texto.strip()
@@ -293,67 +361,19 @@ def validar_citacoes(informativo: Informativo) -> list[dict]:
     return resultados
 
 
-# ── Render HTML (layout padrão) ─────────────────────────────────────────────
-TEAL = "#1C5A4E"
-INK = "#123D34"
-CREAM = "#F5F0E8"
+# ── Exportação do Doc (fonte única de verdade — sem layout à parte) ────────
+def preview_doc_html(informativo: Informativo) -> str:
+    """HTML do Doc AGORA MESMO, exportado direto do Google Docs — reflete
+    exatamente o que está no Doc (timbrado, formatação), sem precisar
+    sincronizar antes."""
+    if not informativo.google_doc_id:
+        raise RuntimeError("Este informativo ainda não tem um Google Doc vinculado.")
+    from app.services.google_drive import exportar_arquivo
 
-
-def _esc(t) -> str:
-    return _html.escape(str(t or ""))
-
-
-def _texto_para_paragrafos_html(texto: str) -> str:
-    blocos = [b.strip() for b in re.split(r"\n{2,}", texto or "") if b.strip()]
-    return "".join(f'<p class="corpo">{_esc(b)}</p>' for b in blocos)
-
-
-def gerar_html(informativo: Informativo, para_pdf: bool = False) -> str:
-    """Layout do Informativo Pimenta Judice: capa teal com título + mês,
-    corpo em Georgia/serif (título)/Archivo (texto), rodapé com marca."""
-    from app.services import brinde_instagram
-    logo = brinde_instagram._logo("logo_light.png")
-
-    fonte_serif = "Georgia, 'Times New Roman', serif" if para_pdf else "'Playfair Display', Georgia, serif"
-    fonte_sans = "Helvetica, Arial, sans-serif" if para_pdf else "'Archivo', Helvetica, Arial, sans-serif"
-    gfont = "" if para_pdf else (
-        '<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700'
-        '&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">'
-    )
-    logo_img = f'<img src="{logo}" width="150" style="margin-bottom:16px"/>' if logo else ""
-    mes_label = informativo.mes_referencia.strftime("%m.%Y")
-    corpo_html = _texto_para_paragrafos_html(informativo.conteudo_texto or "")
-
-    return f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">
-<title>{_esc(informativo.titulo)} — Pimenta Judice</title>{gfont}
-<style>
-  @page {{ size: A4; margin: 1.8cm 2cm; }}
-  body {{ font-family: {fonte_sans}; color: #262b28; margin: 0; background: #fff; }}
-  .wrap {{ max-width: 760px; margin: 0 auto; }}
-  .capa {{ background: {TEAL}; color: #fff; padding: 40px 44px; margin-bottom: 30px; }}
-  .capa .kick {{ font-size: 12px; letter-spacing: 3px; color: {CREAM}; text-transform: uppercase; }}
-  .capa h1 {{ font-family: {fonte_serif}; font-weight: 700; font-size: 30px; line-height: 1.2; margin: 10px 0 4px; }}
-  .capa .num {{ font-size: 13px; color: #e7f2ef; margin-top: 6px; }}
-  .corpo {{ font-size: 14.5px; line-height: 1.75; text-align: justify; color: #262b28; margin: 0 0 14px; }}
-  .foot {{ text-align: center; color: #8a9a95; font-size: 11px; margin-top: 34px; padding-top: 14px; border-top: 1px solid #e5e5e5; }}
-  .foot b {{ color: {TEAL}; }}
-</style></head><body><div class="wrap">
-  <div class="capa">
-    {logo_img}
-    <div class="kick">Informativo Mensal</div>
-    <h1>{_esc(informativo.titulo)}</h1>
-    <div class="num">Edição {mes_label}</div>
-  </div>
-  {corpo_html}
-  <div class="foot"><b>Pimenta Judice Advogados</b> · Planejamento Patrimonial e Sucessório · pimentajudice.com.br</div>
-</div></body></html>"""
-
-
-def html_para_pdf(html: str) -> bytes:
-    from xhtml2pdf import pisa
-    buf = io.BytesIO()
-    pisa.CreatePDF(src=html, dest=buf, encoding="utf-8")
-    return buf.getvalue()
+    html_bytes = exportar_arquivo(informativo.google_doc_id, "text/html")
+    if not html_bytes:
+        raise RuntimeError("Não foi possível exportar o Doc (verifique a autenticação Google).")
+    return html_bytes.decode("utf-8", errors="ignore")
 
 
 def contar_paginas(pdf_bytes: bytes) -> int:
@@ -363,15 +383,23 @@ def contar_paginas(pdf_bytes: bytes) -> int:
 
 # ── Publicação ───────────────────────────────────────────────────────────────
 def publicar(db: Session, informativo: Informativo) -> dict:
-    if not (informativo.conteudo_texto or "").strip():
-        raise RuntimeError("Sincronize o texto do Doc antes de publicar.")
+    """Exporta o PRÓPRIO Google Doc (timbrado + tudo que está escrito nele)
+    como PDF e HTML, salva o PDF na pasta do mês no Drive e disponibiliza a
+    versão pública. Não depende de ter sincronizado antes — publica o que
+    estiver no Doc neste momento."""
+    if not informativo.google_doc_id:
+        raise RuntimeError("Este informativo ainda não tem um Google Doc vinculado.")
 
-    html = gerar_html(informativo, para_pdf=False)
-    pdf_html = gerar_html(informativo, para_pdf=True)
-    pdf_bytes = html_para_pdf(pdf_html)
+    from app.services.google_drive import exportar_arquivo, upload_arquivo_raiz
+
+    pdf_bytes = exportar_arquivo(informativo.google_doc_id, "application/pdf")
+    if not pdf_bytes:
+        raise RuntimeError("Falha ao exportar o PDF do Google Doc (verifique a autenticação Google).")
+    html_bytes = exportar_arquivo(informativo.google_doc_id, "text/html")
+    html = html_bytes.decode("utf-8", errors="ignore") if html_bytes else (informativo.conteudo_html or "")
+
     paginas = contar_paginas(pdf_bytes)
 
-    from app.services.google_drive import upload_arquivo_raiz
     slug = re.sub(r"[^a-z0-9]+", "-", (informativo.titulo or "informativo").lower()).strip("-")[:60] or "informativo"
     subpath = [DRIVE_ROOT_SUBPASTA, _mes_slug(informativo.mes_referencia)]
     pdf_link = upload_arquivo_raiz(pdf_bytes, f"{slug}.pdf", subpath, "application/pdf")

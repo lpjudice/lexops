@@ -9,6 +9,7 @@ StatusInformativo = Literal["rascunho", "primeiro_draft", "revisado", "publicado
 
 class InformativoOut(BaseModel):
     id: uuid.UUID
+    numero: int | None = None
     mes_referencia: date
     titulo: str
     tema_resumido: str | None = None

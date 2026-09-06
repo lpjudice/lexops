@@ -177,8 +177,17 @@ def informativo_pdf(informativo_id: str, db: Session = Depends(get_db)):
     import re
     informativo = _informativo_publicado(db, informativo_id)
     slug = re.sub(r"[^a-z0-9]+", "-", (informativo.titulo or "informativo").lower()).strip("-")[:60] or "informativo"
-    from app.services.informativo_service import gerar_html, html_para_pdf
-    pdf = html_para_pdf(gerar_html(informativo, para_pdf=True))
+
+    from app.services.google_drive import baixar_arquivo_por_id, exportar_arquivo, extrair_file_id
+    pdf = None
+    if informativo.drive_pdf_link:
+        file_id = extrair_file_id(informativo.drive_pdf_link)
+        pdf = baixar_arquivo_por_id(file_id) if file_id else None
+    if not pdf and informativo.google_doc_id:
+        pdf = exportar_arquivo(informativo.google_doc_id, "application/pdf")
+    if not pdf:
+        raise HTTPException(502, "PDF indisponível no momento.")
+
     from fastapi import Response
     return Response(content=pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{slug}.pdf"'})

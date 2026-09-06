@@ -1295,6 +1295,7 @@ def _run_migrations() -> None:
         conn.execute(text("ALTER TABLE recebimentos ADD COLUMN IF NOT EXISTS comprovante_filename VARCHAR(500)"))
         conn.execute(text("ALTER TABLE recebimentos ADD COLUMN IF NOT EXISTS comprovante_path VARCHAR(1000)"))
         conn.execute(text("ALTER TABLE recebimentos ADD COLUMN IF NOT EXISTS comprovante_drive_link VARCHAR(1000)"))
+        conn.execute(text("ALTER TABLE informativos ADD COLUMN IF NOT EXISTS numero INTEGER"))
 
         conn.commit()
 
