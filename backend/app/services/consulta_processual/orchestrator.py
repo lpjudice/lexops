@@ -39,7 +39,7 @@ TRIBUNAIS_CONHECIDOS = {
     "TRF6", "STJ", "TST", "TSE", "STM",
 }
 
-UPLOADS_DIR = Path("/app/uploads/processos")
+UPLOADS_DIR = Path("/app/backend/uploads/processos")
 
 
 def _deve_manter_copia_app_uploads() -> bool:
