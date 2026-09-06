@@ -4,6 +4,7 @@ export type StatusInformativo = 'rascunho' | 'primeiro_draft' | 'revisado' | 'pu
 
 export interface Informativo {
   id: string
+  numero?: number | null
   mes_referencia: string
   titulo: string
   tema_resumido?: string | null
@@ -77,4 +78,12 @@ export const informativosApi = {
 
   previewHtml: (id: string) =>
     api.get<string>(`/informativos/${id}/preview-html`, { responseType: 'text' }).then((r) => r.data),
+
+  obterTemplate: () =>
+    api.get<{ template_doc_link: string | null }>('/informativos/config/template').then((r) => r.data),
+}
+
+export function erroApi(e: unknown): string {
+  const err = e as { response?: { data?: { detail?: string } }; message?: string }
+  return err?.response?.data?.detail || err?.message || 'Erro inesperado.'
 }

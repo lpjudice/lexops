@@ -47,6 +47,12 @@ def responsavel_padrao(db: Session = Depends(get_db)):
     return {"id": str(padrao.id), "nome": padrao.nome, "email": padrao.email}
 
 
+@router.get("/config/template")
+def obter_template(db: Session = Depends(get_db)):
+    cfg = informativo_service.obter_config(db)
+    return {"template_doc_link": cfg.template_doc_link}
+
+
 @router.get("/{informativo_id}", response_model=InformativoOut)
 def obter(informativo_id: uuid.UUID, db: Session = Depends(get_db)):
     return _get(db, informativo_id)
@@ -143,9 +149,10 @@ def validar_citacoes(informativo_id: uuid.UUID, db: Session = Depends(get_db)):
 def preview_html(informativo_id: uuid.UUID, db: Session = Depends(get_db)):
     from fastapi import Response
     informativo = _get(db, informativo_id)
-    if not (informativo.conteudo_texto or "").strip():
-        raise HTTPException(status_code=400, detail="Sincronize o texto do Doc antes de pré-visualizar.")
-    html = informativo_service.gerar_html(informativo, para_pdf=False)
+    try:
+        html = informativo_service.preview_doc_html(informativo)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return Response(content=html, media_type="text/html; charset=utf-8")
 
 
