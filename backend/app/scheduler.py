@@ -164,6 +164,73 @@ def _alert_codex(afetados: list[dict]) -> None:
         logger.exception("Scheduler: alerta Codex falhou")
 
 
+def _faxina_drive_folders() -> None:
+    """05h45 BRT — cura pastas-raiz de cliente órfãs (id apontando pra pasta
+    apagada/lixeira fora do app) e detecta (sem mesclar sozinho) pastas
+    duplicadas na raiz do Drive. Avisa no Telegram (bot principal) o que foi
+    curado automaticamente e o que precisa de revisão manual."""
+    try:
+        from app.services import drive_folder_heal as heal
+
+        orfaos = heal.escanear_orfaos()
+        curados, pendentes = [], []
+        for o in orfaos:
+            rep = heal.curar_orfao(o["nome"])
+            if rep.get("ok"):
+                curados.append({"nome": o["nome"], **rep})
+            else:
+                pendentes.append({"nome": o["nome"], **rep})
+
+        duplicatas = heal.escanear_duplicatas_raiz()
+
+        if not curados and not pendentes and not duplicatas:
+            logger.info("Scheduler: faxina Drive sem achados")
+            return
+        logger.info(
+            "Scheduler: faxina Drive — curados=%d pendentes=%d duplicatas=%d",
+            len(curados), len(pendentes), len(duplicatas),
+        )
+        _alert_drive_folders(curados, pendentes, duplicatas)
+    except Exception:
+        logger.exception("Scheduler: faxina Drive falhou")
+
+
+def _alert_drive_folders(curados: list[dict], pendentes: list[dict], duplicatas: list[dict]) -> None:
+    try:
+        from app.config import settings
+        from app.services import telegram_api
+
+        admin_id = None
+        for x in settings.telegram_allowed_user_ids.split(","):
+            if x.strip():
+                admin_id = int(x.strip()); break
+        if not admin_id or not settings.telegram_bot_token:
+            return
+
+        linhas = ["📁 *Pastas de cliente no Drive — faxina automática*", ""]
+        if curados:
+            linhas.append(f"✅ *{len(curados)} corrigida(s) automaticamente:*")
+            for c in curados:
+                linhas.append(f"   • {c['nome']}")
+            linhas.append("")
+        if pendentes:
+            linhas.append(f"⚠️ *{len(pendentes)} pendente(s) — precisa revisão manual:*")
+            for p in pendentes:
+                linhas.append(f"   • {p['nome']} ({p.get('erro')})")
+            linhas.append("")
+        if duplicatas:
+            linhas.append(f"🔀 *{len(duplicatas)} grupo(s) de pasta duplicada na raiz:*")
+            for d in duplicatas:
+                nomes_membros = ", ".join(
+                    m["clientes"][0]["nome"] if m["clientes"] else m["id"] for m in d["membros"]
+                )
+                linhas.append(f"   • {nomes_membros} — {len(d['membros'])} pastas, revisar e mesclar manualmente")
+        texto = "\n".join(linhas)
+        telegram_api.send_message(admin_id, texto)
+    except Exception:
+        logger.exception("Scheduler: alerta Drive folders falhou")
+
+
 def _refresh_andamentos_session() -> None:
     """Mantém vivo o offline token do bot @jusbr_andamentos_bot (sessão id=2).
 
@@ -649,6 +716,12 @@ def start_scheduler() -> None:
         _faxina_codex,
         trigger=CronTrigger(hour=19, minute=15, timezone="America/Sao_Paulo"),
         id="faxina_codex",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _faxina_drive_folders,
+        trigger=CronTrigger(hour=5, minute=45, timezone="America/Sao_Paulo"),
+        id="faxina_drive_folders",
         replace_existing=True,
     )
     scheduler.add_job(

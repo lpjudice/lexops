@@ -12,6 +12,7 @@ Scopes required: https://www.googleapis.com/auth/drive.file
 import json
 import logging
 import os
+import re
 import threading
 
 import httpx
@@ -53,6 +54,20 @@ def _auth_headers(tokens: dict) -> dict:
 def _escape_drive_query(s: str) -> str:
     """Escapes single quotes in Drive API query strings."""
     return s.replace("\\", "\\\\").replace("'", "\\'")
+
+
+def _normalizar_nome_busca(nome: str) -> str:
+    """Normaliza um nome para COMPARAÇÃO (trim + espaços internos colapsados +
+    minúsculas). Evita duplicação de pasta por pequenas variações de digitação
+    do mesmo nome (espaço extra, maiúscula/minúscula) — nunca usado para
+    renomear nada, só para achar a pasta/registro certo."""
+    return re.sub(r"\s+", " ", (nome or "")).strip().casefold()
+
+
+def _normalizar_nome_criacao(nome: str) -> str:
+    """Limpa um nome antes de usá-lo para CRIAR pasta/arquivo (trim + espaços
+    internos colapsados, preserva maiúsculas/minúsculas do usuário)."""
+    return re.sub(r"\s+", " ", (nome or "")).strip()
 
 
 # ── Anti-duplicação de pastas ─────────────────────────────────────────────
@@ -164,9 +179,20 @@ def registry_forget(parent_id: str, name: str) -> None:
 
 
 def _listar_pastas(name: str, parent_id: str, headers: dict) -> list[dict]:
-    """Lista pastas-irmãs com este nome (ordenadas da mais antiga p/ a mais nova)."""
+    """Lista pastas-irmãs com este nome (ordenadas da mais antiga p/ a mais nova).
+
+    Comparação tolerante a espaço extra/maiúscula-minúscula: busca por 'contains'
+    do 1º termo no Drive (que não suporta regex/ilike) e filtra no cliente por
+    igualdade normalizada — evita criar uma 2ª pasta só porque o nome foi
+    digitado com uma diferença mínima. Quando isso junta 2+ pastas existentes,
+    a reconciliação de duplicatas do chamador (`_consolidar_pastas`) já resolve."""
+    nome_limpo = (name or "").strip()
+    if not nome_limpo:
+        return []
+    alvo_norm = _normalizar_nome_busca(nome_limpo)
+    primeiro_termo = nome_limpo.split(" ", 1)[0]
     query = (
-        f"name='{_escape_drive_query(name)}' "
+        f"name contains '{_escape_drive_query(primeiro_termo)}' "
         f"and mimeType='application/vnd.google-apps.folder' "
         f"and '{parent_id}' in parents and trashed=false"
     )
@@ -182,9 +208,10 @@ def _listar_pastas(name: str, parent_id: str, headers: dict) -> list[dict]:
         },
         timeout=30,
     )
-    if r.is_success:
-        return r.json().get("files", [])
-    return []
+    if not r.is_success:
+        return []
+    candidatos = r.json().get("files", [])
+    return [f for f in candidatos if _normalizar_nome_busca(f.get("name", "")) == alvo_norm]
 
 
 def _pasta_vazia(folder_id: str, headers: dict) -> bool:
@@ -351,16 +378,21 @@ def _is_unauthorized(exc: Exception) -> bool:
 # da pasta em `clientes.drive_folder_id`: o upload usa o id (imune a renome) e só
 # cai na busca por nome na 1ª vez, gravando o id em seguida (backfill).
 def _cliente_folder_id_armazenado(nome_cliente: str) -> str | None:
+    """Busca por nome NORMALIZADO (trim + espaços colapsados + minúsculas) —
+    2 registros de cliente cujo nome só difere por espaço/maiúscula (ex.:
+    "Fulano" e "Fulano ") resolvem para a MESMA pasta."""
     try:
-        from sqlalchemy import select
+        from sqlalchemy import text
         from app.database import SessionLocal
-        from app.models.cliente import Cliente
+        nome_norm = _normalizar_nome_busca(nome_cliente)
         with SessionLocal() as db:
             row = db.execute(
-                select(Cliente.drive_folder_id)
-                .where(Cliente.nome == nome_cliente)
-                .order_by(Cliente.drive_folder_id.isnot(None).desc())
-                .limit(1)
+                text(
+                    "SELECT drive_folder_id FROM clientes "
+                    "WHERE lower(regexp_replace(trim(nome), '\\s+', ' ', 'g')) = :n "
+                    "ORDER BY (drive_folder_id IS NOT NULL) DESC LIMIT 1"
+                ),
+                {"n": nome_norm},
             ).first()
             return row[0] if row and row[0] else None
     except Exception as exc:
@@ -369,18 +401,23 @@ def _cliente_folder_id_armazenado(nome_cliente: str) -> str | None:
 
 
 def _persistir_folder_id_cliente(nome_cliente: str, folder_id: str) -> None:
-    """Grava o id da pasta no cliente apenas se ainda estiver vazio (não sobrescreve)."""
+    """Grava o id da pasta em TODOS os clientes com este nome (normalizado) que
+    ainda estiverem sem id — não sobrescreve quem já tem (ver `curar_...` em
+    drive_folder_heal.py para correção de id órfão)."""
     if not folder_id:
         return
     try:
-        from sqlalchemy import update
+        from sqlalchemy import text
         from app.database import SessionLocal
-        from app.models.cliente import Cliente
+        nome_norm = _normalizar_nome_busca(nome_cliente)
         with SessionLocal() as db:
             db.execute(
-                update(Cliente)
-                .where(Cliente.nome == nome_cliente, Cliente.drive_folder_id.is_(None))
-                .values(drive_folder_id=folder_id)
+                text(
+                    "UPDATE clientes SET drive_folder_id = :f "
+                    "WHERE lower(regexp_replace(trim(nome), '\\s+', ' ', 'g')) = :n "
+                    "AND drive_folder_id IS NULL"
+                ),
+                {"f": folder_id, "n": nome_norm},
             )
             db.commit()
     except Exception as exc:
@@ -389,23 +426,27 @@ def _persistir_folder_id_cliente(nome_cliente: str, folder_id: str) -> None:
 
 def _resolver_pasta_cliente(nome_cliente: str, headers: dict) -> str:
     """Pasta-raiz do cliente (cria se faltar). Usa o id gravado quando houver;
-    senão resolve por nome e faz backfill do id. Imune a renome do cliente."""
-    nome = (nome_cliente or "").strip()
-    cached = _cache_get(DRIVE_FOLDER_ID, nome)
+    senão resolve por nome e faz backfill do id. Imune a renome do cliente.
+    Nome normalizado (trim/espaços) para a chave de cache — clientes cujo nome
+    difere só por espaço resolvem para a MESMA pasta em cache."""
+    nome = _normalizar_nome_criacao(nome_cliente)
+    cache_key = _normalizar_nome_busca(nome)
+    cached = _cache_get(DRIVE_FOLDER_ID, cache_key)
     if cached:
         return cached
     stored = _cliente_folder_id_armazenado(nome)
     if stored:
-        _cache_set(DRIVE_FOLDER_ID, nome, stored)
+        _cache_set(DRIVE_FOLDER_ID, cache_key, stored)
         return stored
     fid = _get_or_create_subfolder(nome, DRIVE_FOLDER_ID, headers)
     _persistir_folder_id_cliente(nome, fid)
+    _cache_set(DRIVE_FOLDER_ID, cache_key, fid)
     return fid
 
 
 def _resolver_pasta_cliente_existente(nome_cliente: str, headers: dict) -> str | None:
     """Pasta-raiz do cliente SEM criar. Prefere o id gravado; senão busca por nome."""
-    nome = (nome_cliente or "").strip()
+    nome = _normalizar_nome_criacao(nome_cliente)
     stored = _cliente_folder_id_armazenado(nome)
     if stored:
         return stored

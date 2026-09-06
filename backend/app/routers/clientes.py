@@ -63,6 +63,44 @@ def criar_cliente(data: ClienteCreate, db: Session = Depends(get_db)):
     return cliente
 
 
+# ── Pastas de cliente no Drive: órfãos + duplicatas (admin) ────────────────────
+# Rotas fixas ANTES de /{cliente_id} — se ficassem depois, "admin" seria
+# interpretado como cliente_id pelo FastAPI (rota dinâmica engole rota fixa).
+
+class MesclarPastasBody(BaseModel):
+    folder_ids: list[str]
+    canonical_id: str | None = None
+
+
+@router.get("/admin/pastas-drive/duplicatas")
+def listar_duplicatas_drive(current: Usuario = Depends(get_current_user)):
+    """Detecta (sem mesclar) pastas de cliente duplicadas na raiz do Drive."""
+    if current.role != "super_admin":
+        raise HTTPException(status_code=403, detail="Apenas super admin.")
+    from app.services import drive_folder_heal as heal
+    return {"duplicatas": heal.escanear_duplicatas_raiz()}
+
+
+@router.get("/admin/pastas-drive/orfaos")
+def listar_orfaos_drive(current: Usuario = Depends(get_current_user)):
+    """Lista clientes cujo drive_folder_id aponta para pasta apagada/lixeira."""
+    if current.role != "super_admin":
+        raise HTTPException(status_code=403, detail="Apenas super admin.")
+    from app.services import drive_folder_heal as heal
+    return {"orfaos": heal.escanear_orfaos()}
+
+
+@router.post("/admin/pastas-drive/mesclar")
+def mesclar_pastas_drive(body: MesclarPastasBody, current: Usuario = Depends(get_current_user)):
+    """Mescla um grupo de pastas duplicadas: move conteúdo das extras para a
+    canônica e joga as extras vazias na lixeira. Nunca apaga pasta com
+    conteúdo remanescente."""
+    if current.role != "super_admin":
+        raise HTTPException(status_code=403, detail="Apenas super admin.")
+    from app.services import drive_folder_heal as heal
+    return heal.mesclar_cluster(body.folder_ids, body.canonical_id)
+
+
 @router.get("/{cliente_id}", response_model=ClienteWithProcessos)
 def obter_cliente(cliente_id: uuid.UUID, db: Session = Depends(get_db)):
     from app.routers.processos import _processo_to_out
