@@ -1,20 +1,22 @@
 """Informativo jurídico mensal — geração, sincronização com Google Docs,
 validação de citações e publicação (PDF + Drive + rota pública do site).
 
-Fluxo: cria-se um Google Doc em branco na pasta /Informativos/{AAAA-MM} do
-Drive; o responsável escreve lá; "sincronizar" traz o texto para o sistema;
-citações de lei/julgado são conferidas (PrecedentCheck, com fallback de
-busca na web para citações de lei) antes de liberar; "publicar" renderiza o
-HTML no layout padrão do escritório, converte em PDF, salva no Drive e
-disponibiliza a versão pública (site → seção Informativos).
+Fluxo: cria-se um Google Doc (a partir do timbrado do escritório) na pasta
+/Informativos/{AAAA-MM} do Drive; opcionalmente a IA lê os arquivos de
+referência enviados e grava um primeiro rascunho no Doc; o responsável edita
+lá; "sincronizar" traz o texto para o sistema; citações de lei/julgado são
+conferidas (PrecedentCheck, com fallback de busca na web para citações de
+lei) antes de liberar; "publicar" renderiza o HTML no layout padrão do
+escritório, converte em PDF, salva no Drive e disponibiliza a versão
+pública (site → seção Informativos).
 """
 from __future__ import annotations
 
+import base64
 import html as _html
 import io
 import logging
 import re
-from calendar import monthrange
 from datetime import date, datetime, timezone
 
 from sqlalchemy.orm import Session
@@ -90,20 +92,24 @@ def criar_informativo(
 
 
 def _provisionar_drive_e_doc(informativo: Informativo) -> None:
-    """Best-effort: cria a pasta do mês no Drive e um Google Doc em branco
-    dentro dela. Falhas ficam em log — o usuário pode tentar de novo depois."""
+    """Best-effort: cria a pasta do mês no Drive e, dentro dela, um Google
+    Doc a partir do timbrado do escritório. Resolve a pasta UMA VEZ só (id) e
+    deriva o link dela do mesmo id — evita qualquer divergência entre o link
+    mostrado e a pasta onde o Doc/PDF realmente vão parar. Falhas ficam em
+    log — o usuário pode tentar de novo depois."""
+    pasta_id = None
     try:
-        from app.services.google_drive import get_folder_link_raiz, resolver_pasta_id_raiz
+        from app.services.google_drive import resolver_pasta_id_raiz
         subpath = [DRIVE_ROOT_SUBPASTA, _mes_slug(informativo.mes_referencia)]
-        informativo.drive_folder_link = get_folder_link_raiz(subpath)
         pasta_id = resolver_pasta_id_raiz(subpath)
+        if pasta_id:
+            informativo.drive_folder_link = f"https://drive.google.com/drive/folders/{pasta_id}"
     except Exception as exc:
         logger.warning("Informativo %s: falha ao preparar pasta no Drive: %s", informativo.id, exc)
-        pasta_id = None
 
     try:
-        from app.services.google_docs import criar_documento_em_branco
-        doc = criar_documento_em_branco(f"Informativo {informativo.titulo}", parent_folder_id=pasta_id)
+        from app.services.google_docs import criar_documento_informativo
+        doc = criar_documento_informativo(f"Informativo {informativo.titulo}", parent_folder_id=pasta_id)
         if doc:
             informativo.google_doc_id = doc["id"]
             informativo.google_doc_link = doc["webViewLink"]
@@ -123,6 +129,96 @@ def upload_arquivo_referencia(informativo: Informativo, conteudo: bytes, nome_ar
     atual = list(informativo.arquivos_referencia or [])
     atual.append({"nome": nome_arquivo, "link_drive": link, "tipo": mimetype})
     informativo.arquivos_referencia = atual
+
+
+# ── Rascunho inicial via IA (a partir dos arquivos de referência) ──────────
+_PROMPT_RASCUNHO = """Você escreve o Informativo Jurídico Mensal do escritório Pimenta Judice
+Advogados (planejamento patrimonial e sucessório, holdings, societário, reforma tributária).
+
+TEMA DO MÊS: {tema}
+
+Use os materiais anexados (se houver) como base de estudo — não invente fatos, números
+ou julgados que não estejam no material ou que você não tenha certeza de que existem.
+Se for citar lei ou julgado, cite de forma precisa (número, tribunal/artigo) só quando
+tiver certeza; senão, escreva de forma genérica sem citar número específico.
+
+REGRAS DE ESTILO (importantes, não quebre nenhuma):
+- Texto corrido em parágrafos, quase sem listas com marcadores (no máximo uma, se for
+  realmente necessária).
+- Linguagem técnica mas acessível — não é uma petição, é um informativo para clientes.
+- PROIBIDO usar travessão longo (—) ou meia-risca como pontuação de pausa — se precisar
+  desse tipo de aposto, use parênteses.
+- Nada de floreios típicos de texto gerado por IA (evite "é importante ressaltar",
+  "em suma", "dito isso", frases de efeito genéricas).
+- Extensão: para caber em 3-4 páginas de PDF (aproximadamente 900-1400 palavras).
+- Comece direto com um parágrafo de abertura contextualizando o tema — sem título
+  (o título já aparece no cabeçalho do documento).
+
+Responda APENAS com o texto corrido do informativo, em parágrafos separados por
+linha em branco. Sem markdown, sem títulos de seção, sem numeração."""
+
+
+def gerar_rascunho_ia(informativo: Informativo) -> tuple[str, float]:
+    """Lê os arquivos de referência (Drive) e escreve, com Claude, um
+    primeiro rascunho do informativo. Retorna (texto, custo_usd)."""
+    from app.config import settings
+    if not settings.anthropic_api_key:
+        raise RuntimeError("ANTHROPIC_API_KEY não configurada.")
+    import anthropic
+
+    from app.services.google_drive import baixar_arquivo_por_id, extrair_file_id
+
+    blocos: list[dict] = []
+    for arquivo in (informativo.arquivos_referencia or [])[:8]:
+        link = arquivo.get("link_drive")
+        tipo = (arquivo.get("tipo") or "").lower()
+        file_id = extrair_file_id(link) if link else None
+        if not file_id:
+            continue
+        conteudo = baixar_arquivo_por_id(file_id)
+        if not conteudo:
+            continue
+        b64 = base64.b64encode(conteudo).decode()
+        if "pdf" in tipo:
+            blocos.append({"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": b64}})
+        elif "image" in tipo:
+            blocos.append({"type": "image", "source": {"type": "base64", "media_type": tipo or "image/png", "data": b64}})
+        # vídeo: sem suporte nativo no Claude — ignorado aqui (best-effort)
+
+    tema = informativo.tema_resumido or informativo.titulo
+    prompt = _PROMPT_RASCUNHO.format(tema=tema)
+    conteudo_msg = blocos + [{"type": "text", "text": prompt}]
+
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    msg = client.messages.create(
+        model=settings.instagram_claude_model or "claude-opus-4-5",
+        max_tokens=4000,
+        messages=[{"role": "user", "content": conteudo_msg}],
+    )
+    texto = "".join(getattr(b, "text", "") for b in msg.content if getattr(b, "type", "") == "text").strip()
+    if not texto:
+        raise RuntimeError("A IA não retornou um rascunho válido.")
+
+    usage = getattr(msg, "usage", None)
+    tin = getattr(usage, "input_tokens", 0) or 0
+    tout = getattr(usage, "output_tokens", 0) or 0
+    custo = round((tin * 5 + tout * 25) / 1_000_000, 5)  # estimativa (preço Opus)
+    return texto, custo
+
+
+def gerar_rascunho_e_gravar(informativo: Informativo) -> str:
+    """Gera o rascunho com IA e já grava no Google Doc vinculado (some com o
+    conteúdo de exemplo do timbrado, se houver)."""
+    if not informativo.google_doc_id:
+        raise RuntimeError("Este informativo ainda não tem um Google Doc vinculado.")
+    texto, _custo = gerar_rascunho_ia(informativo)
+    from app.services.google_docs import escrever_conteudo_documento
+    if not escrever_conteudo_documento(informativo.google_doc_id, informativo.titulo, texto):
+        raise RuntimeError("Rascunho gerado, mas falhou ao gravar no Google Doc (verifique a autenticação Google).")
+    informativo.conteudo_texto = texto
+    if informativo.status == "rascunho":
+        informativo.status = "primeiro_draft"
+    return texto
 
 
 # ── Sincronização com o Google Doc ──────────────────────────────────────────

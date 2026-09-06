@@ -118,6 +118,66 @@ def _com_refresh(fn):
             return None
 
 
+def criar_documento_informativo(titulo: str, parent_folder_id: str | None = None) -> dict | None:
+    """Copia o timbrado do escritório (mesmo usado nas peças) pra dentro da
+    pasta do informativo — garante que o Doc já nasça com a identidade visual
+    do escritório em vez de em branco."""
+    return copiar_arquivo_por_id(TIMBRADO_TEMPLATE_ID, titulo, parent_folder_id=parent_folder_id)
+
+
+def escrever_conteudo_documento(doc_id: str, titulo: str, texto: str) -> bool:
+    """Substitui o corpo do Doc (mantendo o timbrado, que fica no header) por
+    um título centralizado em negrito + parágrafos justificados com
+    espaçamento 150% — mesmo padrão visual usado nas peças. Retorna True se
+    conseguiu escrever."""
+    paragrafos = [p.strip() for p in re.split(r"\n{2,}", texto or "") if p.strip()]
+    corpo = "\n\n".join(paragrafos)
+    texto_final = f"{titulo}\n\n{corpo}" if titulo else corpo
+
+    def _escrever(tokens: dict):
+        doc = _docs_request("GET", f"/{doc_id}", tokens)
+        end_index = doc["body"]["content"][-1]["endIndex"]
+
+        requests = []
+        if end_index > 2:
+            requests.append({"deleteContentRange": {"range": {"startIndex": 1, "endIndex": end_index - 1}}})
+        requests.append({"insertText": {"location": {"index": 1}, "text": texto_final}})
+        requests.append({"deleteParagraphBullets": {"range": {"startIndex": 1, "endIndex": 1 + len(texto_final)}}})
+        _docs_request("POST", f"/{doc_id}:batchUpdate", tokens, json={"requests": requests})
+
+        titulo_end = 1 + len(titulo)
+        corpo_start = titulo_end + 2
+        corpo_end = 1 + len(texto_final)
+        fmt_requests = [
+            {
+                "updateTextStyle": {
+                    "range": {"startIndex": 1, "endIndex": titulo_end},
+                    "textStyle": {"bold": True, "fontSize": {"magnitude": 16, "unit": "PT"}},
+                    "fields": "bold,fontSize",
+                }
+            },
+            {
+                "updateParagraphStyle": {
+                    "range": {"startIndex": 1, "endIndex": titulo_end},
+                    "paragraphStyle": {"alignment": "CENTER"},
+                    "fields": "alignment",
+                }
+            },
+        ]
+        if corpo_end > corpo_start:
+            fmt_requests.append({
+                "updateParagraphStyle": {
+                    "range": {"startIndex": corpo_start, "endIndex": corpo_end},
+                    "paragraphStyle": {"alignment": "JUSTIFIED", "lineSpacing": 150},
+                    "fields": "alignment,lineSpacing",
+                }
+            })
+        _docs_request("POST", f"/{doc_id}:batchUpdate", tokens, json={"requests": fmt_requests})
+        return True
+
+    return bool(_com_refresh(_escrever))
+
+
 def criar_documento_em_branco(titulo: str, parent_folder_id: str | None = None) -> dict | None:
     """Cria um Google Doc em branco (POST documents:create) e, se informado,
     move para dentro de `parent_folder_id` no Drive. Retorna
