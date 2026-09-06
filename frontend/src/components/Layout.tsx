@@ -79,6 +79,7 @@ const navGroups: NavGroup[] = [
       { to: '/reunioes', label: 'Reuniões', Icon: Video },
       { to: '/conselho', label: 'Expansão', Icon: Users2 },
       { to: '/instagram', label: 'Instagram', Icon: Camera },
+      { to: '/informativos', label: 'Informativos', Icon: Newspaper },
     ],
   },
   {
@@ -157,6 +158,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/reunioes': 'Reuniões',
   '/conselho': 'Expansão',
   '/instagram': 'Instagram',
+  '/informativos': 'Informativos',
   '/configuracoes': 'Configurações',
 }
 

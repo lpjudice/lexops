@@ -803,6 +803,34 @@ def get_folder_link_raiz(subpath: list[str]) -> str | None:
             return None
 
 
+def resolver_pasta_id_raiz(subpath: list[str]) -> str | None:
+    """Retorna o ID (não o link) de uma pasta sob a raiz LexOps, navegando/
+    criando o caminho `subpath`. Usado quando é preciso colocar um arquivo
+    (ex.: mover um Google Doc) dentro dessa pasta."""
+    tokens = _load_tokens()
+    if not tokens:
+        return None
+
+    def _do(tkns: dict) -> str:
+        h = _auth_headers(tkns)
+        parent_id = DRIVE_FOLDER_ID
+        for nome in subpath:
+            parent_id = _get_or_create_subfolder(nome, parent_id, h)
+        return parent_id
+
+    try:
+        return _do(tokens)
+    except Exception as exc:
+        if not _is_unauthorized(exc):
+            logger.warning("Falha ao resolver pasta raiz do Drive: %s", exc)
+            return None
+        try:
+            return _do(_refresh(tokens))
+        except Exception as exc2:
+            logger.warning("Falha ao resolver pasta raiz do Drive apos refresh: %s", exc2)
+            return None
+
+
 def listar_arquivos(nome_cliente: str, subfolder: str, sub_subfolder: str | None = None) -> list[dict]:
     """Lists files from {nome_cliente}/{subfolder}[/{sub_subfolder}] in Drive."""
     tokens = _load_tokens()

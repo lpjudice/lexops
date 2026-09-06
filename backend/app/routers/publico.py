@@ -118,6 +118,72 @@ def brinde_site_pdf(sugestao_id: str, db: Session = Depends(get_db)):
     return _resp_pdf(html, f"{_brinde_slug(sug)}-site.pdf")
 
 
+# ── Informativos (seção pública do site) ──
+@router.get("/informativos")
+def informativos_publicos(db: Session = Depends(get_db)):
+    """Lista os informativos publicados, mais recente primeiro — usada pela
+    seção "Informativos" do site."""
+    from app.models.informativo import Informativo
+
+    itens = (
+        db.query(Informativo)
+        .filter(Informativo.status == "publicado")
+        .order_by(Informativo.mes_referencia.desc())
+        .all()
+    )
+    return [
+        {
+            "id": str(i.id),
+            "titulo": i.titulo,
+            "mes_referencia": i.mes_referencia.isoformat(),
+            "publicado_em": i.publicado_em.isoformat() if i.publicado_em else None,
+            "drive_pdf_link": i.drive_pdf_link,
+        }
+        for i in itens
+    ]
+
+
+def _informativo_publicado(db: Session, informativo_id: str):
+    import uuid as _uuid
+
+    from app.models.informativo import Informativo
+
+    try:
+        iid = _uuid.UUID(informativo_id)
+    except ValueError:
+        raise HTTPException(404, "Link inválido")
+    informativo = db.get(Informativo, iid)
+    if not informativo or informativo.status != "publicado":
+        raise HTTPException(404, "Informativo não encontrado")
+    return informativo
+
+
+@router.get("/informativos/{informativo_id}")
+def informativo_view(informativo_id: str, db: Session = Depends(get_db)):
+    informativo = _informativo_publicado(db, informativo_id)
+    return _resp_html(informativo.conteudo_html or "")
+
+
+@router.get("/informativos/{informativo_id}.html")
+def informativo_html(informativo_id: str, db: Session = Depends(get_db)):
+    import re
+    informativo = _informativo_publicado(db, informativo_id)
+    slug = re.sub(r"[^a-z0-9]+", "-", (informativo.titulo or "informativo").lower()).strip("-")[:60] or "informativo"
+    return _resp_html(informativo.conteudo_html or "", f"{slug}.html")
+
+
+@router.get("/informativos/{informativo_id}.pdf")
+def informativo_pdf(informativo_id: str, db: Session = Depends(get_db)):
+    import re
+    informativo = _informativo_publicado(db, informativo_id)
+    slug = re.sub(r"[^a-z0-9]+", "-", (informativo.titulo or "informativo").lower()).strip("-")[:60] or "informativo"
+    from app.services.informativo_service import gerar_html, html_para_pdf
+    pdf = html_para_pdf(gerar_html(informativo, para_pdf=True))
+    from fastapi import Response
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{slug}.pdf"'})
+
+
 def _cfg_por_token(db: Session, token: str) -> ConfigFiscal:
     if not token or len(token) < 16:
         raise HTTPException(404, "Link inválido")
