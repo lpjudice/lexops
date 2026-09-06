@@ -118,6 +118,57 @@ def _com_refresh(fn):
             return None
 
 
+def criar_documento_em_branco(titulo: str, parent_folder_id: str | None = None) -> dict | None:
+    """Cria um Google Doc em branco (POST documents:create) e, se informado,
+    move para dentro de `parent_folder_id` no Drive. Retorna
+    {"id", "webViewLink"} ou None se falhar."""
+    def _criar(tokens: dict):
+        return _docs_request("POST", "", tokens, json={"title": titulo})
+
+    doc = _com_refresh(_criar)
+    if not doc or not doc.get("documentId"):
+        return None
+    doc_id = doc["documentId"]
+
+    if parent_folder_id:
+        try:
+            h = _auth_headers(_load_tokens())
+            r = httpx.patch(
+                f"https://www.googleapis.com/drive/v3/files/{doc_id}",
+                headers=h,
+                params={"supportsAllDrives": True, "addParents": parent_folder_id, "fields": "id,webViewLink"},
+                timeout=30,
+            )
+            r.raise_for_status()
+            return {"id": doc_id, "webViewLink": r.json().get("webViewLink", f"https://docs.google.com/document/d/{doc_id}/edit")}
+        except Exception as exc:
+            logger.warning("Falha ao mover doc em branco para a pasta: %s", exc)
+
+    return {"id": doc_id, "webViewLink": f"https://docs.google.com/document/d/{doc_id}/edit"}
+
+
+def ler_texto_documento(doc_id: str) -> str | None:
+    """Lê o texto puro de um Google Doc (concatena os textRun de cada
+    parágrafo). Retorna None se não conseguir ler."""
+    def _ler(tokens: dict):
+        return _docs_request("GET", f"/{doc_id}", tokens)
+
+    doc = _com_refresh(_ler)
+    if not doc:
+        return None
+
+    partes: list[str] = []
+    for elemento in doc.get("body", {}).get("content", []):
+        paragrafo = elemento.get("paragraph")
+        if not paragrafo:
+            continue
+        for item in paragrafo.get("elements", []):
+            texto = (item.get("textRun") or {}).get("content")
+            if texto:
+                partes.append(texto)
+    return "".join(partes)
+
+
 def gerar_documento_peca(
     peca: dict, nome_documento: str,
     nome_cliente: str | None = None, numero_cnj: str | None = None,

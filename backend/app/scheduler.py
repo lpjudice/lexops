@@ -479,6 +479,69 @@ def _enviar_cobrancas_parcelas() -> None:
         logger.warning("Scheduler: falha geral nas cobranças de parcelas: %s", exc)
 
 
+def _lembretes_informativos() -> None:
+    """08h BRT — avisa por e-mail o responsável de cada Informativo cujo
+    prazo (1º draft ou versão final) chega hoje ou já passou e ainda não foi
+    cumprido. Também alerta quando o mês fecha sem publicação."""
+    try:
+        from datetime import date, timedelta
+
+        from app.database import SessionLocal
+        from app.models.informativo import Informativo
+        from app.services.email_service import _send_via_gmail_oauth
+
+        db = SessionLocal()
+        try:
+            hoje = date.today()
+            pendentes = db.query(Informativo).filter(Informativo.status != "publicado").all()
+            enviados = 0
+            for informativo in pendentes:
+                if not informativo.responsavel_id:
+                    continue
+                from app.models.responsavel import Responsavel
+                resp = db.get(Responsavel, informativo.responsavel_id)
+                if not resp or not resp.email:
+                    continue
+
+                assunto = corpo = None
+                if (
+                    informativo.data_prazo_draft and hoje >= informativo.data_prazo_draft
+                    and not informativo.lembrete_draft_enviado and informativo.status == "rascunho"
+                ):
+                    assunto = f"[Informativos] 1º draft do informativo de {informativo.mes_referencia.strftime('%m/%Y')} está no prazo"
+                    corpo = (
+                        f"O 1º rascunho do informativo de {informativo.mes_referencia.strftime('%m/%Y')} "
+                        f"deveria estar pronto até {informativo.data_prazo_draft.strftime('%d/%m')}. "
+                        f"Acesse o Google Doc: {informativo.google_doc_link or '(link não gerado)'}"
+                    )
+                    informativo.lembrete_draft_enviado = True
+                elif (
+                    informativo.data_prazo_final and hoje >= informativo.data_prazo_final
+                    and not informativo.lembrete_final_enviado
+                ):
+                    assunto = f"[Informativos] Versão final do informativo de {informativo.mes_referencia.strftime('%m/%Y')} está no prazo"
+                    corpo = (
+                        f"A versão revisada do informativo de {informativo.mes_referencia.strftime('%m/%Y')} "
+                        f"deveria estar pronta até {informativo.data_prazo_final.strftime('%d/%m')} "
+                        f"(o informativo do mês tem que estar publicado até 7 dias antes de o mês começar). "
+                        f"Acesse o Google Doc: {informativo.google_doc_link or '(link não gerado)'}"
+                    )
+                    informativo.lembrete_final_enviado = True
+
+                if assunto and corpo:
+                    try:
+                        _send_via_gmail_oauth(resp.email, assunto, f"<p>{corpo}</p>")
+                        enviados += 1
+                    except Exception as exc:
+                        logger.warning("Informativo %s: falha ao enviar lembrete: %s", informativo.id, exc)
+            db.commit()
+            logger.info("Scheduler: lembretes de Informativos — %d e-mail(s) enviado(s)", enviados)
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.warning("Scheduler: falha geral nos lembretes de Informativos: %s", exc)
+
+
 def start_scheduler() -> None:
     if scheduler.running:
         logger.info("Scheduler já estava ativo")
@@ -584,6 +647,13 @@ def start_scheduler() -> None:
         _enviar_cobrancas_parcelas,
         trigger=CronTrigger(hour=9, minute=20, timezone="America/Sao_Paulo"),
         id="cobrancas_parcelas_diarias",
+        replace_existing=True,
+    )
+    # Lembrete de prazos internos dos Informativos — todo dia, 08h BRT
+    scheduler.add_job(
+        _lembretes_informativos,
+        trigger=CronTrigger(hour=8, minute=0, timezone="America/Sao_Paulo"),
+        id="lembretes_informativos_diarios",
         replace_existing=True,
     )
     scheduler.start()
