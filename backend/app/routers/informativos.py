@@ -51,6 +51,11 @@ def responsavel_padrao(db: Session = Depends(get_db)):
     return {"id": str(padrao.id), "nome": padrao.nome, "email": padrao.email}
 
 
+@router.get("/destinatarios-por-fonte")
+def destinatarios_por_fonte(db: Session = Depends(get_db)):
+    return informativo_service.listar_destinatarios_por_fonte(db)
+
+
 @router.get("/assinantes")
 def listar_assinantes(db: Session = Depends(get_db)):
     from app.models.informativo import InformativoAssinante
@@ -195,6 +200,25 @@ def validar_citacoes(informativo_id: uuid.UUID, db: Session = Depends(get_db)):
         raise HTTPException(status_code=502, detail=f"Falha ao validar citações: {exc}")
     db.commit()
     return ValidarCitacoesResponse(citacoes=citacoes)
+
+
+@router.get("/{informativo_id}/resumo-perguntas")
+def resumo_perguntas(informativo_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Resumo + perguntas-teaser lidos do Doc — usado pra montar o texto
+    padrão de WhatsApp no front (mesmo conteúdo do e-mail da newsletter)."""
+    informativo = _get(db, informativo_id)
+    resumo = perguntas = None
+    if informativo.google_doc_id:
+        from app.services.google_docs import ler_perguntas_documento, ler_resumo_documento
+        try:
+            resumo = ler_resumo_documento(informativo.google_doc_id)
+        except Exception:
+            resumo = None
+        try:
+            perguntas = ler_perguntas_documento(informativo.google_doc_id)
+        except Exception:
+            perguntas = []
+    return {"resumo": resumo, "perguntas": perguntas or []}
 
 
 @router.get("/{informativo_id}/preview-html")

@@ -591,8 +591,21 @@ function linkPublicoInformativo(id: string): string {
   return `${window.location.origin}/api/publico/informativos/${id}.html`
 }
 
-function textoWhatsappPadrao(informativo: Informativo): string {
-  return `Informativo Pimenta Judice: ${informativo.titulo}\n${linkPublicoInformativo(informativo.id)}`
+function textoWhatsappPadrao(informativo: Informativo, resumo: string | null): string {
+  const numero = informativo.numero ? `Nº ${informativo.numero} / ` : ''
+  const link = linkPublicoInformativo(informativo.id)
+  const linhas = [
+    '*Informativo Pimenta Judice Advogados:*',
+    '',
+    `📌 ${numero}${fmtMes(informativo.mes_referencia)}`,
+    '',
+    `*${informativo.titulo}*`,
+    `📝 Resumo: ${resumo || '(veja no link abaixo)'}`,
+    '',
+    `🔗 ${link}`,
+  ]
+  if (informativo.drive_pdf_link) linhas.push(`📄 PDF: ${informativo.drive_pdf_link}`)
+  return linhas.join('\n')
 }
 
 function DistribuicaoPanel({ informativo }: { informativo: Informativo }) {
@@ -603,10 +616,23 @@ function DistribuicaoPanel({ informativo }: { informativo: Informativo }) {
 
   const chaveTexto = `informativos:whatsapp-texto:${informativo.id}`
   const chaveEnviados = `informativos:whatsapp-enviados:${informativo.id}`
-  const [textoWhatsapp, setTextoWhatsapp] = useState(() => localStorage.getItem(chaveTexto) || textoWhatsappPadrao(informativo))
+  const [textoWhatsapp, setTextoWhatsapp] = useState(() => localStorage.getItem(chaveTexto) || '')
   const [enviadosWhatsapp, setEnviadosWhatsapp] = useState<Set<string>>(() => {
     try { return new Set(JSON.parse(localStorage.getItem(chaveEnviados) || '[]')) } catch { return new Set() }
   })
+
+  const { data: resumoPerguntas } = useQuery({
+    queryKey: ['informativos', informativo.id, 'resumo-perguntas'],
+    queryFn: () => informativosApi.resumoPerguntas(informativo.id),
+  })
+  useEffect(() => {
+    // Só preenche o padrão automaticamente se o usuário ainda não mexeu no
+    // texto (nada salvo) — nunca sobrescreve uma edição já feita.
+    if (!localStorage.getItem(chaveTexto) && resumoPerguntas !== undefined) {
+      setTextoWhatsapp(textoWhatsappPadrao(informativo, resumoPerguntas?.resumo ?? null))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resumoPerguntas])
 
   const { data: destinatarios } = useQuery({
     queryKey: ['informativos', informativo.id, 'newsletter-destinatarios'],
@@ -649,7 +675,7 @@ function DistribuicaoPanel({ informativo }: { informativo: Informativo }) {
 
   return (
     <div style={{ padding: '14px 20px', display: 'flex', gap: 28, flexWrap: 'wrap' }}>
-      <div style={{ minWidth: 260 }}>
+      <div style={{ flex: '1 1 280px', minWidth: 260, maxWidth: 320 }}>
         <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Newsletter por e-mail</div>
         <p style={{ fontSize: 12.5, color: '#6b7280', margin: '0 0 8px' }}>
           {destinatarios ? `${destinatarios.total} destinatário(s)` : 'Carregando destinatários...'}
@@ -689,44 +715,28 @@ function DistribuicaoPanel({ informativo }: { informativo: Informativo }) {
           {testeResultado && !testeMutation.isPending && <p style={{ fontSize: 11.5, color: '#15803d', marginTop: 4 }}>{testeResultado}</p>}
           {testeMutation.isError && <p style={{ fontSize: 11.5, color: '#b91c1c', marginTop: 4 }}>{erroApi(testeMutation.error)}</p>}
         </div>
+
+        <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid #e5e7eb' }}>
+          {informativo.drive_pdf_link ? (
+            <a href={informativo.drive_pdf_link} target="_blank" rel="noreferrer" style={{ fontSize: 12.5 }}>
+              📄 Baixar PDF (pra enviar em grupos)
+            </a>
+          ) : (
+            <span style={{ fontSize: 12.5, color: '#9ca3af' }}>PDF indisponível</span>
+          )}
+        </div>
       </div>
 
-      <div style={{ minWidth: 260, maxWidth: 340 }}>
-        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>WhatsApp (contatos do Conselho)</div>
+      <div style={{ flex: '2 1 420px', minWidth: 320 }}>
+        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>WhatsApp (contatos da Expansão)</div>
         <textarea
           className={styles.input}
-          style={{ fontSize: 12, marginBottom: 6 }}
-          rows={2}
+          style={{ fontSize: 12, marginBottom: 8, fontFamily: 'inherit' }}
+          rows={5}
           value={textoWhatsapp}
           onChange={(e) => salvarTexto(e.target.value)}
         />
-        {contatosWhatsapp.length === 0 ? (
-          <p style={{ fontSize: 12.5, color: '#9ca3af' }}>Nenhum contato com WhatsApp cadastrado.</p>
-        ) : (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 110, overflowY: 'auto', marginBottom: 8 }}>
-            {contatosWhatsapp.map((c) => {
-              const enviado = enviadosWhatsapp.has(c.id)
-              return (
-                <a
-                  key={c.id}
-                  className={styles.btnTable}
-                  style={{
-                    textDecoration: 'none', fontSize: 11.5,
-                    background: enviado ? '#15803d' : undefined, color: enviado ? '#fff' : undefined,
-                  }}
-                  target="_blank"
-                  rel="noreferrer"
-                  href={waLink(c.whatsapp || '')}
-                  onClick={() => toggleEnviado(c.id)}
-                  title={enviado ? 'Marcado como enviado — clique de novo pra desmarcar' : 'Abre o WhatsApp e marca como enviado'}
-                >
-                  {enviado ? '✓ ' : ''}{c.primeiro_nome}
-                </a>
-              )
-            })}
-          </div>
-        )}
-        <div style={{ display: 'flex', gap: 6, paddingTop: 6, borderTop: '1px solid #e5e7eb' }}>
+        <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
           <input
             className={styles.input}
             style={{ fontSize: 12.5, padding: '5px 8px' }}
@@ -744,16 +754,34 @@ function DistribuicaoPanel({ informativo }: { informativo: Informativo }) {
             Testar
           </a>
         </div>
-      </div>
 
-      <div style={{ minWidth: 180 }}>
-        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>PDF</div>
-        {informativo.drive_pdf_link ? (
-          <a href={informativo.drive_pdf_link} target="_blank" rel="noreferrer" style={{ fontSize: 12.5 }}>
-            Baixar PDF (pra enviar em grupos)
-          </a>
+        {contatosWhatsapp.length === 0 ? (
+          <p style={{ fontSize: 12.5, color: '#9ca3af' }}>Nenhum contato com WhatsApp cadastrado.</p>
         ) : (
-          <span style={{ fontSize: 12.5, color: '#9ca3af' }}>PDF indisponível</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 220, overflowY: 'auto' }}>
+            {contatosWhatsapp.map((c) => {
+              const enviado = enviadosWhatsapp.has(c.id)
+              const nomeCompleto = [c.primeiro_nome, c.sobrenome].filter(Boolean).join(' ')
+              return (
+                <a
+                  key={c.id}
+                  target="_blank"
+                  rel="noreferrer"
+                  href={waLink(c.whatsapp || '')}
+                  onClick={() => toggleEnviado(c.id)}
+                  title={enviado ? 'Marcado como enviado — clique de novo pra desmarcar' : 'Abre o WhatsApp e marca como enviado'}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none', fontSize: 13,
+                    padding: '6px 10px', borderRadius: 6, border: '1px solid #e5e7eb',
+                    background: enviado ? '#15803d' : '#fff', color: enviado ? '#fff' : '#1d1e20',
+                  }}
+                >
+                  <span>{enviado ? '✅' : '💬'}</span>
+                  <span>{nomeCompleto}</span>
+                </a>
+              )
+            })}
+          </div>
         )}
       </div>
     </div>

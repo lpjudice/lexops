@@ -679,6 +679,40 @@ def _link_publico(informativo: Informativo) -> str:
     return f"{base}/api/publico/informativos/{informativo.id}.html"
 
 
+def listar_destinatarios_por_fonte(db: Session) -> dict:
+    """Mesmas 3 fontes de `listar_destinatarios_newsletter`, mas SEM
+    deduplicar entre si — pra exibir separado por origem na tela de
+    E-mails (Clientes / Contatos da Expansão / inscritos públicos)."""
+    from app.models.cliente import Cliente
+    from app.models.conselho import ConselhoContato
+    from app.models.informativo import InformativoAssinante, InformativoOptOut
+
+    optados_fora = {(e or "").strip().lower() for (e,) in db.query(InformativoOptOut.email).all()}
+
+    clientes = [
+        {"email": email, "nome": nome or "", "opt_out": (email or "").strip().lower() in optados_fora}
+        for nome, email in db.query(Cliente.nome, Cliente.email).filter(Cliente.email.isnot(None)).all()
+        if email and "@" in email
+    ]
+    contatos = [
+        {"email": email, "nome": " ".join(p for p in [primeiro, sobre] if p), "opt_out": (email or "").strip().lower() in optados_fora}
+        for primeiro, sobre, email in (
+            db.query(ConselhoContato.primeiro_nome, ConselhoContato.sobrenome, ConselhoContato.email)
+            .filter(ConselhoContato.email.isnot(None)).all()
+        )
+        if email and "@" in email
+    ]
+    assinantes = [
+        {
+            "email": a.email, "nome": a.nome or "", "ativo": a.ativo,
+            "opt_out": a.email.strip().lower() in optados_fora,
+            "created_at": a.created_at.isoformat(),
+        }
+        for a in db.query(InformativoAssinante).order_by(InformativoAssinante.created_at.desc()).all()
+    ]
+    return {"clientes": clientes, "contatos": contatos, "assinantes": assinantes}
+
+
 def listar_destinatarios_newsletter(db: Session) -> list[tuple[str, str]]:
     """Une Cliente.email + ConselhoContato.email + InformativoAssinante
     (inscrição pública), deduplicados por e-mail (case-insensitive), menos
@@ -732,19 +766,33 @@ def montar_email_newsletter(informativo: Informativo, destinatario_email: str | 
     descadastro (opt-out) no rodapé. `destinatario_email` personaliza o link
     de opt-out; sem ele, o link fica genérico (usado em pré-visualização/teste)."""
     resumo = None
+    perguntas: list[str] = []
     if informativo.google_doc_id:
-        from app.services.google_docs import ler_resumo_documento
+        from app.services.google_docs import ler_perguntas_documento, ler_resumo_documento
         try:
             resumo = ler_resumo_documento(informativo.google_doc_id)
         except Exception:
             resumo = None
+        try:
+            perguntas = ler_perguntas_documento(informativo.google_doc_id)
+        except Exception:
+            perguntas = []
 
     mes_label = _mes_label(informativo.mes_referencia)
     link = _link_publico(informativo)
     assunto = f"Informativo Pimenta Judice — {informativo.titulo}"
     link_optout = _link_opt_out(destinatario_email or "")
 
-    resumo_html = f'<p style="font-size:15px;line-height:1.6;color:#333;">{resumo}</p>' if resumo else ""
+    resumo_html = f'<p style="font-size:15px;line-height:1.6;color:#333;margin:0 0 16px;">{resumo}</p>' if resumo else ""
+    perguntas_html = ""
+    if perguntas:
+        itens = "".join(f'<li style="margin:6px 0;">❓ {p}</li>' for p in perguntas)
+        perguntas_html = f"""
+        <div style="background:#f5f0e8;border-radius:8px;padding:14px 18px;margin:0 0 18px;">
+          <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:#1C5A4E;text-transform:uppercase;margin-bottom:6px;">📋 O que você vai encontrar</div>
+          <ul style="margin:0;padding-left:18px;font-size:13.5px;color:#333;">{itens}</ul>
+        </div>"""
+
     html = f"""<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
       <div style="background:#1C5A4E;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0;">
         <div style="font-size:11px;letter-spacing:2px;opacity:.85;text-transform:uppercase;">Informativo · {mes_label}</div>
@@ -752,6 +800,7 @@ def montar_email_newsletter(informativo: Informativo, destinatario_email: str | 
       </div>
       <div style="padding:22px 24px;border:1px solid #e5e5e5;border-top:none;border-radius:0 0 8px 8px;">
         {resumo_html}
+        {perguntas_html}
         <p style="font-size:14px;color:#555;">O PDF completo vai anexado neste e-mail. Você também pode ler direto no site:</p>
         <a href="{link}" style="display:inline-block;background:#1C5A4E;color:#fff;text-decoration:none;font-weight:700;padding:12px 24px;border-radius:999px;font-size:14px;">Ler no site →</a>
       </div>
@@ -809,3 +858,123 @@ def enviar_newsletter(db: Session, informativo: Informativo) -> dict:
             logger.warning("Newsletter informativo %s: falha ao enviar pra %s: %s", informativo.id, email, exc)
 
     return {"enviados": enviados, "total": len(destinatarios), "erros": erros}
+
+
+# ── Página pública (identidade visual do site) ──────────────────────────────
+def _renderizar_corpo_html(texto: str) -> str:
+    """Markdown leve (**negrito**, "> citação") → HTML. Mesma sintaxe gravada
+    no Doc pela IA (ver `_parse_corpo_markup` em google_docs.py)."""
+    import html as _html_mod
+    TEAL = "#4a897c"
+    blocos = [b.strip() for b in re.split(r"\n{2,}", (texto or "").strip()) if b.strip()]
+    partes = []
+    for bloco in blocos:
+        eh_citacao = bloco.startswith(">")
+        if eh_citacao:
+            bloco = re.sub(r"^>\s*", "", bloco)
+        escapado = _html_mod.escape(bloco)
+        escapado = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", escapado)
+        if eh_citacao:
+            partes.append(
+                f'<blockquote style="margin:20px 0;padding:14px 20px;border-left:3px solid {TEAL};'
+                f'font-style:italic;color:#3a352c;background:#faf7f0;">{escapado}</blockquote>'
+            )
+        else:
+            partes.append(f'<p style="font-size:16px;line-height:1.75;color:#3a352c;margin:10px 0;">{escapado}</p>')
+    return "".join(partes)
+
+
+def renderizar_pagina_publica(informativo: Informativo) -> str:
+    """HTML autocontido no visual do site oficial (bege/preto, Playfair
+    Display) — a MESMA identidade usada no brinde do Instagram estilo
+    "site". É essa página que o link "Ler no site" abre e que pode ser
+    embedada/linkada a partir do site oficial. Responsiva (mobile)."""
+    from app.services import brinde_instagram
+
+    BEGE, INK, TEAL, MUT = "#F1ECE1", "#1a1a1a", "#4a897c", "#6b655a"
+    logo = brinde_instagram._logo("logo_dark.png")
+    logo_img = f'<img src="{logo}" width="180" style="margin-bottom:20px;max-width:60vw"/>' if logo else ""
+
+    resumo = perguntas = None
+    if informativo.google_doc_id:
+        from app.services.google_docs import ler_perguntas_documento, ler_resumo_documento
+        try:
+            resumo = ler_resumo_documento(informativo.google_doc_id)
+        except Exception:
+            resumo = None
+        try:
+            perguntas = ler_perguntas_documento(informativo.google_doc_id)
+        except Exception:
+            perguntas = None
+
+    import html as _html_mod
+    mes_label = _mes_label(informativo.mes_referencia)
+    titulo_esc = _html_mod.escape(informativo.titulo)
+    numero_txt = f"Informativo nº {informativo.numero} · " if informativo.numero else "Informativo · "
+
+    resumo_html = (
+        f'<p style="font-size:18px;line-height:1.6;color:{MUT};max-width:640px;margin:16px auto 0;">{_html_mod.escape(resumo)}</p>'
+        if resumo else ""
+    )
+    perguntas_html = ""
+    if perguntas:
+        itens = "".join(f'<li style="margin:8px 0;">{_html_mod.escape(p)}</li>' for p in perguntas)
+        perguntas_html = f"""
+        <div style="background:#fff;border:1px solid #e5ddce;border-radius:10px;padding:20px 26px;margin:0 0 34px;">
+          <div style="font-family:'Playfair Display',Georgia,serif;font-weight:600;font-size:18px;color:{INK};margin-bottom:8px;">O que você vai encontrar</div>
+          <ul style="margin:0;padding-left:20px;font-size:15px;line-height:1.5;color:#3a352c;">{itens}</ul>
+        </div>"""
+
+    corpo_html = _renderizar_corpo_html(informativo.conteudo_texto or "")
+    pdf_link = informativo.drive_pdf_link or f"/api/publico/informativos/{informativo.id}.pdf"
+
+    return f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{titulo_esc} — Pimenta Judice Advogados</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Playfair+Display:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * {{ box-sizing: border-box; }}
+  body {{ font-family: 'Archivo', Helvetica, Arial, sans-serif; color: {INK}; background: {BEGE}; margin: 0; }}
+  .wrap {{ max-width: 820px; margin: 0 auto; padding: 56px 48px; background: {BEGE}; }}
+  .hero {{ text-align: center; padding: 20px 0 36px; border-bottom: 1px solid #dcd4c5; margin-bottom: 40px; }}
+  .hero .kick {{ font-size: 12px; letter-spacing: 4px; color: {TEAL}; text-transform: uppercase; }}
+  .hero h1 {{ font-family: 'Playfair Display', Georgia, serif; font-weight: 700; font-size: 40px; line-height: 1.15; color: {INK}; margin: 16px 0 4px; }}
+  .subscribe {{ max-width: 720px; margin: 0 auto 28px; padding: 14px 18px; background: #fff; border: 1px solid #e5ddce; border-radius: 8px; }}
+  .subscribe form {{ display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }}
+  .subscribe input {{ padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; flex: 1; min-width: 140px; }}
+  .subscribe button {{ padding: 8px 18px; background: {INK}; color: #fff; border: none; border-radius: 6px; font-size: 13px; cursor: pointer; }}
+  .footer-actions {{ text-align: center; border-top: 1px solid #dcd4c5; margin-top: 48px; padding-top: 36px; }}
+  .footer-actions a {{ display: inline-block; background: {INK}; color: #fff; padding: 14px 30px; font-size: 13px; letter-spacing: 1.5px; text-transform: uppercase; text-decoration: none; border-radius: 4px; margin: 0 6px 10px; }}
+  .foot {{ text-align: center; color: {MUT}; font-size: 12px; margin-top: 32px; letter-spacing: 1px; }}
+  @media (max-width: 640px) {{
+    .wrap {{ padding: 32px 20px; }}
+    .hero h1 {{ font-size: 28px; }}
+    .subscribe form {{ flex-direction: column; align-items: stretch; }}
+    .footer-actions a {{ display: block; margin: 8px 0; }}
+  }}
+</style></head><body><div class="wrap">
+  <div class="hero">
+    {logo_img}
+    <div class="kick">{numero_txt}{mes_label}</div>
+    <h1>{titulo_esc}</h1>
+    {resumo_html}
+  </div>
+
+  <div class="subscribe">
+    <form onsubmit="event.preventDefault();var f=this;fetch('/api/publico/informativos/assinar',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{email:f.email.value,nome:f.nome.value}})}}).then(function(r){{if(r.ok){{f.outerHTML='<p style=\\'margin:0;color:{TEAL};font-weight:600;\\'>Inscrito! Você vai receber os próximos informativos por e-mail.</p>'}}else{{alert('Não foi possível inscrever agora. Tente de novo mais tarde.')}}}})">
+      <span style="font-size:13px;color:{MUT};">Receba os próximos informativos por e-mail:</span>
+      <input name="nome" placeholder="Nome (opcional)">
+      <input name="email" type="email" required placeholder="seu@email.com">
+      <button type="submit">Inscrever</button>
+    </form>
+  </div>
+
+  {perguntas_html}
+  {corpo_html}
+
+  <div class="footer-actions">
+    <a href="{pdf_link}" target="_blank" rel="noreferrer">Baixar PDF</a>
+    <a href="https://www.pimentajudice.com.br">pimentajudice.com.br</a>
+  </div>
+  <div class="foot">PIMENTA JUDICE ADVOGADOS ASSOCIADOS · PLANEJAMENTO PATRIMONIAL E SUCESSÓRIO</div>
+</div></body></html>"""
