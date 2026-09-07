@@ -126,22 +126,37 @@ def informativos_publicos(db: Session = Depends(get_db)):
     seção "Informativos" do site."""
     from app.models.informativo import Informativo
 
+    from app.services.google_docs import ler_perguntas_documento, ler_resumo_documento
+
     itens = (
         db.query(Informativo)
         .filter(Informativo.status == "publicado")
         .order_by(Informativo.mes_referencia.desc())
         .all()
     )
-    return [
-        {
+    resultado = []
+    for i in itens:
+        resumo = perguntas = None
+        if i.google_doc_id:
+            try:
+                resumo = ler_resumo_documento(i.google_doc_id)
+            except Exception:
+                resumo = None
+            try:
+                perguntas = ler_perguntas_documento(i.google_doc_id)
+            except Exception:
+                perguntas = None
+        resultado.append({
             "id": str(i.id),
+            "numero": i.numero,
             "titulo": i.titulo,
             "mes_referencia": i.mes_referencia.isoformat(),
             "publicado_em": i.publicado_em.isoformat() if i.publicado_em else None,
             "drive_pdf_link": i.drive_pdf_link,
-        }
-        for i in itens
-    ]
+            "resumo": resumo,
+            "perguntas": perguntas or [],
+        })
+    return resultado
 
 
 @router.get("/informativos/opt-out")
