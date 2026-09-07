@@ -1,6 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -54,6 +55,18 @@ def obter_template(db: Session = Depends(get_db)):
     return {"template_doc_link": cfg.template_doc_link}
 
 
+class ResponsavelPadraoRequest(BaseModel):
+    responsavel_id: uuid.UUID | None = None
+
+
+@router.patch("/config/responsavel-padrao")
+def atualizar_responsavel_padrao(payload: ResponsavelPadraoRequest, db: Session = Depends(get_db)):
+    resp = informativo_service.definir_responsavel_padrao(db, payload.responsavel_id)
+    if not resp:
+        return None
+    return {"id": str(resp.id), "nome": resp.nome, "email": resp.email}
+
+
 @router.get("/{informativo_id}", response_model=InformativoOut)
 def obter(informativo_id: uuid.UUID, db: Session = Depends(get_db)):
     return _get(db, informativo_id)
@@ -80,6 +93,9 @@ def atualizar(informativo_id: uuid.UUID, payload: InformativoAtualizar, db: Sess
     dados = payload.model_dump(exclude_unset=True)
     for campo, valor in dados.items():
         setattr(informativo, campo, valor)
+    if "autorizado" in dados:
+        from datetime import datetime, timezone
+        informativo.autorizado_em = datetime.now(timezone.utc) if dados["autorizado"] else None
     db.commit()
     db.refresh(informativo)
     return informativo

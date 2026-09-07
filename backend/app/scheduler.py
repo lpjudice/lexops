@@ -479,63 +479,128 @@ def _enviar_cobrancas_parcelas() -> None:
         logger.warning("Scheduler: falha geral nas cobranças de parcelas: %s", exc)
 
 
+PJ_EMAIL_COPIA = "pj@pimentajudice.com.br"
+
+
 def _lembretes_informativos() -> None:
-    """08h BRT — avisa por e-mail o responsável de cada Informativo cujo
-    prazo (1º draft ou versão final) chega hoje ou já passou e ainda não foi
-    cumprido. Também alerta quando o mês fecha sem publicação."""
+    """08h BRT — fluxo de lembretes do informativo do MÊS SEGUINTE (relativo
+    a hoje), sempre com cópia pra pj@pimentajudice.com.br:
+
+    1) Ainda não criado: a partir do dia 7 do mês corrente, lembra o
+       responsável padrão a cada 2 dias (7, 9, 11...) até ele criar.
+    2) Criado mas não "Autorizado": lembra o responsável do informativo a
+       cada 2 dias pra revisar e autorizar — tom muda pra "atrasado" a
+       partir do prazo final (data_prazo_final).
+    3) Véspera do mês seguinte (dia anterior ao 1º dia do mês de
+       referência): autorizado → lembrete de publicar; não autorizado →
+       aviso de que segue sem autorização.
+
+    "Autorizado" é só um sinalizador informativo — nunca trava geração de
+    PDF nem publicação."""
     try:
-        from datetime import date, timedelta
+        from datetime import date, datetime, timedelta, timezone
 
         from app.database import SessionLocal
         from app.models.informativo import Informativo
+        from app.models.responsavel import Responsavel
+        from app.services import informativo_service
         from app.services.email_service import _send_via_gmail_oauth
 
         db = SessionLocal()
         try:
             hoje = date.today()
-            pendentes = db.query(Informativo).filter(Informativo.status != "publicado").all()
+            mes_alvo = (hoje.replace(day=1) + timedelta(days=32)).replace(day=1)
+            informativo = (
+                db.query(Informativo)
+                .filter(Informativo.mes_referencia == mes_alvo)
+                .order_by(Informativo.created_at.desc())
+                .first()
+            )
             enviados = 0
-            for informativo in pendentes:
-                if not informativo.responsavel_id:
-                    continue
-                from app.models.responsavel import Responsavel
-                resp = db.get(Responsavel, informativo.responsavel_id)
-                if not resp or not resp.email:
-                    continue
 
-                assunto = corpo = None
-                if (
-                    informativo.data_prazo_draft and hoje >= informativo.data_prazo_draft
-                    and not informativo.lembrete_draft_enviado and informativo.status == "rascunho"
-                ):
-                    assunto = f"[Informativos] 1º draft do informativo de {informativo.mes_referencia.strftime('%m/%Y')} está no prazo"
-                    corpo = (
-                        f"O 1º rascunho do informativo de {informativo.mes_referencia.strftime('%m/%Y')} "
-                        f"deveria estar pronto até {informativo.data_prazo_draft.strftime('%d/%m')}. "
-                        f"Acesse o Google Doc: {informativo.google_doc_link or '(link não gerado)'}"
-                    )
-                    informativo.lembrete_draft_enviado = True
-                elif (
-                    informativo.data_prazo_final and hoje >= informativo.data_prazo_final
-                    and not informativo.lembrete_final_enviado
-                ):
-                    assunto = f"[Informativos] Versão final do informativo de {informativo.mes_referencia.strftime('%m/%Y')} está no prazo"
-                    corpo = (
-                        f"A versão revisada do informativo de {informativo.mes_referencia.strftime('%m/%Y')} "
-                        f"deveria estar pronta até {informativo.data_prazo_final.strftime('%d/%m')} "
-                        f"(o informativo do mês tem que estar publicado até 7 dias antes de o mês começar). "
-                        f"Acesse o Google Doc: {informativo.google_doc_link or '(link não gerado)'}"
-                    )
-                    informativo.lembrete_final_enviado = True
+            if not informativo:
+                if hoje.day >= 7 and (hoje.day - 7) % 2 == 0:
+                    padrao = informativo_service.resolver_responsavel_padrao(db)
+                    if padrao and padrao.email:
+                        mes_label = informativo_service._mes_label(mes_alvo)
+                        draft_prazo, final_prazo = informativo_service.calcular_prazos(mes_alvo)
+                        assunto = f"[Informativos] Criar o informativo de {mes_label}"
+                        corpo = (
+                            f"<p>Ainda não foi criado o informativo de <b>{mes_label}</b> no Gestor Jurídico.</p>"
+                            f"<p>Prazos internos: 1º draft até <b>{draft_prazo.strftime('%d/%m')}</b>; "
+                            f"revisado e autorizado até <b>{final_prazo.strftime('%d/%m')}</b> "
+                            f"(7 dias antes do início do mês).</p>"
+                            f"<p>Acesse Expansão → Informativos e crie o informativo do mês.</p>"
+                        )
+                        try:
+                            _send_via_gmail_oauth(padrao.email, assunto, corpo, cc=[PJ_EMAIL_COPIA])
+                            enviados += 1
+                        except Exception as exc:
+                            logger.warning("Lembrete criar informativo: falha ao enviar: %s", exc)
+                db.commit()
+                logger.info("Scheduler: lembretes de Informativos — %d e-mail(s) (criar informativo)", enviados)
+                return
 
-                if assunto and corpo:
+            resp = db.get(Responsavel, informativo.responsavel_id) if informativo.responsavel_id else None
+            if not resp or not resp.email:
+                logger.info("Scheduler: Informativo %s sem responsável com e-mail — lembrete pulado", informativo.id)
+                return
+
+            mes_label = informativo_service._mes_label(informativo.mes_referencia)
+            vespera = informativo.mes_referencia - timedelta(days=1)
+
+            if informativo.autorizado:
+                if hoje == vespera and not informativo.lembrete_vespera_enviado:
+                    assunto = f"[Informativos] Publicar {mes_label} amanhã"
+                    corpo = (
+                        f"<p>O informativo de <b>{mes_label}</b> está autorizado. "
+                        f"Amanhã começa o mês — hora de publicar e disparar.</p>"
+                    )
                     try:
-                        _send_via_gmail_oauth(resp.email, assunto, f"<p>{corpo}</p>")
+                        _send_via_gmail_oauth(resp.email, assunto, corpo, cc=[PJ_EMAIL_COPIA])
+                        informativo.lembrete_vespera_enviado = True
                         enviados += 1
                     except Exception as exc:
-                        logger.warning("Informativo %s: falha ao enviar lembrete: %s", informativo.id, exc)
+                        logger.warning("Lembrete publicação: falha ao enviar: %s", exc)
+                db.commit()
+                logger.info("Scheduler: lembretes de Informativos — %d e-mail(s) (publicação)", enviados)
+                return
+
+            ultimo = informativo.ultimo_lembrete_autorizacao_em
+            eh_vespera = hoje == vespera
+            deve_enviar = eh_vespera or ultimo is None or (hoje - ultimo).days >= 2
+
+            if deve_enviar:
+                atrasado = informativo.data_prazo_final and hoje >= informativo.data_prazo_final
+                if eh_vespera:
+                    assunto = f"[Informativos] {mes_label} NÃO autorizado — mês começa amanhã"
+                    corpo = (
+                        f"<p>O informativo de <b>{mes_label}</b> ainda não foi marcado como "
+                        f"<b>Autorizado</b> e o mês começa amanhã.</p>"
+                        f"<p>Revise o texto e marque como Autorizado assim que possível.</p>"
+                    )
+                elif atrasado:
+                    assunto = f"[Informativos] Atrasado: {mes_label} ainda não autorizado"
+                    corpo = (
+                        f"<p>O prazo pra revisar e autorizar o informativo de <b>{mes_label}</b> "
+                        f"({informativo.data_prazo_final.strftime('%d/%m')}) já passou.</p>"
+                        f"<p>Marque como <b>Autorizado</b> no sistema assim que revisar.</p>"
+                    )
+                else:
+                    assunto = f"[Informativos] Revise e autorize o informativo de {mes_label}"
+                    corpo = (
+                        f"<p>Lembrete: o informativo de <b>{mes_label}</b> precisa ser revisado e marcado "
+                        f"como <b>Autorizado</b> até <b>{informativo.data_prazo_final.strftime('%d/%m') if informativo.data_prazo_final else '—'}</b>.</p>"
+                    )
+                try:
+                    _send_via_gmail_oauth(resp.email, assunto, corpo, cc=[PJ_EMAIL_COPIA])
+                    informativo.ultimo_lembrete_autorizacao_em = hoje
+                    enviados += 1
+                except Exception as exc:
+                    logger.warning("Lembrete autorização: falha ao enviar: %s", exc)
+
             db.commit()
-            logger.info("Scheduler: lembretes de Informativos — %d e-mail(s) enviado(s)", enviados)
+            logger.info("Scheduler: lembretes de Informativos — %d e-mail(s) (autorização)", enviados)
         finally:
             db.close()
     except Exception as exc:
