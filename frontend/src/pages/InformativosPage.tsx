@@ -663,7 +663,6 @@ function DetalheInformativo({ informativo, onFechar }: { informativo: Informativ
               )}
             </div>
           )}
-          )}
         </Passo>
 
         <div style={{ paddingTop: 14, textAlign: 'right' }}>
