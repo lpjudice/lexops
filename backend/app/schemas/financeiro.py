@@ -131,6 +131,7 @@ class HonorarioOut(BaseModel):
     cobranca_ativa: bool = False
     cobranca_email: str | None = None
     cobranca_emails: list[str] = []
+    ultimo_lembrete_em: datetime | None = None
     recebimentos: list[RecebimentoOut]
     parcelas: list[ParcelaOut] = []
     created_at: datetime

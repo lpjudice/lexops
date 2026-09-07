@@ -61,6 +61,9 @@ class Honorario(Base):
     # Lista de e-mails de destino da cobrança (registrados do cliente selecionados
     # + endereços extras digitados). Vazio = usa cliente.email.
     cobranca_emails: Mapped[list] = mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))
+    # Data/hora do último lembrete enviado (qualquer parcela, ou o vencimento único
+    # de um recebível à vista). Atualizado a cada envio — cron ou manual.
+    ultimo_lembrete_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Estágio do lembrete já enviado quando o recebível NÃO tem parcelas (pagamento
     # à vista, usa data_vencimento do próprio honorário). Mesma escala de Parcela.cobranca_estagio.
     cobranca_estagio: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)

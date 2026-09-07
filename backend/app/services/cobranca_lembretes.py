@@ -118,6 +118,9 @@ def _enviar_parcela(*, db, h, cliente, alvo, destino, escr, pos_vencimento, hoje
     _send_via_gmail_oauth(destino, assunto, html, attachments=[(nome_pdf, pdf)])
     if hasattr(alvo, "ultimo_lembrete_em"):
         alvo.ultimo_lembrete_em = agora
+    # Marca também no honorário (cobre o caso à vista, sem parcela real, e serve
+    # como resumo "último lembrete" visível na tela independente do cronograma).
+    h.ultimo_lembrete_em = agora
 
     # Cópia da cobrança no Drive: pasta do cliente + pasta mestra /Financeiro/Cobrancas
     # (best-effort — não deve derrubar o envio do e-mail se o Drive falhar).

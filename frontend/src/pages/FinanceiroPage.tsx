@@ -35,6 +35,9 @@ function fmtVal(v: number) {
 function fmtData(d: string) {
   return new Date(d + 'T12:00:00').toLocaleDateString('pt-BR')
 }
+function fmtDataHora(d: string) {
+  return new Date(d).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
 
 export default function FinanceiroPage() {
   const navigate = useNavigate()
@@ -1042,7 +1045,7 @@ export default function FinanceiroPage() {
                     )}
 
                     {/* Cobrança automática + Parcelas (cronograma) */}
-                    {(h.parcelas?.length > 0 || h.cobranca_ativa) && (
+                    {h.status !== 'pago' && h.status !== 'cancelado' && (
                       <div style={{ marginBottom: 14 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
                           <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, cursor: 'pointer' }}>
@@ -1058,13 +1061,18 @@ export default function FinanceiroPage() {
                               📧 Enviar cobrança agora
                             </button>
                           )}
+                          {h.ultimo_lembrete_em && (
+                            <span style={{ fontSize: 11, color: '#6b7280' }}>
+                              Último lembrete: {fmtDataHora(h.ultimo_lembrete_em)}
+                            </span>
+                          )}
                         </div>
                         {h.parcelas?.length > 0 && (
                           <>
                             <div className={cs.sectionTitle}>Parcelas</div>
                             <table className={cs.recTable}>
                               <thead>
-                                <tr><th>#</th><th>Vencimento</th><th style={{ textAlign: 'right' }}>Valor</th><th>Situação</th><th></th></tr>
+                                <tr><th>#</th><th>Vencimento</th><th style={{ textAlign: 'right' }}>Valor</th><th>Situação</th><th>Último lembrete</th><th></th></tr>
                               </thead>
                               <tbody>
                                 {h.parcelas.map((p) => {
@@ -1091,6 +1099,9 @@ export default function FinanceiroPage() {
                                         <span style={{ fontSize: 11, fontWeight: 700, color: p.status === 'pago' ? '#2f6f5e' : atrasada ? '#a2585e' : '#6b7280' }}>
                                           {p.status === 'pago' ? '✓ Paga' : atrasada ? 'Vencida' : 'A vencer'}
                                         </span>
+                                      </td>
+                                      <td style={{ fontSize: 11, color: '#6b7280' }}>
+                                        {p.ultimo_lembrete_em ? fmtDataHora(p.ultimo_lembrete_em) : '—'}
                                       </td>
                                       <td style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                                         {p.status === 'pendente' ? (

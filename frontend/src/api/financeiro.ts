@@ -60,6 +60,7 @@ export interface Honorario {
   cobranca_ativa?: boolean
   cobranca_email?: string | null
   cobranca_emails?: string[]
+  ultimo_lembrete_em?: string | null
   recebimentos: Recebimento[]
   parcelas: Parcela[]
   created_at: string
