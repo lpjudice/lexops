@@ -8,9 +8,11 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.informativo import Informativo
 from app.schemas.informativo import (
+    DestinatariosPreview,
     InformativoAtualizar,
     InformativoCriar,
     InformativoOut,
+    NewsletterResponse,
     PublicarResponse,
     ReescreverRequest,
     SincronizarResponse,
@@ -184,6 +186,26 @@ def preview_html(informativo_id: uuid.UUID, db: Session = Depends(get_db)):
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return Response(content=html, media_type="text/html; charset=utf-8")
+
+
+@router.get("/{informativo_id}/newsletter/destinatarios", response_model=DestinatariosPreview)
+def newsletter_destinatarios(informativo_id: uuid.UUID, db: Session = Depends(get_db)):
+    _get(db, informativo_id)
+    destinatarios = informativo_service.listar_destinatarios_newsletter(db)
+    exemplos = [f"{nome} <{email}>" if nome else email for email, nome in destinatarios[:5]]
+    return DestinatariosPreview(total=len(destinatarios), exemplos=exemplos)
+
+
+@router.post("/{informativo_id}/newsletter/enviar", response_model=NewsletterResponse)
+def newsletter_enviar(informativo_id: uuid.UUID, db: Session = Depends(get_db)):
+    informativo = _get(db, informativo_id)
+    try:
+        resultado = informativo_service.enviar_newsletter(db, informativo)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Falha ao enviar newsletter: {exc}")
+    return NewsletterResponse(**resultado)
 
 
 @router.post("/{informativo_id}/publicar", response_model=PublicarResponse)

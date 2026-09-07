@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.config_fiscal import ConfigFiscal
 from app.models.nota_fiscal import NotaFiscal
+from app.schemas.informativo import AssinanteRequest
 
 router = APIRouter(prefix="/publico", tags=["publico"])
 
@@ -143,6 +144,47 @@ def informativos_publicos(db: Session = Depends(get_db)):
     ]
 
 
+@router.post("/informativos/assinar")
+def informativo_assinar(payload: AssinanteRequest, db: Session = Depends(get_db)):
+    """Inscrição pública na newsletter dos Informativos — formulário exibido
+    junto de cada informativo publicado. Não exige ser cliente."""
+    from app.models.informativo import InformativoAssinante
+
+    email = (payload.email or "").strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(400, "E-mail inválido.")
+    nome = (payload.nome or "").strip() or None
+
+    existente = db.query(InformativoAssinante).filter(InformativoAssinante.email == email).first()
+    if existente:
+        existente.ativo = True
+        if nome:
+            existente.nome = nome
+    else:
+        db.add(InformativoAssinante(email=email, nome=nome))
+    db.commit()
+    return {"ok": True}
+
+
+def _injetar_form_assinatura(html: str, informativo_id: str) -> str:
+    """Insere um formulário compacto de inscrição na newsletter logo no
+    início do <body> do HTML exportado do Doc."""
+    import re as _re
+    form = f"""
+    <div style="max-width:820px;margin:16px auto 0;padding:14px 18px;background:#f5f0e8;border:1px solid #e5ddce;border-radius:8px;font-family:Arial,sans-serif;">
+      <form onsubmit="event.preventDefault();var f=this;fetch('/api/publico/informativos/assinar',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{email:f.email.value,nome:f.nome.value}})}}).then(function(r){{if(r.ok){{f.outerHTML='<p style=\\'margin:0;color:#1C5A4E;font-weight:600;font-family:Arial,sans-serif;\\'>Inscrito! Você vai receber os próximos informativos por e-mail.</p>'}}else{{alert('Não foi possível inscrever agora. Tente de novo mais tarde.')}}}})" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <span style="font-size:13px;color:#4a4a4a;">Receba os próximos informativos por e-mail:</span>
+        <input name="nome" placeholder="Nome (opcional)" style="padding:6px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;">
+        <input name="email" type="email" required placeholder="seu@email.com" style="padding:6px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;">
+        <button type="submit" style="padding:6px 16px;background:#1C5A4E;color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer;">Inscrever</button>
+      </form>
+    </div>
+    """
+    if "<body" in html:
+        return _re.sub(r"(<body[^>]*>)", lambda m: m.group(1) + form, html, count=1)
+    return form + html
+
+
 def _informativo_publicado(db: Session, informativo_id: str):
     import uuid as _uuid
 
@@ -161,7 +203,8 @@ def _informativo_publicado(db: Session, informativo_id: str):
 @router.get("/informativos/{informativo_id}")
 def informativo_view(informativo_id: str, db: Session = Depends(get_db)):
     informativo = _informativo_publicado(db, informativo_id)
-    return _resp_html(informativo.conteudo_html or "")
+    html = _injetar_form_assinatura(informativo.conteudo_html or "", informativo_id)
+    return _resp_html(html)
 
 
 @router.get("/informativos/{informativo_id}.html")
@@ -169,7 +212,8 @@ def informativo_html(informativo_id: str, db: Session = Depends(get_db)):
     import re
     informativo = _informativo_publicado(db, informativo_id)
     slug = re.sub(r"[^a-z0-9]+", "-", (informativo.titulo or "informativo").lower()).strip("-")[:60] or "informativo"
-    return _resp_html(informativo.conteudo_html or "", f"{slug}.html")
+    html = _injetar_form_assinatura(informativo.conteudo_html or "", informativo_id)
+    return _resp_html(html, f"{slug}.html")
 
 
 @router.get("/informativos/{informativo_id}.pdf")

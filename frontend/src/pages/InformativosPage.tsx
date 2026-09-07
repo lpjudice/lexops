@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { erroApi, informativosApi } from '../api/informativos'
 import type { Citacao, Informativo, StatusInformativo } from '../api/informativos'
 import { instagramApi } from '../api/instagram'
+import { conselhoApi } from '../api/conselho'
 import ResponsavelComboBox from '../components/ResponsavelComboBox'
 import type { ResponsavelValue } from '../components/ResponsavelComboBox'
 import Modal from '../components/Modal'
@@ -69,6 +70,7 @@ export default function InformativosPage() {
   const [sugestaoParaCriar, setSugestaoParaCriar] = useState<string | null>(null)
   const [recusadas, setRecusadas] = useState<string[]>([])
   const [selecionadoId, setSelecionadoId] = useState<string | null>(null)
+  const [expandidoId, setExpandidoId] = useState<string | null>(null)
   const selecionado = informativos.find((i) => i.id === selecionadoId) ?? null
 
   const { data: sugestoesInstagram = [] } = useQuery({
@@ -180,24 +182,45 @@ export default function InformativosPage() {
                 <th>Prazo final</th>
                 <th>Páginas</th>
                 <th></th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
               {informativos.map((i) => (
-                <tr key={i.id} onClick={() => setSelecionadoId(i.id)} style={{ cursor: 'pointer' }}>
-                  <td>{i.numero ?? '—'}</td>
-                  <td style={{ textTransform: 'capitalize' }}>{fmtMes(i.mes_referencia)}</td>
-                  <td>{i.titulo}</td>
-                  <td><StatusBadge status={i.status} /></td>
-                  <td>{fmtData(i.data_prazo_draft)}</td>
-                  <td>{fmtData(i.data_prazo_final)}</td>
-                  <td>{i.paginas_estimadas ?? '—'}</td>
-                  <td>
-                    <button className={styles.btnTable} onClick={(e) => { e.stopPropagation(); setSelecionadoId(i.id) }}>
-                      Abrir
-                    </button>
-                  </td>
-                </tr>
+                <Fragment key={i.id}>
+                  <tr onClick={() => setSelecionadoId(i.id)} style={{ cursor: 'pointer' }}>
+                    <td>{i.numero ?? '—'}</td>
+                    <td style={{ textTransform: 'capitalize' }}>{fmtMes(i.mes_referencia)}</td>
+                    <td>{i.titulo}</td>
+                    <td><StatusBadge status={i.status} /></td>
+                    <td>{fmtData(i.data_prazo_draft)}</td>
+                    <td>{fmtData(i.data_prazo_final)}</td>
+                    <td>{i.paginas_estimadas ?? '—'}</td>
+                    <td>
+                      <button className={styles.btnTable} onClick={(e) => { e.stopPropagation(); setSelecionadoId(i.id) }}>
+                        Abrir
+                      </button>
+                    </td>
+                    <td>
+                      {i.status === 'publicado' && (
+                        <button
+                          className={styles.btnTable}
+                          onClick={(e) => { e.stopPropagation(); setExpandidoId(expandidoId === i.id ? null : i.id) }}
+                          title="Distribuição"
+                        >
+                          {expandidoId === i.id ? '▲ Distribuir' : '▼ Distribuir'}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                  {expandidoId === i.id && (
+                    <tr>
+                      <td colSpan={9} style={{ background: '#fafafa', padding: 0 }}>
+                        <DistribuicaoPanel informativo={i} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -427,6 +450,106 @@ function ResultadoCitacoes({ citacoes }: { citacoes: Citacao[] }) {
 function fmtDataHora(iso?: string | null) {
   if (!iso) return null
   return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
+// Mesma técnica do módulo Eventos (Expansão): encodeURIComponent trata bem a maioria dos
+// casos, mas emojis fora do plano básico (4 bytes) o WhatsApp Desktop não decodifica —
+// manter esses como caracteres crus resolve.
+function encodeWaText(text: string): string {
+  return encodeURIComponent(text).replace(
+    /%[Ff][0-4](?:%[89ABab][0-9A-Fa-f]){3}/g,
+    (m) => decodeURIComponent(m),
+  )
+}
+
+function linkPublicoInformativo(id: string): string {
+  return `${window.location.origin}/api/publico/informativos/${id}.html`
+}
+
+function DistribuicaoPanel({ informativo }: { informativo: Informativo }) {
+  const [enviarResultado, setEnviarResultado] = useState<{ enviados: number; total: number; erros: number } | null>(null)
+
+  const { data: destinatarios } = useQuery({
+    queryKey: ['informativos', informativo.id, 'newsletter-destinatarios'],
+    queryFn: () => informativosApi.destinatariosNewsletter(informativo.id),
+  })
+  const { data: contatos = [] } = useQuery({
+    queryKey: ['conselho', 'contatos', 'whatsapp'],
+    queryFn: () => conselhoApi.listarContatos(),
+    staleTime: 60_000,
+  })
+  const contatosWhatsapp = contatos.filter((c) => c.whatsapp)
+
+  const enviarMutation = useMutation({
+    mutationFn: () => informativosApi.enviarNewsletter(informativo.id),
+    onSuccess: (res) => setEnviarResultado(res),
+  })
+
+  const handleEnviar = () => {
+    const n = destinatarios?.total ?? 0
+    if (window.confirm(`Enviar a newsletter (resumo + link + PDF) para ${n} destinatário(s)?`)) {
+      enviarMutation.mutate()
+    }
+  }
+
+  const link = linkPublicoInformativo(informativo.id)
+  const textoWhatsapp = `Informativo Pimenta Judice: ${informativo.titulo}\n${link}`
+
+  return (
+    <div style={{ padding: '14px 20px', display: 'flex', gap: 28, flexWrap: 'wrap' }}>
+      <div style={{ minWidth: 240 }}>
+        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Newsletter por e-mail</div>
+        <p style={{ fontSize: 12.5, color: '#6b7280', margin: '0 0 8px' }}>
+          {destinatarios ? `${destinatarios.total} destinatário(s)` : 'Carregando destinatários...'}
+          {destinatarios && destinatarios.exemplos.length > 0 && (
+            <span title={destinatarios.exemplos.join(', ')}> (Clientes + Contatos + inscritos no site)</span>
+          )}
+        </p>
+        <button className={styles.btnSmall} onClick={handleEnviar} disabled={enviarMutation.isPending || !destinatarios?.total}>
+          {enviarMutation.isPending ? 'Enviando...' : 'Enviar newsletter'}
+        </button>
+        {enviarMutation.isError && <p style={{ color: '#b91c1c', fontSize: 12.5 }}>{erroApi(enviarMutation.error)}</p>}
+        {enviarResultado && (
+          <p style={{ fontSize: 12.5, color: '#15803d', marginTop: 6 }}>
+            Enviado pra {enviarResultado.enviados}/{enviarResultado.total} {enviarResultado.erros > 0 && `(${enviarResultado.erros} falha(s))`}
+          </p>
+        )}
+      </div>
+
+      <div style={{ minWidth: 240, maxWidth: 320 }}>
+        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>WhatsApp (contatos do Conselho)</div>
+        {contatosWhatsapp.length === 0 ? (
+          <p style={{ fontSize: 12.5, color: '#9ca3af' }}>Nenhum contato com WhatsApp cadastrado.</p>
+        ) : (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 110, overflowY: 'auto' }}>
+            {contatosWhatsapp.map((c) => (
+              <a
+                key={c.id}
+                className={styles.btnTable}
+                style={{ textDecoration: 'none', fontSize: 11.5 }}
+                target="_blank"
+                rel="noreferrer"
+                href={`https://wa.me/${(c.whatsapp || '').replace(/\D/g, '')}?text=${encodeWaText(textoWhatsapp)}`}
+              >
+                {c.primeiro_nome}
+              </a>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={{ minWidth: 180 }}>
+        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>PDF</div>
+        {informativo.drive_pdf_link ? (
+          <a href={informativo.drive_pdf_link} target="_blank" rel="noreferrer" style={{ fontSize: 12.5 }}>
+            Baixar PDF (pra enviar em grupos)
+          </a>
+        ) : (
+          <span style={{ fontSize: 12.5, color: '#9ca3af' }}>PDF indisponível</span>
+        )}
+      </div>
+    </div>
+  )
 }
 
 function DetalheInformativo({ informativo, onFechar }: { informativo: Informativo; onFechar: () => void }) {

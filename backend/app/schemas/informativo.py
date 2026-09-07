@@ -69,6 +69,22 @@ class ValidarCitacoesResponse(BaseModel):
     citacoes: list[dict]
 
 
+class AssinanteRequest(BaseModel):
+    email: str
+    nome: str | None = None
+
+
+class DestinatariosPreview(BaseModel):
+    total: int
+    exemplos: list[str] = []
+
+
+class NewsletterResponse(BaseModel):
+    enviados: int
+    total: int
+    erros: int
+
+
 class PublicarResponse(BaseModel):
     paginas: int
     aviso: str | None = None
