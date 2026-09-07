@@ -9,11 +9,13 @@ When a new LexOps user authenticates, you must share the folder with their Googl
 
 Scopes required: https://www.googleapis.com/auth/drive.file
 """
+import contextlib
 import json
 import logging
 import os
 import re
 import threading
+import zlib
 
 import httpx
 from app.services.google_master_tokens import load_master_google_tokens, save_master_google_tokens
@@ -108,6 +110,36 @@ def _lock_for(parent_id: str, name: str) -> threading.Lock:
             lk = threading.Lock()
             _folder_locks[key] = lk
         return lk
+
+
+@contextlib.contextmanager
+def _pasta_lock_distribuido(parent_id: str, name: str):
+    """Trava distribuída (Postgres advisory lock) por (pai, nome), além da trava
+    em memória acima. A trava em memória só serializa dentro do MESMO processo;
+    se o backend roda com mais de um worker/réplica, dois processos podiam
+    ainda criar a pasta em paralelo. pg_advisory_lock bloqueia entre processos,
+    usando a MESMA conexão do início ao fim (obrigatório: a trava é por sessão).
+    Best-effort — se o banco não estiver acessível, segue sem travar (a
+    reconciliação por _consolidar_pastas ainda cobre o caso raro remanescente)."""
+    chave = zlib.crc32(f"{parent_id}:{name}".encode()) & 0x7FFFFFFF
+    conn = None
+    try:
+        from app.database import engine
+        conn = engine.connect()
+        conn.exec_driver_sql("SELECT pg_advisory_lock(%s)", (chave,))
+    except Exception as exc:
+        logger.warning("Trava distribuida indisponivel para pasta '%s': %s", name, exc)
+        conn = None
+    try:
+        yield
+    finally:
+        if conn is not None:
+            try:
+                conn.exec_driver_sql("SELECT pg_advisory_unlock(%s)", (chave,))
+            except Exception:
+                pass
+            finally:
+                conn.close()
 
 
 def _registry_get(parent_id: str, name: str) -> str | None:
@@ -288,9 +320,10 @@ def _get_or_create_subfolder(name: str, parent_id: str, headers: dict) -> str:
         _cache_set(parent_id, name, fid)
         return fid
 
-    # Serializa a criação no processo para o caso mais comum (sync em lote):
-    # várias criações em sequência rápida da mesma pasta nova.
-    with _lock_for(parent_id, name):
+    # Serializa a criação no processo (caso mais comum: sync em lote, várias
+    # criações em sequência rápida da mesma pasta nova) e ENTRE processos
+    # (múltiplos workers/réplicas do backend), via advisory lock do Postgres.
+    with _lock_for(parent_id, name), _pasta_lock_distribuido(parent_id, name):
         cached = _cache_get(parent_id, name)
         if cached:
             return cached

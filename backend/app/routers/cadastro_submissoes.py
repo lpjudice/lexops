@@ -114,6 +114,9 @@ class AprovarPayload(BaseModel):
     # Destino: criar cliente novo, ou atualizar um cliente específico.
     criar_novo: bool = False
     cliente_id_alvo: uuid.UUID | None = None
+    # Quando True, pula o alerta de nome parecido ao criar cliente novo
+    # (revisor já confirmou que é pessoa/empresa diferente).
+    ignorar_similares: bool = False
 
 
 def _aplicar_valor(cliente: Cliente, campo: str, valor):
@@ -192,6 +195,14 @@ def aprovar_submissao(
         nome = aplicaveis.get("nome") or (dados.get("nome") if isinstance(dados, dict) else None)
         if not nome:
             raise HTTPException(400, "Sem nome — não é possível criar cliente")
+        if not payload.ignorar_similares:
+            from app.services.cliente_dedup import encontrar_similares
+            similares = encontrar_similares(nome, db)
+            if similares:
+                raise HTTPException(
+                    status_code=409,
+                    detail={"tipo": "nome_similar", "similares": similares},
+                )
         from app.routers.clientes import _gerar_projeto
         projeto_nome, worktree_nome = _gerar_projeto(nome)
         cliente = Cliente(

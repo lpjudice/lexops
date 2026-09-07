@@ -66,7 +66,9 @@ class ClienteBase(_CadastroFields):
 
 
 class ClienteCreate(ClienteBase):
-    pass
+    # Quando True, pula o alerta de nome parecido (usuário já confirmou que é
+    # pessoa/empresa diferente). Nunca persistido — removido antes de criar o Cliente.
+    ignorar_similares: bool = False
 
 
 class ClienteUpdate(_CadastroFields):

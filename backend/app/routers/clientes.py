@@ -50,8 +50,18 @@ def listar_clientes(db: Session = Depends(get_db)):
 
 @router.post("/", response_model=ClienteOut, status_code=status.HTTP_201_CREATED)
 def criar_cliente(data: ClienteCreate, db: Session = Depends(get_db)):
+    payload = data.model_dump()
+    ignorar_similares = payload.pop("ignorar_similares", False)
+    if not ignorar_similares:
+        from app.services.cliente_dedup import encontrar_similares
+        similares = encontrar_similares(data.nome, db)
+        if similares:
+            raise HTTPException(
+                status_code=409,
+                detail={"tipo": "nome_similar", "similares": similares},
+            )
     projeto_nome, worktree_nome = _gerar_projeto(data.nome)
-    cliente = Cliente(**data.model_dump(), projeto_nome=projeto_nome, worktree_nome=worktree_nome)
+    cliente = Cliente(**payload, projeto_nome=projeto_nome, worktree_nome=worktree_nome)
     db.add(cliente)
     db.commit()
     db.refresh(cliente)
