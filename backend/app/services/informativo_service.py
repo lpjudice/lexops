@@ -660,6 +660,16 @@ def publicar(db: Session, informativo: Informativo) -> dict:
     informativo.status = "publicado"
     informativo.publicado_em = datetime.now(timezone.utc)
 
+    from app.services.google_docs import ler_perguntas_documento, ler_resumo_documento
+    try:
+        informativo.resumo_publicado = ler_resumo_documento(informativo.google_doc_id)
+    except Exception:
+        informativo.resumo_publicado = None
+    try:
+        informativo.perguntas_publicadas = ler_perguntas_documento(informativo.google_doc_id) or []
+    except Exception:
+        informativo.perguntas_publicadas = []
+
     aviso = None
     if paginas > LIMITE_PAGINAS:
         aviso = f"O PDF ficou com {paginas} páginas (limite recomendado: {LIMITE_PAGINAS_PREFERIDO}-{LIMITE_PAGINAS})."
