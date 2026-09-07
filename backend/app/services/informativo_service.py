@@ -301,11 +301,24 @@ def gerar_rascunho_ia(informativo: Informativo) -> tuple[str, list[str], str, fl
     return resumo, perguntas, corpo, custo
 
 
-def gerar_rascunho_e_gravar(informativo: Informativo) -> str:
+def _validar_citacoes_best_effort(informativo: Informativo) -> list[dict]:
+    """Roda a validação automaticamente depois de gerar/sincronizar texto —
+    não deve nunca quebrar o fluxo principal (gerar/sincronizar já
+    aconteceram e não podem ser perdidos por causa disso)."""
+    try:
+        return validar_citacoes(informativo)
+    except Exception as exc:
+        logger.warning("Informativo %s: falha na validação automática de citações: %s", informativo.id, exc)
+        return informativo.citacoes_validadas or []
+
+
+def gerar_rascunho_e_gravar(informativo: Informativo) -> tuple[str, list[dict]]:
     """Gera resumo + perguntas-teaser + corpo com IA e já grava no Google Doc
     vinculado — resumo e perguntas nos parágrafos abaixo de seus respectivos
     cabeçalhos, corpo depois do separador (o resto do cabeçalho estruturado
-    não é tocado). Pode ser chamado de novo pra regenerar."""
+    não é tocado). Ao final, valida automaticamente as citações do texto
+    (se houver alguma). Pode ser chamado de novo pra regenerar. Retorna
+    (corpo, citacoes_validadas)."""
     if not informativo.google_doc_id:
         raise RuntimeError("Este informativo ainda não tem um Google Doc vinculado.")
     resumo, perguntas, corpo, _custo = gerar_rascunho_ia(informativo)
@@ -324,14 +337,82 @@ def gerar_rascunho_e_gravar(informativo: Informativo) -> str:
     informativo.rascunho_gerado_em = datetime.now(timezone.utc)
     if informativo.status == "rascunho":
         informativo.status = "primeiro_draft"
-    return corpo
+    citacoes = _validar_citacoes_best_effort(informativo)
+    return corpo, citacoes
+
+
+_PROMPT_REESCREVER = """Você já escreveu este Informativo Jurídico Mensal do escritório Pimenta
+Judice Advogados. Uma checagem encontrou problemas em algumas citações — reescreva o
+texto CORRIGINDO ou REMOVENDO o que está incorreto, mantendo o resto do conteúdo e o
+mesmo estilo (parágrafos corridos, **negrito** nos termos-chave, pelo menos um bloco
+"> " de destaque, sem travessão longo, sem floreios de IA, 3-4 páginas).
+
+TEXTO ATUAL:
+{corpo}
+
+PROBLEMAS ENCONTRADOS NA CHECAGEM:
+{apontamentos}
+{instrucoes_bloco}
+Responda APENAS com o texto corrido corrigido, em parágrafos separados por linha em
+branco — sem comentários sobre o que foi mudado, sem markdown fora do combinado acima."""
+
+
+def _formatar_apontamentos(citacoes: list[dict]) -> str:
+    problemas = [c for c in (citacoes or []) if c.get("status_geral") != "confirmado"]
+    if not problemas:
+        return "(nenhum problema encontrado na última checagem — ajuste só pelo direcionamento abaixo, se houver)"
+    linhas = []
+    for p in problemas:
+        ref = p.get("referencia_original") or {}
+        trecho = ref.get("trecho_citado") or ref.get("numero") or "citação"
+        linhas.append(f"- {trecho}: {p.get('observacao') or p.get('status_geral')}")
+    return "\n".join(linhas)
+
+
+def reescrever_com_apontamentos(informativo: Informativo, instrucoes: str | None) -> tuple[str, list[dict]]:
+    """Passo opcional: reescreve o corpo levando em conta os problemas da
+    última validação de citações + um direcionamento extra do usuário.
+    Regrava no Doc e revalida automaticamente. Retorna (corpo, citacoes)."""
+    if not informativo.google_doc_id:
+        raise RuntimeError("Este informativo ainda não tem um Google Doc vinculado.")
+    if not (informativo.conteudo_texto or "").strip():
+        raise RuntimeError("Gere ou sincronize o texto antes de reescrever.")
+    from app.config import settings
+    if not settings.anthropic_api_key:
+        raise RuntimeError("ANTHROPIC_API_KEY não configurada.")
+    import anthropic
+
+    prompt = _PROMPT_REESCREVER.format(
+        corpo=informativo.conteudo_texto,
+        apontamentos=_formatar_apontamentos(informativo.citacoes_validadas),
+        instrucoes_bloco=_instrucoes_bloco(instrucoes),
+    )
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    msg = client.messages.create(
+        model=settings.instagram_claude_model or "claude-opus-4-5",
+        max_tokens=4000,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    corpo = "".join(getattr(b, "text", "") for b in msg.content if getattr(b, "type", "") == "text").strip()
+    if not corpo:
+        raise RuntimeError("A IA não retornou um texto válido.")
+
+    from app.services.google_docs import substituir_corpo_informativo
+    if not substituir_corpo_informativo(informativo.google_doc_id, corpo):
+        raise RuntimeError("Texto reescrito, mas falhou ao gravar no Google Doc (verifique a autenticação Google).")
+    informativo.conteudo_texto = corpo
+    informativo.rascunho_gerado_em = datetime.now(timezone.utc)
+    citacoes = _validar_citacoes_best_effort(informativo)
+    return corpo, citacoes
 
 
 # ── Sincronização com o Google Doc ──────────────────────────────────────────
-def sincronizar_do_doc(informativo: Informativo) -> str:
-    """Traz só o CORPO do Doc (texto depois do separador) pro sistema —
-    usado antes de validar citações. Não é necessário pra publicar: publicar
-    exporta o Doc inteiro direto."""
+def sincronizar_do_doc(informativo: Informativo) -> tuple[str, list[dict]]:
+    """Traz só o CORPO do Doc (texto depois do separador) pro sistema — útil
+    quando o texto foi editado direto no Doc, sem passar pela IA. Não é
+    necessário pra publicar: publicar exporta o Doc inteiro direto. Ao
+    final, valida automaticamente as citações do texto (se houver alguma).
+    Retorna (texto, citacoes_validadas)."""
     if not informativo.google_doc_id:
         raise RuntimeError("Este informativo ainda não tem um Google Doc vinculado.")
     from app.services.google_docs import ler_corpo_documento
@@ -342,7 +423,8 @@ def sincronizar_do_doc(informativo: Informativo) -> str:
     informativo.conteudo_texto = texto.strip()
     if informativo.status == "rascunho" and informativo.conteudo_texto:
         informativo.status = "primeiro_draft"
-    return informativo.conteudo_texto
+    citacoes = _validar_citacoes_best_effort(informativo)
+    return informativo.conteudo_texto, citacoes
 
 
 # ── Validação de citações (lei e julgado) ───────────────────────────────────
@@ -358,42 +440,99 @@ def _extrair_trechos_lei(texto: str) -> list[str]:
     return list(achados)[:20]
 
 
+def detectar_citacoes(texto: str) -> tuple[list[dict], list[str]]:
+    """Detecção BARATA (sem custo de web_search) — só pra saber se vale a
+    pena rodar a verificação de verdade. Retorna (candidatos_julgado,
+    trechos_lei)."""
+    if not (texto or "").strip():
+        return [], []
+    from app.services.precedentcheck_service import extrair_citacoes
+
+    citacoes_julgado, _custo = extrair_citacoes(texto)
+    trechos_lei = _extrair_trechos_lei(texto)
+    return citacoes_julgado, trechos_lei
+
+
 def _verificar_citacao_lei(trecho: str, contexto: str) -> dict:
-    """Confere um artigo/lei citado usando o mesmo mecanismo de web_search do
-    PrecedentCheck, adaptado (sem tribunal/relator)."""
-    from app.services.precedentcheck_service import _chamar_claude, _parse_json_object
+    """Confere um artigo/lei citado — chamada PRÓPRIA (não reaproveita o
+    _chamar_claude do PrecedentCheck, que restringe a busca a domínios de
+    jurisprudência (STJ/STF/Jusbrasil), errados pra achar o texto de uma
+    LEI). Aqui a busca é restrita ao Planalto (fonte oficial), com poucos
+    tokens e no máx. 2 buscas — mantém o custo baixo."""
+    from app.config import settings
+    if not settings.anthropic_api_key:
+        return {"status_geral": "nao_encontrado", "observacao": "IA não configurada.",
+                "referencia_original": {"tipo": "lei", "trecho_citado": trecho}, "custo_usd": 0.0}
+    import anthropic
 
     prompt = f"""Você é um validador de citações jurídicas. Verifique se o dispositivo legal
-abaixo existe e se o trecho citado corresponde ao teor real da norma. Use busca na
-web para confirmar no texto oficial (Planalto, sites de legislação confiáveis).
-NÃO invente conteúdo — se não achar a norma, diga que não encontrou.
+abaixo existe e se o trecho citado corresponde ao teor real da norma. Use a busca na
+web (restrita ao planalto.gov.br, fonte oficial) pra confirmar. NÃO invente conteúdo —
+se não achar a norma ou o dispositivo específico, diga que não encontrou.
 
 DISPOSITIVO CITADO: {trecho}
 CONTEXTO NO TEXTO: {contexto[:500]}
 
-Responda APENAS com JSON:
-{{"status_geral": "confirmado" | "divergente" | "nao_encontrado", "observacao": "..."}}"""
-    resposta, custo = _chamar_claude(prompt, com_web_search=True)
-    verificacao = _parse_json_object(resposta) or {"status_geral": "nao_encontrado", "observacao": "Sem resposta válida"}
+Responda APENAS com JSON (sem markdown):
+{{
+  "status_geral": "confirmado" | "divergente" | "nao_encontrado",
+  "observacao": "explicação curta e objetiva da divergência (se houver) ou confirmação",
+  "texto_integral": "o texto oficial completo do dispositivo (caput + parágrafos/incisos pertinentes), ou vazio se não encontrado",
+  "url_oficial": "URL da lei no planalto.gov.br, ou vazio se não encontrado"
+}}"""
+
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    try:
+        msg = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=1500,
+            tools=[{
+                "type": "web_search_20250305",
+                "name": "web_search",
+                "max_uses": 2,
+                "allowed_domains": ["planalto.gov.br"],
+            }],
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except Exception as exc:
+        logger.warning("Falha ao verificar citação de lei: %s", exc)
+        return {"status_geral": "nao_encontrado", "observacao": f"Falha na verificação: {exc}",
+                "referencia_original": {"tipo": "lei", "trecho_citado": trecho}, "custo_usd": 0.0}
+
+    texto_resp = "\n".join(getattr(b, "text", "") for b in msg.content if getattr(b, "type", "") == "text")
+    from app.services.precedentcheck_service import _parse_json_object
+    verificacao = _parse_json_object(texto_resp) or {"status_geral": "nao_encontrado", "observacao": "Sem resposta válida"}
+
+    usage = getattr(msg, "usage", None)
+    tin = getattr(usage, "input_tokens", 0) or 0
+    tout = getattr(usage, "output_tokens", 0) or 0
+    custo = (tin * 3.0 + tout * 15.0) / 1_000_000
+    server_tool = getattr(usage, "server_tool_use", None)
+    buscas = getattr(server_tool, "web_search_requests", 0) or 0
+    custo += buscas * 0.01
+
     verificacao["referencia_original"] = {"tipo": "lei", "trecho_citado": trecho}
-    verificacao["custo_usd"] = custo
+    verificacao["custo_usd"] = round(custo, 4)
     return verificacao
 
 
 def validar_citacoes(informativo: Informativo) -> list[dict]:
+    """Detecta candidatos e, só se houver algum, roda a verificação de
+    verdade (com custo de web_search). Chamado automaticamente depois de
+    gerar/sincronizar o texto — mas pode ser rechamado manualmente."""
     texto = informativo.conteudo_texto or ""
     if not texto.strip():
         raise RuntimeError("Sincronize o texto do Doc antes de validar as citações.")
 
-    from app.services.precedentcheck_service import extrair_citacoes, verificar_citacao
+    from app.services.precedentcheck_service import verificar_citacao
 
+    citacoes_julgado, trechos_lei = detectar_citacoes(texto)
     resultados: list[dict] = []
 
-    citacoes_julgado, _custo = extrair_citacoes(texto)
     for citacao in citacoes_julgado:
         resultados.append(verificar_citacao(citacao, texto))
 
-    for trecho in _extrair_trechos_lei(texto):
+    for trecho in trechos_lei:
         idx = texto.find(trecho)
         contexto = texto[max(0, idx - 200): idx + 200] if idx >= 0 else texto[:400]
         resultados.append(_verificar_citacao_lei(trecho, contexto))

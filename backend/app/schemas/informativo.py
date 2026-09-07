@@ -55,6 +55,11 @@ class InformativoAtualizar(BaseModel):
 
 class SincronizarResponse(BaseModel):
     conteudo_texto: str
+    citacoes: list[dict] = []
+
+
+class ReescreverRequest(BaseModel):
+    instrucoes: str | None = None
 
 
 class ValidarCitacoesResponse(BaseModel):

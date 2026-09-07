@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { erroApi, informativosApi } from '../api/informativos'
-import type { Informativo, StatusInformativo } from '../api/informativos'
+import type { Citacao, Informativo, StatusInformativo } from '../api/informativos'
 import { instagramApi } from '../api/instagram'
 import ResponsavelComboBox from '../components/ResponsavelComboBox'
 import type { ResponsavelValue } from '../components/ResponsavelComboBox'
@@ -66,17 +66,32 @@ export default function InformativosPage() {
   })
 
   const [modalCriar, setModalCriar] = useState(false)
+  const [sugestaoParaCriar, setSugestaoParaCriar] = useState<string | null>(null)
+  const [recusadas, setRecusadas] = useState<string[]>([])
   const [selecionadoId, setSelecionadoId] = useState<string | null>(null)
   const selecionado = informativos.find((i) => i.id === selecionadoId) ?? null
+
+  const { data: sugestoesInstagram = [] } = useQuery({
+    queryKey: ['instagram', 'sugestoes-tema', 'sugerido'],
+    queryFn: () => instagramApi.listar('sugerido'),
+    staleTime: 30_000,
+  })
+  const sugestoesVisiveis = sugestoesInstagram.filter((s) => !recusadas.includes(s.id)).slice(0, 5)
 
   const criarMutation = useMutation({
     mutationFn: informativosApi.criar,
     onSuccess: (informativo) => {
       qc.invalidateQueries({ queryKey: ['informativos'] })
       setModalCriar(false)
+      setSugestaoParaCriar(null)
       setSelecionadoId(informativo.id)
     },
   })
+
+  const abrirCriarComSugestao = (sugestaoId: string) => {
+    setSugestaoParaCriar(sugestaoId)
+    setModalCriar(true)
+  }
 
   return (
     <div>
@@ -88,11 +103,51 @@ export default function InformativosPage() {
               Editar modelo padrão
             </a>
           )}
-          <button className={styles.btnPrimary} onClick={() => setModalCriar(true)}>
+          <button className={styles.btnPrimary} onClick={() => { setSugestaoParaCriar(null); setModalCriar(true) }}>
             + Novo informativo
           </button>
         </div>
       </div>
+
+      {sugestoesVisiveis.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+            Sugestões de tema (do Instagram)
+          </div>
+          <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 2 }}>
+            {sugestoesVisiveis.map((s) => (
+              <div
+                key={s.id}
+                style={{
+                  flex: '0 0 auto', minWidth: 200, maxWidth: 240, border: '1px solid #e5e7eb', borderRadius: 8,
+                  padding: '8px 10px', background: '#fafafa', display: 'flex', flexDirection: 'column', gap: 6,
+                }}
+              >
+                <span style={{ fontSize: 12.5, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={s.titulo}>
+                  {s.titulo}
+                </span>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button
+                    className={styles.btnTable}
+                    style={{ flex: 1, fontSize: 11.5 }}
+                    onClick={() => abrirCriarComSugestao(s.id)}
+                  >
+                    Usar este tema
+                  </button>
+                  <button
+                    className={styles.btnTable}
+                    style={{ fontSize: 11.5, color: '#9ca3af' }}
+                    title="Recusar sugestão"
+                    onClick={() => setRecusadas((r) => [...r, s.id])}
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {isLoading ? (
         <p>Carregando...</p>
@@ -138,7 +193,8 @@ export default function InformativosPage() {
       {modalCriar && (
         <ModalCriar
           responsavelPadrao={padrao ?? null}
-          onFechar={() => setModalCriar(false)}
+          sugestaoInicialId={sugestaoParaCriar}
+          onFechar={() => { setModalCriar(false); setSugestaoParaCriar(null) }}
           onCriar={(dados) => criarMutation.mutate(dados)}
           salvando={criarMutation.isPending}
         />
@@ -156,11 +212,13 @@ export default function InformativosPage() {
 
 function ModalCriar({
   responsavelPadrao,
+  sugestaoInicialId,
   onFechar,
   onCriar,
   salvando,
 }: {
   responsavelPadrao: { id: string; nome: string; email: string | null } | null
+  sugestaoInicialId?: string | null
   onFechar: () => void
   onCriar: (dados: {
     mes_referencia: string
@@ -172,13 +230,7 @@ function ModalCriar({
   salvando: boolean
 }) {
   const [mesReferencia, setMesReferencia] = useState(proximoMesReferencia())
-  const [titulo, setTitulo] = useState('')
-  const [temaSugestaoId, setTemaSugestaoId] = useState('')
-  const [responsavel, setResponsavel] = useState<ResponsavelValue>({
-    id: responsavelPadrao?.id ?? null,
-    nome: responsavelPadrao?.nome ?? '',
-    email: responsavelPadrao?.email ?? '',
-  })
+  const [temaSugestaoId, setTemaSugestaoId] = useState(sugestaoInicialId ?? '')
 
   const { data: sugestoesInstagram = [] } = useQuery({
     queryKey: ['instagram', 'sugestoes-tema'],
@@ -186,7 +238,19 @@ function ModalCriar({
     staleTime: 30_000,
   })
 
+  const [titulo, setTitulo] = useState('')
+  const [responsavel, setResponsavel] = useState<ResponsavelValue>({
+    id: responsavelPadrao?.id ?? null,
+    nome: responsavelPadrao?.nome ?? '',
+    email: responsavelPadrao?.email ?? '',
+  })
+
   const sugestaoSelecionada = sugestoesInstagram.find((s) => s.id === temaSugestaoId)
+
+  useEffect(() => {
+    if (sugestaoInicialId && !titulo && sugestaoSelecionada) setTitulo(sugestaoSelecionada.titulo)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sugestaoSelecionada])
 
   return (
     <Modal onClose={onFechar} title="Novo informativo">
@@ -285,6 +349,67 @@ function Passo({
   )
 }
 
+const CITACAO_STATUS_LABEL: Record<string, string> = {
+  confirmado: '✓ Confirmado',
+  divergente: '⚠ Divergente',
+  nao_encontrado: '? Não encontrado',
+}
+const CITACAO_STATUS_COR: Record<string, string> = {
+  confirmado: '#15803d',
+  divergente: '#b45309',
+  nao_encontrado: '#6b7280',
+}
+
+function CitacaoCard({ citacao }: { citacao: Citacao }) {
+  const ref = citacao.referencia_original || {}
+  const rotulo = ref.trecho_citado || [ref.tribunal, ref.numero].filter(Boolean).join(' ') || 'Citação'
+  const cor = CITACAO_STATUS_COR[citacao.status_geral] || '#6b7280'
+  return (
+    <div style={{ border: '1px solid #e5e7eb', borderLeft: `4px solid ${cor}`, borderRadius: 6, padding: '10px 12px', marginTop: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontWeight: 600, fontSize: 13 }}>{rotulo}</span>
+        <span style={{ fontSize: 12, fontWeight: 600, color: cor }}>
+          {CITACAO_STATUS_LABEL[citacao.status_geral] || citacao.status_geral}
+        </span>
+      </div>
+      {citacao.observacao && (
+        <p style={{ fontSize: 12.5, color: '#374151', margin: '6px 0 0', lineHeight: 1.5 }}>{citacao.observacao}</p>
+      )}
+      {citacao.texto_integral && (
+        <div style={{ marginTop: 8, background: '#f9fafb', borderRadius: 4, padding: '8px 10px' }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: '#6b7280', marginBottom: 4, textTransform: 'uppercase' }}>
+            Texto oficial do dispositivo
+          </div>
+          <p style={{ fontSize: 12.5, color: '#1f2937', margin: 0, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+            {citacao.texto_integral}
+          </p>
+          {citacao.url_oficial && (
+            <a href={citacao.url_oficial} target="_blank" rel="noreferrer" style={{ fontSize: 12, display: 'inline-block', marginTop: 6 }}>
+              Ver no Planalto →
+            </a>
+          )}
+        </div>
+      )}
+      {typeof citacao.custo_usd === 'number' && citacao.custo_usd > 0 && (
+        <div style={{ fontSize: 10.5, color: '#9ca3af', marginTop: 6 }}>custo: ${citacao.custo_usd.toFixed(4)}</div>
+      )}
+    </div>
+  )
+}
+
+function ResultadoCitacoes({ citacoes }: { citacoes: Citacao[] }) {
+  if (citacoes.length === 0) {
+    return <p style={{ fontSize: 13, color: '#6b7280', marginTop: 8 }}>Não há citações de lei ou julgado no texto.</p>
+  }
+  return (
+    <div>
+      {citacoes.map((c, idx) => (
+        <CitacaoCard key={idx} citacao={c} />
+      ))}
+    </div>
+  )
+}
+
 function fmtDataHora(iso?: string | null) {
   if (!iso) return null
   return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
@@ -296,6 +421,9 @@ function DetalheInformativo({ informativo, onFechar }: { informativo: Informativ
   const [previewCarregando, setPreviewCarregando] = useState(false)
   const [aviso, setAviso] = useState<string | null>(null)
   const [instrucoes, setInstrucoes] = useState(informativo.instrucoes_ia ?? '')
+  const [instrucoesReescrever, setInstrucoesReescrever] = useState('')
+  const [citacoes, setCitacoes] = useState<Citacao[]>(informativo.citacoes_validadas ?? [])
+  const [citacoesCarregadas, setCitacoesCarregadas] = useState(informativo.citacoes_validadas.length > 0 || Boolean(informativo.rascunho_gerado_em))
 
   const invalidar = () => qc.invalidateQueries({ queryKey: ['informativos'] })
 
@@ -305,15 +433,19 @@ function DetalheInformativo({ informativo, onFechar }: { informativo: Informativ
   })
   const rascunhoIAMutation = useMutation({
     mutationFn: () => informativosApi.gerarRascunhoIA(informativo.id),
-    onSuccess: invalidar,
+    onSuccess: (res) => { invalidar(); setCitacoes(res.citacoes); setCitacoesCarregadas(true) },
+  })
+  const reescreverMutation = useMutation({
+    mutationFn: () => informativosApi.reescreverIA(informativo.id, instrucoesReescrever),
+    onSuccess: (res) => { invalidar(); setCitacoes(res.citacoes); setCitacoesCarregadas(true) },
   })
   const sincronizarMutation = useMutation({
     mutationFn: () => informativosApi.sincronizarDoc(informativo.id),
-    onSuccess: invalidar,
+    onSuccess: (res) => { invalidar(); setCitacoes(res.citacoes); setCitacoesCarregadas(true) },
   })
   const validarMutation = useMutation({
     mutationFn: () => informativosApi.validarCitacoes(informativo.id),
-    onSuccess: invalidar,
+    onSuccess: (res) => { invalidar(); setCitacoes(res.citacoes); setCitacoesCarregadas(true) },
   })
   const publicarMutation = useMutation({
     mutationFn: () => informativosApi.publicar(informativo.id),
@@ -450,33 +582,57 @@ function DetalheInformativo({ informativo, onFechar }: { informativo: Informativ
 
         <Passo
           numero={4}
-          titulo="Confira as citações de lei/julgado (opcional)"
-          descricao="Só se o texto citar lei ou jurisprudência. Primeiro traz o texto do Doc pro sistema, depois confere cada citação."
+          titulo="Checagem de citações de lei/julgado"
+          descricao="Roda sozinha depois de gerar/regerar o texto. Use os botões abaixo se editou o Doc na mão, ou pra rechecar."
         >
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button className={styles.btnSmall} onClick={() => sincronizarMutation.mutate()} disabled={sincronizarMutation.isPending}>
-              {sincronizarMutation.isPending ? 'Trazendo do Doc...' : 'Trazer texto do Doc'}
+              {sincronizarMutation.isPending ? 'Sincronizando e checando...' : 'Sincronizar do Doc e checar'}
             </button>
             <button
               className={styles.btnSmall}
               onClick={() => validarMutation.mutate()}
               disabled={validarMutation.isPending || !informativo.conteudo_texto}
-              title={!informativo.conteudo_texto ? 'Traga o texto do Doc primeiro' : undefined}
+              title={!informativo.conteudo_texto ? 'Gere ou sincronize o texto primeiro' : undefined}
             >
-              {validarMutation.isPending ? 'Validando...' : 'Validar citações'}
+              {validarMutation.isPending ? 'Rechecando...' : 'Rechecar citações'}
             </button>
           </div>
-          {validarMutation.data && (
-            <ul style={{ marginTop: 8, paddingLeft: 18 }}>
-              {validarMutation.data.citacoes.length === 0 && <li style={{ fontSize: 13 }}>Nenhuma citação encontrada no texto.</li>}
-              {validarMutation.data.citacoes.map((c, idx) => (
-                <li key={idx} style={{ fontSize: 13 }}>{JSON.stringify(c)}</li>
-              ))}
-            </ul>
+          {(sincronizarMutation.isPending || validarMutation.isPending) && (
+            <p style={{ fontSize: 12.5, color: '#6b7280', marginTop: 6 }}>Isso pode levar alguns segundos por citação (busca na web).</p>
+          )}
+          {citacoesCarregadas ? <ResultadoCitacoes citacoes={citacoes} /> : (
+            <p style={{ fontSize: 13, color: '#9ca3af', marginTop: 8 }}>Ainda não checado nesta sessão.</p>
           )}
         </Passo>
 
-        <Passo numero={5} titulo="Publicar" descricao="Gera o PDF final a partir do Doc (com timbrado) e disponibiliza no site.">
+        <Passo
+          numero={5}
+          titulo="Reescrever considerando os apontamentos (opcional)"
+          descricao="A IA reescreve o corpo corrigindo o que a checagem apontou. Dá pra somar um direcionamento extra."
+        >
+          <textarea
+            className={styles.input}
+            rows={2}
+            placeholder='Ex.: "corrija a citação do art. 1.055 e cite o dispositivo certo"'
+            value={instrucoesReescrever}
+            onChange={(e) => setInstrucoesReescrever(e.target.value)}
+          />
+          <button
+            className={styles.btnSmall}
+            style={{ marginTop: 6 }}
+            onClick={() => reescreverMutation.mutate()}
+            disabled={reescreverMutation.isPending || !informativo.conteudo_texto}
+            title={!informativo.conteudo_texto ? 'Gere ou sincronize o texto primeiro' : undefined}
+          >
+            {reescreverMutation.isPending ? 'Reescrevendo...' : 'Reescrever com IA'}
+          </button>
+          {reescreverMutation.isError && (
+            <p style={{ color: '#b91c1c', fontSize: 12.5 }}>{erroApi(reescreverMutation.error)}</p>
+          )}
+        </Passo>
+
+        <Passo numero={6} titulo="Publicar" descricao="Gera o PDF final a partir do Doc (com timbrado) e disponibiliza no site.">
           <button className={styles.btnPrimary} onClick={() => publicarMutation.mutate()} disabled={publicarMutation.isPending}>
             {publicarMutation.isPending ? 'Publicando...' : jaPublicado ? 'Republicar' : 'Publicar'}
           </button>
@@ -493,6 +649,20 @@ function DetalheInformativo({ informativo, onFechar }: { informativo: Informativ
           {aviso && <p style={{ color: '#b45309', fontSize: 13 }}>{aviso}</p>}
           {publicarMutation.isError && (
             <p style={{ color: '#b91c1c', fontSize: 12.5 }}>{erroApi(publicarMutation.error)}</p>
+          )}
+          {(informativo.google_doc_link || informativo.drive_folder_link || informativo.drive_pdf_link) && (
+            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 12.5, marginTop: 10 }}>
+              {informativo.google_doc_link && (
+                <a href={informativo.google_doc_link} target="_blank" rel="noreferrer">📄 Abrir Google Doc</a>
+              )}
+              {informativo.drive_folder_link && (
+                <a href={informativo.drive_folder_link} target="_blank" rel="noreferrer">📁 Pasta no Drive</a>
+              )}
+              {informativo.drive_pdf_link && (
+                <a href={informativo.drive_pdf_link} target="_blank" rel="noreferrer">✅ Ver PDF publicado</a>
+              )}
+            </div>
+          )}
           )}
         </Passo>
 
