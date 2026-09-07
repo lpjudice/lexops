@@ -102,6 +102,14 @@ export const informativosApi = {
   definirCorpoManual: (id: string, texto: string) =>
     api.post<{ conteudo_texto: string; citacoes: Citacao[] }>(`/informativos/${id}/definir-corpo-manual`, { texto }, { timeout: 30000 }).then((r) => r.data),
 
+  uploadPdfManual: (id: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post<{ conteudo_texto: string; citacoes: Citacao[] }>(`/informativos/${id}/upload-pdf-manual`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' }, timeout: 30000,
+    }).then((r) => r.data)
+  },
+
   reescreverIA: (id: string, instrucoes?: string) =>
     api.post<{ conteudo_texto: string; citacoes: Citacao[] }>(`/informativos/${id}/reescrever-ia`, { instrucoes: instrucoes || null }, { timeout: 60000 }).then((r) => r.data),
 
