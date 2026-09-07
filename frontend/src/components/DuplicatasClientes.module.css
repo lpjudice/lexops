@@ -97,6 +97,19 @@
 
 .btnMesclar:disabled { opacity: 0.6; cursor: default; }
 
+.btnConfirmarDiferente {
+  background: #fff;
+  color: #15803d;
+  border: 1px solid #15803d;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btnConfirmarDiferente:disabled { opacity: 0.6; cursor: default; }
+
 .erro {
   color: #b91c1c;
   font-size: 13px;

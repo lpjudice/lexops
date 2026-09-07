@@ -59,11 +59,22 @@ def encontrar_similares(
     return achados
 
 
+def _chave_grupo(ids: list[str]) -> str:
+    """Chave estável de um grupo de duplicidade, independente da ordem."""
+    return ",".join(sorted(ids))
+
+
 def escanear_duplicados_cadastro(db: Session, limiar: float = LIMIAR_SIMILARIDADE) -> list[dict]:
     """Varre TODA a tabela `clientes` e agrupa linhas com nome igual/parecido
     (mesma comparação de `encontrar_similares`, mas O(n²) sobre a base toda —
     usado só na tela de revisão manual de duplicidades, não em toda criação).
-    Retorna: [{membros: [{id, nome, tipo, drive_folder_id, created_at}], similaridade}]"""
+    Omite grupos que o Lucas já revisou e confirmou como pessoas diferentes
+    (`dispensar_duplicata`).
+    Retorna: [{chave, membros: [{id, nome, tipo, drive_folder_id, created_at}], similaridade}]"""
+    dispensadas = {
+        row[0] for row in db.execute(text("SELECT chave FROM cliente_duplicata_dispensada")).fetchall()
+    }
+
     linhas = db.execute(
         text("SELECT id::text, nome, tipo, drive_folder_id, created_at FROM clientes ORDER BY nome")
     ).fetchall()
@@ -90,7 +101,21 @@ def escanear_duplicados_cadastro(db: Session, limiar: float = LIMIAR_SIMILARIDAD
                 })
                 pior_score = min(pior_score, score)
         if len(membros) > 1:
+            chave = _chave_grupo([m["id"] for m in membros])
             for m in membros:
                 vistos.add(m["id"])
-            grupos.append({"membros": membros, "similaridade": round(pior_score, 3)})
+            if chave in dispensadas:
+                continue
+            grupos.append({"chave": chave, "membros": membros, "similaridade": round(pior_score, 3)})
     return grupos
+
+
+def dispensar_duplicata(ids: list[str], db: Session) -> None:
+    """Marca um grupo como revisado e confirmado como pessoas/empresas
+    DIFERENTES — some do alerta até a lista de membros do grupo mudar."""
+    chave = _chave_grupo([str(i) for i in ids])
+    db.execute(
+        text("INSERT INTO cliente_duplicata_dispensada (chave) VALUES (:c) ON CONFLICT DO NOTHING"),
+        {"c": chave},
+    )
+    db.commit()

@@ -1311,6 +1311,15 @@ def _run_migrations() -> None:
         conn.execute(text("ALTER TABLE informativos ADD COLUMN IF NOT EXISTS perguntas_publicadas JSONB NOT NULL DEFAULT '[]'::jsonb"))
         conn.execute(text("ALTER TABLE informativo_config ADD COLUMN IF NOT EXISTS responsavel_padrao_id UUID"))
 
+        # Grupos de "possível duplicidade de cliente" que o Lucas já revisou e
+        # confirmou que são pessoas/empresas DIFERENTES — não mostrar de novo.
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS cliente_duplicata_dispensada (
+                chave VARCHAR(500) PRIMARY KEY,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+
         conn.commit()
 
 
