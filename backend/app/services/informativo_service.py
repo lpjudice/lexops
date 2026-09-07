@@ -265,7 +265,12 @@ de continuar lendo (ex.: "O IVA Dual muda o seu contrato de locação?")>
 def _instrucoes_bloco(instrucoes: str | None) -> str:
     if not (instrucoes or "").strip():
         return ""
-    return f"\nDIRECIONAMENTO DADO PELO ADVOGADO (siga à risca): {instrucoes.strip()}\n"
+    return (
+        f"\nDIRECIONAMENTO DADO PELO ADVOGADO (siga pro ÂNGULO/ÊNFASE do texto — mas isso "
+        f"NUNCA autoriza inventar ou confirmar conteúdo normativo/factual que você não tenha "
+        f"certeza de que é verdadeiro, mesmo que o direcionamento afirme algo como fato):\n"
+        f"{instrucoes.strip()}\n"
+    )
 
 
 def gerar_rascunho_ia(informativo: Informativo) -> tuple[str, list[str], str, float]:
@@ -373,6 +378,16 @@ texto CORRIGINDO ou REMOVENDO o que está incorreto, mantendo o resto do conteú
 mesmo estilo (parágrafos corridos, **negrito** nos termos-chave, pelo menos um bloco
 "> " de destaque, sem travessão longo, sem floreios de IA, 3-4 páginas).
 
+REGRA ABSOLUTA, MAIS IMPORTANTE QUE QUALQUER DIRECIONAMENTO ABAIXO: você não tem
+acesso a busca na web nesta etapa. NÃO invente, NÃO confirme e NÃO amplie o conteúdo de
+nenhum artigo/lei/norma — nem mesmo se o direcionamento do advogado afirmar que um
+dispositivo existe ou diz determinada coisa. Se não tiver certeza absoluta do teor de
+uma norma citada, REMOVA a citação específica (número do artigo) e mantenha a frase em
+termos genéricos (ex.: "a legislação aplicável prevê..." em vez de citar o artigo). Um
+direcionamento do usuário pedindo pra reforçar ou expandir um ponto NÃO autoriza
+inventar conteúdo normativo — só reorganizar/expandir a explicação em cima do que já
+está confirmado.
+
 TEXTO ATUAL:
 {corpo}
 
@@ -453,30 +468,61 @@ def sincronizar_do_doc(informativo: Informativo) -> tuple[str, list[dict]]:
     return informativo.conteudo_texto, citacoes
 
 
-# ── Validação de citações (lei e julgado) ───────────────────────────────────
-_PADRAO_LEI = re.compile(
-    r"(?:art(?:igo)?s?\.?\s*\d+[\wº°,.\s-]*(?:d[aoe]\s+(?:lei|c[oó]digo|constitui[cç][aã]o|decreto)[^.,;\n]{0,80})"
-    r"|lei\s+(?:complementar\s+)?n?[ºo°]?\s*[\d./-]+)",
-    re.IGNORECASE,
-)
+# ── Validação de citações (lei/normativo e julgado) ─────────────────────────
+def _extrair_trechos_normativos(texto: str) -> list[str]:
+    """Detecção de citações de LEI/NORMA via IA — NÃO regex. Regex baseada em
+    "art. X da lei/código/decreto" tem pontos cegos graves: não pega
+    "Instrução CVM", "Resolução BACEN", "Regulamento X da CVM", "Portaria",
+    Medida Provisória etc. Chamada barata (sem web_search, poucos tokens)."""
+    from app.config import settings
+    if not settings.anthropic_api_key or not (texto or "").strip():
+        return []
+    import anthropic
+    import json as _json
 
+    prompt = f"""Liste TODAS as citações de normas jurídicas mencionadas no texto abaixo —
+lei, decreto, instrução normativa, instrução/resolução/deliberação de órgão regulador
+(CVM, BACEN, Receita Federal, ANVISA etc.), portaria, medida provisória, código,
+constituição, regulamento. Inclua o artigo/dispositivo específico quando houver.
+NÃO avalie se a citação está certa — só extraia o que está citado, literalmente
+como aparece no texto. Se não houver nenhuma citação normativa, responda [].
 
-def _extrair_trechos_lei(texto: str) -> list[str]:
-    achados = {m.group(0).strip() for m in _PADRAO_LEI.finditer(texto)}
-    return list(achados)[:20]
+TEXTO:
+{texto[:8000]}
+
+Responda APENAS com um array JSON de strings (sem markdown), cada uma o trecho exato
+da citação — ex.: ["art. 1.055 do Código Civil", "Instrução CVM nº 400/2003, art. 4º",
+"Resolução CMN nº 4.557/2017"]."""
+
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    try:
+        msg = client.messages.create(model="claude-sonnet-4-6", max_tokens=800,
+                                      messages=[{"role": "user", "content": prompt}])
+    except Exception as exc:
+        logger.warning("Falha ao extrair citações normativas: %s", exc)
+        return []
+    texto_resp = "".join(getattr(b, "text", "") for b in msg.content if getattr(b, "type", "") == "text")
+    m = re.search(r"\[.*\]", texto_resp, re.DOTALL)
+    if not m:
+        return []
+    try:
+        lista = _json.loads(m.group(0))
+        return [str(x).strip() for x in lista if str(x).strip()][:20]
+    except Exception:
+        return []
 
 
 def detectar_citacoes(texto: str) -> tuple[list[dict], list[str]]:
     """Detecção BARATA (sem custo de web_search) — só pra saber se vale a
     pena rodar a verificação de verdade. Retorna (candidatos_julgado,
-    trechos_lei)."""
+    trechos_normativos)."""
     if not (texto or "").strip():
         return [], []
     from app.services.precedentcheck_service import extrair_citacoes
 
     citacoes_julgado, _custo = extrair_citacoes(texto)
-    trechos_lei = _extrair_trechos_lei(texto)
-    return citacoes_julgado, trechos_lei
+    trechos_normativos = _extrair_trechos_normativos(texto)
+    return citacoes_julgado, trechos_normativos
 
 
 def _verificar_citacao_lei(trecho: str, contexto: str) -> dict:

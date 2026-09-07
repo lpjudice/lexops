@@ -28,6 +28,7 @@ import {
   Gavel,
   Landmark,
   Camera,
+  Mail,
 } from 'lucide-react'
 import api from '../api/client'
 import { useAuth } from '../contexts/AuthContext'
@@ -80,6 +81,7 @@ const navGroups: NavGroup[] = [
       { to: '/conselho', label: 'Expansão', Icon: Users2 },
       { to: '/instagram', label: 'Instagram', Icon: Camera },
       { to: '/informativos', label: 'Informativos', Icon: Newspaper },
+      { to: '/informativos/assinantes', label: 'E-mails (Informativos)', Icon: Mail },
     ],
   },
   {
@@ -159,6 +161,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/conselho': 'Expansão',
   '/instagram': 'Instagram',
   '/informativos': 'Informativos',
+  '/informativos/assinantes': 'E-mails (Informativos)',
   '/configuracoes': 'Configurações',
 }
 

@@ -293,20 +293,43 @@ def _substituir_paragrafo_apos_heading(doc_id: str, heading_texto: str, novo_tex
     return bool(_com_refresh(_escrever))
 
 
+def _substituir_via_token_ou_heading(doc_id: str, token: str, heading_texto: str, novo_texto: str) -> bool:
+    """Tenta primeiro um replaceAllText literal do `token` (ex.: "{{RESUMO}}")
+    — mais robusto a qualquer estrutura de template, já que não depende de
+    achar um parágrafo/cabeçalho específico. Só cai pro método de heading
+    (parágrafo seguinte a um texto fixo) se o token não existir mais no Doc
+    (ex.: já foi substituído numa geração anterior)."""
+    def _tentar_token(tokens: dict):
+        resp = _docs_request("POST", f"/{doc_id}:batchUpdate", tokens, json={"requests": [
+            {"replaceAllText": {"containsText": {"text": token, "matchCase": True}, "replaceText": novo_texto}}
+        ]})
+        trocados = sum(
+            (r.get("replaceAllText") or {}).get("occurrencesChanged", 0) for r in resp.get("replies", [])
+        )
+        return trocados > 0
+
+    if _com_refresh(_tentar_token):
+        return True
+    return _substituir_paragrafo_apos_heading(doc_id, heading_texto, novo_texto)
+
+
 def substituir_resumo_informativo(doc_id: str, resumo: str) -> bool:
-    """Substitui o parágrafo logo abaixo de "RESUMO ESTRUTURADO" pelo texto
-    informado (curto — 1-2 frases ou palavras-chave)."""
-    return _substituir_paragrafo_apos_heading(doc_id, "RESUMO ESTRUTURADO", resumo)
+    """Substitui o resumo — tenta o token {{RESUMO}} primeiro (se o modelo
+    customizado ainda usar esse placeholder), senão localiza pelo parágrafo
+    logo abaixo de "RESUMO ESTRUTURADO". Texto curto — 1-2 frases ou
+    palavras-chave."""
+    return _substituir_via_token_ou_heading(doc_id, "{{RESUMO}}", "RESUMO ESTRUTURADO", resumo)
 
 
 def substituir_perguntas_informativo(doc_id: str, perguntas: list[str]) -> bool:
-    """Substitui o parágrafo logo abaixo do cabeçalho `HEADING_PERGUNTAS`
-    pelas 2-3 perguntas-teaser, juntas num único parágrafo (separadas por
-    " · ") — de propósito uma linha só, pra `_substituir_paragrafo_apos_heading`
-    continuar funcionando de forma idempotente em regenerações (se virassem
-    parágrafos separados, só o primeiro seria limpo numa 2ª geração)."""
+    """Substitui as 2-3 perguntas-teaser, juntas num único parágrafo
+    (separadas por " · ") — de propósito uma linha só, pra continuar
+    funcionando de forma idempotente em regenerações (se virassem
+    parágrafos separados, só o primeiro seria limpo numa 2ª geração).
+    Tenta o token {{PERGUNTAS}} primeiro, senão usa o cabeçalho
+    `HEADING_PERGUNTAS`."""
     texto = " · ".join(p.strip().rstrip("?") + "?" for p in perguntas if p.strip())
-    return _substituir_paragrafo_apos_heading(doc_id, HEADING_PERGUNTAS, texto)
+    return _substituir_via_token_ou_heading(doc_id, "{{PERGUNTAS}}", HEADING_PERGUNTAS, texto)
 
 
 def _paragrafos_do_doc(doc: dict) -> list[tuple[str, int, int]]:
@@ -497,11 +520,27 @@ def substituir_corpo_informativo(doc_id: str, texto: str) -> bool:
         if not texto_limpo:
             return True
 
-        fmt = [{"updateParagraphStyle": {
-            "range": {"startIndex": corte + 1, "endIndex": corte + 1 + len(texto_limpo)},
-            "paragraphStyle": {"alignment": "JUSTIFIED", "lineSpacing": 150},
-            "fields": "alignment,lineSpacing",
-        }}]
+        corpo_start, corpo_end = corte + 1, corte + 1 + len(texto_limpo)
+        fmt = [
+            # Reset explícito: o texto é inserido logo depois do separador
+            # (branco, 1pt, invisível de propósito) e SEM isso herda essa
+            # formatação — já causou corpo inteiro em fonte 1 branca.
+            {"updateTextStyle": {
+                "range": {"startIndex": corpo_start, "endIndex": corpo_end},
+                "textStyle": {
+                    "foregroundColor": {"color": {"rgbColor": {"red": 0, "green": 0, "blue": 0}}},
+                    "fontSize": {"magnitude": 11, "unit": "PT"},
+                    "bold": False,
+                    "italic": False,
+                },
+                "fields": "foregroundColor,fontSize,bold,italic",
+            }},
+            {"updateParagraphStyle": {
+                "range": {"startIndex": corpo_start, "endIndex": corpo_end},
+                "paragraphStyle": {"alignment": "JUSTIFIED", "lineSpacing": 150},
+                "fields": "alignment,lineSpacing",
+            }},
+        ]
         for p_start, p_end, eh_citacao in paragrafos:
             if not eh_citacao or p_end <= p_start:
                 continue
