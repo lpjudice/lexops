@@ -588,24 +588,22 @@ function encodeWaText(text: string): string {
 }
 
 function linkPublicoInformativo(id: string): string {
-  return `${window.location.origin}/api/publico/informativos/${id}.html`
+  return `https://www.pimentajudice.com.br/informativos/ler/${id}`
 }
 
 function textoWhatsappPadrao(informativo: Informativo, resumo: string | null): string {
   const numero = informativo.numero ? `Nº ${informativo.numero} / ` : ''
   const link = linkPublicoInformativo(informativo.id)
-  const linhas = [
+  return [
     '*Informativo Pimenta Judice Advogados:*',
     '',
     `📌 ${numero}${fmtMes(informativo.mes_referencia)}`,
     '',
     `*${informativo.titulo}*`,
-    `📝 Resumo: ${resumo || '(veja no link abaixo)'}`,
+    `📝 Resumo: ${resumo || '(resumo ainda não disponível — confira no link abaixo)'}`,
     '',
     `🔗 ${link}`,
-  ]
-  if (informativo.drive_pdf_link) linhas.push(`📄 PDF: ${informativo.drive_pdf_link}`)
-  return linhas.join('\n')
+  ].join('\n')
 }
 
 function DistribuicaoPanel({ informativo }: { informativo: Informativo }) {
@@ -615,6 +613,7 @@ function DistribuicaoPanel({ informativo }: { informativo: Informativo }) {
   const [telefoneTeste, setTelefoneTeste] = useState('')
 
   const chaveTexto = `informativos:whatsapp-texto:${informativo.id}`
+  const chaveTextoAuto = `informativos:whatsapp-texto-auto:${informativo.id}`
   const chaveEnviados = `informativos:whatsapp-enviados:${informativo.id}`
   const [textoWhatsapp, setTextoWhatsapp] = useState(() => localStorage.getItem(chaveTexto) || '')
   const [enviadosWhatsapp, setEnviadosWhatsapp] = useState<Set<string>>(() => {
@@ -626,11 +625,20 @@ function DistribuicaoPanel({ informativo }: { informativo: Informativo }) {
     queryFn: () => informativosApi.resumoPerguntas(informativo.id),
   })
   useEffect(() => {
-    // Só preenche o padrão automaticamente se o usuário ainda não mexeu no
-    // texto (nada salvo) — nunca sobrescreve uma edição já feita.
-    if (!localStorage.getItem(chaveTexto) && resumoPerguntas !== undefined) {
-      setTextoWhatsapp(textoWhatsappPadrao(informativo, resumoPerguntas?.resumo ?? null))
-    }
+    // Preenche/atualiza o padrão automaticamente enquanto o usuário não
+    // editou o texto manualmente — se o texto atual ainda é igual ao último
+    // gerado automaticamente (ou está vazio), acompanha o resumo assim que
+    // ele fica disponível no Doc. Uma edição manual do usuário deixa de bater
+    // com o "auto" salvo, então para de ser sobrescrita.
+    if (resumoPerguntas === undefined) return
+    const textoAtual = localStorage.getItem(chaveTexto) || ''
+    const ultimoAuto = localStorage.getItem(chaveTextoAuto) || ''
+    if (textoAtual && textoAtual !== ultimoAuto) return
+    const novo = textoWhatsappPadrao(informativo, resumoPerguntas?.resumo ?? null)
+    if (novo === textoAtual) return
+    localStorage.setItem(chaveTextoAuto, novo)
+    localStorage.setItem(chaveTexto, novo)
+    setTextoWhatsapp(novo)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resumoPerguntas])
 
