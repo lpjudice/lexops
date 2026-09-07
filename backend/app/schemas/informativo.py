@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-StatusInformativo = Literal["rascunho", "primeiro_draft", "revisado", "publicado"]
+StatusInformativo = Literal["rascunho", "primeiro_draft", "revisado", "publicado", "excluido"]
 
 
 class InformativoOut(BaseModel):
@@ -33,6 +33,7 @@ class InformativoOut(BaseModel):
     autorizado: bool = False
     autorizado_em: datetime | None = None
     publicado_em: datetime | None = None
+    excluido_em: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

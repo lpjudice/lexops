@@ -103,6 +103,9 @@ class Informativo(Base):
     lembrete_vespera_enviado: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
 
     publicado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # "Excluir" não apaga a linha (o número não pode ser reaproveitado por um
+    # informativo novo) — só marca status="excluido" e registra quando.
+    excluido_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
@@ -151,6 +154,11 @@ class InformativoAssinante(Base):
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     nome: Mapped[str | None] = mapped_column(String(255), nullable=True)
     ativo: Mapped[bool] = mapped_column(nullable=False, default=True, server_default="true")
+    # 'formulario_publico' | 'manual' | 'csv' | 'xls'
+    fonte: Mapped[str] = mapped_column(String(30), nullable=False, default="formulario_publico", server_default="formulario_publico")
+    criado_por_usuario_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("usuarios.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
