@@ -60,9 +60,15 @@ def destinatarios_por_fonte(db: Session = Depends(get_db)):
 @router.get("/assinantes")
 def listar_assinantes(db: Session = Depends(get_db)):
     from app.models.informativo import InformativoAssinante
+    from app.models.usuario import Usuario
     itens = db.query(InformativoAssinante).order_by(InformativoAssinante.created_at.desc()).all()
+    nomes_usuario = {u.id: u.nome for u in db.query(Usuario.id, Usuario.nome).all()}
     return [
-        {"id": str(a.id), "email": a.email, "nome": a.nome, "ativo": a.ativo, "created_at": a.created_at.isoformat()}
+        {
+            "id": str(a.id), "email": a.email, "nome": a.nome, "ativo": a.ativo,
+            "created_at": a.created_at.isoformat(), "fonte": a.fonte,
+            "criado_por": nomes_usuario.get(a.criado_por_usuario_id) if a.criado_por_usuario_id else None,
+        }
         for a in itens
     ]
 
@@ -75,6 +81,129 @@ def excluir_assinante(assinante_id: uuid.UUID, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Assinante não encontrado")
     db.delete(assinante)
     db.commit()
+
+
+class AssinanteManualRequest(BaseModel):
+    email: str
+    nome: str | None = None
+
+
+@router.post("/assinantes", status_code=201)
+def criar_assinante_manual(
+    payload: AssinanteManualRequest, db: Session = Depends(get_db), usuario=Depends(get_current_user)
+):
+    """Adiciona um e-mail/destinatário manualmente (fora do formulário
+    público do site) — usado pra cadastro avulso na tela de E-mails."""
+    from app.models.informativo import InformativoAssinante
+
+    email = (payload.email or "").strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="E-mail inválido.")
+    existente = db.query(InformativoAssinante).filter(InformativoAssinante.email == email).first()
+    if existente:
+        if payload.nome:
+            existente.nome = payload.nome
+        existente.ativo = True
+        db.commit()
+        return {"ok": True, "novo": False}
+    db.add(InformativoAssinante(
+        email=email, nome=(payload.nome or None), fonte="manual", criado_por_usuario_id=usuario.id,
+    ))
+    db.commit()
+    return {"ok": True, "novo": True}
+
+
+class ImportarAssinantesRequest(BaseModel):
+    itens: list[AssinanteManualRequest]
+
+
+@router.post("/assinantes/importar")
+def importar_assinantes(
+    payload: ImportarAssinantesRequest, db: Session = Depends(get_db), usuario=Depends(get_current_user)
+):
+    """Importação em lote — usada pelo textarea de colar CSV (o front já
+    parseia e manda [{email, nome}, ...])."""
+    from app.models.informativo import InformativoAssinante
+
+    existentes = {a.email: a for a in db.query(InformativoAssinante).all()}
+    criados = atualizados = invalidos = 0
+    for item in payload.itens:
+        email = (item.email or "").strip().lower()
+        if not email or "@" not in email:
+            invalidos += 1
+            continue
+        if email in existentes:
+            if item.nome:
+                existentes[email].nome = item.nome
+            atualizados += 1
+        else:
+            nova = InformativoAssinante(email=email, nome=(item.nome or None), fonte="csv", criado_por_usuario_id=usuario.id)
+            db.add(nova)
+            existentes[email] = nova
+            criados += 1
+    db.commit()
+    return {"criados": criados, "atualizados": atualizados, "invalidos": invalidos}
+
+
+@router.post("/assinantes/importar-arquivo")
+async def importar_assinantes_arquivo(
+    file: UploadFile = File(...), db: Session = Depends(get_db), usuario=Depends(get_current_user)
+):
+    """Importação a partir de planilha Excel (.xlsx/.xls) ou CSV — identifica
+    as colunas de e-mail/nome pelo cabeçalho (aceita variações comuns)."""
+    import csv
+    import io
+    from app.models.informativo import InformativoAssinante
+
+    nome_arquivo = (file.filename or "").lower()
+    content = await file.read()
+
+    linhas: list[dict[str, str]] = []
+    if nome_arquivo.endswith((".xlsx", ".xls")):
+        import openpyxl
+        try:
+            wb = openpyxl.load_workbook(io.BytesIO(content))
+            ws = wb.active
+        except Exception:
+            raise HTTPException(status_code=400, detail="Arquivo Excel inválido.")
+        rows = list(ws.iter_rows(values_only=True))
+        if not rows:
+            raise HTTPException(status_code=400, detail="Planilha vazia.")
+        headers = [str(c or "").strip().lower() for c in rows[0]]
+        for row in rows[1:]:
+            linhas.append({headers[i]: str(v).strip() if v is not None else "" for i, v in enumerate(row) if i < len(headers)})
+    elif nome_arquivo.endswith(".csv"):
+        texto = content.decode("utf-8-sig", errors="ignore")
+        reader = csv.DictReader(io.StringIO(texto))
+        linhas = [{(k or "").strip().lower(): (v or "").strip() for k, v in row.items()} for row in reader]
+    else:
+        raise HTTPException(status_code=400, detail="Envie um arquivo .xlsx, .xls ou .csv.")
+
+    def _campo(row: dict, *chaves: str) -> str:
+        for k in chaves:
+            if k in row and row[k]:
+                return row[k]
+        return ""
+
+    existentes = {a.email: a for a in db.query(InformativoAssinante).all()}
+    criados = atualizados = invalidos = 0
+    for row in linhas:
+        email = _campo(row, "email", "e-mail", "e_mail").strip().lower()
+        nome = _campo(row, "nome", "name")
+        if not email or "@" not in email:
+            invalidos += 1
+            continue
+        if email in existentes:
+            if nome:
+                existentes[email].nome = nome
+            atualizados += 1
+        else:
+            nova = InformativoAssinante(email=email, nome=(nome or None), fonte="xls", criado_por_usuario_id=usuario.id)
+            db.add(nova)
+            existentes[email] = nova
+            criados += 1
+    db.commit()
+    return {"criados": criados, "atualizados": atualizados, "invalidos": invalidos}
 
 
 @router.post("/opt-out", status_code=204)
@@ -157,8 +286,13 @@ def atualizar(informativo_id: uuid.UUID, payload: InformativoAtualizar, db: Sess
 
 @router.delete("/{informativo_id}", status_code=204)
 def excluir(informativo_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Soft-delete — o número já foi atribuído e não deve ser reaproveitado
+    por um informativo novo, então a linha fica marcada como "excluido" (a
+    tela mostra cinza/riscado) em vez de sumir do banco."""
+    from datetime import datetime, timezone
     informativo = _get(db, informativo_id)
-    db.delete(informativo)
+    informativo.status = "excluido"
+    informativo.excluido_em = datetime.now(timezone.utc)
     db.commit()
 
 

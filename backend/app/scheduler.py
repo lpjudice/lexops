@@ -512,7 +512,7 @@ def _lembretes_informativos() -> None:
             mes_alvo = (hoje.replace(day=1) + timedelta(days=32)).replace(day=1)
             informativo = (
                 db.query(Informativo)
-                .filter(Informativo.mes_referencia == mes_alvo)
+                .filter(Informativo.mes_referencia == mes_alvo, Informativo.status != "excluido")
                 .order_by(Informativo.created_at.desc())
                 .first()
             )

@@ -1,6 +1,6 @@
 import api from './client'
 
-export type StatusInformativo = 'rascunho' | 'primeiro_draft' | 'revisado' | 'publicado'
+export type StatusInformativo = 'rascunho' | 'primeiro_draft' | 'revisado' | 'publicado' | 'excluido'
 
 export type StatusCitacao = 'confirmado' | 'divergente' | 'nao_encontrado'
 
@@ -46,6 +46,7 @@ export interface Informativo {
   autorizado: boolean
   autorizado_em?: string | null
   publicado_em?: string | null
+  excluido_em?: string | null
   created_at: string
   updated_at: string
 }
@@ -131,6 +132,18 @@ export const informativosApi = {
   optOut: (email: string) => api.post('/informativos/opt-out', { email }),
   excluirEmail: (email: string) => api.post('/informativos/opt-out/excluir', { email }),
   reativarEmail: (email: string) => api.post('/informativos/opt-out/reativar', { email }),
+
+  criarAssinante: (email: string, nome?: string) =>
+    api.post<{ ok: boolean; novo: boolean }>('/informativos/assinantes', { email, nome: nome || null }).then((r) => r.data),
+  importarAssinantes: (itens: { email: string; nome?: string | null }[]) =>
+    api.post<{ criados: number; atualizados: number; invalidos: number }>('/informativos/assinantes/importar', { itens }).then((r) => r.data),
+  importarAssinantesArquivo: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post<{ criados: number; atualizados: number; invalidos: number }>('/informativos/assinantes/importar-arquivo', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then((r) => r.data)
+  },
 }
 
 export function erroApi(e: unknown): string {

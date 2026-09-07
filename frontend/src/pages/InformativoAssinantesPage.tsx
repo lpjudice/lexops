@@ -1,3 +1,4 @@
+import { useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../api/client'
 import { informativosApi, erroApi } from '../api/informativos'
@@ -9,6 +10,8 @@ interface Assinante {
   nome: string | null
   ativo: boolean
   created_at: string
+  fonte: string
+  criado_por: string | null
 }
 
 interface EnvioStatus {
@@ -35,6 +38,13 @@ const assinantesApi = {
   listar: () => api.get<Assinante[]>('/informativos/assinantes').then((r) => r.data),
   excluir: (id: string) => api.delete(`/informativos/assinantes/${id}`),
   porFonte: () => api.get<DestinatariosPorFonte>('/informativos/destinatarios-por-fonte').then((r) => r.data),
+}
+
+const FONTE_LABEL: Record<string, string> = {
+  formulario_publico: 'Formulário público',
+  manual: 'Manual',
+  csv: 'CSV colado',
+  xls: 'Planilha',
 }
 
 function fmtData(iso: string) {
@@ -128,6 +138,113 @@ function Secao({ titulo, descricao, entradas }: { titulo: string; descricao: str
   )
 }
 
+function parseCsvColado(texto: string): { email: string; nome?: string }[] {
+  return texto
+    .split(/\r?\n/)
+    .map((linha) => linha.trim())
+    .filter(Boolean)
+    .map((linha) => {
+      const partes = linha.split(/[,;\t]/).map((p) => p.trim())
+      return { email: partes[0], nome: partes.slice(1).join(' ') || undefined }
+    })
+    .filter((item) => item.email.includes('@'))
+}
+
+function AdicionarPanel() {
+  const qc = useQueryClient()
+  const [modo, setModo] = useState<'manual' | 'csv' | 'arquivo'>('manual')
+  const [email, setEmail] = useState('')
+  const [nome, setNome] = useState('')
+  const [csvTexto, setCsvTexto] = useState('')
+  const [resultado, setResultado] = useState<string | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const invalidar = () => {
+    qc.invalidateQueries({ queryKey: ['informativos', 'assinantes'] })
+    qc.invalidateQueries({ queryKey: ['informativos', 'destinatarios-por-fonte'] })
+  }
+
+  const manualMutation = useMutation({
+    mutationFn: () => informativosApi.criarAssinante(email, nome),
+    onSuccess: () => { invalidar(); setEmail(''); setNome(''); setResultado('Adicionado.') },
+  })
+  const csvMutation = useMutation({
+    mutationFn: () => informativosApi.importarAssinantes(parseCsvColado(csvTexto)),
+    onSuccess: (r) => { invalidar(); setCsvTexto(''); setResultado(`${r.criados} novo(s), ${r.atualizados} atualizado(s)${r.invalidos ? `, ${r.invalidos} inválido(s)` : ''}.`) },
+  })
+  const arquivoMutation = useMutation({
+    mutationFn: (file: File) => informativosApi.importarAssinantesArquivo(file),
+    onSuccess: (r) => { invalidar(); if (fileRef.current) fileRef.current.value = ''; setResultado(`${r.criados} novo(s), ${r.atualizados} atualizado(s)${r.invalidos ? `, ${r.invalidos} inválido(s)` : ''}.`) },
+  })
+
+  const erro = manualMutation.error || csvMutation.error || arquivoMutation.error
+
+  return (
+    <details style={{ marginBottom: 20 }}>
+      <summary style={{ cursor: 'pointer', fontSize: 15, fontWeight: 600 }}>+ Adicionar e-mail(s) manualmente</summary>
+      <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
+        {(['manual', 'csv', 'arquivo'] as const).map((m) => (
+          <button
+            key={m}
+            className={styles.btnTable}
+            style={{ fontWeight: modo === m ? 700 : 400, background: modo === m ? '#eef2ff' : undefined }}
+            onClick={() => { setModo(m); setResultado(null) }}
+          >
+            {m === 'manual' ? 'Um a um' : m === 'csv' ? 'Colar lista (CSV)' : 'Upload de planilha'}
+          </button>
+        ))}
+      </div>
+
+      {modo === 'manual' && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center' }}>
+          <input placeholder="email@exemplo.com" value={email} onChange={(e) => setEmail(e.target.value)} style={{ padding: 6, minWidth: 220 }} />
+          <input placeholder="Nome (opcional)" value={nome} onChange={(e) => setNome(e.target.value)} style={{ padding: 6, minWidth: 180 }} />
+          <button className={styles.btnPrimary} onClick={() => manualMutation.mutate()} disabled={!email.includes('@') || manualMutation.isPending}>
+            Adicionar
+          </button>
+        </div>
+      )}
+
+      {modo === 'csv' && (
+        <div style={{ marginTop: 10 }}>
+          <p style={{ fontSize: 12, color: '#6b7280', margin: '0 0 6px' }}>
+            Uma linha por pessoa — <code>email</code> ou <code>email, nome</code>.
+          </p>
+          <textarea
+            value={csvTexto}
+            onChange={(e) => setCsvTexto(e.target.value)}
+            rows={6}
+            style={{ width: '100%', maxWidth: 480, fontFamily: 'monospace', fontSize: 12.5, padding: 8 }}
+            placeholder={'joao@empresa.com, João Silva\nmaria@empresa.com'}
+          />
+          <div style={{ marginTop: 6 }}>
+            <button className={styles.btnPrimary} onClick={() => csvMutation.mutate()} disabled={!csvTexto.trim() || csvMutation.isPending}>
+              Importar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {modo === 'arquivo' && (
+        <div style={{ marginTop: 10 }}>
+          <p style={{ fontSize: 12, color: '#6b7280', margin: '0 0 6px' }}>
+            Arquivo .xlsx, .xls ou .csv com colunas <code>email</code> e <code>nome</code> (nomes de coluna flexíveis).
+          </p>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) arquivoMutation.mutate(f) }}
+          />
+        </div>
+      )}
+
+      {resultado && <p style={{ fontSize: 12.5, color: '#15803d', marginTop: 8 }}>{resultado}</p>}
+      {erro ? <p style={{ fontSize: 12.5, color: '#b91c1c', marginTop: 8 }}>{erroApi(erro)}</p> : null}
+    </details>
+  )
+}
+
 export default function InformativoAssinantesPage() {
   const qc = useQueryClient()
   const { data: assinantes = [], isLoading: carregandoAssinantes } = useQuery({
@@ -173,6 +290,8 @@ export default function InformativoAssinantesPage() {
         )}
       </p>
 
+      <AdicionarPanel />
+
       {carregandoFontes ? (
         <p>Carregando...</p>
       ) : (
@@ -192,10 +311,11 @@ export default function InformativoAssinantesPage() {
 
       <details style={{ marginBottom: 8 }} open>
         <summary style={{ cursor: 'pointer', fontSize: 15, fontWeight: 600 }}>
-          Inscritos pelo formulário público — {assinantes.length}
+          Inscritos/cadastrados manualmente — {assinantes.length}
         </summary>
         <p style={{ fontSize: 12.5, color: '#6b7280', marginTop: 4 }}>
-          Quem se inscreveu direto na página pública de um informativo (não é Cliente nem Contato).
+          Quem se inscreveu direto na página pública de um informativo, ou foi adicionado à mão/por
+          planilha aqui (não é Cliente nem Contato da Expansão).
         </p>
         {carregandoAssinantes ? (
           <p>Carregando...</p>
@@ -208,7 +328,9 @@ export default function InformativoAssinantesPage() {
                 <tr>
                   <th>E-mail</th>
                   <th>Nome</th>
-                  <th>Inscrito em</th>
+                  <th>Cadastrado em</th>
+                  <th>Fonte</th>
+                  <th>Cadastrado por</th>
                   <th>Newsletter enviada</th>
                   <th>Status</th>
                   <th></th>
@@ -220,6 +342,8 @@ export default function InformativoAssinantesPage() {
                     <td>{a.email}</td>
                     <td>{a.nome || '—'}</td>
                     <td>{fmtData(a.created_at)}</td>
+                    <td>{FONTE_LABEL[a.fonte] || a.fonte}</td>
+                    <td>{a.criado_por || '—'}</td>
                     <td><EnvioBadge status={envioPorEmail.get(a.email.toLowerCase()) ?? null} /></td>
                     <td>{a.ativo ? 'Ativo' : 'Inativo'}</td>
                     <td>

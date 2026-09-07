@@ -14,6 +14,7 @@ const STATUS_LABEL: Record<StatusInformativo, string> = {
   primeiro_draft: '1º draft',
   revisado: 'Revisado',
   publicado: 'Publicado',
+  excluido: 'Excluído',
 }
 
 // Fundo escuro + texto branco em todos — contraste garantido independente do tema da página.
@@ -22,6 +23,7 @@ const STATUS_COR: Record<StatusInformativo, string> = {
   primeiro_draft: '#b45309',
   revisado: '#1d4ed8',
   publicado: '#15803d',
+  excluido: '#9ca3af',
 }
 
 function StatusBadge({ status }: { status: StatusInformativo }) {
@@ -254,12 +256,18 @@ export default function InformativosPage() {
               </tr>
             </thead>
             <tbody>
-              {informativosFiltrados.map((i) => (
+              {informativosFiltrados.map((i) => {
+                const excluido = i.status === 'excluido'
+                return (
                 <Fragment key={i.id}>
-                  <tr onClick={() => setSelecionadoId(i.id)} style={{ cursor: 'pointer' }}>
+                  <tr
+                    onClick={() => setSelecionadoId(i.id)}
+                    style={{ cursor: 'pointer', opacity: excluido ? 0.5 : 1 }}
+                    title={excluido ? `Excluído em ${fmtData(i.excluido_em?.slice(0, 10))}` : undefined}
+                  >
                     <td>{i.numero ?? '—'}</td>
                     <td style={{ textTransform: 'capitalize' }}>{fmtMes(i.mes_referencia)}</td>
-                    <td>{i.titulo}</td>
+                    <td style={{ textDecoration: excluido ? 'line-through' : 'none' }}>{i.titulo}</td>
                     <td><StatusBadge status={i.status} /></td>
                     <td>{fmtData(i.data_prazo_draft)}</td>
                     <td>{fmtData(i.data_prazo_final)}</td>
@@ -289,7 +297,8 @@ export default function InformativosPage() {
                     </tr>
                   )}
                 </Fragment>
-              ))}
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -770,6 +779,7 @@ function DistribuicaoPanel({ informativo }: { informativo: Informativo }) {
             {contatosWhatsapp.map((c) => {
               const enviado = enviadosWhatsapp.has(c.id)
               const nomeCompleto = [c.primeiro_nome, c.sobrenome].filter(Boolean).join(' ')
+              const nomeExibido = c.empresa ? `${nomeCompleto} | ${c.empresa}` : nomeCompleto
               return (
                 <a
                   key={c.id}
@@ -785,7 +795,7 @@ function DistribuicaoPanel({ informativo }: { informativo: Informativo }) {
                   }}
                 >
                   <span>{enviado ? '✅' : '💬'}</span>
-                  <span>{nomeCompleto}</span>
+                  <span>{nomeExibido}</span>
                 </a>
               )
             })}
@@ -806,7 +816,14 @@ function DetalheInformativo({ informativo, onFechar }: { informativo: Informativ
   const [citacoes, setCitacoes] = useState<Citacao[]>(informativo.citacoes_validadas ?? [])
   const [citacoesCarregadas, setCitacoesCarregadas] = useState(informativo.citacoes_validadas.length > 0 || Boolean(informativo.rascunho_gerado_em))
 
-  const invalidar = () => qc.invalidateQueries({ queryKey: ['informativos'] })
+  const invalidar = () => {
+    qc.invalidateQueries({ queryKey: ['informativos'] })
+    // resumo/perguntas são lidos ao vivo do Doc — qualquer ação que reescreve
+    // o Doc (gerar rascunho, reescrever, sincronizar) precisa invalidar essa
+    // query também, senão o painel de Distribuição (WhatsApp/newsletter)
+    // continua mostrando o resumo antigo (ou "ainda não disponível").
+    qc.invalidateQueries({ queryKey: ['informativos', informativo.id, 'resumo-perguntas'] })
+  }
 
   const instrucoesMutation = useMutation({
     mutationFn: (texto: string) => informativosApi.atualizar(informativo.id, { instrucoes_ia: texto || null }),
