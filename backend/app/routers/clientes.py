@@ -121,6 +121,10 @@ class MesclarClientesBody(BaseModel):
     canonical_id: uuid.UUID
 
 
+class DispensarDuplicataBody(BaseModel):
+    ids: list[uuid.UUID]
+
+
 @router.get("/admin/duplicatas-cadastro")
 def listar_duplicatas_cadastro(current: Usuario = Depends(get_current_user), db: Session = Depends(get_db)):
     """Detecta (sem mesclar) linhas de `clientes` com nome igual/parecido."""
@@ -144,6 +148,19 @@ def mesclar_clientes_endpoint(
     if not resultado.get("ok"):
         raise HTTPException(status_code=400, detail=resultado.get("erro", "falha_ao_mesclar"))
     return resultado
+
+
+@router.post("/admin/duplicatas-cadastro/dispensar")
+def dispensar_duplicata_cadastro(
+    body: DispensarDuplicataBody, current: Usuario = Depends(get_current_user), db: Session = Depends(get_db),
+):
+    """Confirma que um grupo apontado como possível duplicidade é, na
+    verdade, gente/empresas diferentes — some do alerta (sem mesclar nada)."""
+    if current.role != "super_admin":
+        raise HTTPException(status_code=403, detail="Apenas super admin.")
+    from app.services.cliente_dedup import dispensar_duplicata
+    dispensar_duplicata([str(i) for i in body.ids], db)
+    return {"ok": True}
 
 
 @router.get("/{cliente_id}", response_model=ClienteWithProcessos)

@@ -17,23 +17,33 @@ function sugerirCanonico(grupo: ClienteDuplicataGrupo): string {
   return [...grupo.membros].sort((a, b) => (a.created_at ?? '').localeCompare(b.created_at ?? ''))[0].id
 }
 
-function GrupoDuplicata({ grupo, onMesclado }: { grupo: ClienteDuplicataGrupo; onMesclado: () => void }) {
+function GrupoDuplicata({ grupo, onResolvido }: { grupo: ClienteDuplicataGrupo; onResolvido: () => void }) {
   const [canonicalId, setCanonicalId] = useState(() => sugerirCanonico(grupo))
+  const ids = grupo.membros.map((m) => m.id)
 
   const mesclar = useMutation({
-    mutationFn: () => clientesApi.mesclarClientes(grupo.membros.map((m) => m.id), canonicalId),
-    onSuccess: onMesclado,
+    mutationFn: () => clientesApi.mesclarClientes(ids, canonicalId),
+    onSuccess: onResolvido,
+  })
+  const dispensar = useMutation({
+    mutationFn: () => clientesApi.dispensarDuplicataCadastro(ids),
+    onSuccess: onResolvido,
   })
 
   const erro = mesclar.error
     ? ((mesclar.error as any)?.response?.data?.detail ?? 'Erro ao mesclar. Tente novamente.')
+    : dispensar.error
+    ? 'Erro ao confirmar. Tente novamente.'
     : null
+
+  const ocupado = mesclar.isPending || dispensar.isPending
 
   return (
     <div className={cs.grupo}>
       <div className={cs.grupoHead}>
-        <span>{Math.round(grupo.similaridade * 100)}% parecidos — escolha qual linha fica (as outras são apagadas
-          depois de mover processos/contratos/tarefas/etc. para ela):</span>
+        <span>{Math.round(grupo.similaridade * 100)}% parecidos — se for a mesma pessoa/empresa, escolha qual
+          linha fica (as outras são apagadas depois de mover processos/contratos/tarefas/etc. para ela). Se forem
+          pessoas diferentes, confirme abaixo para não perguntar de novo:</span>
       </div>
       {grupo.membros.map((m) => (
         <label key={m.id} className={cs.membro}>
@@ -49,7 +59,10 @@ function GrupoDuplicata({ grupo, onMesclado }: { grupo: ClienteDuplicataGrupo; o
       ))}
       {erro && <p className={cs.erro}>⚠ {String(erro)}</p>}
       <div className={cs.acoes}>
-        <button className={cs.btnMesclar} disabled={mesclar.isPending} onClick={() => mesclar.mutate()}>
+        <button className={cs.btnConfirmarDiferente} disabled={ocupado} onClick={() => dispensar.mutate()}>
+          {dispensar.isPending ? 'Confirmando…' : '✓ São pessoas diferentes'}
+        </button>
+        <button className={cs.btnMesclar} disabled={ocupado} onClick={() => mesclar.mutate()}>
           {mesclar.isPending ? 'Mesclando…' : `Mesclar em "${grupo.membros.find((m) => m.id === canonicalId)?.nome}"`}
         </button>
       </div>
@@ -69,7 +82,7 @@ export default function DuplicatasClientes() {
 
   if (duplicatas.length === 0) return null
 
-  function onMesclado() {
+  function onResolvido() {
     qc.invalidateQueries({ queryKey: ['clientes-duplicatas-cadastro'] })
     qc.invalidateQueries({ queryKey: ['clientes'] })
   }
@@ -84,7 +97,7 @@ export default function DuplicatasClientes() {
       {aberto && (
         <div className={cs.lista}>
           {duplicatas.map((grupo) => (
-            <GrupoDuplicata key={grupo.membros.map((m) => m.id).join('-')} grupo={grupo} onMesclado={onMesclado} />
+            <GrupoDuplicata key={grupo.chave} grupo={grupo} onResolvido={onResolvido} />
           ))}
         </div>
       )}

@@ -1301,6 +1301,15 @@ def _run_migrations() -> None:
         conn.execute(text("ALTER TABLE recebimentos ADD COLUMN IF NOT EXISTS comprovante_drive_link VARCHAR(1000)"))
         conn.execute(text("ALTER TABLE informativos ADD COLUMN IF NOT EXISTS numero INTEGER"))
 
+        # Grupos de "possível duplicidade de cliente" que o Lucas já revisou e
+        # confirmou que são pessoas/empresas DIFERENTES — não mostrar de novo.
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS cliente_duplicata_dispensada (
+                chave VARCHAR(500) PRIMARY KEY,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+
         conn.commit()
 
 

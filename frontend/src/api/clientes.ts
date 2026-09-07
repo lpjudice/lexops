@@ -106,6 +106,7 @@ export interface ClienteDuplicataMembro {
 }
 
 export interface ClienteDuplicataGrupo {
+  chave: string
   membros: ClienteDuplicataMembro[]
   similaridade: number
 }
@@ -117,6 +118,8 @@ export const clientesApi = {
       .then((r) => r.data.duplicatas),
   mesclarClientes: (ids: string[], canonicalId: string) =>
     api.post('/clientes/admin/mesclar-clientes', { ids, canonical_id: canonicalId }).then((r) => r.data),
+  dispensarDuplicataCadastro: (ids: string[]) =>
+    api.post('/clientes/admin/duplicatas-cadastro/dispensar', { ids }).then((r) => r.data),
   criar: async (data: ClienteCreate): Promise<Cliente> => {
     try {
       return (await api.post<Cliente>('/clientes/', data)).data
