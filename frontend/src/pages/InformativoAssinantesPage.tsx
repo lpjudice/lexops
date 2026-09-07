@@ -12,6 +12,7 @@ interface Assinante {
   created_at: string
   fonte: string
   criado_por: string | null
+  duplicado?: boolean
 }
 
 interface EnvioStatus {
@@ -26,6 +27,8 @@ interface Entrada {
   nome: string
   opt_out: boolean
   envio_status: EnvioStatus | null
+  created_at: string | null
+  duplicado: boolean
 }
 
 interface DestinatariosPorFonte {
@@ -51,6 +54,15 @@ function fmtData(iso: string) {
   return new Date(iso).toLocaleDateString('pt-BR')
 }
 
+function DuplicadoBadge({ duplicado }: { duplicado: boolean }) {
+  if (!duplicado) return null
+  return (
+    <span title="Esse e-mail aparece em mais de uma seção" style={{ marginLeft: 6, fontSize: 11, background: '#fef3c7', color: '#92400e', padding: '1px 6px', borderRadius: 999 }}>
+      🔁 duplicado
+    </span>
+  )
+}
+
 function fmtDataHora(iso: string) {
   return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
 }
@@ -60,6 +72,36 @@ function EnvioBadge({ status }: { status: EnvioStatus | null }) {
   return (
     <span title={status.ultimo_titulo || undefined} style={{ color: '#374151' }}>
       ✓ {status.total_enviados}x · último {status.ultimo_enviado_em ? fmtDataHora(status.ultimo_enviado_em) : '—'}
+    </span>
+  )
+}
+
+function NomeEditavel({ id, nome }: { id: string; nome: string | null }) {
+  const qc = useQueryClient()
+  const [editando, setEditando] = useState(false)
+  const [valor, setValor] = useState(nome || '')
+  const mutation = useMutation({
+    mutationFn: (v: string) => informativosApi.editarNomeAssinante(id, v),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['informativos', 'assinantes'] }); setEditando(false) },
+  })
+
+  if (!editando) {
+    return (
+      <span style={{ cursor: 'pointer' }} onClick={() => { setValor(nome || ''); setEditando(true) }} title="Clique pra editar">
+        {nome || '—'} <span style={{ fontSize: 11, color: '#9ca3af' }}>✎</span>
+      </span>
+    )
+  }
+  return (
+    <span style={{ display: 'inline-flex', gap: 4 }}>
+      <input
+        autoFocus
+        value={valor}
+        onChange={(e) => setValor(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') mutation.mutate(valor); if (e.key === 'Escape') setEditando(false) }}
+        style={{ padding: 3, fontSize: 12.5, width: 140 }}
+      />
+      <button className={styles.btnTable} onClick={() => mutation.mutate(valor)} disabled={mutation.isPending}>OK</button>
     </span>
   )
 }
@@ -115,6 +157,7 @@ function Secao({ titulo, descricao, entradas }: { titulo: string; descricao: str
               <tr>
                 <th>E-mail</th>
                 <th>Nome</th>
+                <th>Cadastrado em</th>
                 <th>Newsletter enviada</th>
                 <th>Status</th>
                 <th></th>
@@ -123,8 +166,9 @@ function Secao({ titulo, descricao, entradas }: { titulo: string; descricao: str
             <tbody>
               {entradas.map((e, idx) => (
                 <tr key={idx}>
-                  <td>{e.email}</td>
+                  <td>{e.email}<DuplicadoBadge duplicado={e.duplicado} /></td>
                   <td>{e.nome || '—'}</td>
+                  <td>{e.created_at ? fmtData(e.created_at) : '—'}</td>
                   <td><EnvioBadge status={e.envio_status} /></td>
                   <td>{e.opt_out ? '🚫 Descadastrado' : '—'}</td>
                   <td><AcoesEmail email={e.email} opt_out={e.opt_out} /></td>
@@ -269,6 +313,7 @@ export default function InformativoAssinantesPage() {
   })
 
   const envioPorEmail = new Map((porFonte?.assinantes ?? []).map((a) => [a.email.toLowerCase(), a.envio_status]))
+  const duplicadoPorEmail = new Map((porFonte?.assinantes ?? []).map((a) => [a.email.toLowerCase(), a.duplicado]))
 
   const publicado = informativosLista.find((i) => i.status === 'publicado')
   const linkSite = publicado ? `https://www.pimentajudice.com.br/informativos/ler/${publicado.id}` : null
@@ -284,7 +329,7 @@ export default function InformativoAssinantesPage() {
         A newsletter dos informativos vai pra todos os e-mails abaixo (Clientes e Contatos da
         Expansão entram automaticamente, sem precisar se inscrever), menos quem estiver com
         opt-out (por escolha própria ou sua). "Excluir" tira o e-mail da lista por completo (não
-        mexe no cadastro de Cliente/Contato em si).
+        mexe no cadastro de Cliente/Contato em si). 🔁 marca e-mail repetido em mais de uma seção.
         {linkSite && (
           <> Formulário de inscrição pública: <a href={linkSite} target="_blank" rel="noreferrer">ver no informativo publicado →</a></>
         )}
@@ -339,8 +384,8 @@ export default function InformativoAssinantesPage() {
               <tbody>
                 {assinantes.map((a) => (
                   <tr key={a.id}>
-                    <td>{a.email}</td>
-                    <td>{a.nome || '—'}</td>
+                    <td>{a.email}<DuplicadoBadge duplicado={Boolean(duplicadoPorEmail.get(a.email.toLowerCase()))} /></td>
+                    <td><NomeEditavel id={a.id} nome={a.nome} /></td>
                     <td>{fmtData(a.created_at)}</td>
                     <td>{FONTE_LABEL[a.fonte] || a.fonte}</td>
                     <td>{a.criado_por || '—'}</td>

@@ -85,6 +85,7 @@ export const informativosApi = {
     api.patch<Informativo>(`/informativos/${id}`, data).then((r) => r.data),
 
   excluir: (id: string) => api.delete(`/informativos/${id}`),
+  restaurar: (id: string) => api.post<Informativo>(`/informativos/${id}/restaurar`).then((r) => r.data),
 
   uploadArquivo: (id: string, file: File) => {
     const form = new FormData()
@@ -97,6 +98,9 @@ export const informativosApi = {
   // de escrita de texto basta.
   gerarRascunhoIA: (id: string) =>
     api.post<{ conteudo_texto: string; citacoes: Citacao[] }>(`/informativos/${id}/gerar-rascunho-ia`, undefined, { timeout: 60000 }).then((r) => r.data),
+
+  definirCorpoManual: (id: string, texto: string) =>
+    api.post<{ conteudo_texto: string; citacoes: Citacao[] }>(`/informativos/${id}/definir-corpo-manual`, { texto }, { timeout: 30000 }).then((r) => r.data),
 
   reescreverIA: (id: string, instrucoes?: string) =>
     api.post<{ conteudo_texto: string; citacoes: Citacao[] }>(`/informativos/${id}/reescrever-ia`, { instrucoes: instrucoes || null }, { timeout: 60000 }).then((r) => r.data),
@@ -132,6 +136,9 @@ export const informativosApi = {
   optOut: (email: string) => api.post('/informativos/opt-out', { email }),
   excluirEmail: (email: string) => api.post('/informativos/opt-out/excluir', { email }),
   reativarEmail: (email: string) => api.post('/informativos/opt-out/reativar', { email }),
+
+  editarNomeAssinante: (id: string, nome: string) =>
+    api.patch(`/informativos/assinantes/${id}`, { nome }),
 
   criarAssinante: (email: string, nome?: string) =>
     api.post<{ ok: boolean; novo: boolean }>('/informativos/assinantes', { email, nome: nome || null }).then((r) => r.data),
