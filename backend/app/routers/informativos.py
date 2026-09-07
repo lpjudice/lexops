@@ -51,6 +51,26 @@ def responsavel_padrao(db: Session = Depends(get_db)):
     return {"id": str(padrao.id), "nome": padrao.nome, "email": padrao.email}
 
 
+@router.get("/assinantes")
+def listar_assinantes(db: Session = Depends(get_db)):
+    from app.models.informativo import InformativoAssinante
+    itens = db.query(InformativoAssinante).order_by(InformativoAssinante.created_at.desc()).all()
+    return [
+        {"id": str(a.id), "email": a.email, "nome": a.nome, "ativo": a.ativo, "created_at": a.created_at.isoformat()}
+        for a in itens
+    ]
+
+
+@router.delete("/assinantes/{assinante_id}", status_code=204)
+def excluir_assinante(assinante_id: uuid.UUID, db: Session = Depends(get_db)):
+    from app.models.informativo import InformativoAssinante
+    assinante = db.get(InformativoAssinante, assinante_id)
+    if not assinante:
+        raise HTTPException(status_code=404, detail="Assinante não encontrado")
+    db.delete(assinante)
+    db.commit()
+
+
 @router.get("/config/template")
 def obter_template(db: Session = Depends(get_db)):
     cfg = informativo_service.obter_config(db)

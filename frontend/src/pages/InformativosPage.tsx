@@ -51,6 +51,37 @@ function proximoMesReferencia(): string {
   return `${proximo.getFullYear()}-${String(proximo.getMonth() + 1).padStart(2, '0')}-01`
 }
 
+type Periodo = 'mes_atual' | 'proximo_mes' | '3m' | '6m' | '12m' | 'todos'
+
+const PERIODO_LABEL: Record<Periodo, string> = {
+  mes_atual: 'Mês atual',
+  proximo_mes: 'Próximo mês',
+  '3m': 'Últimos 3 meses',
+  '6m': 'Últimos 6 meses',
+  '12m': 'Últimos 12 meses',
+  todos: 'Todos',
+}
+
+// diffMeses = quantos meses o mes_referencia está à frente do mês atual
+// (0 = mês atual, 1 = próximo mês, -1 = mês passado...).
+function diffMesesDeHoje(mesRefIso: string): number {
+  const hoje = new Date()
+  const [ano, mes] = mesRefIso.split('-').map(Number)
+  return (ano - hoje.getFullYear()) * 12 + (mes - 1 - hoje.getMonth())
+}
+
+function dentroDoPeriodo(mesRefIso: string, periodo: Periodo): boolean {
+  const diff = diffMesesDeHoje(mesRefIso)
+  switch (periodo) {
+    case 'mes_atual': return diff === 0
+    case 'proximo_mes': return diff === 1
+    case '3m': return diff <= 1 && diff >= -2
+    case '6m': return diff <= 1 && diff >= -5
+    case '12m': return diff <= 1 && diff >= -11
+    case 'todos': return true
+  }
+}
+
 export default function InformativosPage() {
   const qc = useQueryClient()
   const { data: informativos = [], isLoading } = useQuery({
@@ -69,16 +100,40 @@ export default function InformativosPage() {
   const [modalCriar, setModalCriar] = useState(false)
   const [sugestaoParaCriar, setSugestaoParaCriar] = useState<string | null>(null)
   const [recusadas, setRecusadas] = useState<string[]>([])
+  const [sugestoesExpandido, setSugestoesExpandido] = useState(false)
   const [selecionadoId, setSelecionadoId] = useState<string | null>(null)
   const [expandidoId, setExpandidoId] = useState<string | null>(null)
+  const [periodo, setPeriodo] = useState<Periodo>('3m')
   const selecionado = informativos.find((i) => i.id === selecionadoId) ?? null
 
-  const { data: sugestoesInstagram = [] } = useQuery({
+  const informativosFiltrados = informativos
+    .filter((i) => dentroDoPeriodo(i.mes_referencia, periodo))
+    .sort((a, b) => (b.numero ?? -1) - (a.numero ?? -1))
+
+  const usedSugestaoIds = new Set(informativos.map((i) => i.tema_sugestao_id).filter(Boolean) as string[])
+
+  const { data: sugestoesInstagramBrutas = [] } = useQuery({
     queryKey: ['instagram', 'sugestoes-tema', 'sugerido'],
     queryFn: () => instagramApi.listar('sugerido'),
     staleTime: 30_000,
   })
-  const sugestoesVisiveis = sugestoesInstagram.filter((s) => !recusadas.includes(s.id)).slice(0, 5)
+  // Mais recentes primeiro, sem as já usadas em algum informativo, sem
+  // duplicatas de título (o Instagram às vezes repete o mesmo tema) e
+  // limitado a 100 — igual usado no combobox de criação.
+  const sugestoesInstagram = (() => {
+    const vistos = new Set<string>()
+    return [...sugestoesInstagramBrutas]
+      .filter((s) => !usedSugestaoIds.has(s.id))
+      .sort((a, b) => (b.data_geracao || '').localeCompare(a.data_geracao || ''))
+      .filter((s) => {
+        const chave = s.titulo.trim().toLowerCase()
+        if (vistos.has(chave)) return false
+        vistos.add(chave)
+        return true
+      })
+      .slice(0, 100)
+  })()
+  const sugestoesVisiveis = sugestoesInstagram.filter((s) => !recusadas.includes(s.id)).slice(0, 10)
 
   const criarMutation = useMutation({
     mutationFn: informativosApi.criar,
@@ -125,50 +180,63 @@ export default function InformativosPage() {
         </div>
       </div>
 
-      {sugestoesVisiveis.length > 0 && (
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.4 }}>
-            Sugestões de tema (do Instagram)
-          </div>
-          <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 2 }}>
-            {sugestoesVisiveis.map((s) => (
-              <div
-                key={s.id}
-                style={{
-                  flex: '0 0 auto', minWidth: 200, maxWidth: 240, border: '1px solid #e5e7eb', borderRadius: 8,
-                  padding: '8px 10px', background: '#fafafa', display: 'flex', flexDirection: 'column', gap: 6,
-                }}
-              >
-                <span style={{ fontSize: 12.5, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={s.titulo}>
-                  {s.titulo}
-                </span>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button
-                    className={styles.btnTable}
-                    style={{ flex: 1, fontSize: 11.5 }}
-                    onClick={() => abrirCriarComSugestao(s.id)}
-                  >
+      {sugestoesInstagram.length > 0 && (
+        <div style={{ marginBottom: 16, border: '1px solid #e5e7eb', borderRadius: 8, background: '#fafafa' }}>
+          <button
+            onClick={() => setSugestoesExpandido((v) => !v)}
+            style={{
+              width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer',
+              padding: '10px 14px', fontSize: 12, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase',
+              letterSpacing: 0.4, display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            }}
+          >
+            <span>Sugestões de tema (do Instagram) — {sugestoesVisiveis.length}</span>
+            <span>{sugestoesExpandido ? '▲' : '▼'}</span>
+          </button>
+          {sugestoesExpandido && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '0 14px 12px' }}>
+              {sugestoesVisiveis.map((s) => (
+                <div
+                  key={s.id}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10, border: '1px solid #e5e7eb', borderRadius: 6,
+                    padding: '8px 10px', background: '#fff',
+                  }}
+                >
+                  <span style={{ flex: 1, fontSize: 13 }}>{s.titulo}</span>
+                  <button className={styles.btnTable} style={{ fontSize: 11.5, flexShrink: 0 }} onClick={() => abrirCriarComSugestao(s.id)}>
                     Usar este tema
                   </button>
                   <button
                     className={styles.btnTable}
-                    style={{ fontSize: 11.5, color: '#9ca3af' }}
+                    style={{ fontSize: 11.5, color: '#9ca3af', flexShrink: 0 }}
                     title="Recusar sugestão"
                     onClick={() => setRecusadas((r) => [...r, s.id])}
                   >
                     ✕
                   </button>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <span style={{ fontSize: 12.5, color: '#6b7280' }}>Período:</span>
+        <select className={styles.input} style={{ width: 'auto', padding: '4px 8px', fontSize: 12.5 }} value={periodo} onChange={(e) => setPeriodo(e.target.value as Periodo)}>
+          {(Object.keys(PERIODO_LABEL) as Periodo[]).map((p) => (
+            <option key={p} value={p}>{PERIODO_LABEL[p]}</option>
+          ))}
+        </select>
+      </div>
 
       {isLoading ? (
         <p>Carregando...</p>
       ) : informativos.length === 0 ? (
         <p className={styles.empty}>Nenhum informativo criado ainda.</p>
+      ) : informativosFiltrados.length === 0 ? (
+        <p className={styles.empty}>Nenhum informativo neste período.</p>
       ) : (
         <div className={styles.tableCard}>
           <table className={styles.table}>
@@ -186,7 +254,7 @@ export default function InformativosPage() {
               </tr>
             </thead>
             <tbody>
-              {informativos.map((i) => (
+              {informativosFiltrados.map((i) => (
                 <Fragment key={i.id}>
                   <tr onClick={() => setSelecionadoId(i.id)} style={{ cursor: 'pointer' }}>
                     <td>{i.numero ?? '—'}</td>
@@ -231,6 +299,7 @@ export default function InformativosPage() {
         <ModalCriar
           responsavelPadrao={padrao ?? null}
           sugestaoInicialId={sugestaoParaCriar}
+          usedSugestaoIds={usedSugestaoIds}
           onFechar={() => { setModalCriar(false); setSugestaoParaCriar(null) }}
           onCriar={(dados) => criarMutation.mutate(dados)}
           salvando={criarMutation.isPending}
@@ -247,15 +316,73 @@ export default function InformativosPage() {
   )
 }
 
+function TemaSugestaoComboBox({
+  sugestoes,
+  value,
+  onSelect,
+}: {
+  sugestoes: { id: string; titulo: string }[]
+  value: string
+  onSelect: (s: { id: string; titulo: string } | null) => void
+}) {
+  const [query, setQuery] = useState('')
+  const [open, setOpen] = useState(false)
+  const selecionado = sugestoes.find((s) => s.id === value)
+  const filtrados = query
+    ? sugestoes.filter((s) => s.titulo.toLowerCase().includes(query.toLowerCase()))
+    : sugestoes
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <input
+        className={styles.input}
+        placeholder="— Nenhum, título livre — (digite pra pesquisar)"
+        value={open ? query : (selecionado?.titulo ?? '')}
+        onFocus={() => { setOpen(true); setQuery('') }}
+        onChange={(e) => setQuery(e.target.value)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+      />
+      {open && (
+        <div style={{
+          position: 'absolute', left: 0, right: 0, top: '100%', zIndex: 50, background: '#fff',
+          border: '1px solid #e5e7eb', borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,.1)',
+          maxHeight: 240, overflowY: 'auto', marginTop: 2,
+        }}>
+          <div
+            style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 13, color: '#6b7280', fontStyle: 'italic' }}
+            onMouseDown={() => { onSelect(null); setOpen(false) }}
+          >
+            — Nenhum, título livre —
+          </div>
+          {filtrados.length === 0 && (
+            <div style={{ padding: '8px 12px', fontSize: 13, color: '#9ca3af' }}>Nenhuma sugestão encontrada</div>
+          )}
+          {filtrados.map((s) => (
+            <div
+              key={s.id}
+              style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 13, borderTop: '1px solid #f9fafb' }}
+              onMouseDown={() => { onSelect(s); setOpen(false) }}
+            >
+              {s.titulo}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ModalCriar({
   responsavelPadrao,
   sugestaoInicialId,
+  usedSugestaoIds,
   onFechar,
   onCriar,
   salvando,
 }: {
   responsavelPadrao: { id: string; nome: string; email: string | null } | null
   sugestaoInicialId?: string | null
+  usedSugestaoIds: Set<string>
   onFechar: () => void
   onCriar: (dados: {
     mes_referencia: string
@@ -269,11 +396,15 @@ function ModalCriar({
   const [mesReferencia, setMesReferencia] = useState(proximoMesReferencia())
   const [temaSugestaoId, setTemaSugestaoId] = useState(sugestaoInicialId ?? '')
 
-  const { data: sugestoesInstagram = [] } = useQuery({
+  const { data: sugestoesBrutas = [] } = useQuery({
     queryKey: ['instagram', 'sugestoes-tema'],
     queryFn: () => instagramApi.listar(),
     staleTime: 30_000,
   })
+  const sugestoesInstagram = [...sugestoesBrutas]
+    .filter((s) => !usedSugestaoIds.has(s.id))
+    .sort((a, b) => (b.data_geracao || '').localeCompare(a.data_geracao || ''))
+    .slice(0, 100)
 
   const [titulo, setTitulo] = useState('')
   const [responsavel, setResponsavel] = useState<ResponsavelValue>({
@@ -308,20 +439,14 @@ function ModalCriar({
         {sugestoesInstagram.length > 0 && (
           <div className={styles.fieldGroup}>
             <label className={styles.formLabel}>Partir de um tema já sugerido no Instagram (opcional)</label>
-            <select
-              className={styles.input}
+            <TemaSugestaoComboBox
+              sugestoes={sugestoesInstagram}
               value={temaSugestaoId}
-              onChange={(e) => {
-                setTemaSugestaoId(e.target.value)
-                const s = sugestoesInstagram.find((x) => x.id === e.target.value)
+              onSelect={(s) => {
+                setTemaSugestaoId(s?.id ?? '')
                 if (s && !titulo.trim()) setTitulo(s.titulo)
               }}
-            >
-              <option value="">— Nenhum, título livre —</option>
-              {sugestoesInstagram.map((s) => (
-                <option key={s.id} value={s.id}>{s.titulo}</option>
-              ))}
-            </select>
+            />
           </div>
         )}
         <div className={styles.fieldGroup}>
@@ -576,9 +701,15 @@ function DetalheInformativo({ informativo, onFechar }: { informativo: Informativ
     mutationFn: () => informativosApi.gerarRascunhoIA(informativo.id),
     onSuccess: (res) => { invalidar(); setCitacoes(res.citacoes); setCitacoesCarregadas(true) },
   })
+  const [reescritoEm, setReescritoEm] = useState<string | null>(null)
   const reescreverMutation = useMutation({
     mutationFn: () => informativosApi.reescreverIA(informativo.id, instrucoesReescrever),
-    onSuccess: (res) => { invalidar(); setCitacoes(res.citacoes); setCitacoesCarregadas(true) },
+    onSuccess: (res) => {
+      invalidar()
+      setCitacoes(res.citacoes)
+      setCitacoesCarregadas(true)
+      setReescritoEm(new Date().toISOString())
+    },
   })
   const sincronizarMutation = useMutation({
     mutationFn: () => informativosApi.sincronizarDoc(informativo.id),
@@ -779,12 +910,25 @@ function DetalheInformativo({ informativo, onFechar }: { informativo: Informativ
           >
             {reescreverMutation.isPending ? 'Reescrevendo...' : 'Reescrever com IA'}
           </button>
+          {reescritoEm && !reescreverMutation.isPending && (
+            <span style={{ marginLeft: 8, fontSize: 12.5, color: '#15803d' }}>
+              ✅ Reescrito em {fmtDataHora(reescritoEm)}
+            </span>
+          )}
           {reescreverMutation.isError && (
             <p style={{ color: '#b91c1c', fontSize: 12.5 }}>{erroApi(reescreverMutation.error)}</p>
           )}
         </Passo>
 
         <Passo numero={6} titulo="Publicar" descricao="Gera o PDF final a partir do Doc (com timbrado) e disponibiliza no site.">
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: informativo.autorizado ? '#15803d' : '#6b7280', cursor: 'pointer', marginBottom: 8 }}>
+            <input
+              type="checkbox"
+              checked={informativo.autorizado}
+              onChange={(e) => autorizarMutation.mutate(e.target.checked)}
+            />
+            {informativo.autorizado ? `Autorizado em ${fmtDataHora(informativo.autorizado_em)}` : 'Marcar como Autorizado antes de publicar (opcional)'}
+          </label>
           <button className={styles.btnPrimary} onClick={() => publicarMutation.mutate()} disabled={publicarMutation.isPending}>
             {publicarMutation.isPending ? 'Publicando...' : jaPublicado ? 'Republicar' : 'Publicar'}
           </button>

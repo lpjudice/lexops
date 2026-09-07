@@ -37,6 +37,7 @@ import ConselhoJuridicoPage from './pages/ConselhoJuridicoPage'
 import InstagramPage from './pages/InstagramPage'
 import PostPublicoPage from './pages/PostPublicoPage'
 import InformativosPage from './pages/InformativosPage'
+import InformativoAssinantesPage from './pages/InformativoAssinantesPage'
 
 const queryClient = new QueryClient()
 
@@ -87,6 +88,7 @@ function AppRoutes() {
         <Route path="conselho" element={<ConselhoPage />} />
         <Route path="instagram" element={<InstagramPage />} />
         <Route path="informativos" element={<InformativosPage />} />
+        <Route path="informativos/assinantes" element={<InformativoAssinantesPage />} />
         <Route path="fiscal" element={<FiscalPage />} />
         <Route path="fiscal/visao" element={<VisaoFiscalPage />} />
         <Route path="fiscal/decisao" element={<BackofficeDecisaoPage />} />
