@@ -74,6 +74,10 @@ class AssinanteRequest(BaseModel):
     nome: str | None = None
 
 
+class OptOutRequest(BaseModel):
+    email: str
+
+
 class DestinatariosPreview(BaseModel):
     total: int
     exemplos: list[str] = []
