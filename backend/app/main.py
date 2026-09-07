@@ -1539,7 +1539,7 @@ async def _cors_publico(request, call_next):
     site oficial (pimentajudice.com.br) e por outros domínios públicos — não
     fazem sentido restritas pelo CORS_ORIGINS da administração."""
     response = await call_next(request)
-    if request.url.path.startswith("/api/publico/"):
+    if "/publico/" in request.url.path or request.url.path.endswith("/publico"):
         response.headers["Access-Control-Allow-Origin"] = "*"
     return response
 
