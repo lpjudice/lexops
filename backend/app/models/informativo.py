@@ -61,6 +61,12 @@ class Informativo(Base):
     conteudo_html: Mapped[str | None] = mapped_column(Text, nullable=True)
     paginas_estimadas: Mapped[float | None] = mapped_column(nullable=True)
 
+    # Snapshot de resumo/perguntas lido do Doc no momento da publicação — evita
+    # ler o Google Docs a cada request da listagem pública (era o motivo da
+    # página /informativos do site demorar 5-10s pra carregar).
+    resumo_publicado: Mapped[str | None] = mapped_column(Text, nullable=True)
+    perguntas_publicadas: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
+
     # [{"tribunal","numero","trecho_citado","status_geral","custo_usd",...}]
     citacoes_validadas: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
 

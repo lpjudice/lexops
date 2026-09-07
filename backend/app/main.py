@@ -1306,6 +1306,8 @@ def _run_migrations() -> None:
         conn.execute(text("ALTER TABLE informativos ADD COLUMN IF NOT EXISTS autorizado_em TIMESTAMPTZ"))
         conn.execute(text("ALTER TABLE informativos ADD COLUMN IF NOT EXISTS ultimo_lembrete_autorizacao_em DATE"))
         conn.execute(text("ALTER TABLE informativos ADD COLUMN IF NOT EXISTS lembrete_vespera_enviado BOOLEAN NOT NULL DEFAULT false"))
+        conn.execute(text("ALTER TABLE informativos ADD COLUMN IF NOT EXISTS resumo_publicado TEXT"))
+        conn.execute(text("ALTER TABLE informativos ADD COLUMN IF NOT EXISTS perguntas_publicadas JSONB NOT NULL DEFAULT '[]'::jsonb"))
         conn.execute(text("ALTER TABLE informativo_config ADD COLUMN IF NOT EXISTS responsavel_padrao_id UUID"))
 
         conn.commit()
@@ -1516,10 +1518,44 @@ def _backfill_responsaveis() -> None:
         db.close()
 
 
+def _backfill_informativos_resumo() -> None:
+    """Popula resumo_publicado/perguntas_publicadas dos informativos já
+    publicados antes dessa coluna existir — lê o Google Doc uma única vez
+    aqui no startup, não a cada request da listagem pública do site."""
+    from app.database import SessionLocal
+    from app.models.informativo import Informativo
+
+    db = SessionLocal()
+    try:
+        pendentes = (
+            db.query(Informativo)
+            .filter(Informativo.status == "publicado", Informativo.resumo_publicado.is_(None))
+            .all()
+        )
+        if not pendentes:
+            return
+        from app.services.google_docs import ler_perguntas_documento, ler_resumo_documento
+        for i in pendentes:
+            if not i.google_doc_id:
+                continue
+            try:
+                i.resumo_publicado = ler_resumo_documento(i.google_doc_id)
+            except Exception:
+                pass
+            try:
+                i.perguntas_publicadas = ler_perguntas_documento(i.google_doc_id) or []
+            except Exception:
+                pass
+        db.commit()
+    finally:
+        db.close()
+
+
 _run_migrations()
 _seed_super_admin()
 _seed_conselho_data()
 _backfill_responsaveis()
+_backfill_informativos_resumo()
 
 app = FastAPI(
     title="Sui",
