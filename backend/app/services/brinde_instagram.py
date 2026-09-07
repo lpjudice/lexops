@@ -58,6 +58,10 @@ ESTRUTURA: {guia}{kw}
 Tom acessível e confiável, juridicamente correto, SEM prometer resultado e SEM
 consultoria específica. Conteúdo prático (passos, cuidados, checklists).
 
+O material é PURAMENTE INFORMATIVO — não é peça de venda. NÃO inclua call-to-action
+comercial (nada de "agende", "contrate", "fale com o escritório"). O fechamento é
+institucional: uma frase de encerramento que amarra o tema, sem convite para ação.
+
 Responda APENAS com JSON válido (sem markdown):
 {{
   "titulo": "título do material",
@@ -65,7 +69,7 @@ Responda APENAS com JSON válido (sem markdown):
   "secoes": [
     {{ "titulo": "título da seção", "paragrafos": ["parágrafo..."], "bullets": ["item..."] }}
   ],
-  "cta": "chamada final curta (ex.: agende um diagnóstico com o escritório)"
+  "cta": "frase de encerramento institucional (SEM call-to-action de venda)"
 }}"""
 
 
@@ -143,21 +147,20 @@ def _render_instagram(c: dict, formato: str, para_pdf: bool) -> str:
   ul.callout {{ list-style: none; margin: 14px 0 4px; padding: 16px 20px; border-left: 4px solid; border-radius: 0 8px 8px 0; }}
   ul.callout li {{ font-size: 14.5px; line-height: 1.55; color: {INK}; margin: 7px 0; font-weight: 500; }}
   ul.callout li::before {{ content: "→ "; color: {TEAL}; font-weight: 800; }}
-  .cta {{ margin-top: 8px; padding: 22px 26px; border: 1.5px solid {TEAL}; border-radius: 10px; text-align: center; }}
-  .cta span {{ font-size: 16px; font-weight: 800; color: {TEAL}; }}
-  .foot {{ text-align: center; color: #9aa6a1; font-size: 11.5px; margin-top: 26px; letter-spacing: .5px; }}
+  .fechamento {{ margin-top: 26px; padding-top: 22px; border-top: 1px solid #e4e9e7; text-align: center; font-style: italic; font-size: 15px; color: #4a5450; }}
+  .foot {{ text-align: center; color: #9aa6a1; font-size: 11.5px; margin-top: 20px; letter-spacing: .5px; }}
   .foot b {{ color: {TEAL}; }}
 </style></head><body><div class="wrap">
   {logo_img}
   <div class="hero">
     <div class="quote">&ldquo;</div>
-    <div class="kick">MATERIAL GRATUITO</div>
+    <div class="kick">MATERIAL INFORMATIVO</div>
     <h1>{titulo}</h1>
     <div class="sub">{subtitulo}</div>
   </div>
   <hr class="rule">
   {secoes}
-  <div class="cta"><span>{cta}</span></div>
+  <div class="fechamento">{cta}</div>
   <div class="foot"><b>@dr.lucasjudice</b> · Advogado Patrimonialista · pimentajudice.com.br</div>
 </div></body></html>"""
 
@@ -196,16 +199,14 @@ def _render_site(c: dict, para_pdf: bool) -> str:
   ul.callout {{ list-style: none; margin: 14px 0 4px; padding: 16px 22px; border-left: 3px solid; }}
   ul.callout li {{ font-size: 15px; line-height: 1.6; color: {INK}; margin: 7px 0; }}
   ul.callout li::before {{ content: "— "; color: {TEAL}; font-weight: 700; }}
-  .cta {{ text-align: center; border-top: 1px solid #e4dfd2; margin-top: 44px; padding-top: 36px; }}
-  .cta .t {{ font-family: {serif}; font-size: 22px; color: {INK}; margin-bottom: 16px; }}
-  .cta .btn {{ display: inline-block; border: 1.5px solid {INK}; color: {INK}; padding: 13px 30px; font-size: 13px; letter-spacing: 2px; text-transform: uppercase; text-decoration: none; }}
-  .foot {{ text-align: center; color: {MUT}; font-size: 11.5px; margin-top: 36px; letter-spacing: 1px; }}
+  .fechamento {{ text-align: center; border-top: 1px solid #e4dfd2; margin-top: 44px; padding-top: 32px; font-family: {serif}; font-style: italic; font-size: 19px; color: {INK}; }}
+  .foot {{ text-align: center; color: {MUT}; font-size: 11.5px; margin-top: 28px; letter-spacing: 1px; }}
 </style></head><body><div class="wrap">
   <div class="hero">{logo_img}<div class="kick">Pimenta Judice · Advogados Associados</div>
     <h1>{titulo}</h1><div class="quote">&rdquo;</div><div class="sub">{subtitulo}</div></div>
   {secoes}
-  <div class="cta"><div class="t">{cta}</div><a class="btn" href="https://www.pimentajudice.com.br">pimentajudice.com.br</a></div>
-  <div class="foot">PIMENTA JUDICE ADVOGADOS ASSOCIADOS · PLANEJAMENTO PATRIMONIAL E SUCESSÓRIO</div>
+  <div class="fechamento">{cta}</div>
+  <div class="foot">PIMENTA JUDICE ADVOGADOS ASSOCIADOS · PLANEJAMENTO PATRIMONIAL E SUCESSÓRIO · pimentajudice.com.br</div>
 </div></body></html>"""
 
 

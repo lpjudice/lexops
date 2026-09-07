@@ -60,7 +60,7 @@ function BrindeSection({ sug }: { sug: Sugestao }) {
 
   const salvarKw = useMutation({ mutationFn: () => instagramApi.brindeKeyword(sug.id, kw.trim()), onSuccess: invalidate })
   const gerar = useMutation({
-    mutationFn: (estilo: 'instagram' | 'site') => instagramApi.brindeGerar(sug.id, formato, estilo),
+    mutationFn: () => instagramApi.brindeGerar(sug.id, formato, 'site'),
     onSuccess: invalidate,
     onError: (e: unknown) => alert((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Falha ao gerar brinde.'),
   })
@@ -69,8 +69,6 @@ function BrindeSection({ sug }: { sug: Sugestao }) {
     onSuccess: invalidate,
     onError: (e: unknown) => alert((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Falha no upload.'),
   })
-  const gerandoSite = gerar.isPending && gerar.variables === 'site'
-  const gerandoIg = gerar.isPending && gerar.variables === 'instagram'
 
   return (
     <div className={s.brindeBox}>
@@ -84,19 +82,15 @@ function BrindeSection({ sug }: { sug: Sugestao }) {
         <select className={s.dateInput} value={formato} onChange={(e) => setFormato(e.target.value as never)}>
           {FORMATOS_BRINDE.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
         </select>
-        <button className={s.btn} disabled={gerar.isPending} onClick={() => gerar.mutate('instagram')}>
-          <Sparkles size={14} /> {gerandoIg ? 'Gerando…' : sug.tem_brinde ? 'Regerar brinde' : 'Gerar brinde (teal)'}
-        </button>
-        <button className={s.btn} disabled={gerar.isPending} onClick={() => gerar.mutate('site')} title="Identidade oficial do site (bege/preto), estilo landing page">
-          <Sparkles size={14} /> {gerandoSite ? 'Gerando…' : 'Versão site'}
+        <button className={s.btn} disabled={gerar.isPending} onClick={() => gerar.mutate()}>
+          <Sparkles size={14} /> {gerar.isPending ? 'Gerando…' : sug.tem_brinde_site ? 'Regerar brinde' : 'Gerar brinde'}
         </button>
         <input ref={fileRef} type="file" accept="application/pdf" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate(f) }} />
         <button className={s.btn} disabled={upload.isPending} onClick={() => fileRef.current?.click()}>
           <Upload size={14} /> {upload.isPending ? 'Subindo…' : 'Subir PDF'}
         </button>
       </div>
-      {sug.tem_brinde && <BrindeDownloads id={sug.id} estilo="instagram" label="Brinde (Instagram)" />}
-      {sug.tem_brinde_site && <BrindeDownloads id={sug.id} estilo="site" label="Versão site" />}
+      {sug.tem_brinde_site && <BrindeDownloads id={sug.id} estilo="site" label="Brinde" />}
       {sug.brinde_drive_link && (
         <a className={s.driveLink} href={sug.brinde_drive_link} target="_blank" rel="noreferrer"><FolderOpen size={13} /> PDF no Drive</a>
       )}
@@ -309,36 +303,6 @@ function EmailsConfig() {
   )
 }
 
-// ─────────────────── Template do brinde (Google Docs) ───────────────────
-function BrindeTemplateConfig() {
-  const { data: template, isLoading } = useQuery({
-    queryKey: ['instagram-brinde-template'], queryFn: () => instagramApi.obterTemplateBrinde(),
-  })
-  const criar = useMutation({
-    mutationFn: () => instagramApi.criarTemplateBrinde(),
-    onSuccess: (t) => window.open(t.link, '_blank'),
-    onError: () => alert('Falha ao criar o template no Google Docs. Tente novamente em instantes.'),
-  })
-
-  if (isLoading) return null
-
-  return (
-    <div className={s.configRow}>
-      <FileText size={16} color="#4a6a6a" />
-      <span className={s.configLabel}>Template do brinde:</span>
-      {template ? (
-        <a href={template.link} target="_blank" rel="noreferrer" className={s.templateLink}>
-          Editar no Google Docs ↗
-        </a>
-      ) : (
-        <button className={s.templateBtn} disabled={criar.isPending} onClick={() => criar.mutate()}>
-          {criar.isPending ? 'Criando…' : 'Criar template padrão'}
-        </button>
-      )}
-    </div>
-  )
-}
-
 // ─────────────────── Página ───────────────────
 type Aba = 'sugeridas' | 'agenda' | 'rejeitadas'
 
@@ -445,7 +409,6 @@ export default function InstagramPage() {
       </div>
 
       <EmailsConfig />
-      <BrindeTemplateConfig />
 
       {dicaFormato && <div className={s.dica}><Lightbulb size={18} /><span>{dicaFormato}</span></div>}
 

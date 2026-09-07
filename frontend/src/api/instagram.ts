@@ -90,13 +90,6 @@ export interface EnviarAssessoriaResponse {
 
 export interface InstagramConfig {
   assessoria_emails: string
-  brinde_template_doc_id?: string | null
-  brinde_template_link?: string | null
-}
-
-export interface BrindeTemplate {
-  doc_id: string
-  link: string
 }
 
 export const instagramApi = {
@@ -143,19 +136,13 @@ export const instagramApi = {
   salvarConfig: (assessoria_emails: string) =>
     api.put<InstagramConfig>('/instagram/config', { assessoria_emails }).then((r) => r.data),
 
-  obterTemplateBrinde: () =>
-    api.get<BrindeTemplate | null>('/instagram/brinde/template').then((r) => r.data),
-
-  criarTemplateBrinde: () =>
-    api.post<BrindeTemplate>('/instagram/brinde/template').then((r) => r.data),
-
   buscarPublico: (id: string) =>
     api.get<CardPublico>(`/publico/instagram/${id}`).then((r) => r.data),
 
   brindeKeyword: (id: string, palavra_chave: string) =>
     api.patch<Sugestao>(`/instagram/sugestoes/${id}/brinde/palavra-chave`, { palavra_chave }).then((r) => r.data),
 
-  brindeGerar: (id: string, formato: 'one_pager' | 'slides' | 'html', estilo: 'instagram' | 'site' = 'instagram') =>
+  brindeGerar: (id: string, formato: 'one_pager' | 'slides' | 'html', estilo: 'instagram' | 'site' = 'site') =>
     api.post<Sugestao>(`/instagram/sugestoes/${id}/brinde/gerar`, { formato, estilo }, { timeout: 180000 }).then((r) => r.data),
 
   brindeUpload: (id: string, file: File) => {
@@ -178,7 +165,7 @@ export const instagramApi = {
 }
 
 /** URL pública (compartilhável) do brinde. kind: 'view'|'html'|'pdf'; estilo: 'instagram'|'site'. */
-export function brindeUrl(id: string, kind: 'view' | 'html' | 'pdf' = 'view', estilo: 'instagram' | 'site' = 'instagram'): string {
+export function brindeUrl(id: string, kind: 'view' | 'html' | 'pdf' = 'view', estilo: 'instagram' | 'site' = 'site'): string {
   const path = estilo === 'site' ? 'brinde-site' : 'brinde'
   const base = (typeof window !== 'undefined' ? window.location.origin : '') + '/api/publico/instagram/' + id + '/' + path
   return kind === 'view' ? base : `${base}.${kind}`

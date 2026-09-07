@@ -106,31 +106,6 @@ def _resp_pdf(html: str, filename: str):
                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
-def _resp_pdf_bytes(pdf: bytes, filename: str):
-    from fastapi import Response
-    return Response(content=pdf, media_type="application/pdf",
-                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
-
-
-def _pdf_pronto(db: Session, sugestao_id: str):
-    """Se o brinde já foi gerado via template do Docs, o PDF final está salvo
-    no Drive (brinde_pdf_drive_id) — evita re-renderizar a cada acesso público."""
-    import uuid as _uuid
-
-    from app.models.instagram import InstagramSugestao
-
-    try:
-        sid = _uuid.UUID(sugestao_id)
-    except ValueError:
-        return None, None
-    sug = db.get(InstagramSugestao, sid)
-    if not sug or not sug.brinde_pdf_drive_id:
-        return None, sug
-    from app.services.google_drive import baixar_arquivo_por_id
-    pdf = baixar_arquivo_por_id(sug.brinde_pdf_drive_id)
-    return pdf, sug
-
-
 # ── Brinde estilo Instagram (teal) ──
 @router.get("/instagram/{sugestao_id}/brinde")
 def brinde_view(sugestao_id: str, db: Session = Depends(get_db)):
@@ -146,9 +121,6 @@ def brinde_html(sugestao_id: str, db: Session = Depends(get_db)):
 
 @router.get("/instagram/{sugestao_id}/brinde.pdf")
 def brinde_pdf(sugestao_id: str, db: Session = Depends(get_db)):
-    pronto, sug = _pdf_pronto(db, sugestao_id)
-    if pronto:
-        return _resp_pdf_bytes(pronto, f"{_brinde_slug(sug)}.pdf")
     html, sug = _brinde_render(db, sugestao_id, "instagram", para_pdf=True)
     return _resp_pdf(html, f"{_brinde_slug(sug)}.pdf")
 
@@ -168,9 +140,6 @@ def brinde_site_html(sugestao_id: str, db: Session = Depends(get_db)):
 
 @router.get("/instagram/{sugestao_id}/brinde-site.pdf")
 def brinde_site_pdf(sugestao_id: str, db: Session = Depends(get_db)):
-    pronto, sug = _pdf_pronto(db, sugestao_id)
-    if pronto:
-        return _resp_pdf_bytes(pronto, f"{_brinde_slug(sug)}-site.pdf")
     html, sug = _brinde_render(db, sugestao_id, "site", para_pdf=True)
     return _resp_pdf(html, f"{_brinde_slug(sug)}-site.pdf")
 
