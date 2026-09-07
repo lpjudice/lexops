@@ -321,6 +321,22 @@ def _paragrafos_do_doc(doc: dict) -> list[tuple[str, int, int]]:
     return saida
 
 
+def ler_resumo_documento(doc_id: str) -> str | None:
+    """Lê o parágrafo logo abaixo de "RESUMO ESTRUTURADO" — usado pra montar
+    o corpo do e-mail da newsletter. None se não achar o cabeçalho."""
+    def _ler(tokens: dict):
+        return _docs_request("GET", f"/{doc_id}", tokens)
+
+    doc = _com_refresh(_ler)
+    if not doc:
+        return None
+    paras = _paragrafos_do_doc(doc)
+    for i, (txt, _s, _e) in enumerate(paras):
+        if "RESUMO ESTRUTURADO" in txt and i + 1 < len(paras):
+            return paras[i + 1][0].strip() or None
+    return None
+
+
 def ler_corpo_documento(doc_id: str) -> str | None:
     """Lê só o corpo do informativo (texto depois do separador). Docs
     antigos sem separador (ou o template original) devolvem o texto inteiro."""

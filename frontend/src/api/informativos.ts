@@ -111,6 +111,12 @@ export const informativosApi = {
 
   obterTemplate: () =>
     api.get<{ template_doc_link: string | null }>('/informativos/config/template').then((r) => r.data),
+
+  destinatariosNewsletter: (id: string) =>
+    api.get<{ total: number; exemplos: string[] }>(`/informativos/${id}/newsletter/destinatarios`).then((r) => r.data),
+
+  enviarNewsletter: (id: string) =>
+    api.post<{ enviados: number; total: number; erros: number }>(`/informativos/${id}/newsletter/enviar`, undefined, { timeout: 180000 }).then((r) => r.data),
 }
 
 export function erroApi(e: unknown): string {

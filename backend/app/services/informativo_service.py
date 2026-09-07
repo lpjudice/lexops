@@ -625,3 +625,108 @@ def publicar(db: Session, informativo: Informativo) -> dict:
         aviso = f"O PDF ficou com {paginas} páginas (preferência: até {LIMITE_PAGINAS_PREFERIDO})."
 
     return {"paginas": paginas, "aviso": aviso, "pdf_link": pdf_link}
+
+
+# ── Distribuição (newsletter) ───────────────────────────────────────────────
+def _link_publico(informativo: Informativo) -> str:
+    """Link direto pro informativo na página pública (não a home)."""
+    from app.config import settings
+    base = (settings.frontend_url or "").rstrip("/")
+    if not base or "localhost" in base or "127.0.0.1" in base:
+        base = "https://lexops.fly.dev"
+    return f"{base}/api/publico/informativos/{informativo.id}.html"
+
+
+def listar_destinatarios_newsletter(db: Session) -> list[tuple[str, str]]:
+    """Une Cliente.email + ConselhoContato.email + InformativoAssinante
+    (inscrição pública), deduplicados por e-mail (case-insensitive).
+    Retorna [(email, nome), ...]."""
+    from app.models.cliente import Cliente
+    from app.models.conselho import ConselhoContato
+    from app.models.informativo import InformativoAssinante
+
+    vistos: dict[str, str] = {}
+
+    for nome, email in db.query(Cliente.nome, Cliente.email).filter(Cliente.email.isnot(None)).all():
+        chave = (email or "").strip().lower()
+        if chave and "@" in chave and chave not in vistos:
+            vistos[chave] = nome or ""
+
+    for primeiro, sobre, email in (
+        db.query(ConselhoContato.primeiro_nome, ConselhoContato.sobrenome, ConselhoContato.email)
+        .filter(ConselhoContato.email.isnot(None)).all()
+    ):
+        chave = (email or "").strip().lower()
+        if chave and "@" in chave and chave not in vistos:
+            vistos[chave] = " ".join(p for p in [primeiro, sobre] if p)
+
+    for nome, email in (
+        db.query(InformativoAssinante.nome, InformativoAssinante.email)
+        .filter(InformativoAssinante.ativo.is_(True)).all()
+    ):
+        chave = (email or "").strip().lower()
+        if chave and chave not in vistos:
+            vistos[chave] = nome or ""
+
+    return list(vistos.items())
+
+
+def montar_email_newsletter(informativo: Informativo) -> tuple[str, str]:
+    """(assunto, html) do e-mail da newsletter — resumo do Doc + link direto
+    pro informativo no site + aviso de que o PDF vai anexado."""
+    resumo = None
+    if informativo.google_doc_id:
+        from app.services.google_docs import ler_resumo_documento
+        try:
+            resumo = ler_resumo_documento(informativo.google_doc_id)
+        except Exception:
+            resumo = None
+
+    mes_label = _mes_label(informativo.mes_referencia)
+    link = _link_publico(informativo)
+    assunto = f"Informativo Pimenta Judice — {informativo.titulo}"
+
+    resumo_html = f'<p style="font-size:15px;line-height:1.6;color:#333;">{resumo}</p>' if resumo else ""
+    html = f"""<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
+      <div style="background:#1C5A4E;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0;">
+        <div style="font-size:11px;letter-spacing:2px;opacity:.85;text-transform:uppercase;">Informativo · {mes_label}</div>
+        <h2 style="margin:8px 0 0;">{informativo.titulo}</h2>
+      </div>
+      <div style="padding:22px 24px;border:1px solid #e5e5e5;border-top:none;border-radius:0 0 8px 8px;">
+        {resumo_html}
+        <p style="font-size:14px;color:#555;">O PDF completo vai anexado neste e-mail. Você também pode ler direto no site:</p>
+        <a href="{link}" style="display:inline-block;background:#1C5A4E;color:#fff;text-decoration:none;font-weight:700;padding:12px 24px;border-radius:999px;font-size:14px;">Ler no site →</a>
+      </div>
+      <p style="text-align:center;font-size:11px;color:#999;margin-top:14px;">Pimenta Judice Advogados — Planejamento Patrimonial e Sucessório</p>
+    </div>"""
+    return assunto, html
+
+
+def enviar_newsletter(db: Session, informativo: Informativo) -> dict:
+    """Envia o e-mail da newsletter (resumo + link + PDF anexado) pra todos
+    os destinatários únicos (Clientes + Contatos do Conselho + inscritos
+    públicos). Só funciona pra informativo já publicado (precisa do PDF)."""
+    if informativo.status != "publicado" or not informativo.drive_pdf_link:
+        raise RuntimeError("Publique o informativo antes de enviar a newsletter.")
+
+    from app.services.google_drive import baixar_arquivo_por_id, extrair_file_id
+    file_id = extrair_file_id(informativo.drive_pdf_link)
+    pdf_bytes = baixar_arquivo_por_id(file_id) if file_id else None
+    if not pdf_bytes:
+        raise RuntimeError("Não consegui baixar o PDF do Drive pra anexar (verifique a autenticação Google).")
+
+    slug = re.sub(r"[^a-z0-9]+", "-", (informativo.titulo or "informativo").lower()).strip("-")[:60] or "informativo"
+    assunto, html = montar_email_newsletter(informativo)
+    destinatarios = listar_destinatarios_newsletter(db)
+
+    from app.services.email_service import _send_via_gmail_oauth
+    enviados = erros = 0
+    for email, _nome in destinatarios:
+        try:
+            _send_via_gmail_oauth(email, assunto, html, attachments=[(f"{slug}.pdf", pdf_bytes)])
+            enviados += 1
+        except Exception as exc:
+            erros += 1
+            logger.warning("Newsletter informativo %s: falha ao enviar pra %s: %s", informativo.id, email, exc)
+
+    return {"enviados": enviados, "total": len(destinatarios), "erros": erros}
