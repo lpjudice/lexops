@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { clientesApi } from '../api/clientes'
 import type { ClienteCreate } from '../api/clientes'
 import CadastrosPendentes from '../components/CadastrosPendentes'
+import DuplicatasClientes from '../components/DuplicatasClientes'
 import EnviarLinkModal from '../components/EnviarLinkModal'
 import {
   applyDocMask, brParaIso, buscarCep, ESTADO_CIVIL_OPCOES, isoParaBr,
@@ -92,6 +93,7 @@ export default function ClientesPage() {
         </div>
       </div>
 
+      <DuplicatasClientes />
       <CadastrosPendentes />
 
       {enviarPara && (

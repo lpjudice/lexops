@@ -1,4 +1,5 @@
 import api from './client'
+import { confirmarNomeSimilar, isNomeSimilarConflict } from '../utils/nomeSimilar'
 
 /** Campos cadastrais estendidos (PF + PJ), preenchíveis no autocadastro. */
 export interface ClienteCadastroFields {
@@ -56,40 +57,6 @@ export interface ClienteCreate extends ClienteCadastroFields {
   ignorar_similares?: boolean
 }
 
-interface ClienteSimilar {
-  id: string
-  nome: string
-  tipo: 'PF' | 'PJ'
-  similaridade: number
-}
-
-/** true = usuário respondeu "sim, é a mesma pessoa" (cancela o cadastro).
- * false = "é diferente" (segue, sugerindo completar o nome). */
-function confirmarNomeSimilar(nomeDigitado: string, similares: ClienteSimilar[]): string | null {
-  const lista = similares
-    .map((s) => `• ${s.nome} (${s.tipo}) — ${Math.round(s.similaridade * 100)}% parecido`)
-    .join('\n')
-  const ehMesmoCliente = window.confirm(
-    `Já existe um cadastro parecido com "${nomeDigitado}":\n\n${lista}\n\n` +
-    `É a MESMA pessoa/empresa?\n\n` +
-    `OK = sim, é a mesma (cancela este cadastro — use o cliente já existente)\n` +
-    `Cancelar = não, é diferente (seguir com o cadastro)`
-  )
-  if (ehMesmoCliente) return null
-  const sugestao = window.prompt(
-    'Pessoa/empresa diferente. Para evitar confundir as pastas de cada uma, ' +
-    'complete o nome com um identificador (cidade, apelido, etc.):',
-    nomeDigitado,
-  )
-  return sugestao && sugestao.trim() ? sugestao.trim() : null
-}
-
-function isNomeSimilarConflict(err: unknown): ClienteSimilar[] | null {
-  const resp = (err as { response?: { status?: number; data?: { detail?: unknown } } })?.response
-  if (resp?.status !== 409) return null
-  const detail = resp.data?.detail as { tipo?: string; similares?: ClienteSimilar[] } | undefined
-  return detail?.tipo === 'nome_similar' ? (detail.similares ?? []) : null
-}
 
 export interface Documento {
   filename: string
@@ -130,8 +97,26 @@ export interface EmailCliente {
   created_at: string
 }
 
+export interface ClienteDuplicataMembro {
+  id: string
+  nome: string
+  tipo: 'PF' | 'PJ'
+  drive_folder_id: string | null
+  created_at: string | null
+}
+
+export interface ClienteDuplicataGrupo {
+  membros: ClienteDuplicataMembro[]
+  similaridade: number
+}
+
 export const clientesApi = {
   listar: () => api.get<Cliente[]>('/clientes/').then((r) => r.data),
+  duplicatasCadastro: () =>
+    api.get<{ duplicatas: ClienteDuplicataGrupo[] }>('/clientes/admin/duplicatas-cadastro')
+      .then((r) => r.data.duplicatas),
+  mesclarClientes: (ids: string[], canonicalId: string) =>
+    api.post('/clientes/admin/mesclar-clientes', { ids, canonical_id: canonicalId }).then((r) => r.data),
   criar: async (data: ClienteCreate): Promise<Cliente> => {
     try {
       return (await api.post<Cliente>('/clientes/', data)).data

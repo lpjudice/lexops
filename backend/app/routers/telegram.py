@@ -609,6 +609,29 @@ def _processar_proximo(db: Session, c: TelegramConversa, data: dict, chat_id: in
     )
 
 
+def _criar_cliente_reembolso(
+    db: Session, c: TelegramConversa, data: dict, draft: dict, chat_id: int, nome: str,
+) -> None:
+    """Cria cliente incompleto a partir do fluxo de reembolso no Telegram —
+    só chamado depois que o operador confirmou que NÃO é um cliente já
+    parecido existente (ver checagem em `cli:novo`)."""
+    novo_cli = Cliente(nome=nome, tipo="PF", incompleto=True)
+    db.add(novo_cli)
+    db.commit()
+    db.refresh(novo_cli)
+    draft["cliente_id"] = str(novo_cli.id)
+    draft["cliente_nome"] = novo_cli.nome
+    telegram_api.send_message(
+        chat_id,
+        f"✅ Cliente *{novo_cli.nome}* cadastrado como incompleto.\n"
+        "Lembre de completar o cadastro no LexOps.",
+    )
+    if draft.get("mode") == "add":
+        _passo_add_despesa(db, c, data, chat_id)
+    else:
+        _passo_natureza(db, c, data, chat_id)
+
+
 # ── Callbacks ─────────────────────────────────────────────────────────────────
 
 def _handle_callback(db: Session, cq: dict) -> None:
@@ -660,26 +683,36 @@ def _handle_callback(db: Session, cq: dict) -> None:
             telegram_api.send_message(chat_id, "Digite novamente o nome do cliente:")
             return
         if valor == "novo":
+            nome = (_draft(data).get("_nome_busca") or "").strip()
+            if not nome:
+                telegram_api.send_message(chat_id, "Nome não encontrado. Digite o nome do cliente:")
+                _save(db, c, "cliente_busca", data)
+                return
+            from app.services.cliente_dedup import encontrar_similares
+            similares = encontrar_similares(nome, db)
+            if similares:
+                # Não cria de cara: pode ser o mesmo cliente com nome digitado
+                # um pouco diferente (acento, espaço). Deixa escolher.
+                botoes = [[(f"👤 É este: {s['nome']}", f"cli:{s['id']}")] for s in similares[:4]]
+                botoes.append([("✅ É diferente, cadastrar mesmo assim", "cli:forcar_novo")])
+                lista = "\n".join(f"• {s['nome']} ({round(s['similaridade'] * 100)}% parecido)" for s in similares[:4])
+                telegram_api.send_message(
+                    chat_id,
+                    f'⚠ Já existe cadastro parecido com *"{nome}"*:\n{lista}\n\n'
+                    "É algum desses, ou é pessoa/empresa diferente?",
+                    botoes,
+                )
+                _save(db, c, "cliente_busca", data)
+                return
+            _criar_cliente_reembolso(db, c, data, draft, chat_id, nome)
+            return
+        if valor == "forcar_novo":
             nome = (_draft(data).pop("_nome_busca", None) or "").strip()
             if not nome:
                 telegram_api.send_message(chat_id, "Nome não encontrado. Digite o nome do cliente:")
                 _save(db, c, "cliente_busca", data)
                 return
-            novo_cli = Cliente(nome=nome, tipo="PF", incompleto=True)
-            db.add(novo_cli)
-            db.commit()
-            db.refresh(novo_cli)
-            draft["cliente_id"] = str(novo_cli.id)
-            draft["cliente_nome"] = novo_cli.nome
-            telegram_api.send_message(
-                chat_id,
-                f"✅ Cliente *{novo_cli.nome}* cadastrado como incompleto.\n"
-                "Lembre de completar o cadastro no LexOps.",
-            )
-            if draft.get("mode") == "add":
-                _passo_add_despesa(db, c, data, chat_id)
-            else:
-                _passo_natureza(db, c, data, chat_id)
+            _criar_cliente_reembolso(db, c, data, draft, chat_id, nome)
             return
         cliente = db.query(Cliente).filter(Cliente.id == uuid.UUID(valor)).first()
         if not cliente:

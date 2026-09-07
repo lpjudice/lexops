@@ -111,6 +111,41 @@ def mesclar_pastas_drive(body: MesclarPastasBody, current: Usuario = Depends(get
     return heal.mesclar_cluster(body.folder_ids, body.canonical_id)
 
 
+# ── Cadastro de cliente duplicado (linha na tabela, não só pasta) ──────────────
+# Detecção roda sob demanda (não é barata: compara todos os nomes entre si) —
+# a tela de Clientes chama isso pra mostrar o alerta. A mesclagem é SEMPRE
+# manual (botão), nunca automática — decisão do Lucas.
+
+class MesclarClientesBody(BaseModel):
+    ids: list[uuid.UUID]
+    canonical_id: uuid.UUID
+
+
+@router.get("/admin/duplicatas-cadastro")
+def listar_duplicatas_cadastro(current: Usuario = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Detecta (sem mesclar) linhas de `clientes` com nome igual/parecido."""
+    if current.role != "super_admin":
+        raise HTTPException(status_code=403, detail="Apenas super admin.")
+    from app.services.cliente_dedup import escanear_duplicados_cadastro
+    return {"duplicatas": escanear_duplicados_cadastro(db)}
+
+
+@router.post("/admin/mesclar-clientes")
+def mesclar_clientes_endpoint(
+    body: MesclarClientesBody, current: Usuario = Depends(get_current_user), db: Session = Depends(get_db),
+):
+    """Mescla 2+ cadastros de cliente na linha `canonical_id`: reatribui
+    processos/contratos/tarefas/reembolsos/etc. e mescla a pasta do Drive se
+    houver mais de uma. Ação manual — disparada só pelo botão na revisão."""
+    if current.role != "super_admin":
+        raise HTTPException(status_code=403, detail="Apenas super admin.")
+    from app.services.cliente_merge import mesclar_clientes
+    resultado = mesclar_clientes(body.ids, body.canonical_id, db)
+    if not resultado.get("ok"):
+        raise HTTPException(status_code=400, detail=resultado.get("erro", "falha_ao_mesclar"))
+    return resultado
+
+
 @router.get("/{cliente_id}", response_model=ClienteWithProcessos)
 def obter_cliente(cliente_id: uuid.UUID, db: Session = Depends(get_db)):
     from app.routers.processos import _processo_to_out

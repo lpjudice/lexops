@@ -1,4 +1,5 @@
 import api, { getToken } from './client'
+import { confirmarNomeSimilar, isNomeSimilarConflict } from '../utils/nomeSimilar'
 
 export type StatusContrato =
   | 'rascunho' | 'aguardando_assinatura' | 'parcialmente_assinado' | 'assinado' | 'cancelado'
@@ -132,17 +133,35 @@ export const contratosApi = {
   lerContratantes: (id: string) =>
     api.post<{ contratantes: ContratanteLido[]; financeiro: ContratoFinanceiroIA }>(`/contratos/${id}/ler-contratantes`).then((r) => r.data),
 
-  aplicarContratantes: (
+  aplicarContratantes: async (
     id: string,
     decisoes: ContratanteDecisao[],
     opts?: { vincular_contrato?: boolean; lancar_financeiro?: boolean; financeiro?: ContratoFinanceiroIA },
-  ) =>
-    api.post<Contrato>(`/contratos/${id}/aplicar-contratantes`, {
+  ): Promise<Contrato> => {
+    const body = () => ({
       decisoes,
       vincular_contrato: opts?.vincular_contrato ?? true,
       lancar_financeiro: opts?.lancar_financeiro ?? false,
       financeiro: opts?.financeiro,
-    }).then((r) => r.data),
+    })
+    try {
+      return (await api.post<Contrato>(`/contratos/${id}/aplicar-contratantes`, body())).data
+    } catch (err) {
+      const similares = isNomeSimilarConflict(err)
+      if (similares === null) throw err
+      const nomeConflito = (err as { response?: { data?: { detail?: { nome?: string } } } })
+        ?.response?.data?.detail?.nome ?? ''
+      const novoNome = confirmarNomeSimilar(nomeConflito, similares)
+      if (!novoNome) throw new Error(`Cadastro cancelado — "${nomeConflito}" já existe como cliente parecido.`)
+      // Marca a decisão que gerou o conflito com o nome corrigido, sem repetir o alerta.
+      decisoes = decisoes.map((d) =>
+        d.acao === 'criar' && d.nome === nomeConflito
+          ? { ...d, nome: novoNome, ignorar_similares: true }
+          : d
+      )
+      return (await api.post<Contrato>(`/contratos/${id}/aplicar-contratantes`, body())).data
+    }
+  },
 
   pastaMestra: () =>
     api.get<{ link: string | null }>('/contratos/pasta-mestra').then((r) => r.data),
@@ -199,4 +218,5 @@ export interface ContratanteDecisao {
   profissao?: string
   diferenciador?: string
   principal?: boolean
+  ignorar_similares?: boolean
 }
