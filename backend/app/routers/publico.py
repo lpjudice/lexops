@@ -200,13 +200,12 @@ def _informativo_publicado(db: Session, informativo_id: str):
     return informativo
 
 
-@router.get("/informativos/{informativo_id}")
-def informativo_view(informativo_id: str, db: Session = Depends(get_db)):
-    from app.services.informativo_service import renderizar_pagina_publica
-    informativo = _informativo_publicado(db, informativo_id)
-    return _resp_html(renderizar_pagina_publica(informativo))
-
-
+## IMPORTANTE: rotas com sufixo literal (.html/.pdf) precisam vir ANTES da
+## rota sem sufixo — o path param `{informativo_id}: str` sem conversor casa
+## com QUALQUER string sem barra, incluindo ".html"/".pdf" no final, e o
+## Starlette usa a PRIMEIRA rota que casa. Com a ordem trocada, ".html"
+## nunca era alcançado (a rota "sem sufixo" comia a URL inteira, incluindo
+## o ".html", e a busca por UUID falhava com "Link inválido").
 @router.get("/informativos/{informativo_id}.html")
 def informativo_html(informativo_id: str, db: Session = Depends(get_db)):
     import re
@@ -235,6 +234,13 @@ def informativo_pdf(informativo_id: str, db: Session = Depends(get_db)):
     from fastapi import Response
     return Response(content=pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{slug}.pdf"'})
+
+
+@router.get("/informativos/{informativo_id}")
+def informativo_view(informativo_id: str, db: Session = Depends(get_db)):
+    from app.services.informativo_service import renderizar_pagina_publica
+    informativo = _informativo_publicado(db, informativo_id)
+    return _resp_html(renderizar_pagina_publica(informativo))
 
 
 def _cfg_por_token(db: Session, token: str) -> ConfigFiscal:
