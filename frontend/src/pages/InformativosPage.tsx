@@ -147,6 +147,11 @@ export default function InformativosPage() {
     },
   })
 
+  const restaurarMutation = useMutation({
+    mutationFn: informativosApi.restaurar,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['informativos'] }),
+  })
+
   const abrirCriarComSugestao = (sugestaoId: string) => {
     setSugestaoParaCriar(sugestaoId)
     setModalCriar(true)
@@ -285,6 +290,16 @@ export default function InformativosPage() {
                           title="Distribuição"
                         >
                           {expandidoId === i.id ? '▲ Distribuir' : '▼ Distribuir'}
+                        </button>
+                      )}
+                      {excluido && (
+                        <button
+                          className={styles.btnTable}
+                          onClick={(e) => { e.stopPropagation(); restaurarMutation.mutate(i.id) }}
+                          disabled={restaurarMutation.isPending}
+                          title="Desfaz a exclusão e volta pro status de antes"
+                        >
+                          Restaurar
                         </button>
                       )}
                     </td>
@@ -837,6 +852,12 @@ function DetalheInformativo({ informativo, onFechar }: { informativo: Informativ
     mutationFn: () => informativosApi.validarCitacoes(informativo.id),
     onSuccess: (res) => { invalidar(); setCitacoes(res.citacoes); setCitacoesCarregadas(true) },
   })
+  const [textoManual, setTextoManual] = useState('')
+  const [mostrarTextoManual, setMostrarTextoManual] = useState(false)
+  const corpoManualMutation = useMutation({
+    mutationFn: () => informativosApi.definirCorpoManual(informativo.id, textoManual),
+    onSuccess: () => { invalidar(); validarMutation.mutate(); setMostrarTextoManual(false) },
+  })
   const rascunhoIAMutation = useMutation({
     // Checagem de citações dispara À PARTE (chamada própria) logo depois de
     // gerar — nunca dentro da mesma requisição, senão o front toma timeout
@@ -979,6 +1000,10 @@ function DetalheInformativo({ informativo, onFechar }: { informativo: Informativ
           <button className={styles.btnSmall} onClick={() => rascunhoIAMutation.mutate()} disabled={rascunhoIAMutation.isPending}>
             {rascunhoIAMutation.isPending ? 'Gerando rascunho...' : jaGerado ? 'Regerar rascunho com IA' : 'Gerar rascunho com IA'}
           </button>
+          {' '}
+          <button className={styles.btnSmall} onClick={() => setMostrarTextoManual((v) => !v)}>
+            {mostrarTextoManual ? 'Cancelar' : 'Colar texto pronto'}
+          </button>
           {jaGerado && !rascunhoIAMutation.isPending && (
             <span style={{ marginLeft: 8, fontSize: 12.5, color: '#15803d' }}>
               ✅ Gerado em {fmtDataHora(informativo.rascunho_gerado_em)}
@@ -986,6 +1011,34 @@ function DetalheInformativo({ informativo, onFechar }: { informativo: Informativ
           )}
           {rascunhoIAMutation.isError && (
             <p style={{ color: '#b91c1c', fontSize: 12.5 }}>{erroApi(rascunhoIAMutation.error)}</p>
+          )}
+          {mostrarTextoManual && (
+            <div style={{ marginTop: 10 }}>
+              <p style={{ fontSize: 12, color: '#6b7280', margin: '0 0 6px' }}>
+                Cola o texto pronto (seu, sem passar pela IA) — vira o corpo do informativo no Doc.
+                Só é reescrito se você pedir "Reescrever" depois; do contrário fica exatamente como
+                mandou, mesmo que o resto do Doc tenha um layout diferente.
+              </p>
+              <textarea
+                value={textoManual}
+                onChange={(e) => setTextoManual(e.target.value)}
+                rows={10}
+                style={{ width: '100%', maxWidth: 640, fontSize: 13, padding: 8 }}
+                placeholder="Cole aqui o texto completo do informativo..."
+              />
+              <div style={{ marginTop: 6 }}>
+                <button
+                  className={styles.btnSmall}
+                  onClick={() => corpoManualMutation.mutate()}
+                  disabled={!textoManual.trim() || corpoManualMutation.isPending}
+                >
+                  {corpoManualMutation.isPending ? 'Gravando...' : 'Usar este texto'}
+                </button>
+              </div>
+              {corpoManualMutation.isError && (
+                <p style={{ color: '#b91c1c', fontSize: 12.5 }}>{erroApi(corpoManualMutation.error)}</p>
+              )}
+            </div>
           )}
         </Passo>
 

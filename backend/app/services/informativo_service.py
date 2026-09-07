@@ -337,6 +337,27 @@ def gerar_rascunho_ia(informativo: Informativo) -> tuple[str, list[str], str, fl
     return resumo, perguntas, corpo, custo
 
 
+def definir_corpo_manual(informativo: Informativo, texto: str) -> tuple[str, list[dict]]:
+    """Grava um texto pronto (colado pelo Lucas, não gerado por IA) como
+    corpo do informativo — mesmo destino no Doc que `gerar_rascunho_e_gravar`
+    usa (depois do separador), mas SEM chamar IA nenhuma e SEM tocar em
+    resumo/perguntas. Segue dali a mesma esteira de sempre: checagem de
+    citações, preview, publicar — e só é reescrito se o Lucas pedir
+    explicitamente depois."""
+    if not informativo.google_doc_id:
+        raise RuntimeError("Este informativo ainda não tem um Google Doc vinculado.")
+    texto = (texto or "").strip()
+    if not texto:
+        raise RuntimeError("Texto vazio.")
+    from app.services.google_docs import substituir_corpo_informativo
+    if not substituir_corpo_informativo(informativo.google_doc_id, texto):
+        raise RuntimeError("Falhou ao gravar no Google Doc (verifique a autenticação Google).")
+    informativo.conteudo_texto = texto
+    if informativo.status == "rascunho":
+        informativo.status = "primeiro_draft"
+    return texto, (informativo.citacoes_validadas or [])
+
+
 def gerar_rascunho_e_gravar(informativo: Informativo) -> tuple[str, list[dict]]:
     """Gera resumo + perguntas-teaser + corpo com IA e já grava no Google Doc
     vinculado — resumo e perguntas nos parágrafos abaixo de seus respectivos
@@ -681,12 +702,10 @@ def publicar(db: Session, informativo: Informativo) -> dict:
 
 # ── Distribuição (newsletter) ───────────────────────────────────────────────
 def _link_publico(informativo: Informativo) -> str:
-    """Link direto pro informativo na página pública (não a home)."""
-    from app.config import settings
-    base = (settings.frontend_url or "").rstrip("/")
-    if not base or "localhost" in base or "127.0.0.1" in base:
-        base = "https://lexops.fly.dev"
-    return f"{base}/api/publico/informativos/{informativo.id}.html"
+    """Link direto pro informativo na página pública do site oficial (não
+    lexops.fly.dev — domínio interno, não deve aparecer pro destinatário —
+    nem a versão .html, que força download em vez de abrir no navegador)."""
+    return f"https://www.pimentajudice.com.br/informativos/ler/{informativo.id}"
 
 
 def listar_destinatarios_por_fonte(db: Session) -> dict:
@@ -719,8 +738,11 @@ def listar_destinatarios_por_fonte(db: Session) -> dict:
             "email": email, "nome": nome or "",
             "opt_out": (email or "").strip().lower() in opt_outs,
             "envio_status": _envio_status(email),
+            "created_at": created_at.isoformat() if created_at else None,
         }
-        for nome, email in db.query(Cliente.nome, Cliente.email).filter(Cliente.email.isnot(None)).all()
+        for nome, email, created_at in (
+            db.query(Cliente.nome, Cliente.email, Cliente.created_at).filter(Cliente.email.isnot(None)).all()
+        )
         if email and "@" in email and email.strip().lower() not in ocultos
     ]
     contatos = [
@@ -728,9 +750,10 @@ def listar_destinatarios_por_fonte(db: Session) -> dict:
             "email": email, "nome": " ".join(p for p in [primeiro, sobre] if p),
             "opt_out": (email or "").strip().lower() in opt_outs,
             "envio_status": _envio_status(email),
+            "created_at": created_at.isoformat() if created_at else None,
         }
-        for primeiro, sobre, email in (
-            db.query(ConselhoContato.primeiro_nome, ConselhoContato.sobrenome, ConselhoContato.email)
+        for primeiro, sobre, email, created_at in (
+            db.query(ConselhoContato.primeiro_nome, ConselhoContato.sobrenome, ConselhoContato.email, ConselhoContato.created_at)
             .filter(ConselhoContato.email.isnot(None)).all()
         )
         if email and "@" in email and email.strip().lower() not in ocultos
@@ -745,6 +768,19 @@ def listar_destinatarios_por_fonte(db: Session) -> dict:
         for a in db.query(InformativoAssinante).order_by(InformativoAssinante.created_at.desc()).all()
         if a.email.strip().lower() not in ocultos
     ]
+
+    # Marca duplicidade entre as 3 fontes (mesmo e-mail cadastrado mais de
+    # uma vez, ex.: é Cliente E Contato da Expansão) — visual, não afeta
+    # envio (a newsletter já deduplica por conta própria).
+    from collections import Counter
+    contagem = Counter(
+        e["email"].strip().lower()
+        for e in (clientes + contatos + [{"email": a["email"]} for a in assinantes])
+    )
+    for grupo in (clientes, contatos, assinantes):
+        for e in grupo:
+            e["duplicado"] = contagem[e["email"].strip().lower()] > 1
+
     return {"clientes": clientes, "contatos": contatos, "assinantes": assinantes}
 
 
@@ -1015,7 +1051,9 @@ def renderizar_pagina_publica(informativo: Informativo) -> str:
         </div>"""
 
     corpo_html = _renderizar_corpo_html(informativo.conteudo_texto or "")
-    pdf_link = informativo.drive_pdf_link or f"/api/publico/informativos/{informativo.id}.pdf"
+    # Sempre o proxy próprio (baixa via conta master), nunca o link direto do
+    # Drive — esse exige o visitante estar logado numa conta com acesso.
+    pdf_link = f"https://www.pimentajudice.com.br/informativos/pdf/{informativo.id}"
 
     return f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1028,10 +1066,8 @@ def renderizar_pagina_publica(informativo: Informativo) -> str:
   .hero {{ text-align: center; padding: 20px 0 36px; border-bottom: 1px solid #dcd4c5; margin-bottom: 40px; }}
   .hero .kick {{ font-size: 12px; letter-spacing: 4px; color: {TEAL}; text-transform: uppercase; }}
   .hero h1 {{ font-family: 'Playfair Display', Georgia, serif; font-weight: 700; font-size: 40px; line-height: 1.15; color: {INK}; margin: 16px 0 4px; }}
-  .subscribe {{ max-width: 720px; margin: 0 auto 28px; padding: 14px 18px; background: #fff; border: 1px solid #e5ddce; border-radius: 8px; }}
-  .subscribe form {{ display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }}
-  .subscribe input {{ padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; flex: 1; min-width: 140px; }}
-  .subscribe button {{ padding: 8px 18px; background: {INK}; color: #fff; border: none; border-radius: 6px; font-size: 13px; cursor: pointer; }}
+  .subscribe {{ max-width: 720px; margin: 0 auto 28px; padding: 14px 18px; background: #fff; border: 1px solid #e5ddce; border-radius: 8px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; justify-content: space-between; }}
+  .subscribe a {{ padding: 8px 18px; background: {INK}; color: #fff; border-radius: 6px; font-size: 13px; text-decoration: none; white-space: nowrap; }}
   .footer-actions {{ text-align: center; border-top: 1px solid #dcd4c5; margin-top: 48px; padding-top: 36px; }}
   .footer-actions a {{ display: inline-block; background: {INK}; color: #fff; padding: 14px 30px; font-size: 13px; letter-spacing: 1.5px; text-transform: uppercase; text-decoration: none; border-radius: 4px; margin: 0 6px 10px; }}
   .foot {{ text-align: center; color: {MUT}; font-size: 12px; margin-top: 32px; letter-spacing: 1px; }}
@@ -1050,12 +1086,8 @@ def renderizar_pagina_publica(informativo: Informativo) -> str:
   </div>
 
   <div class="subscribe">
-    <form onsubmit="event.preventDefault();var f=this;fetch('/api/publico/informativos/assinar',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{email:f.email.value,nome:f.nome.value}})}}).then(function(r){{if(r.ok){{f.outerHTML='<p style=\\'margin:0;color:{TEAL};font-weight:600;\\'>Inscrito! Você vai receber os próximos informativos por e-mail.</p>'}}else{{alert('Não foi possível inscrever agora. Tente de novo mais tarde.')}}}})">
-      <span style="font-size:13px;color:{MUT};">Receba os próximos informativos por e-mail:</span>
-      <input name="nome" placeholder="Nome (opcional)">
-      <input name="email" type="email" required placeholder="seu@email.com">
-      <button type="submit">Inscrever</button>
-    </form>
+    <span style="font-size:13px;color:{MUT};">Quer receber os próximos informativos por e-mail?</span>
+    <a href="https://www.pimentajudice.com.br/informativos/#assinar">Inscrever-se →</a>
   </div>
 
   {perguntas_html}

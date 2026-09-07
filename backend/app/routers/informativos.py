@@ -83,6 +83,23 @@ def excluir_assinante(assinante_id: uuid.UUID, db: Session = Depends(get_db)):
     db.commit()
 
 
+class AssinanteNomeRequest(BaseModel):
+    nome: str | None = None
+
+
+@router.patch("/assinantes/{assinante_id}")
+def editar_nome_assinante(assinante_id: uuid.UUID, payload: AssinanteNomeRequest, db: Session = Depends(get_db)):
+    """Corrige/preenche o nome de quem se inscreveu pelo formulário público
+    (o form não pede nome) — não muda e-mail nem fonte."""
+    from app.models.informativo import InformativoAssinante
+    assinante = db.get(InformativoAssinante, assinante_id)
+    if not assinante:
+        raise HTTPException(status_code=404, detail="Assinante não encontrado")
+    assinante.nome = (payload.nome or "").strip() or None
+    db.commit()
+    return {"ok": True}
+
+
 class AssinanteManualRequest(BaseModel):
     email: str
     nome: str | None = None
@@ -288,12 +305,30 @@ def atualizar(informativo_id: uuid.UUID, payload: InformativoAtualizar, db: Sess
 def excluir(informativo_id: uuid.UUID, db: Session = Depends(get_db)):
     """Soft-delete — o número já foi atribuído e não deve ser reaproveitado
     por um informativo novo, então a linha fica marcada como "excluido" (a
-    tela mostra cinza/riscado) em vez de sumir do banco."""
+    tela mostra cinza/riscado) em vez de sumir do banco. Guarda o status
+    anterior pra "Restaurar" voltar exatamente pro estado de antes (inclusive
+    reaparecendo nos links públicos se estava publicado)."""
     from datetime import datetime, timezone
     informativo = _get(db, informativo_id)
+    informativo.status_anterior_exclusao = informativo.status
     informativo.status = "excluido"
     informativo.excluido_em = datetime.now(timezone.utc)
     db.commit()
+
+
+@router.post("/{informativo_id}/restaurar", response_model=InformativoOut)
+def restaurar(informativo_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Desfaz a exclusão — volta pro status de antes (publicado, rascunho
+    etc.), sem precisar recriar do zero."""
+    informativo = _get(db, informativo_id)
+    if informativo.status != "excluido":
+        raise HTTPException(status_code=400, detail="Este informativo não está excluído.")
+    informativo.status = informativo.status_anterior_exclusao or "rascunho"
+    informativo.status_anterior_exclusao = None
+    informativo.excluido_em = None
+    db.commit()
+    db.refresh(informativo)
+    return informativo
 
 
 @router.post("/{informativo_id}/upload", response_model=InformativoOut)
@@ -322,6 +357,26 @@ def gerar_rascunho_ia(informativo_id: uuid.UUID, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Falha ao gerar rascunho: {exc}")
+    db.commit()
+    return SincronizarResponse(conteudo_texto=texto, citacoes=citacoes)
+
+
+class CorpoManualRequest(BaseModel):
+    texto: str
+
+
+@router.post("/{informativo_id}/definir-corpo-manual", response_model=SincronizarResponse)
+def definir_corpo_manual(informativo_id: uuid.UUID, payload: CorpoManualRequest, db: Session = Depends(get_db)):
+    """Grava um texto pronto (colado, não gerado por IA) como corpo — sem
+    chamar a IA. Segue a mesma esteira de checagem/publicação de sempre; o
+    texto só muda se "Reescrever" for pedido explicitamente depois."""
+    informativo = _get(db, informativo_id)
+    try:
+        texto, citacoes = informativo_service.definir_corpo_manual(informativo, payload.texto)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Falha ao gravar o texto: {exc}")
     db.commit()
     return SincronizarResponse(conteudo_texto=texto, citacoes=citacoes)
 

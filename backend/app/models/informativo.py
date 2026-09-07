@@ -105,7 +105,12 @@ class Informativo(Base):
     publicado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # "Excluir" não apaga a linha (o número não pode ser reaproveitado por um
     # informativo novo) — só marca status="excluido" e registra quando.
+    # `status_anterior_exclusao` guarda o status de antes (ex.: "publicado")
+    # pra "Restaurar" devolver o informativo pro estado exato de antes, sem
+    # precisar recriar do zero — inclusive reaparecendo nos links públicos
+    # se estava publicado.
     excluido_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status_anterior_exclusao: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

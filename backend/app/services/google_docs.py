@@ -344,9 +344,32 @@ def _paragrafos_do_doc(doc: dict) -> list[tuple[str, int, int]]:
     return saida
 
 
+def _ler_valor_apos_heading(paras: list[tuple[str, int, int]], heading_texto: str) -> str | None:
+    """Acha `heading_texto` num parágrafo e devolve o valor associado — trata
+    os dois layouts possíveis: (a) o valor ficou no PRÓPRIO parágrafo do
+    cabeçalho (quando a substituição via token {{X}} caiu na mesma linha que
+    o rótulo, ex. "RESUMO ESTRUTURADO: {{RESUMO}}") ou (b) o valor está no
+    parágrafo SEGUINTE (layout com o rótulo isolado numa linha própria).
+    Sem isso, um resumo escrito com sucesso no Doc (visível no PDF) podia não
+    ser encontrado na leitura, porque escrita e leitura assumiam layouts
+    diferentes."""
+    idx = next((i for i, (txt, _s, _e) in enumerate(paras) if heading_texto.lower() in txt.lower()), None)
+    if idx is None:
+        return None
+    heading_txt = paras[idx][0]
+    pos = heading_txt.lower().find(heading_texto.lower())
+    resto = heading_txt[pos + len(heading_texto):].strip(" :\t\n")
+    if resto:
+        return resto
+    if idx + 1 < len(paras):
+        return paras[idx + 1][0].strip() or None
+    return None
+
+
 def ler_resumo_documento(doc_id: str) -> str | None:
-    """Lê o parágrafo logo abaixo de "RESUMO ESTRUTURADO" — usado pra montar
-    o corpo do e-mail da newsletter. None se não achar o cabeçalho."""
+    """Lê o resumo estruturado (parágrafo do próprio cabeçalho ou o
+    seguinte, ver `_ler_valor_apos_heading`) — usado pra montar o corpo do
+    e-mail da newsletter e o texto de WhatsApp. None se não achar."""
     def _ler(tokens: dict):
         return _docs_request("GET", f"/{doc_id}", tokens)
 
@@ -354,16 +377,13 @@ def ler_resumo_documento(doc_id: str) -> str | None:
     if not doc:
         return None
     paras = _paragrafos_do_doc(doc)
-    for i, (txt, _s, _e) in enumerate(paras):
-        if "RESUMO ESTRUTURADO" in txt and i + 1 < len(paras):
-            return paras[i + 1][0].strip() or None
-    return None
+    return _ler_valor_apos_heading(paras, "RESUMO ESTRUTURADO")
 
 
 def ler_perguntas_documento(doc_id: str) -> list[str]:
-    """Lê o parágrafo logo abaixo do cabeçalho `HEADING_PERGUNTAS` e separa
-    as perguntas-teaser (foram gravadas juntas num único parágrafo, " · "
-    entre elas). Lista vazia se não achar."""
+    """Lê as perguntas-teaser (gravadas juntas num único parágrafo, " · "
+    entre elas) — ver `_ler_valor_apos_heading` pros dois layouts possíveis.
+    Lista vazia se não achar."""
     def _ler(tokens: dict):
         return _docs_request("GET", f"/{doc_id}", tokens)
 
@@ -371,11 +391,10 @@ def ler_perguntas_documento(doc_id: str) -> list[str]:
     if not doc:
         return []
     paras = _paragrafos_do_doc(doc)
-    for i, (txt, _s, _e) in enumerate(paras):
-        if HEADING_PERGUNTAS.lower() in txt.lower() and i + 1 < len(paras):
-            bruto = paras[i + 1][0].strip()
-            return [p.strip() for p in bruto.split(" · ") if p.strip()]
-    return []
+    bruto = _ler_valor_apos_heading(paras, HEADING_PERGUNTAS)
+    if not bruto:
+        return []
+    return [p.strip() for p in bruto.split(" · ") if p.strip()]
 
 
 def ler_corpo_documento(doc_id: str) -> str | None:
