@@ -156,7 +156,7 @@ def informativos_publicos(db: Session = Depends(get_db)):
     itens = (
         db.query(Informativo)
         .filter(Informativo.status == "publicado")
-        .order_by(Informativo.mes_referencia.desc())
+        .order_by(Informativo.mes_referencia.desc(), Informativo.numero.desc())
         .all()
     )
     resultado = []
