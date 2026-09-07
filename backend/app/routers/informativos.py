@@ -11,6 +11,7 @@ from app.schemas.informativo import (
     InformativoCriar,
     InformativoOut,
     PublicarResponse,
+    ReescreverRequest,
     SincronizarResponse,
     ValidarCitacoesResponse,
 )
@@ -112,24 +113,37 @@ def upload_arquivo(informativo_id: uuid.UUID, file: UploadFile = File(...), db: 
 def gerar_rascunho_ia(informativo_id: uuid.UUID, db: Session = Depends(get_db)):
     informativo = _get(db, informativo_id)
     try:
-        texto = informativo_service.gerar_rascunho_e_gravar(informativo)
+        texto, citacoes = informativo_service.gerar_rascunho_e_gravar(informativo)
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Falha ao gerar rascunho: {exc}")
     db.commit()
-    return SincronizarResponse(conteudo_texto=texto)
+    return SincronizarResponse(conteudo_texto=texto, citacoes=citacoes)
+
+
+@router.post("/{informativo_id}/reescrever-ia", response_model=SincronizarResponse)
+def reescrever_ia(informativo_id: uuid.UUID, payload: ReescreverRequest, db: Session = Depends(get_db)):
+    informativo = _get(db, informativo_id)
+    try:
+        texto, citacoes = informativo_service.reescrever_com_apontamentos(informativo, payload.instrucoes)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Falha ao reescrever: {exc}")
+    db.commit()
+    return SincronizarResponse(conteudo_texto=texto, citacoes=citacoes)
 
 
 @router.post("/{informativo_id}/sincronizar-doc", response_model=SincronizarResponse)
 def sincronizar_doc(informativo_id: uuid.UUID, db: Session = Depends(get_db)):
     informativo = _get(db, informativo_id)
     try:
-        texto = informativo_service.sincronizar_do_doc(informativo)
+        texto, citacoes = informativo_service.sincronizar_do_doc(informativo)
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     db.commit()
-    return SincronizarResponse(conteudo_texto=texto)
+    return SincronizarResponse(conteudo_texto=texto, citacoes=citacoes)
 
 
 @router.post("/{informativo_id}/validar-citacoes", response_model=ValidarCitacoesResponse)

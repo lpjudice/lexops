@@ -2,6 +2,24 @@ import api from './client'
 
 export type StatusInformativo = 'rascunho' | 'primeiro_draft' | 'revisado' | 'publicado'
 
+export type StatusCitacao = 'confirmado' | 'divergente' | 'nao_encontrado'
+
+export interface Citacao {
+  status_geral: StatusCitacao
+  observacao?: string
+  texto_integral?: string
+  url_oficial?: string
+  custo_usd?: number
+  referencia_original?: {
+    tipo?: string
+    trecho_citado?: string
+    numero?: string
+    tribunal?: string
+    relator?: string
+    data?: string
+  }
+}
+
 export interface Informativo {
   id: string
   numero?: number | null
@@ -15,7 +33,7 @@ export interface Informativo {
   google_doc_link?: string | null
   conteudo_texto?: string | null
   paginas_estimadas?: number | null
-  citacoes_validadas: Record<string, unknown>[]
+  citacoes_validadas: Citacao[]
   arquivos_referencia: { nome: string; link_drive: string; tipo: string }[]
   instrucoes_ia?: string | null
   rascunho_gerado_em?: string | null
@@ -68,13 +86,16 @@ export const informativosApi = {
   },
 
   gerarRascunhoIA: (id: string) =>
-    api.post<{ conteudo_texto: string }>(`/informativos/${id}/gerar-rascunho-ia`, undefined, { timeout: 120000 }).then((r) => r.data),
+    api.post<{ conteudo_texto: string; citacoes: Citacao[] }>(`/informativos/${id}/gerar-rascunho-ia`, undefined, { timeout: 120000 }).then((r) => r.data),
+
+  reescreverIA: (id: string, instrucoes?: string) =>
+    api.post<{ conteudo_texto: string; citacoes: Citacao[] }>(`/informativos/${id}/reescrever-ia`, { instrucoes: instrucoes || null }, { timeout: 120000 }).then((r) => r.data),
 
   sincronizarDoc: (id: string) =>
-    api.post<{ conteudo_texto: string }>(`/informativos/${id}/sincronizar-doc`).then((r) => r.data),
+    api.post<{ conteudo_texto: string; citacoes: Citacao[] }>(`/informativos/${id}/sincronizar-doc`, undefined, { timeout: 120000 }).then((r) => r.data),
 
   validarCitacoes: (id: string) =>
-    api.post<{ citacoes: Record<string, unknown>[] }>(`/informativos/${id}/validar-citacoes`).then((r) => r.data),
+    api.post<{ citacoes: Citacao[] }>(`/informativos/${id}/validar-citacoes`, undefined, { timeout: 120000 }).then((r) => r.data),
 
   publicar: (id: string) =>
     api.post<{ paginas: number; aviso: string | null; pdf_link: string | null }>(`/informativos/${id}/publicar`).then((r) => r.data),

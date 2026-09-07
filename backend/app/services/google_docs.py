@@ -395,12 +395,55 @@ def _parse_corpo_markup(texto: str, start_offset: int) -> tuple[str, list[tuple[
     return "".join(partes), estilos_bold, paragrafos
 
 
+def _anexar_separador_no_fim(doc_id: str) -> tuple[int, int] | None:
+    """Auto-reparo: quando o Doc não tem o marcador separador (ex.: modelo
+    editado à mão que removeu a linha, por engano — ela é invisível de
+    propósito) ANEXA um novo separador no FINAL do documento, sem apagar
+    nada do que já existe. Retorna (corte, fim_doc) já contando o texto
+    inserido, prontos pra `substituir_corpo_informativo` escrever a partir
+    daí. Nunca destrutivo."""
+    def _fazer(tokens: dict):
+        doc = _docs_request("GET", f"/{doc_id}", tokens)
+        content = doc.get("body", {}).get("content", [])
+        fim_doc = content[-1]["endIndex"] if content else 2
+        insert_at = max(1, fim_doc - 1)
+        texto = f"\n{SEPARADOR_INFORMATIVO}\n"
+        _docs_request("POST", f"/{doc_id}:batchUpdate", tokens, json={
+            "requests": [{"insertText": {"location": {"index": insert_at}, "text": texto}}]
+        })
+        sep_start = insert_at + 1
+        sep_end = sep_start + len(SEPARADOR_INFORMATIVO)
+        _docs_request("POST", f"/{doc_id}:batchUpdate", tokens, json={"requests": [
+            {"updateTextStyle": {
+                "range": {"startIndex": sep_start, "endIndex": sep_end},
+                "textStyle": {"foregroundColor": {"color": {"rgbColor": {"red": 1, "green": 1, "blue": 1}}}, "fontSize": {"magnitude": 1, "unit": "PT"}},
+                "fields": "foregroundColor,fontSize",
+            }},
+            {"updateParagraphStyle": {
+                "range": {"startIndex": sep_start, "endIndex": sep_end},
+                "paragraphStyle": {"borderBottom": {
+                    "color": {"color": {"rgbColor": {"red": 0.6, "green": 0.6, "blue": 0.6}}},
+                    "width": {"magnitude": 1, "unit": "PT"},
+                    "padding": {"magnitude": 4, "unit": "PT"},
+                    "dashStyle": "SOLID",
+                }},
+                "fields": "borderBottom",
+            }},
+        ]})
+        return sep_end, fim_doc + len(texto)
+
+    return _com_refresh(_fazer)
+
+
 def substituir_corpo_informativo(doc_id: str, texto: str) -> bool:
     """Substitui só o corpo (tudo depois do separador) pelo texto informado,
     preservando o cabeçalho estruturado acima. Aplica negrito real (marcado
     com **assim** no texto) e destaca blocos de citação/julgado (parágrafos
     iniciados com "> ") com recuo e borda esquerda. Pode ser chamado várias
-    vezes (regenerar rascunho) — sempre localiza o separador de novo."""
+    vezes (regenerar rascunho) — sempre localiza o separador de novo. Se o
+    separador não existir mais no Doc (ex.: apagado sem querer numa edição
+    manual), REPARA anexando um novo no final — nunca sobrescreve o Doc
+    inteiro (isso já causou perda do cabeçalho customizado uma vez)."""
     def _achar_corte(tokens: dict):
         doc = _docs_request("GET", f"/{doc_id}", tokens)
         content = doc.get("body", {}).get("content", [])
@@ -417,7 +460,10 @@ def substituir_corpo_informativo(doc_id: str, texto: str) -> bool:
         return False
     corte, fim_doc = resultado
     if corte is None:
-        corte = 1  # doc legado sem separador — sobrescreve tudo
+        reparo = _anexar_separador_no_fim(doc_id)
+        if not reparo:
+            return False
+        corte, fim_doc = reparo
 
     # +1 pro "\n" que recria a linha em branco entre o separador e o corpo
     # (o corte apaga tudo até o fim do doc, inclusive essa linha em branco).
