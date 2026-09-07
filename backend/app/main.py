@@ -1304,6 +1304,7 @@ def _run_migrations() -> None:
         conn.execute(text("ALTER TABLE informativos ADD COLUMN IF NOT EXISTS lembrete_vespera_enviado BOOLEAN NOT NULL DEFAULT false"))
         conn.execute(text("ALTER TABLE informativos ADD COLUMN IF NOT EXISTS resumo_publicado TEXT"))
         conn.execute(text("ALTER TABLE informativos ADD COLUMN IF NOT EXISTS perguntas_publicadas JSONB NOT NULL DEFAULT '[]'::jsonb"))
+        conn.execute(text("ALTER TABLE informativo_opt_out ADD COLUMN IF NOT EXISTS oculto BOOLEAN NOT NULL DEFAULT false"))
         conn.execute(text("ALTER TABLE informativo_config ADD COLUMN IF NOT EXISTS responsavel_padrao_id UUID"))
 
         conn.commit()

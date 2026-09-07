@@ -157,10 +157,32 @@ class InformativoAssinante(Base):
 class InformativoOptOut(Base):
     """Lista de supressão da newsletter — e-mail aqui NUNCA recebe, mesmo que
     seja Cliente, Contato do Conselho ou InformativoAssinante. Alimentada
-    pelo link de descadastro no rodapé do e-mail."""
+    pelo link de descadastro no rodapé do e-mail, ou manualmente pelo Lucas
+    na tela de E-mails.
+
+    `oculto` distingue as duas ações que a tela de E-mails oferece: opt-out
+    (email continua listado, só marcado como descadastrado — reversível) e
+    "excluir completamente" (email some da listagem inteira, além de nunca
+    receber — para quando o cadastro é lixo/errado)."""
 
     __tablename__ = "informativo_opt_out"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    oculto: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class InformativoEnvioStatus(Base):
+    """Resumo compacto de envio da newsletter por e-mail — 1 linha por
+    destinatário, não 1 linha por envio, pra não crescer sem limite conforme
+    mais informativos forem saindo. Usado só pra mostrar "já recebeu X
+    informativos, último em tal data" na tela de E-mails."""
+
+    __tablename__ = "informativo_envio_status"
+
+    email: Mapped[str] = mapped_column(String(255), primary_key=True)
+    total_enviados: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
+    ultimo_numero: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ultimo_titulo: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    ultimo_enviado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -13,6 +13,7 @@ from app.schemas.informativo import (
     InformativoCriar,
     InformativoOut,
     NewsletterResponse,
+    OptOutRequest,
     PublicarResponse,
     ReescreverRequest,
     SincronizarResponse,
@@ -74,6 +75,32 @@ def excluir_assinante(assinante_id: uuid.UUID, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Assinante não encontrado")
     db.delete(assinante)
     db.commit()
+
+
+@router.post("/opt-out", status_code=204)
+def opt_out_manual(payload: OptOutRequest, db: Session = Depends(get_db)):
+    """Descadastra um e-mail (Cliente, Contato ou Assinante) da newsletter
+    por escolha do Lucas — continua listado na tela, só marcado."""
+    try:
+        informativo_service.opt_out_manual(db, payload.email)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/opt-out/excluir", status_code=204)
+def excluir_email(payload: OptOutRequest, db: Session = Depends(get_db)):
+    """Some com o e-mail da tela de E-mails por completo (além de nunca mais
+    receber). Não apaga o Cliente/Contato em si."""
+    try:
+        informativo_service.excluir_email_completamente(db, payload.email)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/opt-out/reativar", status_code=204)
+def reativar_email(payload: OptOutRequest, db: Session = Depends(get_db)):
+    """Desfaz opt-out/exclusão manual — volta a receber e a aparecer normal."""
+    informativo_service.reativar_email(db, payload.email)
 
 
 @router.get("/config/template")

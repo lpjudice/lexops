@@ -127,6 +127,10 @@ export const informativosApi = {
 
   enviarNewsletter: (id: string) =>
     api.post<{ enviados: number; total: number; erros: number }>(`/informativos/${id}/newsletter/enviar`, undefined, { timeout: 180000 }).then((r) => r.data),
+
+  optOut: (email: string) => api.post('/informativos/opt-out', { email }),
+  excluirEmail: (email: string) => api.post('/informativos/opt-out/excluir', { email }),
+  reativarEmail: (email: string) => api.post('/informativos/opt-out/reativar', { email }),
 }
 
 export function erroApi(e: unknown): string {

@@ -692,35 +692,102 @@ def _link_publico(informativo: Informativo) -> str:
 def listar_destinatarios_por_fonte(db: Session) -> dict:
     """Mesmas 3 fontes de `listar_destinatarios_newsletter`, mas SEM
     deduplicar entre si — pra exibir separado por origem na tela de
-    E-mails (Clientes / Contatos da Expansão / inscritos públicos)."""
+    E-mails (Clientes / Contatos da Expansão / inscritos públicos).
+    Entradas marcadas como "excluídas" (oculto=True) somem da listagem por
+    completo; as demais trazem opt_out + resumo de envio (envio_status)."""
     from app.models.cliente import Cliente
     from app.models.conselho import ConselhoContato
-    from app.models.informativo import InformativoAssinante, InformativoOptOut
+    from app.models.informativo import InformativoAssinante, InformativoEnvioStatus, InformativoOptOut
 
-    optados_fora = {(e or "").strip().lower() for (e,) in db.query(InformativoOptOut.email).all()}
+    opt_outs = {(o.email or "").strip().lower(): o for o in db.query(InformativoOptOut).all()}
+    ocultos = {e for e, o in opt_outs.items() if o.oculto}
+    envios = {
+        (s.email or "").strip().lower(): {
+            "total_enviados": s.total_enviados,
+            "ultimo_numero": s.ultimo_numero,
+            "ultimo_titulo": s.ultimo_titulo,
+            "ultimo_enviado_em": s.ultimo_enviado_em.isoformat() if s.ultimo_enviado_em else None,
+        }
+        for s in db.query(InformativoEnvioStatus).all()
+    }
+
+    def _envio_status(email: str) -> dict | None:
+        return envios.get((email or "").strip().lower())
 
     clientes = [
-        {"email": email, "nome": nome or "", "opt_out": (email or "").strip().lower() in optados_fora}
+        {
+            "email": email, "nome": nome or "",
+            "opt_out": (email or "").strip().lower() in opt_outs,
+            "envio_status": _envio_status(email),
+        }
         for nome, email in db.query(Cliente.nome, Cliente.email).filter(Cliente.email.isnot(None)).all()
-        if email and "@" in email
+        if email and "@" in email and email.strip().lower() not in ocultos
     ]
     contatos = [
-        {"email": email, "nome": " ".join(p for p in [primeiro, sobre] if p), "opt_out": (email or "").strip().lower() in optados_fora}
+        {
+            "email": email, "nome": " ".join(p for p in [primeiro, sobre] if p),
+            "opt_out": (email or "").strip().lower() in opt_outs,
+            "envio_status": _envio_status(email),
+        }
         for primeiro, sobre, email in (
             db.query(ConselhoContato.primeiro_nome, ConselhoContato.sobrenome, ConselhoContato.email)
             .filter(ConselhoContato.email.isnot(None)).all()
         )
-        if email and "@" in email
+        if email and "@" in email and email.strip().lower() not in ocultos
     ]
     assinantes = [
         {
             "email": a.email, "nome": a.nome or "", "ativo": a.ativo,
-            "opt_out": a.email.strip().lower() in optados_fora,
+            "opt_out": a.email.strip().lower() in opt_outs,
+            "envio_status": _envio_status(a.email),
             "created_at": a.created_at.isoformat(),
         }
         for a in db.query(InformativoAssinante).order_by(InformativoAssinante.created_at.desc()).all()
+        if a.email.strip().lower() not in ocultos
     ]
     return {"clientes": clientes, "contatos": contatos, "assinantes": assinantes}
+
+
+def opt_out_manual(db: Session, email: str) -> None:
+    """Descadastra um e-mail da newsletter por escolha do Lucas (não pelo
+    link de auto-descadastro) — a linha continua aparecendo na tela de
+    E-mails, só marcada como descadastrada."""
+    from app.models.informativo import InformativoOptOut
+
+    email = (email or "").strip().lower()
+    if not email or "@" not in email:
+        raise ValueError("E-mail inválido.")
+    existente = db.query(InformativoOptOut).filter(InformativoOptOut.email == email).first()
+    if not existente:
+        db.add(InformativoOptOut(email=email))
+        db.commit()
+
+
+def excluir_email_completamente(db: Session, email: str) -> None:
+    """Remove o e-mail de vez da tela de E-mails (some da listagem) e
+    garante que nunca mais recebe a newsletter. Não apaga o Cliente/Contato
+    em si — só a ligação dele com o módulo de Informativos."""
+    from app.models.informativo import InformativoOptOut
+
+    email = (email or "").strip().lower()
+    if not email or "@" not in email:
+        raise ValueError("E-mail inválido.")
+    existente = db.query(InformativoOptOut).filter(InformativoOptOut.email == email).first()
+    if existente:
+        existente.oculto = True
+    else:
+        db.add(InformativoOptOut(email=email, oculto=True))
+    db.commit()
+
+
+def reativar_email(db: Session, email: str) -> None:
+    """Desfaz opt-out/exclusão — o e-mail volta a receber a newsletter e a
+    aparecer normalmente na tela."""
+    from app.models.informativo import InformativoOptOut
+
+    email = (email or "").strip().lower()
+    db.query(InformativoOptOut).filter(InformativoOptOut.email == email).delete()
+    db.commit()
 
 
 def listar_destinatarios_newsletter(db: Session) -> list[tuple[str, str]]:
@@ -856,6 +923,7 @@ def enviar_newsletter(db: Session, informativo: Informativo) -> dict:
     slug = re.sub(r"[^a-z0-9]+", "-", (informativo.titulo or "informativo").lower()).strip("-")[:60] or "informativo"
     destinatarios = listar_destinatarios_newsletter(db)
 
+    from app.models.informativo import InformativoEnvioStatus
     from app.services.email_service import _send_via_gmail_oauth
     enviados = erros = 0
     for email, _nome in destinatarios:
@@ -863,6 +931,17 @@ def enviar_newsletter(db: Session, informativo: Informativo) -> dict:
             assunto, html = montar_email_newsletter(informativo, destinatario_email=email)
             _send_via_gmail_oauth(email, assunto, html, attachments=[(f"{slug}.pdf", pdf_bytes)])
             enviados += 1
+
+            chave = email.strip().lower()
+            status = db.query(InformativoEnvioStatus).filter(InformativoEnvioStatus.email == chave).first()
+            if not status:
+                status = InformativoEnvioStatus(email=chave, total_enviados=0)
+                db.add(status)
+            status.total_enviados += 1
+            status.ultimo_numero = informativo.numero
+            status.ultimo_titulo = informativo.titulo
+            status.ultimo_enviado_em = datetime.now(timezone.utc)
+            db.commit()
         except Exception as exc:
             erros += 1
             logger.warning("Newsletter informativo %s: falha ao enviar pra %s: %s", informativo.id, email, exc)
