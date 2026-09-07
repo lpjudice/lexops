@@ -85,6 +85,17 @@ class Informativo(Base):
     lembrete_draft_enviado: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
     lembrete_final_enviado: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
 
+    # Confirmação manual do Lucas de que o informativo está revisado e pode
+    # ser publicado/distribuído. Não trava nada no sistema — é só um sinal
+    # pro fluxo de lembretes por e-mail saber que já pode parar de cobrar.
+    autorizado: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
+    autorizado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Throttle dos lembretes de "confirme e autorize" (a cada 2 dias).
+    ultimo_lembrete_autorizacao_em: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Dedup do lembrete de véspera do mês (publicação, se autorizado; aviso
+    # de atraso, se não).
+    lembrete_vespera_enviado: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
+
     publicado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -110,6 +121,13 @@ class InformativoConfig(Base):
     template_doc_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     template_doc_link: Mapped[str | None] = mapped_column(Text, nullable=True)
     proximo_numero: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    # Responsável padrão pra todo informativo NOVO — editável na tela
+    # principal; muda o default só pra informativos futuros (os já criados
+    # mantêm o responsável que tinham). Semeado com RESPONSAVEL_PADRAO_NOME
+    # (busca por nome) na primeira vez que for resolvido, se ainda não setado.
+    responsavel_padrao_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("responsaveis.id", ondelete="SET NULL"), nullable=True
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )

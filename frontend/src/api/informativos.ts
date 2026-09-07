@@ -43,6 +43,8 @@ export interface Informativo {
   data_prazo_final?: string | null
   lembrete_draft_enviado: boolean
   lembrete_final_enviado: boolean
+  autorizado: boolean
+  autorizado_em?: string | null
   publicado_em?: string | null
   created_at: string
   updated_at: string
@@ -62,6 +64,7 @@ export interface InformativoAtualizar {
   responsavel_id?: string | null
   status?: StatusInformativo
   instrucoes_ia?: string | null
+  autorizado?: boolean
 }
 
 export const informativosApi = {
@@ -71,6 +74,9 @@ export const informativosApi = {
 
   responsavelPadrao: () =>
     api.get<{ id: string; nome: string; email: string | null } | null>('/informativos/responsavel-padrao').then((r) => r.data),
+
+  definirResponsavelPadrao: (responsavelId: string | null) =>
+    api.patch<{ id: string; nome: string; email: string | null } | null>('/informativos/config/responsavel-padrao', { responsavel_id: responsavelId }).then((r) => r.data),
 
   criar: (data: InformativoCriar) => api.post<Informativo>('/informativos', data).then((r) => r.data),
 

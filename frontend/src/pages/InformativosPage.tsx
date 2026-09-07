@@ -93,11 +93,25 @@ export default function InformativosPage() {
     setModalCriar(true)
   }
 
+  const responsavelPadraoMutation = useMutation({
+    mutationFn: (id: string | null) => informativosApi.definirResponsavelPadrao(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['informativos', 'responsavel-padrao'] }),
+  })
+
   return (
     <div>
       <div className={styles.pageHeader}>
         <h1 className={styles.pageTitle}>Informativos</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 12.5, color: '#6b7280' }}>Responsável padrão:</span>
+            <div style={{ width: 190 }}>
+              <ResponsavelComboBox
+                value={{ id: padrao?.id ?? null, nome: padrao?.nome ?? '', email: padrao?.email ?? '' }}
+                onChange={(v) => responsavelPadraoMutation.mutate(v.id ?? null)}
+              />
+            </div>
+          </div>
           {template?.template_doc_link && (
             <a href={template.template_doc_link} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>
               Editar modelo padrão
@@ -431,6 +445,10 @@ function DetalheInformativo({ informativo, onFechar }: { informativo: Informativ
     mutationFn: (texto: string) => informativosApi.atualizar(informativo.id, { instrucoes_ia: texto || null }),
     onSuccess: invalidar,
   })
+  const autorizarMutation = useMutation({
+    mutationFn: (autorizado: boolean) => informativosApi.atualizar(informativo.id, { autorizado }),
+    onSuccess: invalidar,
+  })
   const rascunhoIAMutation = useMutation({
     mutationFn: () => informativosApi.gerarRascunhoIA(informativo.id),
     onSuccess: (res) => { invalidar(); setCitacoes(res.citacoes); setCitacoesCarregadas(true) },
@@ -497,7 +515,18 @@ function DetalheInformativo({ informativo, onFechar }: { informativo: Informativ
           <span style={{ fontSize: 13, color: '#6b7280' }}>
             {fmtMes(informativo.mes_referencia)} · 1º draft até {fmtData(informativo.data_prazo_draft)} · final até {fmtData(informativo.data_prazo_final)}
           </span>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 5, marginLeft: 'auto', fontSize: 12.5, color: informativo.autorizado ? '#15803d' : '#6b7280', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={informativo.autorizado}
+              onChange={(e) => autorizarMutation.mutate(e.target.checked)}
+            />
+            {informativo.autorizado ? `Autorizado em ${fmtDataHora(informativo.autorizado_em)}` : 'Autorizado'}
+          </label>
         </div>
+        <p style={{ fontSize: 11.5, color: '#9ca3af', margin: '0 0 4px' }}>
+          "Autorizado" é só um sinalizador pros lembretes por e-mail — não trava geração de PDF nem publicação.
+        </p>
 
         <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 13, padding: '10px 0', borderBottom: '1px solid #f1f1f1' }}>
           {informativo.google_doc_link && (

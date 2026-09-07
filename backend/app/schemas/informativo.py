@@ -30,6 +30,8 @@ class InformativoOut(BaseModel):
     data_prazo_final: date | None = None
     lembrete_draft_enviado: bool = False
     lembrete_final_enviado: bool = False
+    autorizado: bool = False
+    autorizado_em: datetime | None = None
     publicado_em: datetime | None = None
     created_at: datetime
     updated_at: datetime
@@ -51,6 +53,7 @@ class InformativoAtualizar(BaseModel):
     responsavel_id: uuid.UUID | None = None
     status: StatusInformativo | None = None
     instrucoes_ia: str | None = None
+    autorizado: bool | None = None
 
 
 class SincronizarResponse(BaseModel):

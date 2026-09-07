@@ -53,11 +53,37 @@ def calcular_prazos(mes_referencia: date) -> tuple[date, date]:
 
 
 def resolver_responsavel_padrao(db: Session) -> Responsavel | None:
-    return (
+    """Responsável padrão pra informativos novos — lido de
+    InformativoConfig.responsavel_padrao_id (editável na tela principal).
+    Na primeira vez (config ainda sem valor), semeia buscando por nome
+    (RESPONSAVEL_PADRAO_NOME) e já grava isso como o padrão daqui pra
+    frente — depois disso, só muda se alguém trocar explicitamente."""
+    cfg = obter_config(db)
+    if cfg.responsavel_padrao_id:
+        resp = db.get(Responsavel, cfg.responsavel_padrao_id)
+        if resp:
+            return resp
+
+    padrao = (
         db.query(Responsavel)
         .filter(Responsavel.nome.ilike(f"%{RESPONSAVEL_PADRAO_NOME}%"), Responsavel.ativo.is_(True))
         .first()
     )
+    if padrao:
+        cfg.responsavel_padrao_id = padrao.id
+        db.commit()
+    return padrao
+
+
+def definir_responsavel_padrao(db: Session, responsavel_id) -> Responsavel | None:
+    """Troca o responsável padrão de informativos futuros. Não altera
+    informativos já criados."""
+    cfg = obter_config(db)
+    cfg.responsavel_padrao_id = responsavel_id
+    db.commit()
+    if not responsavel_id:
+        return None
+    return db.get(Responsavel, responsavel_id)
 
 
 def _mes_slug(mes_referencia: date) -> str:
@@ -457,8 +483,10 @@ def _verificar_citacao_lei(trecho: str, contexto: str) -> dict:
     """Confere um artigo/lei citado — chamada PRÓPRIA (não reaproveita o
     _chamar_claude do PrecedentCheck, que restringe a busca a domínios de
     jurisprudência (STJ/STF/Jusbrasil), errados pra achar o texto de uma
-    LEI). Aqui a busca é restrita ao Planalto (fonte oficial), com poucos
-    tokens e no máx. 2 buscas — mantém o custo baixo."""
+    LEI). NÃO restringe domínio — cobre lei federal (Planalto), estadual e
+    municipal (cada uma no site oficial correspondente, que varia por
+    estado/município). Custo baixo vem de max_tokens pequeno e no máx.
+    2 buscas, não de restrição de domínio."""
     from app.config import settings
     if not settings.anthropic_api_key:
         return {"status_geral": "nao_encontrado", "observacao": "IA não configurada.",
@@ -466,9 +494,10 @@ def _verificar_citacao_lei(trecho: str, contexto: str) -> dict:
     import anthropic
 
     prompt = f"""Você é um validador de citações jurídicas. Verifique se o dispositivo legal
-abaixo existe e se o trecho citado corresponde ao teor real da norma. Use a busca na
-web (restrita ao planalto.gov.br, fonte oficial) pra confirmar. NÃO invente conteúdo —
-se não achar a norma ou o dispositivo específico, diga que não encontrou.
+abaixo existe e se o trecho citado corresponde ao teor real da norma. Use busca na web
+pra confirmar no site oficial (Planalto pra lei federal; site oficial do estado/
+município correspondente pra lei estadual/municipal). NÃO invente conteúdo — se não
+achar a norma ou o dispositivo específico, diga que não encontrou.
 
 DISPOSITIVO CITADO: {trecho}
 CONTEXTO NO TEXTO: {contexto[:500]}
@@ -478,7 +507,7 @@ Responda APENAS com JSON (sem markdown):
   "status_geral": "confirmado" | "divergente" | "nao_encontrado",
   "observacao": "explicação curta e objetiva da divergência (se houver) ou confirmação",
   "texto_integral": "o texto oficial completo do dispositivo (caput + parágrafos/incisos pertinentes), ou vazio se não encontrado",
-  "url_oficial": "URL da lei no planalto.gov.br, ou vazio se não encontrado"
+  "url_oficial": "URL da norma no site oficial (Planalto ou o site oficial do estado/município), ou vazio se não encontrado"
 }}"""
 
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
@@ -490,7 +519,6 @@ Responda APENAS com JSON (sem markdown):
                 "type": "web_search_20250305",
                 "name": "web_search",
                 "max_uses": 2,
-                "allowed_domains": ["planalto.gov.br"],
             }],
             messages=[{"role": "user", "content": prompt}],
         )

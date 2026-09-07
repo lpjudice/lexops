@@ -1302,6 +1302,11 @@ def _run_migrations() -> None:
         conn.execute(text("ALTER TABLE informativos ADD COLUMN IF NOT EXISTS numero INTEGER"))
         conn.execute(text("ALTER TABLE informativos ADD COLUMN IF NOT EXISTS instrucoes_ia TEXT"))
         conn.execute(text("ALTER TABLE informativos ADD COLUMN IF NOT EXISTS rascunho_gerado_em TIMESTAMPTZ"))
+        conn.execute(text("ALTER TABLE informativos ADD COLUMN IF NOT EXISTS autorizado BOOLEAN NOT NULL DEFAULT false"))
+        conn.execute(text("ALTER TABLE informativos ADD COLUMN IF NOT EXISTS autorizado_em TIMESTAMPTZ"))
+        conn.execute(text("ALTER TABLE informativos ADD COLUMN IF NOT EXISTS ultimo_lembrete_autorizacao_em DATE"))
+        conn.execute(text("ALTER TABLE informativos ADD COLUMN IF NOT EXISTS lembrete_vespera_enviado BOOLEAN NOT NULL DEFAULT false"))
+        conn.execute(text("ALTER TABLE informativo_config ADD COLUMN IF NOT EXISTS responsavel_padrao_id UUID"))
 
         conn.commit()
 
