@@ -14,7 +14,7 @@ FROM python:3.11-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nginx curl \
     gcc pkg-config zlib1g-dev libxml2-dev libxslt1-dev libxmlsec1-dev libxmlsec1-openssl \
-    libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf2.0-0 libcairo2 libffi-dev \
+    libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libcairo2 libffi-dev \
     shared-mime-info fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
