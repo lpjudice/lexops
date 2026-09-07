@@ -852,6 +852,7 @@ def _run_migrations() -> None:
         conn.execute(text("ALTER TABLE instagram_sugestoes ADD COLUMN IF NOT EXISTS video_drive_link TEXT"))
         conn.execute(text("ALTER TABLE instagram_sugestoes ADD COLUMN IF NOT EXISTS brinde_conteudo JSONB"))
         conn.execute(text("ALTER TABLE instagram_sugestoes ADD COLUMN IF NOT EXISTS brinde_site_conteudo JSONB"))
+        conn.execute(text("ALTER TABLE instagram_sugestoes ADD COLUMN IF NOT EXISTS brinde_pdf_drive_id TEXT"))
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS instagram_config (
                 id INTEGER PRIMARY KEY DEFAULT 1,
@@ -862,6 +863,8 @@ def _run_migrations() -> None:
         conn.execute(text(
             "INSERT INTO instagram_config (id, assessoria_emails) VALUES (1, 'moni@pimentajudice.com.br') ON CONFLICT (id) DO NOTHING"
         ))
+        conn.execute(text("ALTER TABLE instagram_config ADD COLUMN IF NOT EXISTS brinde_template_doc_id TEXT"))
+        conn.execute(text("ALTER TABLE instagram_config ADD COLUMN IF NOT EXISTS brinde_template_link TEXT"))
 
         # Conselho/Expansão: dias_lembrete adicionado a conselho_eventos depois da tabela já existir em produção
         # (Base.metadata.create_all só cria tabelas novas, não adiciona colunas a tabelas existentes)

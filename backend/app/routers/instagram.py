@@ -13,6 +13,7 @@ from app.schemas.instagram import (
     AjustarRequest,
     BrindeGerarRequest,
     BrindeKeywordRequest,
+    BrindeTemplateOut,
     ConfigOut,
     ConfigUpdate,
     CustosMes,
@@ -75,6 +76,32 @@ def salvar_config(payload: ConfigUpdate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(cfg)
     return cfg
+
+
+@router.get("/brinde/template", response_model=BrindeTemplateOut | None)
+def obter_template_brinde(db: Session = Depends(get_db)):
+    cfg = _get_config(db)
+    if not cfg.brinde_template_doc_id:
+        return None
+    return BrindeTemplateOut(doc_id=cfg.brinde_template_doc_id, link=cfg.brinde_template_link or "")
+
+
+@router.post("/brinde/template", response_model=BrindeTemplateOut)
+def criar_template_brinde(db: Session = Depends(get_db)):
+    """Cria (se ainda não existir) o Google Doc modelo do brinde e devolve o
+    link pra edição. Idempotente — se já existe, só retorna o link atual."""
+    cfg = _get_config(db)
+    if cfg.brinde_template_doc_id:
+        return BrindeTemplateOut(doc_id=cfg.brinde_template_doc_id, link=cfg.brinde_template_link or "")
+
+    from app.services import brinde_docs
+    doc = brinde_docs.criar_template_padrao()
+    if not doc:
+        raise HTTPException(status_code=502, detail="Falha ao criar o template no Google Docs (Drive indisponível?).")
+    cfg.brinde_template_doc_id = doc["id"]
+    cfg.brinde_template_link = doc.get("webViewLink") or f"https://docs.google.com/document/d/{doc['id']}/edit"
+    db.commit()
+    return BrindeTemplateOut(doc_id=cfg.brinde_template_doc_id, link=cfg.brinde_template_link)
 
 
 @router.get("/sugestoes", response_model=list[SugestaoOut])
@@ -177,13 +204,12 @@ def _brinde_slug(sug: InstagramSugestao) -> str:
     return re.sub(r"[^a-z0-9]+", "-", base).strip("-")[:50] or "brinde"
 
 
-def _salvar_brinde_no_drive(sug: InstagramSugestao, conteudo: dict, formato: str, estilo: str) -> None:
-    """Salva HTML+PDF do brinde no Drive: pasta da sugestão + pasta única /Instagram/Brindes."""
+def _salvar_brinde_no_drive(db: Session, sug: InstagramSugestao, conteudo: dict, formato: str, estilo: str) -> None:
+    """Gera o PDF do brinde — via template do Google Docs (se configurado) ou,
+    em fallback, o render HTML legado — e salva no Drive. Quando o template
+    está configurado, guarda o ID do PDF pra o link público servir direto."""
     try:
-        from app.services import brinde_instagram
-        from app.services.google_drive import upload_arquivo_raiz
-        html = brinde_instagram.render(conteudo, formato, estilo, para_pdf=False)
-        pdf = brinde_instagram.html_para_pdf(brinde_instagram.render(conteudo, formato, estilo, para_pdf=True))
+        from app.services.google_drive import extrair_file_id, upload_arquivo_raiz
         slug = _brinde_slug(sug)
         suf = "-site" if estilo == "site" else ""
         pasta_status = "Aprovados" if sug.status in ("aprovado", "publicado") else "Sugeridos"
@@ -191,6 +217,26 @@ def _salvar_brinde_no_drive(sug: InstagramSugestao, conteudo: dict, formato: str
             ["Instagram", pasta_status, _mes_ano(sug), f"{sug.id.hex[:6]}-{slug}"],  # pasta da sugestão
             ["Instagram", "Brindes", _mes_ano(sug)],  # pasta única de brindes (histórico)
         ]
+
+        pdf: bytes | None = None
+        cfg = db.get(InstagramConfig, 1)
+        if cfg and cfg.brinde_template_doc_id:
+            from app.services import brinde_docs
+            pdf = brinde_docs.gerar_pdf_via_template(cfg.brinde_template_doc_id, conteudo)
+
+        if pdf:
+            link = None
+            for sub in destinos:
+                link = upload_arquivo_raiz(pdf, f"{slug}{suf}.pdf", sub, "application/pdf") or link
+            if link:
+                sug.brinde_pdf_drive_id = extrair_file_id(link)
+                db.commit()
+            return
+
+        # Fallback: render HTML/CSS local (sem template do Docs configurado ainda)
+        from app.services import brinde_instagram
+        html = brinde_instagram.render(conteudo, formato, estilo, para_pdf=False)
+        pdf = brinde_instagram.html_para_pdf(brinde_instagram.render(conteudo, formato, estilo, para_pdf=True))
         for sub in destinos:
             upload_arquivo_raiz(html.encode("utf-8"), f"{slug}{suf}.html", sub, "text/html")
             upload_arquivo_raiz(pdf, f"{slug}{suf}.pdf", sub, "application/pdf")
@@ -217,7 +263,7 @@ def brinde_gerar(sugestao_id: uuid.UUID, payload: BrindeGerarRequest, db: Sessio
     sug.custo_usd = round((sug.custo_usd or 0.0) + custo, 5)
     db.commit()
     db.refresh(sug)
-    _salvar_brinde_no_drive(sug, conteudo, payload.formato, payload.estilo)  # background-ish (best-effort)
+    _salvar_brinde_no_drive(db, sug, conteudo, payload.formato, payload.estilo)  # background-ish (best-effort)
     return sug
 
 

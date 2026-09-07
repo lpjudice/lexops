@@ -309,6 +309,36 @@ function EmailsConfig() {
   )
 }
 
+// ─────────────────── Template do brinde (Google Docs) ───────────────────
+function BrindeTemplateConfig() {
+  const { data: template, isLoading } = useQuery({
+    queryKey: ['instagram-brinde-template'], queryFn: () => instagramApi.obterTemplateBrinde(),
+  })
+  const criar = useMutation({
+    mutationFn: () => instagramApi.criarTemplateBrinde(),
+    onSuccess: (t) => window.open(t.link, '_blank'),
+    onError: () => alert('Falha ao criar o template no Google Docs. Tente novamente em instantes.'),
+  })
+
+  if (isLoading) return null
+
+  return (
+    <div className={s.configRow}>
+      <FileText size={16} color="#4a6a6a" />
+      <span className={s.configLabel}>Template do brinde:</span>
+      {template ? (
+        <a href={template.link} target="_blank" rel="noreferrer" className={s.templateLink}>
+          Editar no Google Docs ↗
+        </a>
+      ) : (
+        <button className={s.templateBtn} disabled={criar.isPending} onClick={() => criar.mutate()}>
+          {criar.isPending ? 'Criando…' : 'Criar template padrão'}
+        </button>
+      )}
+    </div>
+  )
+}
+
 // ─────────────────── Página ───────────────────
 type Aba = 'sugeridas' | 'agenda' | 'rejeitadas'
 
@@ -415,6 +445,7 @@ export default function InstagramPage() {
       </div>
 
       <EmailsConfig />
+      <BrindeTemplateConfig />
 
       {dicaFormato && <div className={s.dica}><Lightbulb size={18} /><span>{dicaFormato}</span></div>}
 
