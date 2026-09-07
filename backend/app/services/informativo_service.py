@@ -240,6 +240,11 @@ REGRAS DE ESTILO (importantes, não quebre nenhuma):
   desse tipo de aposto, use parênteses.
 - Nada de floreios típicos de texto gerado por IA (evite "é importante ressaltar",
   "em suma", "dito isso", frases de efeito genéricas).
+- PROIBIDO terminar com frase de call-to-action tipo "o escritório permanece à
+  disposição", "nos procure", "entre em contato", "estamos à disposição" ou
+  qualquer variação — é um informativo de conteúdo, não um texto de venda.
+  Termine com um fechamento substantivo sobre o tema (uma conclusão real, uma
+  implicação prática), nunca uma chamada para contato.
 - Extensão: para caber em 3-4 páginas de PDF (aproximadamente 900-1400 palavras).
 - Comece direto com um parágrafo de abertura contextualizando o tema — sem título
   (o título já aparece no cabeçalho do documento).
@@ -332,24 +337,15 @@ def gerar_rascunho_ia(informativo: Informativo) -> tuple[str, list[str], str, fl
     return resumo, perguntas, corpo, custo
 
 
-def _validar_citacoes_best_effort(informativo: Informativo) -> list[dict]:
-    """Roda a validação automaticamente depois de gerar/sincronizar texto —
-    não deve nunca quebrar o fluxo principal (gerar/sincronizar já
-    aconteceram e não podem ser perdidos por causa disso)."""
-    try:
-        return validar_citacoes(informativo)
-    except Exception as exc:
-        logger.warning("Informativo %s: falha na validação automática de citações: %s", informativo.id, exc)
-        return informativo.citacoes_validadas or []
-
-
 def gerar_rascunho_e_gravar(informativo: Informativo) -> tuple[str, list[dict]]:
     """Gera resumo + perguntas-teaser + corpo com IA e já grava no Google Doc
     vinculado — resumo e perguntas nos parágrafos abaixo de seus respectivos
     cabeçalhos, corpo depois do separador (o resto do cabeçalho estruturado
-    não é tocado). Ao final, valida automaticamente as citações do texto
-    (se houver alguma). Pode ser chamado de novo pra regenerar. Retorna
-    (corpo, citacoes_validadas)."""
+    não é tocado). Pode ser chamado de novo pra regenerar. Retorna (corpo,
+    citacoes_validadas anteriores — a checagem de citações é DISPARADA À
+    PARTE pelo front logo em seguida, nunca aqui: rodar a verificação com
+    web_search dentro dessa chamada já estourou o timeout do HTTP com o
+    texto inteiro pronto, mas perdido, do lado do usuário)."""
     if not informativo.google_doc_id:
         raise RuntimeError("Este informativo ainda não tem um Google Doc vinculado.")
     resumo, perguntas, corpo, _custo = gerar_rascunho_ia(informativo)
@@ -368,15 +364,16 @@ def gerar_rascunho_e_gravar(informativo: Informativo) -> tuple[str, list[dict]]:
     informativo.rascunho_gerado_em = datetime.now(timezone.utc)
     if informativo.status == "rascunho":
         informativo.status = "primeiro_draft"
-    citacoes = _validar_citacoes_best_effort(informativo)
-    return corpo, citacoes
+    return corpo, (informativo.citacoes_validadas or [])
 
 
 _PROMPT_REESCREVER = """Você já escreveu este Informativo Jurídico Mensal do escritório Pimenta
 Judice Advogados. Uma checagem encontrou problemas em algumas citações — reescreva o
 texto CORRIGINDO ou REMOVENDO o que está incorreto, mantendo o resto do conteúdo e o
 mesmo estilo (parágrafos corridos, **negrito** nos termos-chave, pelo menos um bloco
-"> " de destaque, sem travessão longo, sem floreios de IA, 3-4 páginas).
+"> " de destaque, sem travessão longo, sem floreios de IA, 3-4 páginas, sem terminar
+com "o escritório permanece à disposição"/"nos procure" ou variação — nunca chamada
+para contato, sempre fechamento substantivo sobre o tema).
 
 REGRA ABSOLUTA, MAIS IMPORTANTE QUE QUALQUER DIRECIONAMENTO ABAIXO: você não tem
 acesso a busca na web nesta etapa. NÃO invente, NÃO confirme e NÃO amplie o conteúdo de
@@ -443,17 +440,17 @@ def reescrever_com_apontamentos(informativo: Informativo, instrucoes: str | None
         raise RuntimeError("Texto reescrito, mas falhou ao gravar no Google Doc (verifique a autenticação Google).")
     informativo.conteudo_texto = corpo
     informativo.rascunho_gerado_em = datetime.now(timezone.utc)
-    citacoes = _validar_citacoes_best_effort(informativo)
-    return corpo, citacoes
+    return corpo, (informativo.citacoes_validadas or [])
 
 
 # ── Sincronização com o Google Doc ──────────────────────────────────────────
 def sincronizar_do_doc(informativo: Informativo) -> tuple[str, list[dict]]:
     """Traz só o CORPO do Doc (texto depois do separador) pro sistema — útil
     quando o texto foi editado direto no Doc, sem passar pela IA. Não é
-    necessário pra publicar: publicar exporta o Doc inteiro direto. Ao
-    final, valida automaticamente as citações do texto (se houver alguma).
-    Retorna (texto, citacoes_validadas)."""
+    necessário pra publicar: publicar exporta o Doc inteiro direto. A
+    checagem de citações é disparada à parte pelo front (ver
+    `_validar_citacoes_best_effort` — não roda mais aqui pra não estourar o
+    timeout do HTTP). Retorna (texto, citacoes_validadas anteriores)."""
     if not informativo.google_doc_id:
         raise RuntimeError("Este informativo ainda não tem um Google Doc vinculado.")
     from app.services.google_docs import ler_corpo_documento
@@ -464,8 +461,7 @@ def sincronizar_do_doc(informativo: Informativo) -> tuple[str, list[dict]]:
     informativo.conteudo_texto = texto.strip()
     if informativo.status == "rascunho" and informativo.conteudo_texto:
         informativo.status = "primeiro_draft"
-    citacoes = _validar_citacoes_best_effort(informativo)
-    return informativo.conteudo_texto, citacoes
+    return informativo.conteudo_texto, (informativo.citacoes_validadas or [])
 
 
 # ── Validação de citações (lei/normativo e julgado) ─────────────────────────
@@ -685,17 +681,21 @@ def _link_publico(informativo: Informativo) -> str:
 
 def listar_destinatarios_newsletter(db: Session) -> list[tuple[str, str]]:
     """Une Cliente.email + ConselhoContato.email + InformativoAssinante
-    (inscrição pública), deduplicados por e-mail (case-insensitive).
-    Retorna [(email, nome), ...]."""
+    (inscrição pública), deduplicados por e-mail (case-insensitive), menos
+    quem estiver na lista de opt-out. Retorna [(email, nome), ...]."""
     from app.models.cliente import Cliente
     from app.models.conselho import ConselhoContato
-    from app.models.informativo import InformativoAssinante
+    from app.models.informativo import InformativoAssinante, InformativoOptOut
+
+    optados_fora = {
+        (e or "").strip().lower() for (e,) in db.query(InformativoOptOut.email).all()
+    }
 
     vistos: dict[str, str] = {}
 
     for nome, email in db.query(Cliente.nome, Cliente.email).filter(Cliente.email.isnot(None)).all():
         chave = (email or "").strip().lower()
-        if chave and "@" in chave and chave not in vistos:
+        if chave and "@" in chave and chave not in vistos and chave not in optados_fora:
             vistos[chave] = nome or ""
 
     for primeiro, sobre, email in (
@@ -703,7 +703,7 @@ def listar_destinatarios_newsletter(db: Session) -> list[tuple[str, str]]:
         .filter(ConselhoContato.email.isnot(None)).all()
     ):
         chave = (email or "").strip().lower()
-        if chave and "@" in chave and chave not in vistos:
+        if chave and "@" in chave and chave not in vistos and chave not in optados_fora:
             vistos[chave] = " ".join(p for p in [primeiro, sobre] if p)
 
     for nome, email in (
@@ -711,15 +711,26 @@ def listar_destinatarios_newsletter(db: Session) -> list[tuple[str, str]]:
         .filter(InformativoAssinante.ativo.is_(True)).all()
     ):
         chave = (email or "").strip().lower()
-        if chave and chave not in vistos:
+        if chave and chave not in vistos and chave not in optados_fora:
             vistos[chave] = nome or ""
 
     return list(vistos.items())
 
 
-def montar_email_newsletter(informativo: Informativo) -> tuple[str, str]:
+def _link_opt_out(email: str) -> str:
+    from app.config import settings
+    import urllib.parse
+    base = (settings.frontend_url or "").rstrip("/")
+    if not base or "localhost" in base or "127.0.0.1" in base:
+        base = "https://lexops.fly.dev"
+    return f"{base}/api/publico/informativos/opt-out?email={urllib.parse.quote(email)}"
+
+
+def montar_email_newsletter(informativo: Informativo, destinatario_email: str | None = None) -> tuple[str, str]:
     """(assunto, html) do e-mail da newsletter — resumo do Doc + link direto
-    pro informativo no site + aviso de que o PDF vai anexado."""
+    pro informativo no site + aviso de que o PDF vai anexado + link de
+    descadastro (opt-out) no rodapé. `destinatario_email` personaliza o link
+    de opt-out; sem ele, o link fica genérico (usado em pré-visualização/teste)."""
     resumo = None
     if informativo.google_doc_id:
         from app.services.google_docs import ler_resumo_documento
@@ -731,6 +742,7 @@ def montar_email_newsletter(informativo: Informativo) -> tuple[str, str]:
     mes_label = _mes_label(informativo.mes_referencia)
     link = _link_publico(informativo)
     assunto = f"Informativo Pimenta Judice — {informativo.titulo}"
+    link_optout = _link_opt_out(destinatario_email or "")
 
     resumo_html = f'<p style="font-size:15px;line-height:1.6;color:#333;">{resumo}</p>' if resumo else ""
     html = f"""<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
@@ -743,32 +755,53 @@ def montar_email_newsletter(informativo: Informativo) -> tuple[str, str]:
         <p style="font-size:14px;color:#555;">O PDF completo vai anexado neste e-mail. Você também pode ler direto no site:</p>
         <a href="{link}" style="display:inline-block;background:#1C5A4E;color:#fff;text-decoration:none;font-weight:700;padding:12px 24px;border-radius:999px;font-size:14px;">Ler no site →</a>
       </div>
-      <p style="text-align:center;font-size:11px;color:#999;margin-top:14px;">Pimenta Judice Advogados — Planejamento Patrimonial e Sucessório</p>
+      <p style="text-align:center;font-size:11px;color:#999;margin-top:14px;">
+        Pimenta Judice Advogados — Planejamento Patrimonial e Sucessório<br>
+        <a href="{link_optout}" style="color:#999;">Não quero mais receber estes e-mails</a>
+      </p>
     </div>"""
     return assunto, html
 
 
-def enviar_newsletter(db: Session, informativo: Informativo) -> dict:
-    """Envia o e-mail da newsletter (resumo + link + PDF anexado) pra todos
-    os destinatários únicos (Clientes + Contatos do Conselho + inscritos
-    públicos). Só funciona pra informativo já publicado (precisa do PDF)."""
+def _baixar_pdf_informativo(informativo: Informativo) -> bytes:
     if informativo.status != "publicado" or not informativo.drive_pdf_link:
         raise RuntimeError("Publique o informativo antes de enviar a newsletter.")
-
     from app.services.google_drive import baixar_arquivo_por_id, extrair_file_id
     file_id = extrair_file_id(informativo.drive_pdf_link)
     pdf_bytes = baixar_arquivo_por_id(file_id) if file_id else None
     if not pdf_bytes:
         raise RuntimeError("Não consegui baixar o PDF do Drive pra anexar (verifique a autenticação Google).")
+    return pdf_bytes
 
+
+def enviar_newsletter_teste(informativo: Informativo, email: str) -> None:
+    """Manda a newsletter (mesmo conteúdo real) só pra UM e-mail digitado na
+    hora — pra conferir antes de disparar pra todo mundo. Não mexe na lista
+    de destinatários real nem em nada persistido."""
+    email = (email or "").strip()
+    if not email or "@" not in email:
+        raise RuntimeError("E-mail inválido.")
+    pdf_bytes = _baixar_pdf_informativo(informativo)
     slug = re.sub(r"[^a-z0-9]+", "-", (informativo.titulo or "informativo").lower()).strip("-")[:60] or "informativo"
-    assunto, html = montar_email_newsletter(informativo)
+    assunto, html = montar_email_newsletter(informativo, destinatario_email=email)
+    from app.services.email_service import _send_via_gmail_oauth
+    _send_via_gmail_oauth(email, f"[TESTE] {assunto}", html, attachments=[(f"{slug}.pdf", pdf_bytes)])
+
+
+def enviar_newsletter(db: Session, informativo: Informativo) -> dict:
+    """Envia o e-mail da newsletter (resumo + link + PDF anexado) pra todos
+    os destinatários únicos (Clientes + Contatos do Conselho + inscritos
+    públicos, menos quem pediu opt-out). Só funciona pra informativo já
+    publicado (precisa do PDF)."""
+    pdf_bytes = _baixar_pdf_informativo(informativo)
+    slug = re.sub(r"[^a-z0-9]+", "-", (informativo.titulo or "informativo").lower()).strip("-")[:60] or "informativo"
     destinatarios = listar_destinatarios_newsletter(db)
 
     from app.services.email_service import _send_via_gmail_oauth
     enviados = erros = 0
     for email, _nome in destinatarios:
         try:
+            assunto, html = montar_email_newsletter(informativo, destinatario_email=email)
             _send_via_gmail_oauth(email, assunto, html, attachments=[(f"{slug}.pdf", pdf_bytes)])
             enviados += 1
         except Exception as exc:

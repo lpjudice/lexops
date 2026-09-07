@@ -144,6 +144,25 @@ def informativos_publicos(db: Session = Depends(get_db)):
     ]
 
 
+@router.get("/informativos/opt-out")
+def informativo_opt_out(email: str, db: Session = Depends(get_db)):
+    """Descadastro da newsletter — GET de propósito, pra funcionar como link
+    clicável direto no rodapé do e-mail. Suprime esse e-mail pra sempre,
+    mesmo que seja Cliente/Contato/Assinante."""
+    from app.models.informativo import InformativoOptOut
+
+    email_norm = (email or "").strip().lower()
+    if not email_norm or "@" not in email_norm:
+        raise HTTPException(400, "E-mail inválido.")
+    if not db.query(InformativoOptOut).filter(InformativoOptOut.email == email_norm).first():
+        db.add(InformativoOptOut(email=email_norm))
+        db.commit()
+    return _resp_html(
+        "<!doctype html><html><body style='font-family:Arial,sans-serif;text-align:center;padding:60px 20px;'>"
+        f"<p>Pronto — <b>{email_norm}</b> não vai mais receber os informativos por e-mail.</p></body></html>"
+    )
+
+
 @router.post("/informativos/assinar")
 def informativo_assinar(payload: AssinanteRequest, db: Session = Depends(get_db)):
     """Inscrição pública na newsletter dos Informativos — formulário exibido

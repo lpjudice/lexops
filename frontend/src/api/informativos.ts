@@ -91,17 +91,21 @@ export const informativosApi = {
     return api.post<Informativo>(`/informativos/${id}/upload`, form).then((r) => r.data)
   },
 
+  // Geração/reescrita/sincronização NÃO fazem mais a checagem de citações
+  // junto (isso já estourou timeout esperando web_search) — timeout normal
+  // de escrita de texto basta.
   gerarRascunhoIA: (id: string) =>
-    api.post<{ conteudo_texto: string; citacoes: Citacao[] }>(`/informativos/${id}/gerar-rascunho-ia`, undefined, { timeout: 120000 }).then((r) => r.data),
+    api.post<{ conteudo_texto: string; citacoes: Citacao[] }>(`/informativos/${id}/gerar-rascunho-ia`, undefined, { timeout: 60000 }).then((r) => r.data),
 
   reescreverIA: (id: string, instrucoes?: string) =>
-    api.post<{ conteudo_texto: string; citacoes: Citacao[] }>(`/informativos/${id}/reescrever-ia`, { instrucoes: instrucoes || null }, { timeout: 120000 }).then((r) => r.data),
+    api.post<{ conteudo_texto: string; citacoes: Citacao[] }>(`/informativos/${id}/reescrever-ia`, { instrucoes: instrucoes || null }, { timeout: 60000 }).then((r) => r.data),
 
   sincronizarDoc: (id: string) =>
-    api.post<{ conteudo_texto: string; citacoes: Citacao[] }>(`/informativos/${id}/sincronizar-doc`, undefined, { timeout: 120000 }).then((r) => r.data),
+    api.post<{ conteudo_texto: string; citacoes: Citacao[] }>(`/informativos/${id}/sincronizar-doc`, undefined, { timeout: 30000 }).then((r) => r.data),
 
+  // Verificação com web_search por citação pode demorar bastante — timeout maior.
   validarCitacoes: (id: string) =>
-    api.post<{ citacoes: Citacao[] }>(`/informativos/${id}/validar-citacoes`, undefined, { timeout: 120000 }).then((r) => r.data),
+    api.post<{ citacoes: Citacao[] }>(`/informativos/${id}/validar-citacoes`, undefined, { timeout: 240000 }).then((r) => r.data),
 
   publicar: (id: string) =>
     api.post<{ paginas: number; aviso: string | null; pdf_link: string | null }>(`/informativos/${id}/publicar`).then((r) => r.data),
@@ -111,6 +115,9 @@ export const informativosApi = {
 
   obterTemplate: () =>
     api.get<{ template_doc_link: string | null }>('/informativos/config/template').then((r) => r.data),
+
+  newsletterTeste: (id: string, email: string) =>
+    api.post<{ ok: boolean }>(`/informativos/${id}/newsletter/teste`, { email }, { timeout: 30000 }).then((r) => r.data),
 
   destinatariosNewsletter: (id: string) =>
     api.get<{ total: number; exemplos: string[] }>(`/informativos/${id}/newsletter/destinatarios`).then((r) => r.data),
