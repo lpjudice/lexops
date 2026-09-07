@@ -381,6 +381,36 @@ def definir_corpo_manual(informativo_id: uuid.UUID, payload: CorpoManualRequest,
     return SincronizarResponse(conteudo_texto=texto, citacoes=citacoes)
 
 
+@router.post("/{informativo_id}/upload-pdf-manual", response_model=SincronizarResponse)
+async def upload_pdf_manual(informativo_id: uuid.UUID, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Sobe um PDF já pronto (feito fora do sistema) — extrai o texto e grava
+    como corpo, exatamente como "colar texto pronto". Segue dali a mesma
+    esteira de sempre (checagem, preview, publicar), e "publicar" sempre
+    reexporta o Google Doc — que já vai ter esse texto, com o timbrado do
+    modelo."""
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Envie um arquivo PDF.")
+    informativo = _get(db, informativo_id)
+    conteudo = await file.read()
+    try:
+        from pypdf import PdfReader
+        import io as _io
+        paginas_pdf = PdfReader(_io.BytesIO(conteudo)).pages
+        texto = "\n\n".join((p.extract_text() or "").strip() for p in paginas_pdf).strip()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Não consegui ler o PDF: {exc}")
+    if not texto:
+        raise HTTPException(status_code=400, detail="Não encontrei texto no PDF (pode ser um PDF só de imagem/escaneado).")
+    try:
+        texto, citacoes = informativo_service.definir_corpo_manual(informativo, texto)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Falha ao gravar o texto: {exc}")
+    db.commit()
+    return SincronizarResponse(conteudo_texto=texto, citacoes=citacoes)
+
+
 @router.post("/{informativo_id}/reescrever-ia", response_model=SincronizarResponse)
 def reescrever_ia(informativo_id: uuid.UUID, payload: ReescreverRequest, db: Session = Depends(get_db)):
     informativo = _get(db, informativo_id)

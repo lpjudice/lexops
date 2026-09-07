@@ -858,6 +858,10 @@ function DetalheInformativo({ informativo, onFechar }: { informativo: Informativ
     mutationFn: () => informativosApi.definirCorpoManual(informativo.id, textoManual),
     onSuccess: () => { invalidar(); validarMutation.mutate(); setMostrarTextoManual(false) },
   })
+  const uploadPdfMutation = useMutation({
+    mutationFn: (file: File) => informativosApi.uploadPdfManual(informativo.id, file),
+    onSuccess: () => { invalidar(); validarMutation.mutate(); setMostrarTextoManual(false) },
+  })
   const rascunhoIAMutation = useMutation({
     // Checagem de citações dispara À PARTE (chamada própria) logo depois de
     // gerar — nunca dentro da mesma requisição, senão o front toma timeout
@@ -1037,6 +1041,21 @@ function DetalheInformativo({ informativo, onFechar }: { informativo: Informativ
               </div>
               {corpoManualMutation.isError && (
                 <p style={{ color: '#b91c1c', fontSize: 12.5 }}>{erroApi(corpoManualMutation.error)}</p>
+              )}
+
+              <p style={{ fontSize: 12, color: '#6b7280', margin: '14px 0 6px' }}>
+                Ou envie um PDF já pronto — o texto é extraído automaticamente e vira o corpo, do
+                mesmo jeito.
+              </p>
+              <input
+                type="file"
+                accept=".pdf"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadPdfMutation.mutate(f) }}
+                disabled={uploadPdfMutation.isPending}
+              />
+              {uploadPdfMutation.isPending && <span style={{ marginLeft: 8, fontSize: 12.5 }}>Extraindo texto do PDF...</span>}
+              {uploadPdfMutation.isError && (
+                <p style={{ color: '#b91c1c', fontSize: 12.5 }}>{erroApi(uploadPdfMutation.error)}</p>
               )}
             </div>
           )}
