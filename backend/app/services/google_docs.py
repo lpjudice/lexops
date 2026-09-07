@@ -360,6 +360,24 @@ def ler_resumo_documento(doc_id: str) -> str | None:
     return None
 
 
+def ler_perguntas_documento(doc_id: str) -> list[str]:
+    """Lê o parágrafo logo abaixo do cabeçalho `HEADING_PERGUNTAS` e separa
+    as perguntas-teaser (foram gravadas juntas num único parágrafo, " · "
+    entre elas). Lista vazia se não achar."""
+    def _ler(tokens: dict):
+        return _docs_request("GET", f"/{doc_id}", tokens)
+
+    doc = _com_refresh(_ler)
+    if not doc:
+        return []
+    paras = _paragrafos_do_doc(doc)
+    for i, (txt, _s, _e) in enumerate(paras):
+        if HEADING_PERGUNTAS.lower() in txt.lower() and i + 1 < len(paras):
+            bruto = paras[i + 1][0].strip()
+            return [p.strip() for p in bruto.split(" · ") if p.strip()]
+    return []
+
+
 def ler_corpo_documento(doc_id: str) -> str | None:
     """Lê só o corpo do informativo (texto depois do separador). Docs
     antigos sem separador (ou o template original) devolvem o texto inteiro."""

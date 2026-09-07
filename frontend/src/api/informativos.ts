@@ -116,6 +116,9 @@ export const informativosApi = {
   obterTemplate: () =>
     api.get<{ template_doc_link: string | null }>('/informativos/config/template').then((r) => r.data),
 
+  resumoPerguntas: (id: string) =>
+    api.get<{ resumo: string | null; perguntas: string[] }>(`/informativos/${id}/resumo-perguntas`).then((r) => r.data),
+
   newsletterTeste: (id: string, email: string) =>
     api.post<{ ok: boolean }>(`/informativos/${id}/newsletter/teste`, { email }, { timeout: 30000 }).then((r) => r.data),
 
