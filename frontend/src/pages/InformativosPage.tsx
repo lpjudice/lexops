@@ -591,8 +591,22 @@ function linkPublicoInformativo(id: string): string {
   return `${window.location.origin}/api/publico/informativos/${id}.html`
 }
 
+function textoWhatsappPadrao(informativo: Informativo): string {
+  return `Informativo Pimenta Judice: ${informativo.titulo}\n${linkPublicoInformativo(informativo.id)}`
+}
+
 function DistribuicaoPanel({ informativo }: { informativo: Informativo }) {
   const [enviarResultado, setEnviarResultado] = useState<{ enviados: number; total: number; erros: number } | null>(null)
+  const [emailTeste, setEmailTeste] = useState('')
+  const [testeResultado, setTesteResultado] = useState<string | null>(null)
+  const [telefoneTeste, setTelefoneTeste] = useState('')
+
+  const chaveTexto = `informativos:whatsapp-texto:${informativo.id}`
+  const chaveEnviados = `informativos:whatsapp-enviados:${informativo.id}`
+  const [textoWhatsapp, setTextoWhatsapp] = useState(() => localStorage.getItem(chaveTexto) || textoWhatsappPadrao(informativo))
+  const [enviadosWhatsapp, setEnviadosWhatsapp] = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem(chaveEnviados) || '[]')) } catch { return new Set() }
+  })
 
   const { data: destinatarios } = useQuery({
     queryKey: ['informativos', informativo.id, 'newsletter-destinatarios'],
@@ -609,20 +623,33 @@ function DistribuicaoPanel({ informativo }: { informativo: Informativo }) {
     mutationFn: () => informativosApi.enviarNewsletter(informativo.id),
     onSuccess: (res) => setEnviarResultado(res),
   })
+  const testeMutation = useMutation({
+    mutationFn: () => informativosApi.newsletterTeste(informativo.id, emailTeste),
+    onSuccess: () => setTesteResultado(`Teste enviado pra ${emailTeste}.`),
+  })
 
   const handleEnviar = () => {
     const n = destinatarios?.total ?? 0
-    if (window.confirm(`Enviar a newsletter (resumo + link + PDF) para ${n} destinatário(s)?`)) {
+    if (window.confirm(`Enviar a newsletter (resumo + link + PDF) para ${n} destinatário(s)? Essa ação não pode ser desfeita.`)) {
       enviarMutation.mutate()
     }
   }
 
-  const link = linkPublicoInformativo(informativo.id)
-  const textoWhatsapp = `Informativo Pimenta Judice: ${informativo.titulo}\n${link}`
+  const salvarTexto = (v: string) => {
+    setTextoWhatsapp(v)
+    localStorage.setItem(chaveTexto, v)
+  }
+  const toggleEnviado = (contatoId: string) => {
+    const novo = new Set(enviadosWhatsapp)
+    if (novo.has(contatoId)) novo.delete(contatoId); else novo.add(contatoId)
+    setEnviadosWhatsapp(novo)
+    localStorage.setItem(chaveEnviados, JSON.stringify([...novo]))
+  }
+  const waLink = (numero: string) => `https://wa.me/${numero.replace(/\D/g, '')}?text=${encodeWaText(textoWhatsapp)}`
 
   return (
     <div style={{ padding: '14px 20px', display: 'flex', gap: 28, flexWrap: 'wrap' }}>
-      <div style={{ minWidth: 240 }}>
+      <div style={{ minWidth: 260 }}>
         <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Newsletter por e-mail</div>
         <p style={{ fontSize: 12.5, color: '#6b7280', margin: '0 0 8px' }}>
           {destinatarios ? `${destinatarios.total} destinatário(s)` : 'Carregando destinatários...'}
@@ -631,7 +658,7 @@ function DistribuicaoPanel({ informativo }: { informativo: Informativo }) {
           )}
         </p>
         <button className={styles.btnSmall} onClick={handleEnviar} disabled={enviarMutation.isPending || !destinatarios?.total}>
-          {enviarMutation.isPending ? 'Enviando...' : 'Enviar newsletter'}
+          {enviarMutation.isPending ? 'Enviando...' : 'Enviar newsletter pra todos'}
         </button>
         {enviarMutation.isError && <p style={{ color: '#b91c1c', fontSize: 12.5 }}>{erroApi(enviarMutation.error)}</p>}
         {enviarResultado && (
@@ -639,28 +666,84 @@ function DistribuicaoPanel({ informativo }: { informativo: Informativo }) {
             Enviado pra {enviarResultado.enviados}/{enviarResultado.total} {enviarResultado.erros > 0 && `(${enviarResultado.erros} falha(s))`}
           </p>
         )}
+
+        <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid #e5e7eb' }}>
+          <label className={styles.formLabel} style={{ display: 'block', fontSize: 11.5 }}>Testar antes de enviar pra todos</label>
+          <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+            <input
+              className={styles.input}
+              style={{ fontSize: 12.5, padding: '5px 8px' }}
+              placeholder="seu@email.com"
+              value={emailTeste}
+              onChange={(e) => setEmailTeste(e.target.value)}
+            />
+            <button
+              className={styles.btnTable}
+              style={{ fontSize: 11.5, flexShrink: 0 }}
+              onClick={() => testeMutation.mutate()}
+              disabled={testeMutation.isPending || !emailTeste.includes('@')}
+            >
+              {testeMutation.isPending ? 'Enviando...' : 'Enviar teste'}
+            </button>
+          </div>
+          {testeResultado && !testeMutation.isPending && <p style={{ fontSize: 11.5, color: '#15803d', marginTop: 4 }}>{testeResultado}</p>}
+          {testeMutation.isError && <p style={{ fontSize: 11.5, color: '#b91c1c', marginTop: 4 }}>{erroApi(testeMutation.error)}</p>}
+        </div>
       </div>
 
-      <div style={{ minWidth: 240, maxWidth: 320 }}>
+      <div style={{ minWidth: 260, maxWidth: 340 }}>
         <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>WhatsApp (contatos do Conselho)</div>
+        <textarea
+          className={styles.input}
+          style={{ fontSize: 12, marginBottom: 6 }}
+          rows={2}
+          value={textoWhatsapp}
+          onChange={(e) => salvarTexto(e.target.value)}
+        />
         {contatosWhatsapp.length === 0 ? (
           <p style={{ fontSize: 12.5, color: '#9ca3af' }}>Nenhum contato com WhatsApp cadastrado.</p>
         ) : (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 110, overflowY: 'auto' }}>
-            {contatosWhatsapp.map((c) => (
-              <a
-                key={c.id}
-                className={styles.btnTable}
-                style={{ textDecoration: 'none', fontSize: 11.5 }}
-                target="_blank"
-                rel="noreferrer"
-                href={`https://wa.me/${(c.whatsapp || '').replace(/\D/g, '')}?text=${encodeWaText(textoWhatsapp)}`}
-              >
-                {c.primeiro_nome}
-              </a>
-            ))}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 110, overflowY: 'auto', marginBottom: 8 }}>
+            {contatosWhatsapp.map((c) => {
+              const enviado = enviadosWhatsapp.has(c.id)
+              return (
+                <a
+                  key={c.id}
+                  className={styles.btnTable}
+                  style={{
+                    textDecoration: 'none', fontSize: 11.5,
+                    background: enviado ? '#15803d' : undefined, color: enviado ? '#fff' : undefined,
+                  }}
+                  target="_blank"
+                  rel="noreferrer"
+                  href={waLink(c.whatsapp || '')}
+                  onClick={() => toggleEnviado(c.id)}
+                  title={enviado ? 'Marcado como enviado — clique de novo pra desmarcar' : 'Abre o WhatsApp e marca como enviado'}
+                >
+                  {enviado ? '✓ ' : ''}{c.primeiro_nome}
+                </a>
+              )
+            })}
           </div>
         )}
+        <div style={{ display: 'flex', gap: 6, paddingTop: 6, borderTop: '1px solid #e5e7eb' }}>
+          <input
+            className={styles.input}
+            style={{ fontSize: 12.5, padding: '5px 8px' }}
+            placeholder="Testar: 5511999999999 (DDI+DDD)"
+            value={telefoneTeste}
+            onChange={(e) => setTelefoneTeste(e.target.value)}
+          />
+          <a
+            className={styles.btnTable}
+            style={{ fontSize: 11.5, flexShrink: 0, textDecoration: 'none', opacity: telefoneTeste.replace(/\D/g, '').length < 10 ? 0.5 : 1, pointerEvents: telefoneTeste.replace(/\D/g, '').length < 10 ? 'none' : 'auto' }}
+            target="_blank"
+            rel="noreferrer"
+            href={waLink(telefoneTeste)}
+          >
+            Testar
+          </a>
+        </div>
       </div>
 
       <div style={{ minWidth: 180 }}>
@@ -697,27 +780,30 @@ function DetalheInformativo({ informativo, onFechar }: { informativo: Informativ
     mutationFn: (autorizado: boolean) => informativosApi.atualizar(informativo.id, { autorizado }),
     onSuccess: invalidar,
   })
-  const rascunhoIAMutation = useMutation({
-    mutationFn: () => informativosApi.gerarRascunhoIA(informativo.id),
+  const validarMutation = useMutation({
+    mutationFn: () => informativosApi.validarCitacoes(informativo.id),
     onSuccess: (res) => { invalidar(); setCitacoes(res.citacoes); setCitacoesCarregadas(true) },
+  })
+  const rascunhoIAMutation = useMutation({
+    // Checagem de citações dispara À PARTE (chamada própria) logo depois de
+    // gerar — nunca dentro da mesma requisição, senão o front toma timeout
+    // esperando o texto (que já ficou pronto e salvo) porque a checagem com
+    // busca na web pode passar de 1-2 minutos.
+    mutationFn: () => informativosApi.gerarRascunhoIA(informativo.id),
+    onSuccess: () => { invalidar(); validarMutation.mutate() },
   })
   const [reescritoEm, setReescritoEm] = useState<string | null>(null)
   const reescreverMutation = useMutation({
     mutationFn: () => informativosApi.reescreverIA(informativo.id, instrucoesReescrever),
-    onSuccess: (res) => {
+    onSuccess: () => {
       invalidar()
-      setCitacoes(res.citacoes)
-      setCitacoesCarregadas(true)
       setReescritoEm(new Date().toISOString())
+      validarMutation.mutate()
     },
   })
   const sincronizarMutation = useMutation({
     mutationFn: () => informativosApi.sincronizarDoc(informativo.id),
-    onSuccess: (res) => { invalidar(); setCitacoes(res.citacoes); setCitacoesCarregadas(true) },
-  })
-  const validarMutation = useMutation({
-    mutationFn: () => informativosApi.validarCitacoes(informativo.id),
-    onSuccess: (res) => { invalidar(); setCitacoes(res.citacoes); setCitacoesCarregadas(true) },
+    onSuccess: () => { invalidar(); validarMutation.mutate() },
   })
   const publicarMutation = useMutation({
     mutationFn: () => informativosApi.publicar(informativo.id),
@@ -850,7 +936,33 @@ function DetalheInformativo({ informativo, onFechar }: { informativo: Informativ
           )}
         </Passo>
 
-        <Passo numero={3} titulo="Pré-visualizar" descricao="Mostra o Doc exatamente como está agora — confira o texto antes de decidir se precisa checar citações.">
+        <Passo
+          numero={3}
+          titulo="Checagem de citações de lei/julgado"
+          descricao="Automática — dispara sozinha logo depois de gerar/regerar/sincronizar (pode levar mais de um minuto, feita à parte pra não travar a geração). Use os botões abaixo pra rechecar."
+        >
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className={styles.btnSmall} onClick={() => sincronizarMutation.mutate()} disabled={sincronizarMutation.isPending}>
+              {sincronizarMutation.isPending ? 'Sincronizando...' : 'Sincronizar do Doc e checar'}
+            </button>
+            <button
+              className={styles.btnSmall}
+              onClick={() => validarMutation.mutate()}
+              disabled={validarMutation.isPending || !informativo.conteudo_texto}
+              title={!informativo.conteudo_texto ? 'Gere ou sincronize o texto primeiro' : undefined}
+            >
+              {validarMutation.isPending ? 'Checando...' : 'Rechecar citações'}
+            </button>
+          </div>
+          {(sincronizarMutation.isPending || validarMutation.isPending) && (
+            <p style={{ fontSize: 12.5, color: '#6b7280', marginTop: 6 }}>Checando... pode levar mais de um minuto (busca na web por citação).</p>
+          )}
+          {citacoesCarregadas ? <ResultadoCitacoes citacoes={citacoes} /> : (
+            <p style={{ fontSize: 13, color: '#9ca3af', marginTop: 8 }}>Ainda não checado nesta sessão.</p>
+          )}
+        </Passo>
+
+        <Passo numero={4} titulo="Pré-visualizar" descricao="Mostra o Doc exatamente como está agora.">
           <button className={styles.btnSmall} onClick={abrirPreview} disabled={previewCarregando}>
             {previewCarregando ? 'Carregando...' : 'Pré-visualizar'}
           </button>
@@ -860,32 +972,6 @@ function DetalheInformativo({ informativo, onFechar }: { informativo: Informativ
               srcDoc={preview}
               style={{ width: '100%', height: 500, border: '1px solid #e5e7eb', borderRadius: 8, marginTop: 10 }}
             />
-          )}
-        </Passo>
-
-        <Passo
-          numero={4}
-          titulo="Checagem de citações de lei/julgado"
-          descricao="Roda sozinha depois de gerar/regerar o texto. Use os botões abaixo se editou o Doc na mão, ou pra rechecar."
-        >
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button className={styles.btnSmall} onClick={() => sincronizarMutation.mutate()} disabled={sincronizarMutation.isPending}>
-              {sincronizarMutation.isPending ? 'Sincronizando e checando...' : 'Sincronizar do Doc e checar'}
-            </button>
-            <button
-              className={styles.btnSmall}
-              onClick={() => validarMutation.mutate()}
-              disabled={validarMutation.isPending || !informativo.conteudo_texto}
-              title={!informativo.conteudo_texto ? 'Gere ou sincronize o texto primeiro' : undefined}
-            >
-              {validarMutation.isPending ? 'Rechecando...' : 'Rechecar citações'}
-            </button>
-          </div>
-          {(sincronizarMutation.isPending || validarMutation.isPending) && (
-            <p style={{ fontSize: 12.5, color: '#6b7280', marginTop: 6 }}>Isso pode levar alguns segundos por citação (busca na web).</p>
-          )}
-          {citacoesCarregadas ? <ResultadoCitacoes citacoes={citacoes} /> : (
-            <p style={{ fontSize: 13, color: '#9ca3af', marginTop: 8 }}>Ainda não checado nesta sessão.</p>
           )}
         </Passo>
 

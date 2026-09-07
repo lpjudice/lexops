@@ -216,6 +216,22 @@ def newsletter_destinatarios(informativo_id: uuid.UUID, db: Session = Depends(ge
     return DestinatariosPreview(total=len(destinatarios), exemplos=exemplos)
 
 
+class NewsletterTesteRequest(BaseModel):
+    email: str
+
+
+@router.post("/{informativo_id}/newsletter/teste")
+def newsletter_teste(informativo_id: uuid.UUID, payload: NewsletterTesteRequest, db: Session = Depends(get_db)):
+    informativo = _get(db, informativo_id)
+    try:
+        informativo_service.enviar_newsletter_teste(informativo, payload.email)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Falha ao enviar teste: {exc}")
+    return {"ok": True}
+
+
 @router.post("/{informativo_id}/newsletter/enviar", response_model=NewsletterResponse)
 def newsletter_enviar(informativo_id: uuid.UUID, db: Session = Depends(get_db)):
     informativo = _get(db, informativo_id)
