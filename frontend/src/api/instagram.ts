@@ -90,6 +90,13 @@ export interface EnviarAssessoriaResponse {
 
 export interface InstagramConfig {
   assessoria_emails: string
+  brinde_template_doc_id?: string | null
+  brinde_template_link?: string | null
+}
+
+export interface BrindeTemplate {
+  doc_id: string
+  link: string
 }
 
 export const instagramApi = {
@@ -135,6 +142,12 @@ export const instagramApi = {
 
   salvarConfig: (assessoria_emails: string) =>
     api.put<InstagramConfig>('/instagram/config', { assessoria_emails }).then((r) => r.data),
+
+  obterTemplateBrinde: () =>
+    api.get<BrindeTemplate | null>('/instagram/brinde/template').then((r) => r.data),
+
+  criarTemplateBrinde: () =>
+    api.post<BrindeTemplate>('/instagram/brinde/template').then((r) => r.data),
 
   buscarPublico: (id: string) =>
     api.get<CardPublico>(`/publico/instagram/${id}`).then((r) => r.data),

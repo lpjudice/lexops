@@ -165,9 +165,16 @@ class EnviarAssessoriaResponse(BaseModel):
 
 class ConfigOut(BaseModel):
     assessoria_emails: str
+    brinde_template_doc_id: str | None = None
+    brinde_template_link: str | None = None
 
     model_config = {"from_attributes": True}
 
 
 class ConfigUpdate(BaseModel):
     assessoria_emails: str
+
+
+class BrindeTemplateOut(BaseModel):
+    doc_id: str
+    link: str

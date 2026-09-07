@@ -79,6 +79,9 @@ class InstagramSugestao(Base):
     brinde_site_conteudo: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # Se o Lucas subiu o próprio PDF, link da pasta/arquivo no Drive
     brinde_drive_link: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ID (Drive) do PDF final gerado via template do Google Docs — quando presente,
+    # o link público serve esse arquivo direto, sem re-renderizar a cada acesso.
+    brinde_pdf_drive_id: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     @property
     def tem_brinde(self) -> bool:
@@ -114,6 +117,9 @@ class InstagramConfig(Base):
     assessoria_emails: Mapped[str] = mapped_column(
         Text, nullable=False, default=DEFAULT_ASSESSORIA_EMAILS
     )
+    # Google Doc modelo do brinde (Lucas edita o visual direto no Docs)
+    brinde_template_doc_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    brinde_template_link: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )

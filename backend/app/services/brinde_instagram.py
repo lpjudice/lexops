@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import base64
 import html as _html
-import io
 import json
 import pathlib
 
@@ -86,95 +85,86 @@ def render(conteudo: dict, formato: str, estilo: str, para_pdf: bool = False) ->
     return _render_instagram(conteudo, formato or "one_pager", para_pdf)
 
 
-def _bullets(items, cls="") -> str:
-    if not items:
-        return ""
-    lis = "".join(f"<li>{_esc(b)}</li>" for b in items)
-    return f'<ul class="{cls}">{lis}</ul>'
-
-
 def _paras(items) -> str:
     return "".join(f'<p class="p">{_esc(p)}</p>' for p in (items or []))
 
 
-# ---------- Estilo Instagram (teal) ----------
+def _callout(items, cor_bg: str, cor_borda: str) -> str:
+    """Bullets viram UM único bloco destacado (fundo + barra lateral) — usado só
+    para a lista de pontos-chave, não para cada parágrafo."""
+    if not items:
+        return ""
+    lis = "".join(f"<li>{_esc(b)}</li>" for b in items)
+    return f'<ul class="callout" style="background:{cor_bg}; border-left-color:{cor_borda};">{lis}</ul>'
+
+
+# ---------- Estilo Instagram (teal, fundo branco, sotaques coloridos) ----------
 def _render_instagram(c: dict, formato: str, para_pdf: bool) -> str:
-    TEAL, INK, CREAM = "#1C5A4E", "#123D34", "#F5F0E8"
-    logo = _logo("logo_light.png")
+    TEAL, INK, MUT, TINT = "#1C5A4E", "#16211d", "#5c6b66", "#EAF3F0"
+    logo = _logo("logo_dark.png")
     fonte = "Helvetica, Arial, sans-serif" if para_pdf else "'Archivo', Helvetica, Arial, sans-serif"
-    gfont = "" if para_pdf else '<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700;800;900&display=swap" rel="stylesheet">'
-    # sombras/raios só no navegador (pisa ignora)
-    card_sh = "" if para_pdf else "box-shadow:0 6px 22px rgba(18,61,52,.08); border-radius:12px;"
-    cover_rad = "" if para_pdf else "border-radius:12px;"
+    gfont = "" if para_pdf else '<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">'
 
     secoes = ""
     for i, s in enumerate(c.get("secoes", []), start=1):
         num = f'{i:02d}'
-        if formato == "slides":
-            # cada seção = um bloco/slide (quebra de página no PDF a partir do 2º)
-            brk = 'style="page-break-before: always;"' if (para_pdf and i > 1) else ''
-            secoes += f"""<div class="slide" {brk}>
-              <div class="s-num">{num}</div>
-              <h2 class="s-title">{_esc(s.get('titulo'))}</h2>
-              <div class="s-card" style="{card_sh}">{_paras(s.get('paragrafos'))}{_bullets(s.get('bullets'),'bl')}</div>
-            </div>"""
-        else:
-            # one_pager (compacto) e html (fluido)
-            secoes += f"""<div class="sec">
-              <div class="s-head"><span class="s-num">{num}</span><h2 class="s-title">{_esc(s.get('titulo'))}</h2></div>
-              {_paras(s.get('paragrafos'))}{_bullets(s.get('bullets'),'bl')}
-            </div>"""
+        brk = 'style="page-break-before: always;"' if (para_pdf and formato == "slides" and i > 1) else ''
+        secoes += f"""<div class="sec" {brk}>
+          <div class="s-head"><span class="s-num">{num}</span><h2 class="s-title">{_esc(s.get('titulo'))}</h2></div>
+          {_paras(s.get('paragrafos'))}{_callout(s.get('bullets'), TINT, TEAL)}
+        </div>"""
 
-    # densidade por formato
     if formato == "one_pager":
-        pad, tsize, ptop = "26px", "26px", "14px"
+        tsize = "24px"
     elif formato == "slides":
-        pad, tsize, ptop = "34px", "30px", "20px"
+        tsize = "26px"
     else:
-        pad, tsize, ptop = "30px", "28px", "18px"
+        tsize = "25px"
 
-    logo_img = f'<img src="{logo}" width="150" style="margin-bottom:14px"/>' if logo else ''
+    logo_img = f'<img src="{logo}" style="width:130px; margin-bottom:22px"/>' if logo else ''
     titulo, subtitulo, cta = _esc(c.get("titulo")), _esc(c.get("subtitulo")), _esc(c.get("cta"))
     return f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">
 <title>{titulo} — Pimenta Judice</title>{gfont}
 <style>
-  @page {{ size: A4; margin: 1.3cm; }}
+  @page {{ size: A4; margin: 1.6cm; }}
   body {{ font-family: {fonte}; color: {INK}; margin: 0; background: #fff; }}
-  .wrap {{ max-width: 760px; margin: 0 auto; padding: {pad}; }}
-  .cover td {{ padding: 34px 38px; }}
-  .cover .kick {{ color: {CREAM}; font-size: 12px; letter-spacing: 3px; }}
-  .cover h1 {{ color: #fff; font-size: 32px; margin: 8px 0 6px; line-height: 1.14; font-weight: 800; }}
-  .cover .sub {{ color: #e7f2ef; font-size: 15px; }}
-  .sec {{ margin: {ptop} 0; }}
-  .s-head {{ margin-bottom: 6px; }}
-  .s-num {{ color: {TEAL}; font-weight: 800; font-size: 13px; letter-spacing: 2px; }}
-  .s-title {{ display:inline; font-size: {tsize}; color: {INK}; margin: 0 0 0 10px; border-left: 4px solid {TEAL}; padding-left: 10px; }}
-  .slide .s-title {{ display:block; margin: 4px 0 12px; padding-left: 12px; }}
-  .slide {{ margin: 22px 0; }}
-  .s-card {{ background: #f6faf9; border-left: 5px solid {TEAL}; padding: 18px 20px; }}
-  .p {{ font-size: 14px; line-height: 1.6; color: #34413c; margin: {ptop} 0 6px; }}
-  .bl {{ margin: 6px 0 6px 2px; padding-left: 18px; }}
-  .bl li {{ font-size: 14px; line-height: 1.5; color: #34413c; margin: 3px 0; }}
-  .cta {{ background: {CREAM}; border-left: 5px solid {TEAL}; padding: 18px 22px; margin-top: 22px; font-weight: 700; color: {TEAL}; {cover_rad} }}
-  .foot {{ text-align: center; color: #8a9a95; font-size: 12px; margin-top: 22px; }}
+  .wrap {{ max-width: 720px; margin: 0 auto; padding: 8px; }}
+  .hero {{ position: relative; }}
+  .kick {{ color: {TEAL}; font-size: 12px; font-weight: 800; letter-spacing: 4px; margin-bottom: 14px; }}
+  h1 {{ font-size: 34px; line-height: 1.16; font-weight: 900; color: {INK}; margin: 0 0 14px; max-width: 90%; }}
+  .quote {{ font-size: 110px; color: {TEAL}; opacity: .14; font-weight: 900; font-family: Georgia, serif; position: absolute; right: 0; top: -18px; }}
+  .sub {{ font-size: 16px; color: {MUT}; line-height: 1.55; max-width: 560px; margin: 0 0 8px; }}
+  .rule {{ border: none; border-top: 3px solid {TEAL}; width: 56px; margin: 26px 0 6px; }}
+  .sec {{ margin: 30px 0; }}
+  .s-head {{ display: flex; align-items: baseline; gap: 12px; margin-bottom: 10px; }}
+  .s-num {{ color: {TEAL}; font-weight: 900; font-size: 15px; letter-spacing: 1px; }}
+  .s-title {{ font-size: {tsize}; font-weight: 800; color: {INK}; margin: 0; }}
+  .p {{ font-size: 15px; line-height: 1.7; color: #333d39; margin: 0 0 10px; }}
+  ul.callout {{ list-style: none; margin: 14px 0 4px; padding: 16px 20px; border-left: 4px solid; border-radius: 0 8px 8px 0; }}
+  ul.callout li {{ font-size: 14.5px; line-height: 1.55; color: {INK}; margin: 7px 0; font-weight: 500; }}
+  ul.callout li::before {{ content: "→ "; color: {TEAL}; font-weight: 800; }}
+  .cta {{ margin-top: 8px; padding: 22px 26px; border: 1.5px solid {TEAL}; border-radius: 10px; text-align: center; }}
+  .cta span {{ font-size: 16px; font-weight: 800; color: {TEAL}; }}
+  .foot {{ text-align: center; color: #9aa6a1; font-size: 11.5px; margin-top: 26px; letter-spacing: .5px; }}
   .foot b {{ color: {TEAL}; }}
 </style></head><body><div class="wrap">
-  <table class="cover" width="100%" cellpadding="0" cellspacing="0" style="{cover_rad}"><tr>
-    <td bgcolor="{TEAL}" style="{cover_rad}">
-      {logo_img}
-      <div class="kick">MATERIAL GRATUITO</div>
-      <h1>{titulo}</h1>
-      <div class="sub">{subtitulo}</div>
-    </td></tr></table>
+  {logo_img}
+  <div class="hero">
+    <div class="quote">&ldquo;</div>
+    <div class="kick">MATERIAL GRATUITO</div>
+    <h1>{titulo}</h1>
+    <div class="sub">{subtitulo}</div>
+  </div>
+  <hr class="rule">
   {secoes}
-  <div class="cta">{cta}</div>
+  <div class="cta"><span>{cta}</span></div>
   <div class="foot"><b>@dr.lucasjudice</b> · Advogado Patrimonialista · pimentajudice.com.br</div>
 </div></body></html>"""
 
 
-# ---------- Estilo Site oficial (bege/preto, mais elaborado — landing page) ----------
+# ---------- Estilo Site oficial (fundo branco, serifado, sotaque bege/teal) ----------
 def _render_site(c: dict, para_pdf: bool) -> str:
-    BEGE, INK, TEAL, MUT = "#F1ECE1", "#1a1a1a", "#4a897c", "#6b655a"
+    INK, TEAL, MUT, TINT = "#1a1a1a", "#4a897c", "#6b655a", "#F1ECE1"
     logo = _logo("logo_dark.png")
     serif = "Georgia, 'Times New Roman', serif" if para_pdf else "'Playfair Display', Georgia, serif"
     sans = "Helvetica, Arial, sans-serif" if para_pdf else "'Archivo', Helvetica, Arial, sans-serif"
@@ -185,32 +175,34 @@ def _render_site(c: dict, para_pdf: bool) -> str:
         secoes += f"""<div class="sec">
           <h2>{_esc(s.get('titulo'))}</h2>
           {''.join(f'<p>{_esc(p)}</p>' for p in (s.get('paragrafos') or []))}
-          {('<ul>' + ''.join(f'<li>{_esc(b)}</li>' for b in (s.get('bullets') or [])) + '</ul>') if s.get('bullets') else ''}
+          {_callout(s.get('bullets'), TINT, TEAL)}
         </div>"""
-    logo_img = f'<img src="{logo}" width="180" style="margin-bottom:26px"/>' if logo else ''
+    logo_img = f'<img src="{logo}" style="width:160px; margin-bottom:30px"/>' if logo else ''
     titulo, subtitulo, cta = _esc(c.get("titulo")), _esc(c.get("subtitulo")), _esc(c.get("cta"))
     return f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">
 <title>{titulo} — Pimenta Judice Advogados</title>{gfont}
 <style>
-  @page {{ size: A4; margin: 1.6cm; }}
-  body {{ font-family: {sans}; color: {INK}; background: {BEGE}; margin: 0; }}
-  .wrap {{ max-width: 820px; margin: 0 auto; padding: 56px 48px; background: {BEGE}; }}
-  .hero {{ text-align: center; padding: 20px 0 36px; border-bottom: 1px solid #dcd4c5; margin-bottom: 40px; }}
-  .hero .kick {{ font-size: 12px; letter-spacing: 5px; color: {TEAL}; text-transform: uppercase; }}
-  .hero h1 {{ font-family: {serif}; font-weight: 700; font-size: 42px; line-height: 1.12; color: {INK}; margin: 16px 0 12px; }}
-  .hero .sub {{ font-size: 17px; color: {MUT}; max-width: 620px; margin: 0 auto; line-height: 1.5; }}
-  .sec {{ margin: 34px 0; }}
-  .sec h2 {{ font-family: {serif}; font-weight: 600; font-size: 26px; color: {INK}; margin: 0 0 12px; }}
-  .sec p {{ font-size: 16px; line-height: 1.75; color: #3a352c; margin: 10px 0; }}
-  .sec ul {{ margin: 12px 0; padding-left: 20px; }}
-  .sec li {{ font-size: 16px; line-height: 1.6; color: #3a352c; margin: 7px 0; }}
-  .cta {{ text-align: center; border-top: 1px solid #dcd4c5; margin-top: 48px; padding-top: 40px; }}
-  .cta .t {{ font-family: {serif}; font-size: 24px; color: {INK}; margin-bottom: 18px; }}
-  .cta .btn {{ display: inline-block; background: {INK}; color: #fff; padding: 15px 34px; font-size: 14px; letter-spacing: 2px; text-transform: uppercase; text-decoration: none; }}
-  .foot {{ text-align: center; color: {MUT}; font-size: 12px; margin-top: 40px; letter-spacing: 1px; }}
+  @page {{ size: A4; margin: 2cm; }}
+  body {{ font-family: {sans}; color: {INK}; background: #fff; margin: 0; }}
+  .wrap {{ max-width: 720px; margin: 0 auto; }}
+  .hero {{ padding: 0 0 30px; border-bottom: 1px solid #e4dfd2; margin-bottom: 36px; position: relative; }}
+  .hero .kick {{ font-size: 11.5px; letter-spacing: 4px; color: {TEAL}; text-transform: uppercase; font-weight: 600; }}
+  .hero h1 {{ font-family: {serif}; font-weight: 700; font-size: 38px; line-height: 1.16; color: {INK}; margin: 14px 0 14px; }}
+  .quote {{ font-size: 100px; line-height: 0; color: {TEAL}; opacity: .15; font-family: {serif}; position: absolute; right: 0; top: 10px; }}
+  .hero .sub {{ font-size: 16.5px; color: {MUT}; max-width: 560px; line-height: 1.55; font-style: italic; }}
+  .sec {{ margin: 30px 0; }}
+  .sec h2 {{ font-family: {serif}; font-weight: 600; font-size: 23px; color: {INK}; margin: 0 0 10px; }}
+  .sec p {{ font-size: 15.5px; line-height: 1.75; color: #3a352c; margin: 8px 0; }}
+  ul.callout {{ list-style: none; margin: 14px 0 4px; padding: 16px 22px; border-left: 3px solid; }}
+  ul.callout li {{ font-size: 15px; line-height: 1.6; color: {INK}; margin: 7px 0; }}
+  ul.callout li::before {{ content: "— "; color: {TEAL}; font-weight: 700; }}
+  .cta {{ text-align: center; border-top: 1px solid #e4dfd2; margin-top: 44px; padding-top: 36px; }}
+  .cta .t {{ font-family: {serif}; font-size: 22px; color: {INK}; margin-bottom: 16px; }}
+  .cta .btn {{ display: inline-block; border: 1.5px solid {INK}; color: {INK}; padding: 13px 30px; font-size: 13px; letter-spacing: 2px; text-transform: uppercase; text-decoration: none; }}
+  .foot {{ text-align: center; color: {MUT}; font-size: 11.5px; margin-top: 36px; letter-spacing: 1px; }}
 </style></head><body><div class="wrap">
   <div class="hero">{logo_img}<div class="kick">Pimenta Judice · Advogados Associados</div>
-    <h1>{titulo}</h1><div class="sub">{subtitulo}</div></div>
+    <h1>{titulo}</h1><div class="quote">&rdquo;</div><div class="sub">{subtitulo}</div></div>
   {secoes}
   <div class="cta"><div class="t">{cta}</div><a class="btn" href="https://www.pimentajudice.com.br">pimentajudice.com.br</a></div>
   <div class="foot">PIMENTA JUDICE ADVOGADOS ASSOCIADOS · PLANEJAMENTO PATRIMONIAL E SUCESSÓRIO</div>
@@ -218,7 +210,7 @@ def _render_site(c: dict, para_pdf: bool) -> str:
 
 
 def html_para_pdf(html: str) -> bytes:
-    from xhtml2pdf import pisa
-    buf = io.BytesIO()
-    pisa.CreatePDF(src=html, dest=buf, encoding="utf-8")
-    return buf.getvalue()
+    """Renderiza o HTML em PDF via WeasyPrint (motor com suporte real a CSS —
+    xhtml2pdf/pisa quebrava o fundo contínuo em uma caixa por parágrafo/bullet)."""
+    from weasyprint import HTML
+    return HTML(string=html).write_pdf()
