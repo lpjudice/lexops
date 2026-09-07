@@ -1,0 +1,104 @@
+.wrap {
+  margin-bottom: 16px;
+  border: 1px solid #fca5a5;
+  background: #fef2f2;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: #991b1b;
+}
+
+.badge {
+  background: #dc2626;
+  color: #fff;
+  border-radius: 999px;
+  padding: 1px 9px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.chevron { margin-left: auto; color: #b91c1c; }
+
+.lista {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #fecaca;
+  padding: 10px;
+}
+
+.grupo {
+  background: #fff;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.grupoHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.membro {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  font-size: 14px;
+  color: #1f2937;
+}
+
+.membroMeta {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.semPasta {
+  font-size: 11px;
+  color: #b45309;
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 6px;
+  padding: 0 6px;
+}
+
+.acoes {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.btnMesclar {
+  background: #dc2626;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btnMesclar:disabled { opacity: 0.6; cursor: default; }
+
+.erro {
+  color: #b91c1c;
+  font-size: 13px;
+  margin: 4px 0 0;
+}

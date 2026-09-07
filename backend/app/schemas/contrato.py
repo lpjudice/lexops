@@ -83,6 +83,9 @@ class ContratanteDecisao(BaseModel):
     diferenciador: str | None = None
     # Contratante em nome de quem o contrato fica vinculado (o "principal").
     principal: bool = False
+    # Quando True, pula o alerta de nome parecido ao criar (revisor já
+    # confirmou que é pessoa/empresa diferente de um cliente existente).
+    ignorar_similares: bool = False
 
 
 class ContratoFinanceiro(BaseModel):

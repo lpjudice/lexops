@@ -495,6 +495,14 @@ def aplicar_contratantes(
             _preencher_vazios(cli, dados, db)
         else:  # criar (mesma inicialização do POST /clientes: incompleto + projeto/worktree)
             nome_novo = dec.nome.strip()[:255]
+            if not dec.ignorar_similares:
+                from app.services.cliente_dedup import encontrar_similares
+                similares = encontrar_similares(nome_novo, db)
+                if similares:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={"tipo": "nome_similar", "nome": nome_novo, "similares": similares},
+                    )
             projeto_nome, worktree_nome = _gerar_projeto(nome_novo)
             cli = Cliente(
                 nome=nome_novo, tipo=dec.tipo, incompleto=True,
