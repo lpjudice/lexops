@@ -285,14 +285,24 @@ function Passo({
   )
 }
 
+function fmtDataHora(iso?: string | null) {
+  if (!iso) return null
+  return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
 function DetalheInformativo({ informativo, onFechar }: { informativo: Informativo; onFechar: () => void }) {
   const qc = useQueryClient()
   const [preview, setPreview] = useState<string | null>(null)
   const [previewCarregando, setPreviewCarregando] = useState(false)
   const [aviso, setAviso] = useState<string | null>(null)
+  const [instrucoes, setInstrucoes] = useState(informativo.instrucoes_ia ?? '')
 
   const invalidar = () => qc.invalidateQueries({ queryKey: ['informativos'] })
 
+  const instrucoesMutation = useMutation({
+    mutationFn: (texto: string) => informativosApi.atualizar(informativo.id, { instrucoes_ia: texto || null }),
+    onSuccess: invalidar,
+  })
   const rascunhoIAMutation = useMutation({
     mutationFn: () => informativosApi.gerarRascunhoIA(informativo.id),
     onSuccess: invalidar,
@@ -340,6 +350,13 @@ function DetalheInformativo({ informativo, onFechar }: { informativo: Informativ
     }
   }
 
+  const jaGerado = Boolean(informativo.rascunho_gerado_em)
+  const jaPublicado = Boolean(informativo.publicado_em)
+  // Há rascunho novo (gerado pela IA) depois da última publicação — vale republicar.
+  const rascunhoMaisNovo =
+    jaPublicado && jaGerado &&
+    new Date(informativo.rascunho_gerado_em as string) > new Date(informativo.publicado_em as string)
+
   return (
     <Modal onClose={onFechar} title={`${informativo.numero ? `Nº ${informativo.numero} — ` : ''}${informativo.titulo}`} width={640}>
       <div className={styles.form}>
@@ -385,23 +402,54 @@ function DetalheInformativo({ informativo, onFechar }: { informativo: Informativ
               ))}
             </ul>
           )}
+          <label className={styles.formLabel} style={{ display: 'block', marginTop: 10 }}>
+            Direcionamento pra IA (opcional)
+          </label>
+          <textarea
+            className={styles.input}
+            rows={2}
+            placeholder='Ex.: "foque no impacto pra holdings imobiliárias" ou "cite o julgado tal"'
+            value={instrucoes}
+            onChange={(e) => setInstrucoes(e.target.value)}
+            onBlur={() => {
+              if (instrucoes !== (informativo.instrucoes_ia ?? '')) instrucoesMutation.mutate(instrucoes)
+            }}
+          />
         </Passo>
 
         <Passo
           numero={2}
           titulo="Escreva o texto"
-          descricao="Gere um rascunho com IA a partir do material acima, ou abra o Google Doc (link no topo) e escreva você mesmo."
+          descricao="Gere (ou regere) um rascunho com IA a partir do material e do direcionamento acima, ou abra o Google Doc (link no topo) e escreva você mesmo."
         >
           <button className={styles.btnSmall} onClick={() => rascunhoIAMutation.mutate()} disabled={rascunhoIAMutation.isPending}>
-            {rascunhoIAMutation.isPending ? 'Gerando rascunho...' : 'Gerar rascunho com IA'}
+            {rascunhoIAMutation.isPending ? 'Gerando rascunho...' : jaGerado ? 'Regerar rascunho com IA' : 'Gerar rascunho com IA'}
           </button>
+          {jaGerado && !rascunhoIAMutation.isPending && (
+            <span style={{ marginLeft: 8, fontSize: 12.5, color: '#15803d' }}>
+              ✅ Gerado em {fmtDataHora(informativo.rascunho_gerado_em)}
+            </span>
+          )}
           {rascunhoIAMutation.isError && (
             <p style={{ color: '#b91c1c', fontSize: 12.5 }}>{erroApi(rascunhoIAMutation.error)}</p>
           )}
         </Passo>
 
+        <Passo numero={3} titulo="Pré-visualizar" descricao="Mostra o Doc exatamente como está agora — confira o texto antes de decidir se precisa checar citações.">
+          <button className={styles.btnSmall} onClick={abrirPreview} disabled={previewCarregando}>
+            {previewCarregando ? 'Carregando...' : 'Pré-visualizar'}
+          </button>
+          {preview && (
+            <iframe
+              title="Pré-visualização"
+              srcDoc={preview}
+              style={{ width: '100%', height: 500, border: '1px solid #e5e7eb', borderRadius: 8, marginTop: 10 }}
+            />
+          )}
+        </Passo>
+
         <Passo
-          numero={3}
+          numero={4}
           titulo="Confira as citações de lei/julgado (opcional)"
           descricao="Só se o texto citar lei ou jurisprudência. Primeiro traz o texto do Doc pro sistema, depois confere cada citação."
         >
@@ -428,23 +476,20 @@ function DetalheInformativo({ informativo, onFechar }: { informativo: Informativ
           )}
         </Passo>
 
-        <Passo numero={4} titulo="Pré-visualizar" descricao="Mostra o Doc exatamente como está agora.">
-          <button className={styles.btnSmall} onClick={abrirPreview} disabled={previewCarregando}>
-            {previewCarregando ? 'Carregando...' : 'Pré-visualizar'}
-          </button>
-          {preview && (
-            <iframe
-              title="Pré-visualização"
-              srcDoc={preview}
-              style={{ width: '100%', height: 500, border: '1px solid #e5e7eb', borderRadius: 8, marginTop: 10 }}
-            />
-          )}
-        </Passo>
-
         <Passo numero={5} titulo="Publicar" descricao="Gera o PDF final a partir do Doc (com timbrado) e disponibiliza no site.">
           <button className={styles.btnPrimary} onClick={() => publicarMutation.mutate()} disabled={publicarMutation.isPending}>
-            {publicarMutation.isPending ? 'Publicando...' : 'Publicar'}
+            {publicarMutation.isPending ? 'Publicando...' : jaPublicado ? 'Republicar' : 'Publicar'}
           </button>
+          {jaPublicado && !publicarMutation.isPending && (
+            <span style={{ marginLeft: 8, fontSize: 12.5, color: '#15803d' }}>
+              ✅ Publicado em {fmtDataHora(informativo.publicado_em)}
+            </span>
+          )}
+          {rascunhoMaisNovo && (
+            <p style={{ fontSize: 12.5, color: '#b45309', marginTop: 4 }}>
+              O rascunho foi regenerado depois da última publicação — republique pra atualizar o PDF.
+            </p>
+          )}
           {aviso && <p style={{ color: '#b45309', fontSize: 13 }}>{aviso}</p>}
           {publicarMutation.isError && (
             <p style={{ color: '#b91c1c', fontSize: 12.5 }}>{erroApi(publicarMutation.error)}</p>

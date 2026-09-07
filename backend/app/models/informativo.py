@@ -68,6 +68,12 @@ class Informativo(Base):
     # informativo do mês. [{"nome","link_drive","tipo"}]
     arquivos_referencia: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
 
+    # Direcionamento livre do usuário pro rascunho da IA (ex.: "foque no
+    # impacto pra holdings imobiliárias, cite o julgado X").
+    instrucoes_ia: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Quando o rascunho (corpo) foi gerado/regenerado pela IA pela última vez.
+    rascunho_gerado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     drive_folder_link: Mapped[str | None] = mapped_column(Text, nullable=True)
     drive_pdf_link: Mapped[str | None] = mapped_column(Text, nullable=True)
 

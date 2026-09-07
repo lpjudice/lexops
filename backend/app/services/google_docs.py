@@ -126,9 +126,11 @@ SEPARADOR_INFORMATIVO = "•••"
 
 def provisionar_template_informativo(parent_folder_id: str | None = None) -> dict | None:
     """Cria (uma vez só) o modelo-base dos informativos: cópia do timbrado do
-    escritório + esqueleto com número/mês, tema/subtema, resumo estruturado,
-    uma linha separadora e o corpo. É só um Google Doc — pode ser aberto e
-    ajustado livremente (fonte, cores, logo) depois de criado; os próximos
+    escritório + esqueleto com uma linha pequena de identificação (nº/mês,
+    tipo "dateline" à direita, quebrando o visual de doutrina), o tema como
+    título grande, o subtema como subtítulo, resumo estruturado, uma linha
+    separadora e o corpo. É só um Google Doc — pode ser aberto e ajustado
+    livremente (fonte, cores, logo) depois de criado; os próximos
     informativos copiam a versão mais recente dele."""
     copia = copiar_arquivo_por_id(TIMBRADO_TEMPLATE_ID, "Modelo Base — Informativo (não usar diretamente)",
                                    parent_folder_id=parent_folder_id)
@@ -136,11 +138,11 @@ def provisionar_template_informativo(parent_folder_id: str | None = None) -> dic
         return None
     doc_id = copia["id"]
 
-    cabecalho = "INFORMATIVO Nº {{NUMERO}} — {{MES}}"
+    kicker = "INFORMATIVO Nº {{NUMERO}} · {{MES}}"
     esqueleto = (
-        f"{cabecalho}\n\n"
-        "TEMA: {{TEMA}}\n"
-        "SUBTEMA: {{SUBTEMA}}\n\n"
+        f"{kicker}\n\n"
+        "{{TEMA}}\n"
+        "{{SUBTEMA}}\n\n"
         "RESUMO ESTRUTURADO\n"
         "{{RESUMO}}\n\n"
         f"{SEPARADOR_INFORMATIVO}\n\n"
@@ -158,18 +160,44 @@ def provisionar_template_informativo(parent_folder_id: str | None = None) -> dic
         requests.append({"deleteParagraphBullets": {"range": {"startIndex": 1, "endIndex": 1 + len(esqueleto)}}})
         _docs_request("POST", f"/{doc_id}:batchUpdate", tokens, json={"requests": requests})
 
-        titulo_end = 1 + len(cabecalho)
-        sep_start = 1 + esqueleto.index(SEPARADOR_INFORMATIVO)
-        sep_end = sep_start + len(SEPARADOR_INFORMATIVO)
+        def _rng(marcador: str) -> tuple[int, int]:
+            i = 1 + esqueleto.index(marcador)
+            return i, i + len(marcador)
+
+        kicker_start, kicker_end = 1, 1 + len(kicker)
+        tema_start, tema_end = _rng("{{TEMA}}")
+        subtema_start, subtema_end = _rng("{{SUBTEMA}}")
+        resumo_label_start, resumo_label_end = _rng("RESUMO ESTRUTURADO")
+        sep_start, sep_end = _rng(SEPARADOR_INFORMATIVO)
+
+        CINZA = {"color": {"rgbColor": {"red": 0.45, "green": 0.45, "blue": 0.45}}}
         fmt_requests = [
+            # Kicker "Informativo nº X · Mês": pequeno, cinza, alinhado à
+            # direita — dateline que quebra o visual de texto de doutrina.
             {"updateTextStyle": {
-                "range": {"startIndex": 1, "endIndex": titulo_end},
-                "textStyle": {"bold": True, "fontSize": {"magnitude": 14, "unit": "PT"}},
+                "range": {"startIndex": kicker_start, "endIndex": kicker_end},
+                "textStyle": {"fontSize": {"magnitude": 9, "unit": "PT"}, "foregroundColor": CINZA},
+                "fields": "fontSize,foregroundColor",
+            }},
+            {"updateParagraphStyle": {
+                "range": {"startIndex": kicker_start, "endIndex": kicker_end},
+                "paragraphStyle": {"alignment": "END"},
+                "fields": "alignment",
+            }},
+            # Tema = título de verdade do informativo: grande e em negrito.
+            {"updateTextStyle": {
+                "range": {"startIndex": tema_start, "endIndex": tema_end},
+                "textStyle": {"bold": True, "fontSize": {"magnitude": 20, "unit": "PT"}},
                 "fields": "bold,fontSize",
             }},
+            # Subtema: subtítulo médio, itálico, cinza.
             {"updateTextStyle": {
-                "range": {"startIndex": 1 + esqueleto.index("RESUMO ESTRUTURADO"),
-                          "endIndex": 1 + esqueleto.index("RESUMO ESTRUTURADO") + len("RESUMO ESTRUTURADO")},
+                "range": {"startIndex": subtema_start, "endIndex": subtema_end},
+                "textStyle": {"italic": True, "fontSize": {"magnitude": 12, "unit": "PT"}, "foregroundColor": CINZA},
+                "fields": "italic,fontSize,foregroundColor",
+            }},
+            {"updateTextStyle": {
+                "range": {"startIndex": resumo_label_start, "endIndex": resumo_label_end},
                 "textStyle": {"bold": True},
                 "fields": "bold",
             }},
@@ -200,18 +228,21 @@ def provisionar_template_informativo(parent_folder_id: str | None = None) -> dic
     return {"id": doc_id, "webViewLink": copia.get("webViewLink")}
 
 
-def preencher_cabecalho_informativo(
-    doc_id: str, numero: int, mes_label: str, tema: str, subtema: str, resumo: str | None = None,
-) -> bool:
-    """Preenche os marcadores {{NUMERO}}/{{MES}}/{{TEMA}}/{{SUBTEMA}}/{{RESUMO}}
+def preencher_cabecalho_informativo(doc_id: str, numero: int, mes_label: str, tema: str, subtema: str) -> bool:
+    """Preenche os marcadores {{NUMERO}}/{{MES}}/{{TEMA}}/{{SUBTEMA}}/{{TITULO}}
     de um Doc recém-copiado do template. Usa replaceAllText — não precisa
-    calcular índice nenhum."""
+    calcular índice nenhum. {{TITULO}} recebe o mesmo texto de {{TEMA}} (pra
+    repetir o título grande logo acima do corpo, se o modelo tiver esse
+    marcador — é opcional, replaceAllText simplesmente não faz nada se não
+    achar o texto). O resumo e as perguntas-teaser são preenchidos depois,
+    por `substituir_resumo_informativo`/`substituir_perguntas_informativo`
+    (a IA gera junto com o corpo)."""
     valores = {
         "{{NUMERO}}": str(numero),
         "{{MES}}": mes_label,
         "{{TEMA}}": tema or "",
+        "{{TITULO}}": tema or "",
         "{{SUBTEMA}}": subtema or "—",
-        "{{RESUMO}}": resumo or "(resumo pendente — preencha depois de escrever o corpo)",
     }
     requests = [
         {"replaceAllText": {"containsText": {"text": token, "matchCase": True}, "replaceText": valor}}
@@ -223,6 +254,59 @@ def preencher_cabecalho_informativo(
         return True
 
     return bool(_com_refresh(_fazer))
+
+
+# Texto de cabeçalho usado como âncora pra localizar onde entram as 2-3
+# perguntas-teaser ("O que você vai encontrar") — precisa bater com o que
+# está escrito no modelo (Google Doc). Ajuste aqui se o texto no Doc mudar.
+HEADING_PERGUNTAS = "O QUE VOCÊ VAI ENCONTRAR"
+
+
+def _substituir_paragrafo_apos_heading(doc_id: str, heading_texto: str, novo_texto: str) -> bool:
+    """Substitui o parágrafo logo abaixo de um texto de cabeçalho fixo
+    (busca case-insensitive) pelo `novo_texto`. Localiza pelo parágrafo
+    seguinte ao cabeçalho, então funciona tanto na 1ª vez (ainda com um
+    placeholder tipo {{X}}) quanto em regenerações."""
+    def _achar(tokens: dict):
+        doc = _docs_request("GET", f"/{doc_id}", tokens)
+        paras = _paragrafos_do_doc(doc)
+        for i, (txt, _s, _e) in enumerate(paras):
+            if heading_texto.lower() in txt.lower() and i + 1 < len(paras):
+                return paras[i + 1]
+        return None
+
+    alvo = _com_refresh(_achar)
+    if not alvo:
+        return False
+    _texto, start, end = alvo
+
+    def _escrever(tokens: dict):
+        requests = []
+        if end - 1 > start:
+            requests.append({"deleteContentRange": {"range": {"startIndex": start, "endIndex": end - 1}}})
+        if novo_texto:
+            requests.append({"insertText": {"location": {"index": start}, "text": novo_texto}})
+        if requests:
+            _docs_request("POST", f"/{doc_id}:batchUpdate", tokens, json={"requests": requests})
+        return True
+
+    return bool(_com_refresh(_escrever))
+
+
+def substituir_resumo_informativo(doc_id: str, resumo: str) -> bool:
+    """Substitui o parágrafo logo abaixo de "RESUMO ESTRUTURADO" pelo texto
+    informado (curto — 1-2 frases ou palavras-chave)."""
+    return _substituir_paragrafo_apos_heading(doc_id, "RESUMO ESTRUTURADO", resumo)
+
+
+def substituir_perguntas_informativo(doc_id: str, perguntas: list[str]) -> bool:
+    """Substitui o parágrafo logo abaixo do cabeçalho `HEADING_PERGUNTAS`
+    pelas 2-3 perguntas-teaser, juntas num único parágrafo (separadas por
+    " · ") — de propósito uma linha só, pra `_substituir_paragrafo_apos_heading`
+    continuar funcionando de forma idempotente em regenerações (se virassem
+    parágrafos separados, só o primeiro seria limpo numa 2ª geração)."""
+    texto = " · ".join(p.strip().rstrip("?") + "?" for p in perguntas if p.strip())
+    return _substituir_paragrafo_apos_heading(doc_id, HEADING_PERGUNTAS, texto)
 
 
 def _paragrafos_do_doc(doc: dict) -> list[tuple[str, int, int]]:
@@ -272,10 +356,51 @@ def ler_texto_documento(doc_id: str) -> str | None:
     return "".join(t for t, _s, _e in _paragrafos_do_doc(doc))
 
 
+def _parse_corpo_markup(texto: str, start_offset: int) -> tuple[str, list[tuple[int, int]], list[tuple[int, int, bool]]]:
+    """Quebra o corpo em parágrafos (separados por linha em branco), remove
+    marcadores **negrito** (guardando os spans pra aplicar estilo real) e
+    identifica blocos de destaque/citação — parágrafos que começam com "> ",
+    no estilo markdown de blockquote. Retorna (texto_limpo, estilos_bold,
+    paragrafos) onde paragrafos é [(start, end, eh_citacao), ...]."""
+    blocos_brutos = [b for b in re.split(r"\n{2,}", texto.strip()) if b.strip()]
+    partes: list[str] = []
+    estilos_bold: list[tuple[int, int]] = []
+    paragrafos: list[tuple[int, int, bool]] = []
+    pos = start_offset
+
+    for i, bloco in enumerate(blocos_brutos):
+        bloco = bloco.strip()
+        eh_citacao = bloco.startswith(">")
+        if eh_citacao:
+            bloco = re.sub(r"^>\s*", "", bloco)
+
+        p_start = pos
+        for parte in re.split(r"(\*\*[^*]+\*\*)", bloco):
+            if not parte:
+                continue
+            if parte.startswith("**") and parte.endswith("**"):
+                inner = parte[2:-2]
+                estilos_bold.append((pos, pos + len(inner)))
+                partes.append(inner)
+                pos += len(inner)
+            else:
+                partes.append(parte)
+                pos += len(parte)
+        paragrafos.append((p_start, pos, eh_citacao))
+
+        if i < len(blocos_brutos) - 1:
+            partes.append("\n\n")
+            pos += 2
+
+    return "".join(partes), estilos_bold, paragrafos
+
+
 def substituir_corpo_informativo(doc_id: str, texto: str) -> bool:
     """Substitui só o corpo (tudo depois do separador) pelo texto informado,
-    preservando o cabeçalho estruturado acima. Pode ser chamado várias vezes
-    (regenerar rascunho) — sempre localiza o separador de novo."""
+    preservando o cabeçalho estruturado acima. Aplica negrito real (marcado
+    com **assim** no texto) e destaca blocos de citação/julgado (parágrafos
+    iniciados com "> ") com recuo e borda esquerda. Pode ser chamado várias
+    vezes (regenerar rascunho) — sempre localiza o separador de novo."""
     def _achar_corte(tokens: dict):
         doc = _docs_request("GET", f"/{doc_id}", tokens)
         content = doc.get("body", {}).get("content", [])
@@ -294,21 +419,57 @@ def substituir_corpo_informativo(doc_id: str, texto: str) -> bool:
     if corte is None:
         corte = 1  # doc legado sem separador — sobrescreve tudo
 
+    # +1 pro "\n" que recria a linha em branco entre o separador e o corpo
+    # (o corte apaga tudo até o fim do doc, inclusive essa linha em branco).
+    texto_limpo, estilos_bold, paragrafos = _parse_corpo_markup(texto, corte + 1) if texto else ("", [], [])
+    texto_inserido = ("\n" + texto_limpo) if texto_limpo else ""
+
     def _escrever(tokens: dict):
         requests = []
         if fim_doc - 1 > corte:
             requests.append({"deleteContentRange": {"range": {"startIndex": corte, "endIndex": fim_doc - 1}}})
-        if texto:
-            requests.append({"insertText": {"location": {"index": corte}, "text": texto}})
+        if texto_inserido:
+            requests.append({"insertText": {"location": {"index": corte}, "text": texto_inserido}})
         if requests:
             _docs_request("POST", f"/{doc_id}:batchUpdate", tokens, json={"requests": requests})
-        if texto:
-            fmt = [{"updateParagraphStyle": {
-                "range": {"startIndex": corte, "endIndex": corte + len(texto)},
-                "paragraphStyle": {"alignment": "JUSTIFIED", "lineSpacing": 150},
-                "fields": "alignment,lineSpacing",
-            }}]
-            _docs_request("POST", f"/{doc_id}:batchUpdate", tokens, json={"requests": fmt})
+        if not texto_limpo:
+            return True
+
+        fmt = [{"updateParagraphStyle": {
+            "range": {"startIndex": corte + 1, "endIndex": corte + 1 + len(texto_limpo)},
+            "paragraphStyle": {"alignment": "JUSTIFIED", "lineSpacing": 150},
+            "fields": "alignment,lineSpacing",
+        }}]
+        for p_start, p_end, eh_citacao in paragrafos:
+            if not eh_citacao or p_end <= p_start:
+                continue
+            fmt.append({"updateParagraphStyle": {
+                "range": {"startIndex": p_start, "endIndex": p_end},
+                "paragraphStyle": {
+                    "alignment": "START",
+                    "indentStart": {"magnitude": 28, "unit": "PT"},
+                    "borderLeft": {
+                        "color": {"color": {"rgbColor": {"red": 0.11, "green": 0.35, "blue": 0.31}}},
+                        "width": {"magnitude": 2, "unit": "PT"},
+                        "padding": {"magnitude": 8, "unit": "PT"},
+                        "dashStyle": "SOLID",
+                    },
+                },
+                "fields": "alignment,indentStart,borderLeft",
+            }})
+            fmt.append({"updateTextStyle": {
+                "range": {"startIndex": p_start, "endIndex": p_end},
+                "textStyle": {"italic": True},
+                "fields": "italic",
+            }})
+        for b_start, b_end in estilos_bold:
+            if b_end > b_start:
+                fmt.append({"updateTextStyle": {
+                    "range": {"startIndex": b_start, "endIndex": b_end},
+                    "textStyle": {"bold": True},
+                    "fields": "bold",
+                }})
+        _docs_request("POST", f"/{doc_id}:batchUpdate", tokens, json={"requests": fmt})
         return True
 
     return bool(_com_refresh(_escrever))
