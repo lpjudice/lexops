@@ -22,6 +22,31 @@ from app.schemas.informativo import AssinanteRequest
 router = APIRouter(prefix="/publico", tags=["publico"])
 
 
+@router.get("/instagram")
+def instagram_brindes_publicos(db: Session = Depends(get_db)):
+    """Lista os brindes/materiais (estilo site) já gerados, mais recente primeiro —
+    usada pela seção "Conteúdo" do site oficial."""
+    from app.models.instagram import InstagramSugestao
+
+    itens = (
+        db.query(InstagramSugestao)
+        .filter(InstagramSugestao.brinde_site_conteudo.isnot(None))
+        .order_by(InstagramSugestao.updated_at.desc())
+        .all()
+    )
+    resultado = []
+    for i in itens:
+        conteudo = i.brinde_site_conteudo or {}
+        resultado.append({
+            "id": str(i.id),
+            "titulo": conteudo.get("titulo") or i.brinde_titulo or i.titulo,
+            "subtitulo": conteudo.get("subtitulo"),
+            "tema": i.tema,
+            "atualizado_em": i.updated_at.isoformat() if i.updated_at else None,
+        })
+    return resultado
+
+
 @router.get("/instagram/{sugestao_id}")
 def card_instagram_publico(sugestao_id: str, db: Session = Depends(get_db)):
     """Card de post (somente leitura, sem login) para a assessoria abrir e publicar.

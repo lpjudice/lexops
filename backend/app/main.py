@@ -1533,6 +1533,17 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def _cors_publico(request, call_next):
+    """As rotas /api/publico/* são consumidas por fetch client-side direto do
+    site oficial (pimentajudice.com.br) e por outros domínios públicos — não
+    fazem sentido restritas pelo CORS_ORIGINS da administração."""
+    response = await call_next(request)
+    if request.url.path.startswith("/api/publico/"):
+        response.headers["Access-Control-Allow-Origin"] = "*"
+    return response
+
+
 # Handler de validação à prova de bytes — o handler default do FastAPI tenta serializar
 # o `input` dos erros, que para uploads é o body binário (PDF), e estoura UnicodeDecodeError
 # virando 500. Aqui sanitizamos qualquer valor não-serializável antes de devolver 422.
