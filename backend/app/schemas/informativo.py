@@ -22,6 +22,8 @@ class InformativoOut(BaseModel):
     paginas_estimadas: float | None = None
     citacoes_validadas: list[dict] = []
     arquivos_referencia: list[dict] = []
+    instrucoes_ia: str | None = None
+    rascunho_gerado_em: datetime | None = None
     drive_folder_link: str | None = None
     drive_pdf_link: str | None = None
     data_prazo_draft: date | None = None
@@ -48,6 +50,7 @@ class InformativoAtualizar(BaseModel):
     tema_resumido: str | None = None
     responsavel_id: uuid.UUID | None = None
     status: StatusInformativo | None = None
+    instrucoes_ia: str | None = None
 
 
 class SincronizarResponse(BaseModel):

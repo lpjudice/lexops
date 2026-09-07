@@ -200,7 +200,7 @@ _PROMPT_RASCUNHO = """Você escreve o Informativo Jurídico Mensal do escritóri
 Advogados (planejamento patrimonial e sucessório, holdings, societário, reforma tributária).
 
 TEMA DO MÊS: {tema}
-
+{instrucoes_bloco}
 Use os materiais anexados (se houver) como base de estudo — não invente fatos, números
 ou julgados que não estejam no material ou que você não tenha certeza de que existem.
 Se for citar lei ou julgado, cite de forma precisa (número, tribunal/artigo) só quando
@@ -217,14 +217,35 @@ REGRAS DE ESTILO (importantes, não quebre nenhuma):
 - Extensão: para caber em 3-4 páginas de PDF (aproximadamente 900-1400 palavras).
 - Comece direto com um parágrafo de abertura contextualizando o tema — sem título
   (o título já aparece no cabeçalho do documento).
+- Use **negrito** (dois asteriscos) nos 3-6 termos ou trechos mais importantes do
+  texto — não exagere, só o que realmente merece destaque.
+- Inclua OBRIGATORIAMENTE pelo menos um bloco de destaque: um parágrafo iniciado
+  por "> " (maior que, espaço) com uma citação literal de lei/julgado relevante ou
+  uma frase-síntese do ponto central do informativo. Esse bloco quebra o visual de
+  texto corrido — não coloque mais de dois no total.
 
-Responda APENAS com o texto corrido do informativo, em parágrafos separados por
-linha em branco. Sem markdown, sem títulos de seção, sem numeração."""
+Responda EXATAMENTE neste formato (sem markdown fora do combinado acima, sem
+títulos de seção, sem numeração):
+
+RESUMO: <1 a 2 frases curtas, ou só palavras-chave separadas por vírgula — isso
+vai aparecer sozinho, resumido mesmo, no cabeçalho do informativo>
+PERGUNTAS: <2 a 3 perguntas bem curtas e diretas, separadas por " | ", do tipo
+"o que você vai encontrar neste informativo" — precisam despertar interesse
+de continuar lendo (ex.: "O IVA Dual muda o seu contrato de locação?")>
+---CORPO---
+<o texto corrido do informativo, em parágrafos separados por linha em branco>"""
 
 
-def gerar_rascunho_ia(informativo: Informativo) -> tuple[str, float]:
+def _instrucoes_bloco(instrucoes: str | None) -> str:
+    if not (instrucoes or "").strip():
+        return ""
+    return f"\nDIRECIONAMENTO DADO PELO ADVOGADO (siga à risca): {instrucoes.strip()}\n"
+
+
+def gerar_rascunho_ia(informativo: Informativo) -> tuple[str, list[str], str, float]:
     """Lê os arquivos de referência (Drive) e escreve, com Claude, um
-    primeiro rascunho do informativo. Retorna (texto, custo_usd)."""
+    resumo estruturado curto + perguntas-teaser + o corpo do informativo.
+    Retorna (resumo, perguntas, corpo, custo_usd)."""
     from app.config import settings
     if not settings.anthropic_api_key:
         raise RuntimeError("ANTHROPIC_API_KEY não configurada.")
@@ -250,7 +271,7 @@ def gerar_rascunho_ia(informativo: Informativo) -> tuple[str, float]:
         # vídeo: sem suporte nativo no Claude — ignorado aqui (best-effort)
 
     tema = informativo.tema_resumido or informativo.titulo
-    prompt = _PROMPT_RASCUNHO.format(tema=tema)
+    prompt = _PROMPT_RASCUNHO.format(tema=tema, instrucoes_bloco=_instrucoes_bloco(informativo.instrucoes_ia))
     conteudo_msg = blocos + [{"type": "text", "text": prompt}]
 
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
@@ -259,31 +280,51 @@ def gerar_rascunho_ia(informativo: Informativo) -> tuple[str, float]:
         max_tokens=4000,
         messages=[{"role": "user", "content": conteudo_msg}],
     )
-    texto = "".join(getattr(b, "text", "") for b in msg.content if getattr(b, "type", "") == "text").strip()
-    if not texto:
+    resposta = "".join(getattr(b, "text", "") for b in msg.content if getattr(b, "type", "") == "text").strip()
+    if not resposta:
         raise RuntimeError("A IA não retornou um rascunho válido.")
+
+    resumo, perguntas, corpo = "", [], resposta
+    if "---CORPO---" in resposta:
+        cabeca, corpo = resposta.split("---CORPO---", 1)
+        corpo = corpo.strip()
+        for linha in cabeca.strip().splitlines():
+            if linha.upper().startswith("RESUMO:"):
+                resumo = linha.split(":", 1)[1].strip()
+            elif linha.upper().startswith("PERGUNTAS:"):
+                perguntas = [p.strip() for p in linha.split(":", 1)[1].split("|") if p.strip()]
 
     usage = getattr(msg, "usage", None)
     tin = getattr(usage, "input_tokens", 0) or 0
     tout = getattr(usage, "output_tokens", 0) or 0
     custo = round((tin * 5 + tout * 25) / 1_000_000, 5)  # estimativa (preço Opus)
-    return texto, custo
+    return resumo, perguntas, corpo, custo
 
 
 def gerar_rascunho_e_gravar(informativo: Informativo) -> str:
-    """Gera o rascunho com IA e já grava no CORPO do Google Doc vinculado
-    (o cabeçalho estruturado acima do separador não é tocado). Pode ser
-    chamado de novo pra regenerar — sempre substitui só o corpo."""
+    """Gera resumo + perguntas-teaser + corpo com IA e já grava no Google Doc
+    vinculado — resumo e perguntas nos parágrafos abaixo de seus respectivos
+    cabeçalhos, corpo depois do separador (o resto do cabeçalho estruturado
+    não é tocado). Pode ser chamado de novo pra regenerar."""
     if not informativo.google_doc_id:
         raise RuntimeError("Este informativo ainda não tem um Google Doc vinculado.")
-    texto, _custo = gerar_rascunho_ia(informativo)
-    from app.services.google_docs import substituir_corpo_informativo
-    if not substituir_corpo_informativo(informativo.google_doc_id, texto):
+    resumo, perguntas, corpo, _custo = gerar_rascunho_ia(informativo)
+    from app.services.google_docs import (
+        substituir_corpo_informativo,
+        substituir_perguntas_informativo,
+        substituir_resumo_informativo,
+    )
+    if not substituir_corpo_informativo(informativo.google_doc_id, corpo):
         raise RuntimeError("Rascunho gerado, mas falhou ao gravar no Google Doc (verifique a autenticação Google).")
-    informativo.conteudo_texto = texto
+    if resumo:
+        substituir_resumo_informativo(informativo.google_doc_id, resumo)
+    if perguntas:
+        substituir_perguntas_informativo(informativo.google_doc_id, perguntas)
+    informativo.conteudo_texto = corpo
+    informativo.rascunho_gerado_em = datetime.now(timezone.utc)
     if informativo.status == "rascunho":
         informativo.status = "primeiro_draft"
-    return texto
+    return corpo
 
 
 # ── Sincronização com o Google Doc ──────────────────────────────────────────

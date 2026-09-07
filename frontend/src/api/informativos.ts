@@ -17,6 +17,8 @@ export interface Informativo {
   paginas_estimadas?: number | null
   citacoes_validadas: Record<string, unknown>[]
   arquivos_referencia: { nome: string; link_drive: string; tipo: string }[]
+  instrucoes_ia?: string | null
+  rascunho_gerado_em?: string | null
   drive_folder_link?: string | null
   drive_pdf_link?: string | null
   data_prazo_draft?: string | null
@@ -41,6 +43,7 @@ export interface InformativoAtualizar {
   tema_resumido?: string | null
   responsavel_id?: string | null
   status?: StatusInformativo
+  instrucoes_ia?: string | null
 }
 
 export const informativosApi = {
