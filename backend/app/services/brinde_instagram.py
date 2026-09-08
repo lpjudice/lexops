@@ -73,13 +73,19 @@ Responda APENAS com JSON válido (sem markdown):
 }}"""
 
 
-def gerar_conteudo(sug: InstagramSugestao, formato: str, estilo: str) -> tuple[dict, float, str]:
-    """Gera o conteúdo do brinde. Retorna (conteudo, custo_usd, titulo)."""
-    tema = sug.tema or sug.titulo or "Planejamento patrimonial"
-    data, custo = ia_instagram._call_llm_json(_prompt(tema, formato, estilo, sug.brinde_palavra_chave))
+def gerar_conteudo_tema(tema: str, formato: str, estilo: str = "site", palavra: str | None = None) -> tuple[dict, float, str]:
+    """Gera o conteúdo do brinde a partir de um tema livre (usado pelos exemplos
+    fixos, que não pertencem a nenhum post). Retorna (conteudo, custo_usd, titulo)."""
+    data, custo = ia_instagram._call_llm_json(_prompt(tema, formato, estilo, palavra))
     if not isinstance(data, dict) or not data.get("secoes"):
         raise ValueError("A IA não retornou um brinde válido.")
     return data, custo, (data.get("titulo") or tema)[:255]
+
+
+def gerar_conteudo(sug: InstagramSugestao, formato: str, estilo: str) -> tuple[dict, float, str]:
+    """Gera o conteúdo do brinde a partir do tema de um post. Retorna (conteudo, custo_usd, titulo)."""
+    tema = sug.tema or sug.titulo or "Planejamento patrimonial"
+    return gerar_conteudo_tema(tema, formato, estilo, sug.brinde_palavra_chave)
 
 
 # ── Render ────────────────────────────────────────────────────────────────────

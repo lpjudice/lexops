@@ -1,0 +1,28 @@
+.voltar { display:inline-flex; align-items:center; color:#556; margin-right:10px; text-decoration:none; vertical-align:-3px; }
+.voltar:hover { color:#1C5A4E; }
+
+.subtitulo { margin:0 0 16px; color:#667; font-size:14px; }
+
+.exemplos { border:1px solid #e2ecec; background:#f7fafa; border-radius:10px; padding:12px 14px; margin-bottom:16px; }
+.exemplosHead { display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:13px; font-weight:600; color:#4a6a6a; }
+.exemplosLista { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; }
+.exemploItem { display:flex; align-items:center; gap:6px; background:#fff; border:1px solid #e2ecec; border-radius:8px; padding:6px 10px; }
+
+.filtro { display:flex; align-items:center; gap:8px; font-size:13px; color:#556; margin-bottom:14px; cursor:pointer; }
+
+.lista { display:flex; flex-direction:column; gap:10px; }
+.linha { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; border:1px solid #eee; border-radius:10px; padding:12px 14px; background:#fff; flex-wrap:wrap; }
+.linhaAtiva { border-color:#1C5A4E; box-shadow:0 0 0 1px #1C5A4E inset; }
+.linhaInfo { flex:1; min-width:220px; display:flex; flex-direction:column; gap:4px; }
+.linhaTopo { display:flex; align-items:center; gap:10px; }
+.linhaTitulo { font-size:14.5px; font-weight:600; color:#333; }
+.linhaMeta { font-size:12px; color:#888; }
+.linhaAcoes { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+
+.formatoTag { font-size:11px; font-weight:800; letter-spacing:.5px; text-transform:uppercase; color:#9a6a1a; background:#fbf3de; border-radius:999px; padding:2px 8px; }
+.tagAtivo { display:inline-flex; align-items:center; gap:4px; font-size:11.5px; font-weight:700; color:#1C5A4E; }
+
+.acao { display:inline-flex; align-items:center; gap:4px; font-size:12px; font-weight:600; color:#1C5A4E;
+  text-decoration:none; background:#e8f5f2; border:none; border-radius:999px; padding:5px 10px; cursor:pointer; }
+.acao:hover { background:#d8efe9; }
+.acaoPublicar { border:1px solid #1C5A4E; background:#fff; }

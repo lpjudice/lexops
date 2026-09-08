@@ -45,6 +45,10 @@
 .cardChanged { border-left:4px solid #e0a83a; }
 
 .gastoBox { display:flex; gap:14px; align-items:center; font-size:13px; color:#556; }
+
+.centralLink { display:inline-flex; align-items:center; gap:6px; font-size:13px; font-weight:600; color:#1C5A4E;
+  text-decoration:none; background:#e8f5f2; border-radius:999px; padding:6px 12px; margin-left:auto; }
+.centralLink:hover { background:#d8efe9; }
 .gastoMes b { color:#1C5A4E; }
 .gastoTotal { color:#8a8a8a; }
 
@@ -54,6 +58,17 @@
 .brindeKw { padding:7px 10px; border:1px solid #ccc; border-radius:8px; font-size:13px; font-weight:700; letter-spacing:1px; width:180px; }
 .brindeHint { font-size:11px; color:#999; }
 .brindeTitulo { font-size:13px; font-style:italic; color:#555; margin-right:2px; }
+
+.brindeLista { display:flex; flex-direction:column; gap:8px; margin-top:2px; }
+.brindeCard { border:1px solid #e8e0c8; background:#fff; border-radius:8px; padding:9px 12px; display:flex; flex-direction:column; gap:6px; }
+.brindeCardAtivo { border-color:#1C5A4E; box-shadow:0 0 0 1px #1C5A4E inset; }
+.brindeCardHead { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.brindeCardFormato { font-size:11px; font-weight:800; letter-spacing:.5px; text-transform:uppercase; color:#9a6a1a; background:#fbf3de; border-radius:999px; padding:2px 8px; }
+.brindeCardData { font-size:11px; color:#999; }
+.brindeCardTitulo { font-size:13.5px; font-weight:600; color:#333; }
+.pubBadgeSite { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:700; color:#1C5A4E; width:fit-content; }
+.btnPublicarSite { border:1px solid #1C5A4E; color:#1C5A4E; font-weight:700; }
+.btnPublicarSite:hover { background:#e8f5f2; }
 
 .videoBox { border:1px solid #d7e2ee; background:#f7fbff; border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; gap:8px; }
 .videoHead { display:flex; align-items:center; gap:6px; font-size:12px; font-weight:800; letter-spacing:.5px; text-transform:uppercase; color:#2b6aa8; }

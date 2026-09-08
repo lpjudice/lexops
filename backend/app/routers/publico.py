@@ -41,29 +41,31 @@ def card_instagram_publico(sugestao_id: str, db: Session = Depends(get_db)):
     return CardPublicoOut.model_validate(sug)
 
 
-def _brinde_slug(sug) -> str:
+def _brinde_slug(titulo: str) -> str:
     import re
-    base = (sug.brinde_titulo or "brinde").lower()
-    return re.sub(r"[^a-z0-9]+", "-", base).strip("-")[:50] or "brinde"
+    return re.sub(r"[^a-z0-9]+", "-", (titulo or "brinde").lower()).strip("-")[:50] or "brinde"
 
 
-def _brinde_render(db: Session, sugestao_id: str, estilo: str, para_pdf: bool) -> tuple[str, object]:
-    """Renderiza o brinde (instagram|site) a partir do conteúdo salvo. Retorna (html, sug)."""
+def _brinde_publicado(db: Session, sugestao_id: str):
+    """Busca o brinde marcado como publicado_no_site para este post — é o
+    único material que a URL pública fixa (por post) expõe."""
     import uuid as _uuid
 
-    from app.models.instagram import InstagramSugestao
-    from app.services import brinde_instagram
+    from app.models.instagram import InstagramBrinde
 
     try:
         sid = _uuid.UUID(sugestao_id)
     except ValueError:
         raise HTTPException(404, "Link inválido")
-    sug = db.get(InstagramSugestao, sid)
-    conteudo = sug.brinde_site_conteudo if (sug and estilo == "site") else (sug.brinde_conteudo if sug else None)
-    if not sug or not conteudo:
-        raise HTTPException(404, "Brinde não encontrado")
-    html = brinde_instagram.render(conteudo, sug.brinde_formato or "one_pager", estilo, para_pdf=para_pdf)
-    return html, sug
+    brinde = (
+        db.query(InstagramBrinde)
+        .filter(InstagramBrinde.sugestao_id == sid, InstagramBrinde.publicado_no_site.is_(True))
+        .order_by(InstagramBrinde.publicado_em.desc())
+        .first()
+    )
+    if not brinde:
+        raise HTTPException(404, "Nenhum material publicado para este post")
+    return brinde
 
 
 def _resp_html(html: str, filename: str | None = None):
@@ -80,42 +82,122 @@ def _resp_pdf(html: str, filename: str):
                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
-# ── Brinde estilo Instagram (teal) ──
+def _resp_pdf_bytes(pdf: bytes, filename: str):
+    from fastapi import Response
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+def _material_view_ou_html(db: Session, sugestao_id: str, para_download: bool):
+    from app.services import brinde_instagram
+    brinde = _brinde_publicado(db, sugestao_id)
+    if brinde.formato == "manual" or not brinde.conteudo:
+        raise HTTPException(404, "Este material foi subido como PDF — sem versão HTML")
+    html = brinde_instagram.render(brinde.conteudo, brinde.formato, "site", para_pdf=False)
+    return _resp_html(html, f"{_brinde_slug(brinde.titulo)}.html" if para_download else None)
+
+
+def _material_pdf(db: Session, sugestao_id: str, sufixo: str = ""):
+    from app.services.google_drive import baixar_arquivo_por_id, extrair_file_id
+    from app.services import brinde_instagram
+    brinde = _brinde_publicado(db, sugestao_id)
+    slug = _brinde_slug(brinde.titulo)
+    if brinde.formato == "manual" or not brinde.conteudo:
+        file_id = extrair_file_id(brinde.drive_link or "")
+        pdf = baixar_arquivo_por_id(file_id) if file_id else None
+        if not pdf:
+            raise HTTPException(404, "PDF não encontrado no Drive")
+        return _resp_pdf_bytes(pdf, f"{slug}{sufixo}.pdf")
+    html = brinde_instagram.render(brinde.conteudo, brinde.formato, "site", para_pdf=True)
+    return _resp_pdf(html, f"{slug}{sufixo}.pdf")
+
+
+def _brinde_por_id(db: Session, brinde_id: str):
+    import uuid as _uuid
+
+    from app.models.instagram import InstagramBrinde
+
+    try:
+        bid = _uuid.UUID(brinde_id)
+    except ValueError:
+        raise HTTPException(404, "Link inválido")
+    brinde = db.get(InstagramBrinde, bid)
+    if not brinde:
+        raise HTTPException(404, "Brinde não encontrado")
+    return brinde
+
+
+def _render_brinde_html(db: Session, brinde_id: str, para_download: bool):
+    from app.services import brinde_instagram
+    brinde = _brinde_por_id(db, brinde_id)
+    if brinde.formato == "manual" or not brinde.conteudo:
+        raise HTTPException(404, "Este material foi subido como PDF — sem versão HTML")
+    html = brinde_instagram.render(brinde.conteudo, brinde.formato, "site", para_pdf=False)
+    return _resp_html(html, f"{_brinde_slug(brinde.titulo)}.html" if para_download else None)
+
+
+def _render_brinde_pdf(db: Session, brinde_id: str):
+    from app.services.google_drive import baixar_arquivo_por_id, extrair_file_id
+    from app.services import brinde_instagram
+    brinde = _brinde_por_id(db, brinde_id)
+    slug = _brinde_slug(brinde.titulo)
+    if brinde.formato == "manual" or not brinde.conteudo:
+        file_id = extrair_file_id(brinde.drive_link or "")
+        pdf = baixar_arquivo_por_id(file_id) if file_id else None
+        if not pdf:
+            raise HTTPException(404, "PDF não encontrado no Drive")
+        return _resp_pdf_bytes(pdf, f"{slug}.pdf")
+    html = brinde_instagram.render(brinde.conteudo, brinde.formato, "site", para_pdf=True)
+    return _resp_pdf(html, f"{slug}.pdf")
+
+
+# Link direto por brinde (qualquer versão, publicada ou não) — usado nos botões
+# Ver/PDF/HTML de cada item da lista, e nos 3 exemplos fixos de referência.
+@router.get("/instagram/brinde/{brinde_id}")
+def brinde_por_id_view(brinde_id: str, db: Session = Depends(get_db)):
+    return _render_brinde_html(db, brinde_id, para_download=False)
+
+
+@router.get("/instagram/brinde/{brinde_id}.html")
+def brinde_por_id_html(brinde_id: str, db: Session = Depends(get_db)):
+    return _render_brinde_html(db, brinde_id, para_download=True)
+
+
+@router.get("/instagram/brinde/{brinde_id}.pdf")
+def brinde_por_id_pdf(brinde_id: str, db: Session = Depends(get_db)):
+    return _render_brinde_pdf(db, brinde_id)
+
+
+# Mantém as duas famílias de rota (histórico) — ambas servem o mesmo material
+# publicado do post (único estilo hoje é o "site").
 @router.get("/instagram/{sugestao_id}/brinde")
 def brinde_view(sugestao_id: str, db: Session = Depends(get_db)):
-    html, _ = _brinde_render(db, sugestao_id, "instagram", para_pdf=False)
-    return _resp_html(html)
+    return _material_view_ou_html(db, sugestao_id, para_download=False)
 
 
 @router.get("/instagram/{sugestao_id}/brinde.html")
 def brinde_html(sugestao_id: str, db: Session = Depends(get_db)):
-    html, sug = _brinde_render(db, sugestao_id, "instagram", para_pdf=False)
-    return _resp_html(html, f"{_brinde_slug(sug)}.html")
+    return _material_view_ou_html(db, sugestao_id, para_download=True)
 
 
 @router.get("/instagram/{sugestao_id}/brinde.pdf")
 def brinde_pdf(sugestao_id: str, db: Session = Depends(get_db)):
-    html, sug = _brinde_render(db, sugestao_id, "instagram", para_pdf=True)
-    return _resp_pdf(html, f"{_brinde_slug(sug)}.pdf")
+    return _material_pdf(db, sugestao_id)
 
 
-# ── Brinde estilo Site oficial (bege/preto — landing) ──
 @router.get("/instagram/{sugestao_id}/brinde-site")
 def brinde_site_view(sugestao_id: str, db: Session = Depends(get_db)):
-    html, _ = _brinde_render(db, sugestao_id, "site", para_pdf=False)
-    return _resp_html(html)
+    return _material_view_ou_html(db, sugestao_id, para_download=False)
 
 
 @router.get("/instagram/{sugestao_id}/brinde-site.html")
 def brinde_site_html(sugestao_id: str, db: Session = Depends(get_db)):
-    html, sug = _brinde_render(db, sugestao_id, "site", para_pdf=False)
-    return _resp_html(html, f"{_brinde_slug(sug)}-site.html")
+    return _material_view_ou_html(db, sugestao_id, para_download=True)
 
 
 @router.get("/instagram/{sugestao_id}/brinde-site.pdf")
 def brinde_site_pdf(sugestao_id: str, db: Session = Depends(get_db)):
-    html, sug = _brinde_render(db, sugestao_id, "site", para_pdf=True)
-    return _resp_pdf(html, f"{_brinde_slug(sug)}-site.pdf")
+    return _material_pdf(db, sugestao_id, sufixo="-site")
 
 
 def _cfg_por_token(db: Session, token: str) -> ConfigFiscal:

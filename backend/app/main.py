@@ -834,6 +834,7 @@ def _run_migrations() -> None:
             "CREATE INDEX IF NOT EXISTS ix_instagram_sugestoes_status ON instagram_sugestoes(status, data_geracao DESC)"
         ))
         conn.execute(text("ALTER TABLE instagram_sugestoes ADD COLUMN IF NOT EXISTS aprovado_em TIMESTAMPTZ"))
+        conn.execute(text("ALTER TABLE instagram_sugestoes ADD COLUMN IF NOT EXISTS publicado_em TIMESTAMPTZ"))
         conn.execute(text("ALTER TABLE instagram_sugestoes ADD COLUMN IF NOT EXISTS drive_link TEXT"))
         conn.execute(text("ALTER TABLE instagram_sugestoes ADD COLUMN IF NOT EXISTS custo_usd DOUBLE PRECISION NOT NULL DEFAULT 0"))
         conn.execute(text("ALTER TABLE instagram_sugestoes ADD COLUMN IF NOT EXISTS ajustes JSONB NOT NULL DEFAULT '[]'::jsonb"))
@@ -857,8 +858,35 @@ def _run_migrations() -> None:
         conn.execute(text(
             "INSERT INTO instagram_config (id, assessoria_emails) VALUES (1, 'moni@pimentajudice.com.br') ON CONFLICT (id) DO NOTHING"
         ))
-        conn.execute(text("ALTER TABLE instagram_config ADD COLUMN IF NOT EXISTS brinde_template_doc_id TEXT"))
-        conn.execute(text("ALTER TABLE instagram_config ADD COLUMN IF NOT EXISTS brinde_template_link TEXT"))
+
+        # Instagram — brindes (histórico: 1 linha por geração, não substitui)
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS instagram_brindes (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                sugestao_id UUID REFERENCES instagram_sugestoes(id) ON DELETE CASCADE,
+                formato VARCHAR(20) NOT NULL DEFAULT 'one_pager',
+                titulo VARCHAR(255) NOT NULL DEFAULT '',
+                conteudo JSONB,
+                drive_link TEXT,
+                publicado_no_site BOOLEAN NOT NULL DEFAULT false,
+                publicado_em TIMESTAMPTZ,
+                exemplo BOOLEAN NOT NULL DEFAULT false,
+                custo_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+                criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_instagram_brindes_sugestao ON instagram_brindes(sugestao_id)"
+        ))
+        # Backfill único: brinde já gerado (slot antigo) vira o 1º item da lista nova.
+        conn.execute(text("""
+            INSERT INTO instagram_brindes (sugestao_id, formato, titulo, conteudo, drive_link, criado_em)
+            SELECT s.id, COALESCE(s.brinde_formato, 'one_pager'), COALESCE(s.brinde_titulo, s.titulo),
+                   COALESCE(s.brinde_site_conteudo, s.brinde_conteudo), s.brinde_drive_link, s.data_geracao
+            FROM instagram_sugestoes s
+            WHERE (s.brinde_conteudo IS NOT NULL OR s.brinde_site_conteudo IS NOT NULL)
+              AND NOT EXISTS (SELECT 1 FROM instagram_brindes b WHERE b.sugestao_id = s.id)
+        """))
 
         # Conselho/Expansão: dias_lembrete adicionado a conselho_eventos depois da tabela já existir em produção
         # (Base.metadata.create_all só cria tabelas novas, não adiciona colunas a tabelas existentes)
