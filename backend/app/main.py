@@ -884,10 +884,15 @@ def _run_migrations() -> None:
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_instagram_brindes_sugestao ON instagram_brindes(sugestao_id)"
         ))
+        # Tabela pode já existir de uma tentativa anterior sem o default do id — garante.
+        conn.execute(text(
+            "ALTER TABLE instagram_brindes ALTER COLUMN id SET DEFAULT gen_random_uuid()"
+        ))
         # Backfill único: brinde já gerado (slot antigo) vira o 1º item da lista nova.
+        # id gerado explicitamente na própria query (não depende do DEFAULT da coluna).
         conn.execute(text("""
-            INSERT INTO instagram_brindes (sugestao_id, formato, titulo, conteudo, drive_link, criado_em)
-            SELECT s.id, COALESCE(s.brinde_formato, 'one_pager'), COALESCE(s.brinde_titulo, s.titulo),
+            INSERT INTO instagram_brindes (id, sugestao_id, formato, titulo, conteudo, drive_link, criado_em)
+            SELECT gen_random_uuid(), s.id, COALESCE(s.brinde_formato, 'one_pager'), COALESCE(s.brinde_titulo, s.titulo),
                    COALESCE(s.brinde_site_conteudo, s.brinde_conteudo), s.brinde_drive_link, s.data_geracao
             FROM instagram_sugestoes s
             WHERE (s.brinde_conteudo IS NOT NULL OR s.brinde_site_conteudo IS NOT NULL)
