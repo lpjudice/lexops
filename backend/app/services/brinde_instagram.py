@@ -38,15 +38,30 @@ def _esc(t) -> str:
 
 
 # ── Geração de conteúdo (Claude) ──────────────────────────────────────────────
+_GUIA_FORMATO = {
+    "one_pager": (
+        "EXATAMENTE 3 seções — o material inteiro tem que caber em 1 página impressa.\n"
+        "Cada seção: OU 1 parágrafo curto (2-3 frases, até ~40 palavras) OU 3-4 bullets "
+        "bem curtos (até 8 palavras cada) — nunca os dois juntos. Direto ao ponto, "
+        "zero enrolação, é o resumo essencial pra quem só tem 1 minuto."
+    ),
+    "slides": (
+        "6 a 8 seções — cada uma é um bloco autônomo e independente, tipo passo de um "
+        "checklist (a pessoa pode ler fora de ordem e entender). Cada seção: 1 frase de "
+        "contexto (máx. 15 palavras) + 2-4 bullets de ação bem curtos (até 8 palavras). "
+        "NÃO escreva parágrafos longos — isso é um guia escaneável, não um texto corrido."
+    ),
+    "html": (
+        "4 a 6 seções, cada uma com 2-3 parágrafos completos (60-100 palavras cada), "
+        "explicando o tema com profundidade real — contexto, exemplos, nuances jurídicas. "
+        "Use bullets só quando reforçar um ponto do parágrafo, não como substituto dele. "
+        "Este é o material mais completo e explicativo dos três formatos — tipo um mini-ebook."
+    ),
+}
+
+
 def _prompt(tema: str, formato: str, estilo: str, palavra: str | None) -> str:
-    if estilo == "site":
-        guia = "4 a 6 seções com boa profundidade (vira uma landing page do site)."
-    else:
-        guia = {
-            "one_pager": "EXATAMENTE 3 seções bem concisas — cabe em 1 folha. Bullets curtíssimos.",
-            "slides": "6 a 8 seções CURTAS e diretas — cada uma é um bloco/slide independente e escaneável.",
-            "html": "4 a 6 seções com mais texto e explicação (material completo tipo mini-ebook).",
-        }.get(formato, "3 a 5 seções concisas.")
+    guia = _GUIA_FORMATO.get(formato, _GUIA_FORMATO["html"])
     kw = f'\nA pessoa recebe este material comentando "{palavra}" no post.' if palavra else ""
     return f"""Você cria um material rico (brinde/isca de captação) para o Pimenta Judice,
 advocacia patrimonialista (holding, sucessão, societário, reforma tributária).
@@ -91,7 +106,7 @@ def gerar_conteudo(sug: InstagramSugestao, formato: str, estilo: str) -> tuple[d
 # ── Render ────────────────────────────────────────────────────────────────────
 def render(conteudo: dict, formato: str, estilo: str, para_pdf: bool = False) -> str:
     if estilo == "site":
-        return _render_site(conteudo, para_pdf)
+        return _render_site(conteudo, formato or "one_pager", para_pdf)
     return _render_instagram(conteudo, formato or "one_pager", para_pdf)
 
 
@@ -172,41 +187,56 @@ def _render_instagram(c: dict, formato: str, para_pdf: bool) -> str:
 
 
 # ---------- Estilo Site oficial (fundo branco, serifado, sotaque bege/teal) ----------
-def _render_site(c: dict, para_pdf: bool) -> str:
+def _render_site(c: dict, formato: str, para_pdf: bool) -> str:
     INK, TEAL, MUT, TINT = "#1a1a1a", "#4a897c", "#6b655a", "#F1ECE1"
     logo = _logo("logo_dark.png")
     serif = "Georgia, 'Times New Roman', serif" if para_pdf else "'Playfair Display', Georgia, serif"
     sans = "Helvetica, Arial, sans-serif" if para_pdf else "'Archivo', Helvetica, Arial, sans-serif"
     gfont = "" if para_pdf else '<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Playfair+Display:wght@500;600;700;800&display=swap" rel="stylesheet">'
 
+    # Cada formato tem uma densidade/quebra de página diferente — não é só o
+    # conteúdo que muda, o layout impresso também precisa parecer outra coisa.
+    compacto = formato == "one_pager"
+    em_blocos = formato == "slides"
+    margem_pagina = "1.4cm" if compacto else "2cm"
+    tam_h1 = "30px" if compacto else "38px"
+    tam_sec_h2 = "19px" if compacto else "23px"
+    tam_p = "14px" if compacto else "15.5px"
+    esp_sec = "16px" if compacto else "30px"
+    sec_card = (
+        f"border:1px solid #e4dfd2; border-radius:10px; padding:18px 20px 16px;"
+        if em_blocos else ""
+    )
+
     secoes = ""
-    for s in c.get("secoes", []):
-        secoes += f"""<div class="sec">
+    for i, s in enumerate(c.get("secoes", [])):
+        brk = 'style="page-break-before: always;"' if (para_pdf and em_blocos and i > 0) else ''
+        secoes += f"""<div class="sec" {brk}>
           <h2>{_esc(s.get('titulo'))}</h2>
           {''.join(f'<p>{_esc(p)}</p>' for p in (s.get('paragrafos') or []))}
           {_callout(s.get('bullets'), TINT, TEAL)}
         </div>"""
-    logo_img = f'<img src="{logo}" style="width:160px; margin-bottom:30px"/>' if logo else ''
+    logo_img = f'<img src="{logo}" style="width:{"130px" if compacto else "160px"}; margin-bottom:{"18px" if compacto else "30px"}"/>' if logo else ''
     titulo, subtitulo, cta = _esc(c.get("titulo")), _esc(c.get("subtitulo")), _esc(c.get("cta"))
     return f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">
 <title>{titulo} — Pimenta Judice Advogados</title>{gfont}
 <style>
-  @page {{ size: A4; margin: 2cm; }}
+  @page {{ size: A4; margin: {margem_pagina}; }}
   body {{ font-family: {sans}; color: {INK}; background: #fff; margin: 0; }}
   .wrap {{ max-width: 720px; margin: 0 auto; }}
-  .hero {{ padding: 0 0 30px; border-bottom: 1px solid #e4dfd2; margin-bottom: 36px; position: relative; }}
+  .hero {{ padding: 0 0 {"18px" if compacto else "30px"}; border-bottom: 1px solid #e4dfd2; margin-bottom: {"20px" if compacto else "36px"}; position: relative; }}
   .hero .kick {{ font-size: 11.5px; letter-spacing: 4px; color: {TEAL}; text-transform: uppercase; font-weight: 600; }}
-  .hero h1 {{ font-family: {serif}; font-weight: 700; font-size: 38px; line-height: 1.16; color: {INK}; margin: 14px 0 14px; }}
+  .hero h1 {{ font-family: {serif}; font-weight: 700; font-size: {tam_h1}; line-height: 1.16; color: {INK}; margin: 14px 0 14px; }}
   .quote {{ font-size: 100px; line-height: 0; color: {TEAL}; opacity: .15; font-family: {serif}; position: absolute; right: 0; top: 10px; }}
   .hero .sub {{ font-size: 16.5px; color: {MUT}; max-width: 560px; line-height: 1.55; font-style: italic; }}
-  .sec {{ margin: 30px 0; }}
-  .sec h2 {{ font-family: {serif}; font-weight: 600; font-size: 23px; color: {INK}; margin: 0 0 10px; }}
-  .sec p {{ font-size: 15.5px; line-height: 1.75; color: #3a352c; margin: 8px 0; }}
+  .sec {{ margin: {esp_sec} 0; {sec_card} }}
+  .sec h2 {{ font-family: {serif}; font-weight: 600; font-size: {tam_sec_h2}; color: {INK}; margin: 0 0 10px; }}
+  .sec p {{ font-size: {tam_p}; line-height: 1.7; color: #3a352c; margin: 8px 0; }}
   ul.callout {{ list-style: none; margin: 14px 0 4px; padding: 16px 22px; border-left: 3px solid; }}
-  ul.callout li {{ font-size: 15px; line-height: 1.6; color: {INK}; margin: 7px 0; }}
+  ul.callout li {{ font-size: {tam_p}; line-height: 1.6; color: {INK}; margin: 7px 0; }}
   ul.callout li::before {{ content: "— "; color: {TEAL}; font-weight: 700; }}
-  .fechamento {{ text-align: center; border-top: 1px solid #e4dfd2; margin-top: 44px; padding-top: 32px; font-family: {serif}; font-style: italic; font-size: 19px; color: {INK}; }}
-  .foot {{ text-align: center; color: {MUT}; font-size: 11.5px; margin-top: 28px; letter-spacing: 1px; }}
+  .fechamento {{ text-align: center; border-top: 1px solid #e4dfd2; margin-top: {"24px" if compacto else "44px"}; padding-top: {"18px" if compacto else "32px"}; font-family: {serif}; font-style: italic; font-size: 17px; color: {INK}; }}
+  .foot {{ text-align: center; color: {MUT}; font-size: 11.5px; margin-top: {"16px" if compacto else "28px"}; letter-spacing: 1px; }}
 </style></head><body><div class="wrap">
   <div class="hero">{logo_img}<div class="kick">Pimenta Judice · Advogados Associados</div>
     <h1>{titulo}</h1><div class="quote">&rdquo;</div><div class="sub">{subtitulo}</div></div>
