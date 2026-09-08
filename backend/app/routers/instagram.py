@@ -8,11 +8,12 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models.instagram import DEFAULT_ASSESSORIA_EMAILS, InstagramConfig, InstagramSugestao
+from app.models.instagram import DEFAULT_ASSESSORIA_EMAILS, InstagramBrinde, InstagramConfig, InstagramSugestao
 from app.schemas.instagram import (
     AjustarRequest,
     BrindeGerarRequest,
     BrindeKeywordRequest,
+    BrindeOut,
     ConfigOut,
     ConfigUpdate,
     CustosMes,
@@ -136,6 +137,8 @@ def atualizar(sugestao_id: uuid.UUID, payload: SugestaoUpdate, db: Session = Dep
     # Marca o momento da aprovação (para o filtro por mês na Agenda)
     if dados.get("status") == "aprovado" and sug.aprovado_em is None:
         sug.aprovado_em = datetime.now(timezone.utc)
+    if dados.get("status") == "publicado":
+        sug.publicado_em = datetime.now(timezone.utc)
     db.commit()
     db.refresh(sug)
     return sug
@@ -171,74 +174,195 @@ def brinde_palavra_chave(sugestao_id: uuid.UUID, payload: BrindeKeywordRequest, 
     return sug
 
 
-def _brinde_slug(sug: InstagramSugestao) -> str:
+def _brinde_slug(titulo: str) -> str:
     import re
-    base = (sug.brinde_titulo or sug.titulo or "brinde").lower()
-    return re.sub(r"[^a-z0-9]+", "-", base).strip("-")[:50] or "brinde"
+    return re.sub(r"[^a-z0-9]+", "-", (titulo or "brinde").lower()).strip("-")[:50] or "brinde"
 
 
-def _salvar_brinde_no_drive(db: Session, sug: InstagramSugestao, conteudo: dict, formato: str, estilo: str) -> None:
-    """Renderiza HTML+PDF do brinde e salva no Drive: pasta da sugestão + pasta
-    única /Instagram/Brindes."""
+def _salvar_brinde_no_drive(sug: InstagramSugestao, brinde: InstagramBrinde, conteudo: dict) -> str | None:
+    """Renderiza HTML+PDF do brinde e salva no Drive: pasta da versão (dentro da
+    sugestão) + pasta única /Instagram/Brindes. Retorna o link da pasta da versão."""
     try:
         from app.services import brinde_instagram
-        from app.services.google_drive import upload_arquivo_raiz
-        html = brinde_instagram.render(conteudo, formato, estilo, para_pdf=False)
-        pdf = brinde_instagram.html_para_pdf(brinde_instagram.render(conteudo, formato, estilo, para_pdf=True))
-        slug = _brinde_slug(sug)
-        suf = "-site" if estilo == "site" else ""
+        from app.services.google_drive import get_folder_link_raiz, upload_arquivo_raiz
+        html = brinde_instagram.render(conteudo, brinde.formato, "site", para_pdf=False)
+        pdf = brinde_instagram.html_para_pdf(brinde_instagram.render(conteudo, brinde.formato, "site", para_pdf=True))
+        slug = _brinde_slug(brinde.titulo)
         pasta_status = "Aprovados" if sug.status in ("aprovado", "publicado") else "Sugeridos"
-        destinos = [
-            ["Instagram", pasta_status, _mes_ano(sug), f"{sug.id.hex[:6]}-{slug}"],  # pasta da sugestão
-            ["Instagram", "Brindes", _mes_ano(sug)],  # pasta única de brindes (histórico)
-        ]
+        subpath_versao = ["Instagram", pasta_status, _mes_ano(sug), f"{sug.id.hex[:6]}-{slug}", brinde.id.hex[:6]]
+        destinos = [subpath_versao, ["Instagram", "Brindes", _mes_ano(sug)]]
         for sub in destinos:
-            upload_arquivo_raiz(html.encode("utf-8"), f"{slug}{suf}.html", sub, "text/html")
-            upload_arquivo_raiz(pdf, f"{slug}{suf}.pdf", sub, "application/pdf")
+            upload_arquivo_raiz(html.encode("utf-8"), f"{slug}.html", sub, "text/html")
+            upload_arquivo_raiz(pdf, f"{slug}.pdf", sub, "application/pdf")
+        return get_folder_link_raiz(subpath_versao)
     except Exception:
-        pass  # best-effort (depende de OAuth do Drive)
+        return None  # best-effort (depende de OAuth do Drive)
 
 
-@router.post("/sugestoes/{sugestao_id}/brinde/gerar", response_model=SugestaoOut)
+@router.post("/sugestoes/{sugestao_id}/brinde/gerar", response_model=BrindeOut)
 def brinde_gerar(sugestao_id: uuid.UUID, payload: BrindeGerarRequest, db: Session = Depends(get_db)):
-    """Gera o brinde com a IA. estilo='instagram' (teal) ou 'site' (bege/preto oficial)."""
+    """Gera um NOVO brinde (não substitui os anteriores — fica no histórico)."""
     _checar_ia_configurada()
     sug = _get(db, sugestao_id)
     from app.services import brinde_instagram
     try:
-        conteudo, custo, titulo = brinde_instagram.gerar_conteudo(sug, payload.formato, payload.estilo)
+        conteudo, custo, titulo = brinde_instagram.gerar_conteudo(sug, payload.formato, "site")
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Falha ao gerar brinde: {exc}")
-    if payload.estilo == "site":
-        sug.brinde_site_conteudo = conteudo
-    else:
-        sug.brinde_conteudo = conteudo
-        sug.brinde_formato = payload.formato
-    sug.brinde_titulo = titulo
+
+    brinde = InstagramBrinde(
+        sugestao_id=sug.id, formato=payload.formato, titulo=titulo, conteudo=conteudo, custo_usd=round(custo, 5),
+    )
+    db.add(brinde)
     sug.custo_usd = round((sug.custo_usd or 0.0) + custo, 5)
     db.commit()
-    db.refresh(sug)
-    _salvar_brinde_no_drive(db, sug, conteudo, payload.formato, payload.estilo)  # background-ish (best-effort)
-    return sug
+    db.refresh(brinde)
+
+    brinde.drive_link = _salvar_brinde_no_drive(sug, brinde, conteudo)
+    db.commit()
+    db.refresh(brinde)
+    return brinde
 
 
-@router.post("/sugestoes/{sugestao_id}/brinde/upload", response_model=SugestaoOut)
+@router.get("/sugestoes/{sugestao_id}/brindes", response_model=list[BrindeOut])
+def listar_brindes_do_post(sugestao_id: uuid.UUID, db: Session = Depends(get_db)):
+    _get(db, sugestao_id)  # 404 se o post não existir
+    stmt = select(InstagramBrinde).where(InstagramBrinde.sugestao_id == sugestao_id).order_by(InstagramBrinde.criado_em.desc())
+    return db.execute(stmt).scalars().all()
+
+
+@router.get("/brindes", response_model=list[BrindeOut])
+def central_de_brindes(
+    apenas_publicados: bool = Query(False),
+    db: Session = Depends(get_db),
+):
+    """Lista todos os brindes gerados, de todos os posts — central pra saber
+    o que está publicado no site e poder ocultar algum."""
+    stmt = select(InstagramBrinde, InstagramSugestao.titulo).join(
+        InstagramSugestao, InstagramBrinde.sugestao_id == InstagramSugestao.id, isouter=True,
+    ).where(InstagramBrinde.exemplo.is_(False)).order_by(InstagramBrinde.criado_em.desc())
+    if apenas_publicados:
+        stmt = stmt.where(InstagramBrinde.publicado_no_site.is_(True))
+    out = []
+    for brinde, sugestao_titulo in db.execute(stmt).all():
+        item = BrindeOut.model_validate(brinde)
+        item.sugestao_titulo = sugestao_titulo
+        out.append(item)
+    return out
+
+
+@router.get("/brindes/exemplos", response_model=list[BrindeOut])
+def listar_exemplos_brinde(db: Session = Depends(get_db)):
+    stmt = select(InstagramBrinde).where(InstagramBrinde.exemplo.is_(True)).order_by(InstagramBrinde.formato)
+    return db.execute(stmt).scalars().all()
+
+
+_TEMA_EXEMPLO = "Holding Familiar: Como Funciona e Quando Vale a Pena"
+
+
+@router.post("/brindes/exemplos/gerar", response_model=list[BrindeOut])
+def gerar_exemplos_brinde(db: Session = Depends(get_db)):
+    """(Re)gera os 3 exemplos fixos de referência (1 por formato), pra mostrar
+    a diferença de profundidade/tamanho de cada um."""
+    _checar_ia_configurada()
+    from app.services import brinde_instagram
+
+    db.execute(InstagramBrinde.__table__.delete().where(InstagramBrinde.exemplo.is_(True)))
+    db.commit()
+
+    criados = []
+    for formato in ("one_pager", "slides", "html"):
+        try:
+            conteudo, custo, titulo = brinde_instagram.gerar_conteudo_tema(_TEMA_EXEMPLO, formato)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Falha ao gerar exemplo ({formato}): {exc}")
+        brinde = InstagramBrinde(
+            sugestao_id=None, formato=formato, titulo=titulo, conteudo=conteudo,
+            custo_usd=round(custo, 5), exemplo=True,
+        )
+        db.add(brinde)
+        db.commit()
+        db.refresh(brinde)
+        try:
+            from app.services.google_drive import get_folder_link_raiz, upload_arquivo_raiz
+            html = brinde_instagram.render(conteudo, formato, "site", para_pdf=False)
+            pdf = brinde_instagram.html_para_pdf(brinde_instagram.render(conteudo, formato, "site", para_pdf=True))
+            subpath = ["Instagram", "Exemplos", formato]
+            upload_arquivo_raiz(html.encode("utf-8"), f"{formato}.html", subpath, "text/html")
+            upload_arquivo_raiz(pdf, f"{formato}.pdf", subpath, "application/pdf")
+            brinde.drive_link = get_folder_link_raiz(subpath)
+            db.commit()
+            db.refresh(brinde)
+        except Exception:
+            pass
+        criados.append(brinde)
+    return criados
+
+
+def _get_brinde(db: Session, brinde_id: uuid.UUID) -> InstagramBrinde:
+    b = db.get(InstagramBrinde, brinde_id)
+    if not b:
+        raise HTTPException(status_code=404, detail="Brinde não encontrado")
+    return b
+
+
+@router.patch("/brindes/{brinde_id}/publicar", response_model=BrindeOut)
+def publicar_brinde(brinde_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Marca este brinde como o material ativo no site — desmarca qualquer
+    outro do mesmo post (só 1 fica publicado por vez, é o link fixo do site)."""
+    brinde = _get_brinde(db, brinde_id)
+    if brinde.sugestao_id:
+        db.execute(
+            InstagramBrinde.__table__.update()
+            .where(InstagramBrinde.sugestao_id == brinde.sugestao_id, InstagramBrinde.id != brinde.id)
+            .values(publicado_no_site=False)
+        )
+    brinde.publicado_no_site = True
+    brinde.publicado_em = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(brinde)
+    return brinde
+
+
+@router.patch("/brindes/{brinde_id}/ocultar", response_model=BrindeOut)
+def ocultar_brinde(brinde_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Tira do site (mantém a data em que foi publicado, como histórico)."""
+    brinde = _get_brinde(db, brinde_id)
+    brinde.publicado_no_site = False
+    db.commit()
+    db.refresh(brinde)
+    return brinde
+
+
+@router.delete("/brindes/{brinde_id}", status_code=status.HTTP_204_NO_CONTENT)
+def excluir_brinde(brinde_id: uuid.UUID, db: Session = Depends(get_db)):
+    brinde = _get_brinde(db, brinde_id)
+    db.delete(brinde)
+    db.commit()
+
+
+@router.post("/sugestoes/{sugestao_id}/brinde/upload", response_model=BrindeOut)
 def brinde_upload(sugestao_id: uuid.UUID, file: UploadFile = File(...), db: Session = Depends(get_db)):
-    """Sobe um PDF de brinde próprio para o Drive (/Instagram/Brindes/{MM-AAAA}/)."""
+    """Sobe um PDF de brinde próprio (sem geração por IA) pro Drive."""
     from app.services.google_drive import get_folder_link_raiz, upload_arquivo_raiz
     sug = _get(db, sugestao_id)
     conteudo = file.file.read()
     if not conteudo:
         raise HTTPException(status_code=400, detail="Arquivo vazio.")
-    subpath = ["Instagram", "Brindes", _mes_ano(sug)]
     nome = file.filename or f"brinde-{sug.id.hex[:6]}.pdf"
-    if not upload_arquivo_raiz(conteudo, nome, subpath, file.content_type or "application/pdf"):
-        raise HTTPException(status_code=502, detail="Falha ao subir no Drive (verifique a autenticação Google).")
-    sug.brinde_drive_link = get_folder_link_raiz(subpath)
-    sug.brinde_titulo = sug.brinde_titulo or nome
+    brinde = InstagramBrinde(sugestao_id=sug.id, formato="manual", titulo=nome)
+    db.add(brinde)
     db.commit()
-    db.refresh(sug)
-    return sug
+    db.refresh(brinde)
+    subpath = ["Instagram", "Brindes", _mes_ano(sug), f"{sug.id.hex[:6]}-manual", brinde.id.hex[:6]]
+    if not upload_arquivo_raiz(conteudo, nome, subpath, file.content_type or "application/pdf"):
+        db.delete(brinde)
+        db.commit()
+        raise HTTPException(status_code=502, detail="Falha ao subir no Drive (verifique a autenticação Google).")
+    brinde.drive_link = get_folder_link_raiz(subpath)
+    db.commit()
+    db.refresh(brinde)
+    return brinde
 
 
 # Downloads/visualização do brinde ficam no router público (link compartilhável,

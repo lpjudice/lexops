@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Float, Integer, String, Text, func
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -54,6 +54,8 @@ class InstagramSugestao(Base):
     data_sugerida: Mapped[date | None] = mapped_column(Date, nullable=True)
     # Quando foi aprovado (para filtro por mês de aprovação na Agenda)
     aprovado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Quando foi marcado como publicado no Instagram (última vez — "reabrir" não apaga)
+    publicado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Link da pasta no Drive (preenchido ao salvar os PNGs)
     drive_link: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -100,6 +102,36 @@ class InstagramSugestao(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+
+
+class InstagramBrinde(Base):
+    """Um material (brinde/isca) gerado para um post — histórico completo: cada
+    geração vira uma linha nova (não substitui a anterior). No máximo 1 por
+    post fica com `publicado_no_site=True` por vez (é o que a URL pública fixa
+    do site — /materiais/pdf/{sugestao_id} — exibe). `sugestao_id` nulo marca
+    um exemplo fixo de referência (não pertence a nenhum post real)."""
+
+    __tablename__ = "instagram_brindes"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    sugestao_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("instagram_sugestoes.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+
+    # 'one_pager' | 'slides' | 'html' | 'manual' (PDF subido à mão, sem conteúdo gerado)
+    formato: Mapped[str] = mapped_column(String(20), nullable=False, default="one_pager")
+    titulo: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    conteudo: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    drive_link: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    publicado_no_site: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    publicado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Fica marcado como exemplo fixo de referência (não é um brinde real de post)
+    exemplo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+
+    custo_usd: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class InstagramConfig(Base):

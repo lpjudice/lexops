@@ -35,6 +35,7 @@ import ConselhoPage from './pages/ConselhoPage'
 import DespachoPage from './pages/DespachoPage'
 import ConselhoJuridicoPage from './pages/ConselhoJuridicoPage'
 import InstagramPage from './pages/InstagramPage'
+import InstagramBrindesPage from './pages/InstagramBrindesPage'
 import PostPublicoPage from './pages/PostPublicoPage'
 import InformativosPage from './pages/InformativosPage'
 import InformativoAssinantesPage from './pages/InformativoAssinantesPage'
@@ -89,6 +90,7 @@ function AppRoutes() {
         <Route path="instagram" element={<InstagramPage />} />
         <Route path="informativos" element={<InformativosPage />} />
         <Route path="informativos/assinantes" element={<InformativoAssinantesPage />} />
+        <Route path="instagram/brindes" element={<InstagramBrindesPage />} />
         <Route path="fiscal" element={<FiscalPage />} />
         <Route path="fiscal/visao" element={<VisaoFiscalPage />} />
         <Route path="fiscal/decisao" element={<BackofficeDecisaoPage />} />

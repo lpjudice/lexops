@@ -67,6 +67,7 @@ class SugestaoOut(BaseModel):
     status: Status
     data_sugerida: date | None = None
     aprovado_em: datetime | None = None
+    publicado_em: datetime | None = None
     drive_link: str | None = None
     enviado_assessoria_em: datetime | None = None
     brinde_palavra_chave: str | None = None
@@ -122,6 +123,23 @@ class BrindeGerarRequest(BaseModel):
 
 class BrindeKeywordRequest(BaseModel):
     palavra_chave: str
+
+
+class BrindeOut(BaseModel):
+    id: uuid.UUID
+    sugestao_id: uuid.UUID | None
+    formato: str
+    titulo: str
+    drive_link: str | None
+    publicado_no_site: bool
+    publicado_em: datetime | None
+    exemplo: bool
+    custo_usd: float
+    criado_em: datetime
+    # contexto do post, só preenchido na central (lista cross-posts)
+    sugestao_titulo: str | None = None
+
+    model_config = {"from_attributes": True}
 
 
 class AjustarRequest(BaseModel):

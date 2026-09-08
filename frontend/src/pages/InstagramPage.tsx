@@ -1,11 +1,13 @@
 import { useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import {
   Camera, Sparkles, Check, X, Send, Trash2, RotateCcw, Mail, Lightbulb, Wand2, Plus, CheckCircle2,
-  Download, HardDrive, ChevronDown, ChevronUp, FolderOpen, History, DollarSign, Gift, Link2, FileText, Upload, Film,
+  Download, HardDrive, ChevronDown, ChevronUp, FolderOpen, History, DollarSign, Gift, Link2, Upload, Film,
+  Eye, EyeOff, Globe,
 } from 'lucide-react'
 import { instagramApi, brindeUrl } from '../api/instagram'
-import type { FonteColeta, Sugestao } from '../api/instagram'
+import type { Brinde, FonteColeta, Sugestao } from '../api/instagram'
 import { SlideCarousel } from '../components/InstagramSlide'
 import { baixarZip, salvarNoDrive } from '../utils/instagramExport'
 import page from './Page.module.css'
@@ -23,7 +25,7 @@ const FONTES: { key: FonteColeta; label: string }[] = [
 ]
 
 function mesKey(su: Sugestao): string | null {
-  const d = su.aprovado_em ?? su.data_sugerida
+  const d = su.status === 'publicado' ? (su.publicado_em ?? su.aprovado_em) : (su.aprovado_em ?? su.data_sugerida)
   return d ? d.slice(0, 7) : null // YYYY-MM
 }
 function mesLabel(k: string): string {
@@ -32,41 +34,81 @@ function mesLabel(k: string): string {
 }
 
 // ─────────────────── Brinde / isca (lead magnet) ───────────────────
-const FORMATOS_BRINDE: { key: 'one_pager' | 'slides' | 'html'; label: string }[] = [
-  { key: 'one_pager', label: 'One-pager' }, { key: 'slides', label: 'Guia (blocos)' }, { key: 'html', label: 'Material completo' },
+const FORMATOS_BRINDE: { key: 'one_pager' | 'slides' | 'html'; label: string; descricao: string }[] = [
+  { key: 'one_pager', label: 'One-pager', descricao: '1 folha, 3 seções bem curtas — pra quem quer o resumo rápido' },
+  { key: 'slides', label: 'Guia em blocos', descricao: '6–8 blocos curtos e escaneáveis, tipo checklist passo a passo' },
+  { key: 'html', label: 'Material completo', descricao: '4–6 seções com mais profundidade, tipo mini-ebook' },
 ]
+const FORMATO_BRINDE_LABEL: Record<string, string> = {
+  one_pager: 'One-pager', slides: 'Guia em blocos', html: 'Material completo', manual: 'PDF próprio',
+}
+function fmtData(iso?: string | null): string {
+  if (!iso) return ''
+  return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+}
 
-function BrindeDownloads({ id, estilo, label }: { id: string; estilo: 'instagram' | 'site'; label: string }) {
+function BrindeCard({ brinde, onChange }: { brinde: Brinde; onChange: () => void }) {
   const [copiado, setCopiado] = useState(false)
+  const publicar = useMutation({ mutationFn: () => instagramApi.publicarBrinde(brinde.id), onSuccess: onChange })
+  const ocultar = useMutation({ mutationFn: () => instagramApi.ocultarBrinde(brinde.id), onSuccess: onChange })
+  const excluir = useMutation({ mutationFn: () => instagramApi.excluirBrinde(brinde.id), onSuccess: onChange })
+  const semHtml = brinde.formato === 'manual'
+
   return (
-    <div className={s.brindeRow}>
-      <span className={s.brindeTitulo}>{label}:</span>
-      <a className={s.driveLink} href={brindeUrl(id, 'view', estilo)} target="_blank" rel="noreferrer"><FileText size={13} /> Ver</a>
-      <a className={s.driveLink} href={brindeUrl(id, 'pdf', estilo)} target="_blank" rel="noreferrer"><Download size={13} /> PDF</a>
-      <a className={s.driveLink} href={brindeUrl(id, 'html', estilo)} target="_blank" rel="noreferrer"><Download size={13} /> HTML</a>
-      <button className={s.driveLink} onClick={() => { navigator.clipboard?.writeText(brindeUrl(id, 'view', estilo)); setCopiado(true); setTimeout(() => setCopiado(false), 2000) }}>
-        <Link2 size={13} /> {copiado ? 'Copiado!' : 'Link'}
-      </button>
+    <div className={`${s.brindeCard} ${brinde.publicado_no_site ? s.brindeCardAtivo : ''}`}>
+      <div className={s.brindeCardHead}>
+        <span className={s.brindeCardFormato}>{FORMATO_BRINDE_LABEL[brinde.formato] ?? brinde.formato}</span>
+        <span className={s.brindeCardData}>gerado em {fmtData(brinde.criado_em)}</span>
+      </div>
+      <div className={s.brindeCardTitulo}>{brinde.titulo}</div>
+      {brinde.publicado_no_site && (
+        <div className={s.pubBadgeSite}><Globe size={12} /> No site desde {fmtData(brinde.publicado_em)}</div>
+      )}
+      <div className={s.brindeRow}>
+        {!semHtml && <a className={s.driveLink} href={brindeUrl(brinde.id, 'view')} target="_blank" rel="noreferrer"><Eye size={13} /> Ver</a>}
+        <a className={s.driveLink} href={brindeUrl(brinde.id, 'pdf')} target="_blank" rel="noreferrer"><Download size={13} /> PDF</a>
+        {!semHtml && <a className={s.driveLink} href={brindeUrl(brinde.id, 'html')} target="_blank" rel="noreferrer"><Download size={13} /> HTML</a>}
+        <button className={s.driveLink} onClick={() => { navigator.clipboard?.writeText(brindeUrl(brinde.id, 'view')); setCopiado(true); setTimeout(() => setCopiado(false), 2000) }}>
+          <Link2 size={13} /> {copiado ? 'Copiado!' : 'Link'}
+        </button>
+        {brinde.drive_link && <a className={s.driveLink} href={brinde.drive_link} target="_blank" rel="noreferrer"><FolderOpen size={13} /> Drive</a>}
+        {brinde.publicado_no_site ? (
+          <button className={s.driveLink} disabled={ocultar.isPending} onClick={() => ocultar.mutate()}><EyeOff size={13} /> Ocultar do site</button>
+        ) : (
+          <button className={`${s.driveLink} ${s.btnPublicarSite}`} disabled={publicar.isPending} onClick={() => publicar.mutate()}><Globe size={13} /> Publicar no site</button>
+        )}
+        <button className={s.driveLink} title="Excluir esta versão" disabled={excluir.isPending}
+          onClick={() => { if (confirm('Excluir este brinde? Não pode ser desfeito.')) excluir.mutate() }}>
+          <Trash2 size={13} />
+        </button>
+      </div>
     </div>
   )
 }
 
 function BrindeSection({ sug }: { sug: Sugestao }) {
   const qc = useQueryClient()
-  const invalidate = () => qc.invalidateQueries({ queryKey: ['instagram-sugestoes'] })
+  const { data: brindes = [] } = useQuery({
+    queryKey: ['instagram-brindes', sug.id], queryFn: () => instagramApi.listarBrindesDoPost(sug.id),
+  })
+  const invalidateBrindes = () => qc.invalidateQueries({ queryKey: ['instagram-brindes', sug.id] })
   const [kw, setKw] = useState(sug.brinde_palavra_chave ?? '')
-  const [formato, setFormato] = useState<'one_pager' | 'slides' | 'html'>((sug.brinde_formato as never) || 'one_pager')
+  const [formato, setFormato] = useState<'one_pager' | 'slides' | 'html'>('one_pager')
   const fileRef = useRef<HTMLInputElement>(null)
+  const formatoInfo = FORMATOS_BRINDE.find((f) => f.key === formato)
 
-  const salvarKw = useMutation({ mutationFn: () => instagramApi.brindeKeyword(sug.id, kw.trim()), onSuccess: invalidate })
+  const salvarKw = useMutation({
+    mutationFn: () => instagramApi.brindeKeyword(sug.id, kw.trim()),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['instagram-sugestoes'] }),
+  })
   const gerar = useMutation({
-    mutationFn: () => instagramApi.brindeGerar(sug.id, formato, 'site'),
-    onSuccess: invalidate,
+    mutationFn: () => instagramApi.brindeGerar(sug.id, formato),
+    onSuccess: invalidateBrindes,
     onError: (e: unknown) => alert((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Falha ao gerar brinde.'),
   })
   const upload = useMutation({
     mutationFn: (f: File) => instagramApi.brindeUpload(sug.id, f),
-    onSuccess: invalidate,
+    onSuccess: invalidateBrindes,
     onError: (e: unknown) => alert((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Falha no upload.'),
   })
 
@@ -83,16 +125,18 @@ function BrindeSection({ sug }: { sug: Sugestao }) {
           {FORMATOS_BRINDE.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
         </select>
         <button className={s.btn} disabled={gerar.isPending} onClick={() => gerar.mutate()}>
-          <Sparkles size={14} /> {gerar.isPending ? 'Gerando…' : sug.tem_brinde_site ? 'Regerar brinde' : 'Gerar brinde'}
+          <Sparkles size={14} /> {gerar.isPending ? 'Gerando…' : 'Gerar brinde'}
         </button>
         <input ref={fileRef} type="file" accept="application/pdf" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate(f) }} />
         <button className={s.btn} disabled={upload.isPending} onClick={() => fileRef.current?.click()}>
           <Upload size={14} /> {upload.isPending ? 'Subindo…' : 'Subir PDF'}
         </button>
       </div>
-      {sug.tem_brinde_site && <BrindeDownloads id={sug.id} estilo="site" label="Brinde" />}
-      {sug.brinde_drive_link && (
-        <a className={s.driveLink} href={sug.brinde_drive_link} target="_blank" rel="noreferrer"><FolderOpen size={13} /> PDF no Drive</a>
+      {formatoInfo && <div className={s.brindeHint} style={{ marginTop: -4, marginBottom: 8 }}>{formatoInfo.descricao}</div>}
+      {brindes.length > 0 && (
+        <div className={s.brindeLista}>
+          {brindes.map((b) => <BrindeCard key={b.id} brinde={b} onChange={invalidateBrindes} />)}
+        </div>
       )}
     </div>
   )
@@ -176,7 +220,7 @@ function SugestaoCard({ sug }: { sug: Sugestao }) {
           <div className={s.compactBody}>
             <div className={s.cardTitle}>{sug.titulo}</div>
             <div className={s.metaRow}>
-              {sug.status === 'publicado' && <span className={s.pubBadge}>✓ Publicado</span>}
+              {sug.status === 'publicado' && <span className={s.pubBadge}>✓ Publicado{sug.publicado_em ? ` em ${fmtData(sug.publicado_em)}` : ''}</span>}
               {sug.data_sugerida && <span className={s.chip}>{new Date(sug.data_sugerida + 'T12:00:00').toLocaleDateString('pt-BR')}</span>}
               {sug.drive_link && <a className={s.driveLink} href={sug.drive_link} target="_blank" rel="noreferrer"><FolderOpen size={13} /> Drive</a>}
             </div>
@@ -266,7 +310,7 @@ function SugestaoCard({ sug }: { sug: Sugestao }) {
         <BrindeSection sug={sug} />
         <VideoSection sug={sug} />
 
-        {sug.status === 'publicado' && <div className={s.pubBadge}>✓ Publicado</div>}
+        {sug.status === 'publicado' && <div className={s.pubBadge}>✓ Publicado{sug.publicado_em ? ` em ${fmtData(sug.publicado_em)}` : ''}</div>}
         {sug.enviado_assessoria_em && sug.status !== 'publicado' && (
           <div className={s.sentBadge}>✓ Enviado à assessoria em {new Date(sug.enviado_assessoria_em).toLocaleDateString('pt-BR')}</div>
         )}
@@ -304,7 +348,7 @@ function EmailsConfig() {
 }
 
 // ─────────────────── Página ───────────────────
-type Aba = 'sugeridas' | 'agenda' | 'rejeitadas'
+type Aba = 'sugeridas' | 'agenda' | 'publicados' | 'rejeitadas'
 
 export default function InstagramPage() {
   const qc = useQueryClient()
@@ -346,10 +390,11 @@ export default function InstagramPage() {
   })
 
   const grupos = useMemo(() => {
-    const g: Record<Aba, Sugestao[]> = { sugeridas: [], agenda: [], rejeitadas: [] }
+    const g: Record<Aba, Sugestao[]> = { sugeridas: [], agenda: [], publicados: [], rejeitadas: [] }
     for (const su of sugestoes) {
       if (su.status === 'sugerido') g.sugeridas.push(su)
       else if (su.status === 'rejeitado') g.rejeitadas.push(su)
+      else if (su.status === 'publicado') g.publicados.push(su)
       else g.agenda.push(su)
     }
     return g
@@ -357,9 +402,9 @@ export default function InstagramPage() {
 
   const meses = useMemo(() => {
     const set = new Set<string>()
-    for (const su of grupos.agenda) { const k = mesKey(su); if (k) set.add(k) }
+    for (const su of [...grupos.agenda, ...grupos.publicados]) { const k = mesKey(su); if (k) set.add(k) }
     return [...set].sort().reverse()
-  }, [grupos.agenda])
+  }, [grupos.agenda, grupos.publicados])
 
   const dicaFormato = useMemo(() => {
     const agendados = [...grupos.agenda].filter((x) => x.data_sugerida).sort((a, b) => (b.data_sugerida! < a.data_sugerida! ? -1 : 1))
@@ -369,12 +414,13 @@ export default function InstagramPage() {
   }, [grupos.agenda])
 
   let lista = grupos[aba]
-  if (aba === 'agenda' && mesFiltro !== 'todos') lista = lista.filter((su) => mesKey(su) === mesFiltro)
+  if ((aba === 'agenda' || aba === 'publicados') && mesFiltro !== 'todos') lista = lista.filter((su) => mesKey(su) === mesFiltro)
 
   return (
     <div>
       <div className={page.pageHeader}>
         <h1 className={page.pageTitle}><Camera size={22} style={{ verticalAlign: '-4px', marginRight: 8 }} />Instagram · @dr.lucasjudice</h1>
+        <Link to="/instagram/brindes" className={s.centralLink}><Globe size={14} /> Central de materiais (brindes)</Link>
         {custos && (
           <div className={s.gastoBox} title="Gasto de IA (geração + ajustes)">
             <span className={s.gastoMes}>Gasto do mês: <b>${custos.mes_atual_usd.toFixed(2)}</b></span>
@@ -413,16 +459,16 @@ export default function InstagramPage() {
       {dicaFormato && <div className={s.dica}><Lightbulb size={18} /><span>{dicaFormato}</span></div>}
 
       <div className={s.tabs}>
-        {([['sugeridas', 'Sugestões'], ['agenda', 'Aprovados / Agenda'], ['rejeitadas', 'Rejeitados']] as [Aba, string][]).map(([key, label]) => (
+        {([['sugeridas', 'Sugestões'], ['agenda', 'Aprovados / Agenda'], ['publicados', 'Publicados'], ['rejeitadas', 'Rejeitados']] as [Aba, string][]).map(([key, label]) => (
           <button key={key} className={`${s.tab} ${aba === key ? s.tabActive : ''}`} onClick={() => setAba(key)}>
             {label}<span className={s.tabCount}>{grupos[key].length}</span>
           </button>
         ))}
       </div>
 
-      {aba === 'agenda' && meses.length > 0 && (
+      {(aba === 'agenda' || aba === 'publicados') && meses.length > 0 && (
         <div className={s.filterRow}>
-          <span className={s.configLabel}>Mês de aprovação:</span>
+          <span className={s.configLabel}>Mês:</span>
           <select className={s.dateInput} value={mesFiltro} onChange={(e) => setMesFiltro(e.target.value)}>
             <option value="todos">Todos</option>
             {meses.map((m) => <option key={m} value={m}>{mesLabel(m)}</option>)}

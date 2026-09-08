@@ -46,6 +46,7 @@ export interface Sugestao {
   status: StatusSugestao
   data_sugerida?: string | null
   aprovado_em?: string | null
+  publicado_em?: string | null
   drive_link?: string | null
   enviado_assessoria_em?: string | null
   brinde_palavra_chave?: string | null
@@ -90,6 +91,22 @@ export interface EnviarAssessoriaResponse {
 
 export interface InstagramConfig {
   assessoria_emails: string
+}
+
+export type BrindeFormato = 'one_pager' | 'slides' | 'html' | 'manual'
+
+export interface Brinde {
+  id: string
+  sugestao_id: string | null
+  formato: BrindeFormato
+  titulo: string
+  drive_link?: string | null
+  publicado_no_site: boolean
+  publicado_em?: string | null
+  exemplo: boolean
+  custo_usd: number
+  criado_em: string
+  sugestao_titulo?: string | null
 }
 
 export const instagramApi = {
@@ -142,14 +159,29 @@ export const instagramApi = {
   brindeKeyword: (id: string, palavra_chave: string) =>
     api.patch<Sugestao>(`/instagram/sugestoes/${id}/brinde/palavra-chave`, { palavra_chave }).then((r) => r.data),
 
-  brindeGerar: (id: string, formato: 'one_pager' | 'slides' | 'html', estilo: 'instagram' | 'site' = 'site') =>
-    api.post<Sugestao>(`/instagram/sugestoes/${id}/brinde/gerar`, { formato, estilo }, { timeout: 180000 }).then((r) => r.data),
+  brindeGerar: (id: string, formato: 'one_pager' | 'slides' | 'html') =>
+    api.post<Brinde>(`/instagram/sugestoes/${id}/brinde/gerar`, { formato, estilo: 'site' }, { timeout: 180000 }).then((r) => r.data),
 
   brindeUpload: (id: string, file: File) => {
     const fd = new FormData()
     fd.append('file', file)
-    return api.post<Sugestao>(`/instagram/sugestoes/${id}/brinde/upload`, fd, { timeout: 120000 }).then((r) => r.data)
+    return api.post<Brinde>(`/instagram/sugestoes/${id}/brinde/upload`, fd, { timeout: 120000 }).then((r) => r.data)
   },
+
+  listarBrindesDoPost: (id: string) => api.get<Brinde[]>(`/instagram/sugestoes/${id}/brindes`).then((r) => r.data),
+
+  centralDeBrindes: (apenasPublicados = false) =>
+    api.get<Brinde[]>('/instagram/brindes', { params: apenasPublicados ? { apenas_publicados: true } : undefined }).then((r) => r.data),
+
+  publicarBrinde: (brindeId: string) => api.patch<Brinde>(`/instagram/brindes/${brindeId}/publicar`).then((r) => r.data),
+
+  ocultarBrinde: (brindeId: string) => api.patch<Brinde>(`/instagram/brindes/${brindeId}/ocultar`).then((r) => r.data),
+
+  excluirBrinde: (brindeId: string) => api.delete(`/instagram/brindes/${brindeId}`).then(() => undefined),
+
+  exemplosBrinde: () => api.get<Brinde[]>('/instagram/brindes/exemplos').then((r) => r.data),
+
+  gerarExemplosBrinde: () => api.post<Brinde[]>('/instagram/brindes/exemplos/gerar', undefined, { timeout: 180000 }).then((r) => r.data),
 
   videoCopy: (id: string, file: File) => {
     const fd = new FormData()
@@ -164,10 +196,9 @@ export const instagramApi = {
   },
 }
 
-/** URL pública (compartilhável) do brinde. kind: 'view'|'html'|'pdf'; estilo: 'instagram'|'site'. */
-export function brindeUrl(id: string, kind: 'view' | 'html' | 'pdf' = 'view', estilo: 'instagram' | 'site' = 'site'): string {
-  const path = estilo === 'site' ? 'brinde-site' : 'brinde'
-  const base = (typeof window !== 'undefined' ? window.location.origin : '') + '/api/publico/instagram/' + id + '/' + path
+/** URL pública (compartilhável) de UM brinde específico, por id. kind: 'view'|'html'|'pdf'. */
+export function brindeUrl(brindeId: string, kind: 'view' | 'html' | 'pdf' = 'view'): string {
+  const base = (typeof window !== 'undefined' ? window.location.origin : '') + '/api/publico/instagram/brinde/' + brindeId
   return kind === 'view' ? base : `${base}.${kind}`
 }
 
