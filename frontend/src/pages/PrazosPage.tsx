@@ -273,16 +273,59 @@ export default function PrazosPage() {
   // comunicação e cada um gera seu prazo. Não unificamos nada automaticamente —
   // só sinalizamos, porque dois prazos no mesmo processo em dias próximos também
   // podem ser publicações realmente distintas (ex.: despacho + decisão).
+  //
+  // A primeira versão exigia data_limite IDÊNTICA e falhava justo nos piores
+  // casos: quando uma das fontes está com a data errada, os limites divergem e
+  // o par passava batido — que é exatamente quando avisar mais importa.
+  // Agora o critério é o mesmo PROCESSO com publicações próximas: a mesma
+  // comunicação chega às duas fontes com 0–3 dias de diferença (a do DJEN sai
+  // na disponibilização, a do Recorte no dia útil seguinte, que atravessa fim
+  // de semana). 5 dias dá folga para feriado emendado.
+  const JANELA_DUPLICATA_DIAS = 5
+  const diasEntre = (a?: string, b?: string) => {
+    if (!a || !b) return Infinity
+    return Math.abs(
+      (new Date(a + 'T00:00:00').getTime() - new Date(b + 'T00:00:00').getTime())
+      / (1000 * 60 * 60 * 24),
+    )
+  }
+  const pendentes = prazos.filter((p) => p.status === 'pendente')
+  const paresDuplicata = new Map<string, string>()  // id do prazo -> id do grupo
+  for (const p of pendentes) {
+    for (const o of pendentes) {
+      if (o.id === p.id || o.processo_id !== p.processo_id) continue
+      const proximos =
+        diasEntre(p.data_publicacao, o.data_publicacao) <= JANELA_DUPLICATA_DIAS ||
+        diasEntre(p.data_limite, o.data_limite) <= JANELA_DUPLICATA_DIAS
+      if (!proximos) continue
+      // Grupo identificado pelo menor id do par, para os dois cards caírem no
+      // mesmo grupo independentemente da ordem em que foram varridos.
+      const grupo = paresDuplicata.get(o.id) ?? (p.id < o.id ? p.id : o.id)
+      paresDuplicata.set(p.id, grupo)
+      paresDuplicata.set(o.id, grupo)
+    }
+  }
+  const ehPossivelDuplicata = (p: typeof prazos[number]) => paresDuplicata.has(p.id)
   const chaveDuplicata = (p: typeof prazos[number]) =>
-    `${p.processo_id}|${p.data_limite ?? ''}`
-  const duplicados = new Set(
-    prazos
-      .filter((p) => p.status === 'pendente' && p.data_limite)
-      .map(chaveDuplicata)
-      .filter((k, i, arr) => arr.indexOf(k) !== i),
-  )
-  const ehPossivelDuplicata = (p: typeof prazos[number]) =>
-    p.status === 'pendente' && !!p.data_limite && duplicados.has(chaveDuplicata(p))
+    paresDuplicata.get(p.id) ?? `${p.processo_id}|${p.data_limite ?? ''}`
+
+  // Data de ordenação de cada grupo = a menor data limite entre seus membros,
+  // para o grupo inteiro aterrissar junto na posição do mais urgente.
+  // Dois mapas separados de propósito: o id do grupo É o id de um dos prazos,
+  // então reaproveitar um único mapa misturaria as duas chaves.
+  const dataDoGrupo = new Map<string, string>()
+  for (const p of pendentes) {
+    const grupo = paresDuplicata.get(p.id)
+    if (!grupo || !p.data_limite) continue
+    const atual = dataDoGrupo.get(grupo)
+    if (!atual || p.data_limite < atual) dataDoGrupo.set(grupo, p.data_limite)
+  }
+  const ordemDuplicata = new Map<string, string>()
+  for (const p of pendentes) {
+    const grupo = paresDuplicata.get(p.id)
+    const data = grupo ? dataDoGrupo.get(grupo) : undefined
+    if (data) ordemDuplicata.set(p.id, data)
+  }
 
   const prazosVisiveis = prazos
     .filter(p => {
@@ -293,17 +336,22 @@ export default function PrazosPage() {
       return p.status === tabStatus
     })
     .sort((a, b) => {
-      // Vencido primeiro (é o que precisa de decisão hoje), depois por data
-      // limite. Duplicatas caem juntas naturalmente porque a chave de duplicata
-      // é processo+data_limite: ordenar por data e desempatar por processo põe
-      // as pendentes lado a lado, em vez de espalhadas pela lista.
       if (tabStatus === 'ativo') {
+        // Vencido primeiro: é o que precisa de decisão hoje.
         const v = Number(estaVencido(b)) - Number(estaVencido(a))
         if (v !== 0) return v
       }
-      const da = a.data_limite ?? '9999-12-31'
-      const db = b.data_limite ?? '9999-12-31'
+      // Os membros de um grupo de duplicata ordenam pela MENOR data limite do
+      // grupo, e não pela própria. Sem isso, um par com limites diferentes
+      // (18/09 e 21/09 — o caso que motivou a mudança) voltaria a ficar
+      // separado por todos os prazos que vencem no meio.
+      const da = ordemDuplicata.get(a.id) ?? a.data_limite ?? '9999-12-31'
+      const db = ordemDuplicata.get(b.id) ?? b.data_limite ?? '9999-12-31'
       if (da !== db) return da < db ? -1 : 1
+      // Dentro do grupo, mantém a ordem cronológica real.
+      const la = a.data_limite ?? '9999-12-31'
+      const lb = b.data_limite ?? '9999-12-31'
+      if (la !== lb) return la < lb ? -1 : 1
       return a.processo_id < b.processo_id ? -1 : a.processo_id > b.processo_id ? 1 : 0
     })
 
