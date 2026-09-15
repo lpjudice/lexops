@@ -27,6 +27,8 @@ export interface Parcela {
   status: StatusParcela
   data_pagamento?: string | null
   observacao?: string
+  marcado_pago_em?: string | null
+  marcado_por?: string | null
   ultimo_lembrete_em?: string | null
 }
 
@@ -146,7 +148,7 @@ export const financeiroApi = {
     api.delete(`/financeiro/parcelas/${parcelaId}`),
 
   pagarParcela: (parcelaId: string, data: { data_recebimento?: string; forma_pagamento?: FormaPagamento; valor?: number; observacao?: string }) =>
-    api.post<Parcela>(`/financeiro/parcelas/${parcelaId}/pagar`, data).then((r) => r.data),
+    api.post<Parcela & { recebimento_id: string }>(`/financeiro/parcelas/${parcelaId}/pagar`, data).then((r) => r.data),
 
   reabrirParcela: (parcelaId: string) =>
     api.post<Parcela>(`/financeiro/parcelas/${parcelaId}/reabrir`).then((r) => r.data),

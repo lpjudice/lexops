@@ -152,6 +152,10 @@ class Parcela(Base):
     )
     data_pagamento: Mapped[date | None] = mapped_column(Date, nullable=True)
     observacao: Mapped[str | None] = mapped_column(String(500))
+    # Auditoria de quando/quem marcou como paga (timestamp real da ação, distinto de
+    # data_pagamento que é a data informada do recebimento).
+    marcado_pago_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    marcado_por: Mapped[str | None] = mapped_column(String(150), nullable=True)
     # Controle de cobrança: última vez que o lembrete desta parcela saiu.
     ultimo_lembrete_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Estágio de lembrete já enviado: 0=nenhum, 1=D-15, 2=D-7, 3=D-2, 4=pós-vencimento (D+5).

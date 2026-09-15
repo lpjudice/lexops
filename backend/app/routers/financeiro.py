@@ -1,6 +1,6 @@
 import uuid
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -10,9 +10,10 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.cliente import Cliente
 from app.models.financeiro import Honorario, Parcela, Recebimento
+from app.models.usuario import Usuario
 from app.schemas.financeiro import (
     HonorarioCreate, HonorarioOut, HonorarioUpdate,
-    ParcelaInput, ParcelaOut, ParcelaPagar, ParcelaUpdate,
+    ParcelaInput, ParcelaOut, ParcelaPagar, ParcelaPagarResultado, ParcelaUpdate,
     RecebimentoCreate, RecebimentoOut,
     ResumoCliente, ResumoFinanceiro, ResumoMensal,
 )
@@ -304,9 +305,18 @@ def remover_parcela(parcela_id: uuid.UUID, db: Session = Depends(get_db)):
     db.commit()
 
 
-@router.post("/parcelas/{parcela_id}/pagar", response_model=ParcelaOut)
-def pagar_parcela(parcela_id: uuid.UUID, data: ParcelaPagar, db: Session = Depends(get_db)):
-    """Marca a parcela como paga: cria um Recebimento vinculado (a NF é emitida por recebimento)."""
+@router.post("/parcelas/{parcela_id}/pagar", response_model=ParcelaPagarResultado)
+def pagar_parcela(
+    parcela_id: uuid.UUID, data: ParcelaPagar, db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """
+    Marca a parcela como paga: cria um Recebimento vinculado (a NF é emitida por
+    recebimento). Registra quem confirmou e quando (timestamp real da ação, distinto
+    da data de recebimento informada) — `observacao` guarda a fonte da confirmação
+    (ex.: extrato, cliente avisou por WhatsApp); o comprovante é anexado depois via
+    POST /recebimentos/{id}/comprovante, usando o recebimento_id retornado aqui.
+    """
     p = db.query(Parcela).filter(Parcela.id == parcela_id).first()
     if not p:
         raise HTTPException(status_code=404, detail="Parcela não encontrada")
@@ -321,6 +331,8 @@ def pagar_parcela(parcela_id: uuid.UUID, data: ParcelaPagar, db: Session = Depen
     db.add(rec)
     p.status = "pago"
     p.data_pagamento = rec.data_recebimento
+    p.marcado_pago_em = datetime.now(timezone.utc)
+    p.marcado_por = usuario.nome
     db.flush()
     h = db.query(Honorario).filter(Honorario.id == p.honorario_id).first()
     if h:
@@ -328,6 +340,7 @@ def pagar_parcela(parcela_id: uuid.UUID, data: ParcelaPagar, db: Session = Depen
         _recalc_status_honorario(h)
     db.commit()
     db.refresh(p)
+    p.recebimento_id = rec.id  # atributo transitório, só para a resposta
     return p
 
 
@@ -341,6 +354,8 @@ def reabrir_parcela(parcela_id: uuid.UUID, db: Session = Depends(get_db)):
         db.delete(rec)
     p.status = "pendente"
     p.data_pagamento = None
+    p.marcado_pago_em = None
+    p.marcado_por = None
     db.flush()
     h = db.query(Honorario).filter(Honorario.id == p.honorario_id).first()
     if h:

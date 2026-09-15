@@ -10,6 +10,7 @@ import { contratosApi } from '../api/contratos'
 import CurrencyInput from '../components/CurrencyInput'
 import ComboBox from '../components/ComboBox'
 import type { ComboOption } from '../components/ComboBox'
+import PagarParcelaModal from '../components/PagarParcelaModal'
 import styles from './Page.module.css'
 import cs from './FinanceiroPage.module.css'
 
@@ -65,6 +66,7 @@ export default function FinanceiroPage() {
   const [parcelasEdit, setParcelasEdit] = useState<ParcelaInput[]>([])
   // Edição inline de parcelas no card (id → {valor, data})
   const [parcEdits, setParcEdits] = useState<Record<string, { valor: number; data_vencimento: string }>>({})
+  const [pagarModal, setPagarModal] = useState<{ id: string; numero: number; valor: number } | null>(null)
 
   const { data: honorarios = [], isLoading } = useQuery({
     queryKey: ['honorarios', filtroStatus],
@@ -165,11 +167,6 @@ export default function FinanceiroPage() {
     qc.invalidateQueries({ queryKey: ['honorarios'] })
     qc.invalidateQueries({ queryKey: ['financeiro-resumo'] })
   }
-  const pagarParcela = useMutation({
-    mutationFn: ({ id, data_recebimento, forma }: { id: string; data_recebimento: string; forma: FormaPagamento }) =>
-      financeiroApi.pagarParcela(id, { data_recebimento, forma_pagamento: forma }),
-    onSuccess: invalidarFin,
-  })
   const reabrirParcela = useMutation({
     mutationFn: (id: string) => financeiroApi.reabrirParcela(id),
     onSuccess: invalidarFin,
@@ -1105,6 +1102,11 @@ export default function FinanceiroPage() {
                                           <input type="date" className={styles.input} style={{ padding: '3px 6px' }}
                                             value={ed?.data_vencimento ?? p.data_vencimento}
                                             onChange={(e) => setParcEdits({ ...parcEdits, [p.id]: { valor: ed?.valor ?? p.valor, data_vencimento: e.target.value } })} />
+                                        ) : p.status === 'pago' && p.marcado_pago_em ? (
+                                          <span title={p.marcado_por ? `Marcado como pago por ${p.marcado_por}` : undefined}>
+                                            Pago em {fmtDataHora(p.marcado_pago_em)}
+                                            {p.marcado_por && <><br /><span style={{ fontSize: 11, color: '#6b7280' }}>por {p.marcado_por}</span></>}
+                                          </span>
                                         ) : fmtData(p.data_vencimento)}
                                       </td>
                                       <td className={cs.tdValor}>
@@ -1131,7 +1133,7 @@ export default function FinanceiroPage() {
                                             )}
                                             <button className={styles.btnPrimary} style={{ padding: '3px 10px', fontSize: 12 }}
                                               title="Marcar parcela como paga (gera recebimento)"
-                                              onClick={() => pagarParcela.mutate({ id: p.id, data_recebimento: new Date().toISOString().slice(0, 10), forma: 'pix' })}>
+                                              onClick={() => setPagarModal({ id: p.id, numero: p.numero, valor: ed?.valor ?? p.valor })}>
                                               ✓ Pagar
                                             </button>
                                             <button className={styles.btnDanger}
@@ -1325,6 +1327,16 @@ export default function FinanceiroPage() {
             </button>
           </div>
         </div>
+      )}
+
+      {pagarModal && (
+        <PagarParcelaModal
+          parcelaId={pagarModal.id}
+          numero={pagarModal.numero}
+          valor={pagarModal.valor}
+          onClose={() => setPagarModal(null)}
+          onConfirmed={invalidarFin}
+        />
       )}
     </div>
   )

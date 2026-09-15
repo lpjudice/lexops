@@ -65,9 +65,17 @@ class ParcelaOut(BaseModel):
     status: StatusParcela
     data_pagamento: date | None
     observacao: str | None
+    marcado_pago_em: datetime | None = None
+    marcado_por: str | None = None
     ultimo_lembrete_em: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+
+class ParcelaPagarResultado(ParcelaOut):
+    """Resposta de POST /parcelas/{id}/pagar — inclui o id do recebimento criado,
+    para o frontend poder anexar o comprovante na mesma ação."""
+    recebimento_id: uuid.UUID
 
 
 class HonorarioCreate(BaseModel):
