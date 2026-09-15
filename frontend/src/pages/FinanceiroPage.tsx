@@ -149,6 +149,18 @@ export default function FinanceiroPage() {
     setParcelasEdit(itens)
   }
 
+  // Muda só o 1º vencimento SEM mexer nos valores — preserva qualquer split manual
+  // já digitado (2500+5000+2500 etc.), só realinha as datas das parcelas existentes.
+  const reagendarDatas = (primeiro: string) => {
+    if (!primeiro || parcelasEdit.length === 0) return
+    const [y, m, d] = primeiro.split('-').map(Number)
+    setParcelasEdit(parcelasEdit.map((p, i) => {
+      const dt = new Date(y, (m - 1) + i, d)
+      const iso = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
+      return { ...p, data_vencimento: iso }
+    }))
+  }
+
   const invalidarFin = () => {
     qc.invalidateQueries({ queryKey: ['honorarios'] })
     qc.invalidateQueries({ queryKey: ['financeiro-resumo'] })
@@ -632,10 +644,17 @@ export default function FinanceiroPage() {
               <span style={{ fontSize: 12, color: '#6b7280' }}>parcela(s), 1º venc.:</span>
               <input type="date" className={styles.input} style={{ width: 170 }}
                 value={parc1Venc}
-                onChange={(e) => { setParc1Venc(e.target.value); gerarParcelas(parcN, e.target.value, form.valor_total) }} />
+                onChange={(e) => {
+                  setParc1Venc(e.target.value)
+                  // Se já existe cronograma (ex.: valores customizados manualmente), só
+                  // realinha as datas — não mexe nos valores. Senão, gera do zero.
+                  if (parcelasEdit.length > 0) reagendarDatas(e.target.value)
+                  else gerarParcelas(parcN, e.target.value, form.valor_total)
+                }} />
               {parcN >= 2 && (
                 <button type="button" className={styles.btnTable}
-                  onClick={() => gerarParcelas(parcN, parc1Venc, form.valor_total)}>↻ Recalcular</button>
+                  title="Redivide o valor total igualmente entre as parcelas — apaga qualquer valor customizado manualmente"
+                  onClick={() => { if (parcelasEdit.length === 0 || confirm('Isso substitui os valores atuais por uma divisão igual entre as parcelas. Continuar?')) gerarParcelas(parcN, parc1Venc, form.valor_total) }}>↻ Recalcular</button>
               )}
             </div>
             {parcN >= 2 && parcelasEdit.length > 0 && (

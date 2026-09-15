@@ -424,7 +424,10 @@ def _upsert_honorario_do_contrato(db: Session, contrato: Contrato, fin) -> None:
 
     existente = db.query(Honorario).filter(Honorario.contrato_id == contrato.id).first()
     if existente:
-        if valor:
+        # Se já há cronograma (parcelas), o valor_total é derivado dele — pode ter sido
+        # customizado manualmente (split não-prorata). Não deixa a releitura da IA
+        # sobrescrever com o total "cru" do contrato.
+        if valor and not existente.parcelas:
             existente.valor_total = valor
         if fin.valor_causa is not None:
             existente.valor_causa = fin.valor_causa
