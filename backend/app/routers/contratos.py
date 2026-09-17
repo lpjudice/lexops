@@ -9,7 +9,7 @@ from app.dependencies import get_current_user
 from app.models.contrato import Contrato, Signatario
 from app.schemas.contrato import (
     AplicarContratantesRequest, ContratoCreate, ContratoOut, ContratoUpdate,
-    GerarPdfRequest, SignatarioCreate, SignatarioOut,
+    GerarPdfRequest, GerarProcuracaoRequest, SignatarioCreate, SignatarioOut,
 )
 from app.services import clicksign
 
@@ -20,12 +20,18 @@ router = APIRouter(prefix="/contratos", tags=["contratos"],
                    dependencies=[Depends(get_current_user)])
 
 
+def _pasta_drive(tipo_documento: str) -> str:
+    """Nome da pasta no Drive (cliente e mestra) conforme o tipo de documento."""
+    return "Procurações" if tipo_documento == "procuracao" else "Contratos"
+
+
 def _duplicar_assinado_para_drive(db: Session, contrato: Contrato, pdf_bytes: bytes, nome_arquivo: str) -> tuple[str | None, str | None]:
     """
-    Sobe o PDF final assinado para a pasta do cliente (LexOps/{cliente}/Contratos) e para
-    a pasta mestra (LexOps/Contratos/{cliente}), que reúne todos os contratos finalizados
-    da plataforma. Retorna (link_cliente, link_master); qualquer um pode vir None se o
-    Drive não estiver conectado ou o upload falhar.
+    Sobe o PDF final assinado para a pasta do cliente (LexOps/{cliente}/Contratos ou
+    /Procurações) e para a pasta mestra correspondente (LexOps/Contratos/{cliente} ou
+    LexOps/Procurações/{cliente}), que reúne todos os documentos finalizados daquele tipo.
+    Retorna (link_cliente, link_master); qualquer um pode vir None se o Drive não estiver
+    conectado ou o upload falhar.
     """
     from app.models.cliente import Cliente
     from app.services.google_drive import upload_arquivo, upload_arquivo_raiz
@@ -34,14 +40,15 @@ def _duplicar_assinado_para_drive(db: Session, contrato: Contrato, pdf_bytes: by
     if not cliente:
         return None, None
 
+    pasta = _pasta_drive(contrato.tipo_documento)
     link_cliente = None
     link_master = None
     try:
-        link_cliente = upload_arquivo(pdf_bytes, nome_arquivo, cliente.nome, "Contratos")
+        link_cliente = upload_arquivo(pdf_bytes, nome_arquivo, cliente.nome, pasta)
     except Exception:
         pass
     try:
-        link_master = upload_arquivo_raiz(pdf_bytes, nome_arquivo, subpath=["Contratos", cliente.nome], mimetype="application/pdf")
+        link_master = upload_arquivo_raiz(pdf_bytes, nome_arquivo, subpath=[pasta, cliente.nome], mimetype="application/pdf")
     except Exception:
         pass
     return link_cliente, link_master
@@ -124,10 +131,11 @@ def criar_contrato(data: ContratoCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/pasta-mestra")
-def obter_pasta_mestra():
-    """Link da pasta mestra /Contratos na raiz do Drive (duplica todos os contratos finalizados)."""
+def obter_pasta_mestra(tipo_documento: str = "contrato"):
+    """Link da pasta mestra na raiz do Drive (duplica todos os documentos finalizados
+    daquele tipo — /Contratos ou /Procurações)."""
     from app.services.google_drive import get_folder_link_raiz
-    return {"link": get_folder_link_raiz(["Contratos"])}
+    return {"link": get_folder_link_raiz([_pasta_drive(tipo_documento)])}
 
 
 @router.get("/{contrato_id}", response_model=ContratoOut)
@@ -165,7 +173,7 @@ def deletar_contrato(contrato_id: uuid.UUID, db: Session = Depends(get_db)):
             for arq in c.arquivos or []:
                 filename = arq.get("filename")
                 if filename:
-                    deletar_arquivo(cliente.nome, "Contratos", filename)
+                    deletar_arquivo(cliente.nome, _pasta_drive(c.tipo_documento), filename)
     except Exception:
         pass
     # Marcar honorários vinculados como órfãos para validação
@@ -207,7 +215,7 @@ async def upload_pdf(
             cliente = db.query(Cliente).filter(Cliente.id == c.cliente_id).first()
             if cliente:
                 from app.services.google_drive import upload_arquivo
-                drive_link = upload_arquivo(conteudo_bytes, arquivo.filename, cliente.nome, "Contratos")
+                drive_link = upload_arquivo(conteudo_bytes, arquivo.filename, cliente.nome, _pasta_drive(c.tipo_documento))
         except Exception:
             pass
         if drive_link:
@@ -245,7 +253,7 @@ def remover_arquivo(
                 from app.services.google_drive import deletar_arquivo
                 cliente = db.query(Cliente).filter(Cliente.id == c.cliente_id).first()
                 if cliente:
-                    deletar_arquivo(cliente.nome, "Contratos", filename)
+                    deletar_arquivo(cliente.nome, _pasta_drive(c.tipo_documento), filename)
             except Exception:
                 pass
     c.arquivos = nova_lista
@@ -712,6 +720,93 @@ async def gerar_pdf_contrato(
     except Exception:
         pass
 
+    return c
+
+
+# ── Geração de PDF da procuração ──────────────────────────────────────────────
+
+@router.post("/{contrato_id}/gerar-procuracao", response_model=ContratoOut)
+async def gerar_pdf_procuracao(
+    contrato_id: uuid.UUID,
+    body: GerarProcuracaoRequest,
+    db: Session = Depends(get_db),
+):
+    """Gera o PDF da procuração e o adiciona à lista de arquivos. Mesma infra de
+    upload/Drive do 'Gerar contrato', sem o lançamento automático no financeiro
+    (procuração não tem honorários)."""
+    from datetime import date as date_type
+    from app.services.procuracao_pdf import gerar_procuracao
+
+    c = db.query(Contrato).filter(Contrato.id == contrato_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Contrato não encontrado")
+
+    data_procuracao = None
+    if body.data_procuracao:
+        try:
+            data_procuracao = date_type.fromisoformat(body.data_procuracao)
+        except ValueError:
+            pass
+
+    pdf_bytes = gerar_procuracao(
+        outorgante_nome=body.outorgante_nome,
+        outorgante_qualificacao=body.outorgante_qualificacao,
+        outorgante_cpf_cnpj=body.outorgante_cpf_cnpj,
+        outorgante_endereco=body.outorgante_endereco,
+        outorgante_email=body.outorgante_email,
+        outorgados=[o.model_dump() for o in body.outorgados],
+        endereco_escritorio=body.endereco_escritorio,
+        finalidade=body.finalidade,
+        data_procuracao=data_procuracao,
+    )
+
+    nome_arquivo = f"Procuracao_{body.outorgante_nome.replace(' ', '_')}_{contrato_id.hex[:8]}.pdf"
+    destino = UPLOADS_DIR / nome_arquivo
+    destino.write_bytes(pdf_bytes)
+
+    drive_link = None
+    try:
+        from app.models.cliente import Cliente
+        cliente = db.query(Cliente).filter(Cliente.id == c.cliente_id).first()
+        if cliente:
+            from app.services.google_drive import upload_arquivo
+            drive_link = upload_arquivo(pdf_bytes, nome_arquivo, cliente.nome, _pasta_drive(c.tipo_documento))
+    except Exception:
+        pass
+
+    # Pré-preenchimento reverso (mesma lógica do contrato): preenche só campos vazios.
+    try:
+        from app.models.cliente import Cliente
+        cli = db.query(Cliente).filter(Cliente.id == c.cliente_id).first()
+        if cli:
+            mudou = False
+            novo_cpf = (body.outorgante_cpf_cnpj or "").strip()
+            if not cli.cpf_cnpj and novo_cpf:
+                ja_usado = db.query(Cliente).filter(
+                    Cliente.cpf_cnpj == novo_cpf, Cliente.id != cli.id
+                ).first()
+                if not ja_usado:
+                    cli.cpf_cnpj = novo_cpf
+                    mudou = True
+            novo_email = (body.outorgante_email or "").strip()
+            if not cli.email and novo_email:
+                cli.email = novo_email
+                mudou = True
+            novo_end = (body.outorgante_endereco or "").strip()
+            if not cli.endereco and novo_end:
+                cli.endereco = novo_end
+                mudou = True
+            if mudou:
+                db.commit()
+    except Exception:
+        db.rollback()
+
+    lista = list(c.arquivos or [])
+    lista.append({"filename": nome_arquivo, "path": str(destino), "clicksign_key": None, "drive_link": drive_link})
+    c.arquivos = lista
+    c.arquivo_path = str(destino)
+    db.commit()
+    db.refresh(c)
     return c
 
 

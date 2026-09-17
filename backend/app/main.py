@@ -1338,6 +1338,7 @@ def _run_migrations() -> None:
         conn.execute(text("ALTER TABLE honorarios ADD COLUMN IF NOT EXISTS ultimo_lembrete_em TIMESTAMPTZ"))
         conn.execute(text("ALTER TABLE parcelas ADD COLUMN IF NOT EXISTS marcado_pago_em TIMESTAMPTZ"))
         conn.execute(text("ALTER TABLE parcelas ADD COLUMN IF NOT EXISTS marcado_por VARCHAR(150)"))
+        conn.execute(text("ALTER TABLE contratos ADD COLUMN IF NOT EXISTS tipo_documento VARCHAR(20) NOT NULL DEFAULT 'contrato'"))
         conn.execute(text("ALTER TABLE informativos ADD COLUMN IF NOT EXISTS numero INTEGER"))
         conn.execute(text("ALTER TABLE informativos ADD COLUMN IF NOT EXISTS instrucoes_ia TEXT"))
         conn.execute(text("ALTER TABLE informativos ADD COLUMN IF NOT EXISTS rascunho_gerado_em TIMESTAMPTZ"))

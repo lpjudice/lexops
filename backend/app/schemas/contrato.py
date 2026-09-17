@@ -27,11 +27,15 @@ class SignatarioOut(SignatarioCreate):
     model_config = {"from_attributes": True}
 
 
+TipoDocumento = Literal["contrato", "procuracao"]
+
+
 class ContratoCreate(BaseModel):
     cliente_id: uuid.UUID
     processo_id: uuid.UUID | None = None
     titulo: str
     descricao: str | None = None
+    tipo_documento: TipoDocumento = "contrato"
 
 
 class ContratoUpdate(BaseModel):
@@ -63,6 +67,24 @@ class GerarPdfRequest(BaseModel):
     percentual_exito: str = "15%"
     percentual_exito_num: float | None = None  # % numérico para financeiro
     data_contrato: str = ""           # YYYY-MM-DD
+
+
+class OutorgadoInput(BaseModel):
+    nome: str = ""
+    oab: str = ""
+    cpf: str = ""
+
+
+class GerarProcuracaoRequest(BaseModel):
+    outorgante_nome: str
+    outorgante_qualificacao: str = ""
+    outorgante_cpf_cnpj: str = ""
+    outorgante_endereco: str = ""
+    outorgante_email: str = ""
+    outorgados: list[OutorgadoInput] = []
+    endereco_escritorio: str = ""
+    finalidade: str = ""
+    data_procuracao: str = ""         # YYYY-MM-DD
 
 
 # ── Leitura de contratantes por IA (upload) ──────────────────────────────────

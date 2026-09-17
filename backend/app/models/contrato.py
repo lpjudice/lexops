@@ -23,6 +23,9 @@ class Contrato(Base):
 
     titulo: Mapped[str] = mapped_column(String(255), nullable=False)
     descricao: Mapped[str | None] = mapped_column(Text)
+    # "contrato" (padrão) ou "procuracao" — mesma infra (ClickSign, e-mails,
+    # leitura por IA), só muda o gerador de PDF e a pasta do Drive.
+    tipo_documento: Mapped[str] = mapped_column(String(20), nullable=False, default="contrato", server_default="contrato")
     arquivo_path: Mapped[str | None] = mapped_column(String(500))  # path local do PDF original (legado)
     arquivo_assinado_path: Mapped[str | None] = mapped_column(String(500))  # PDF assinado
     # Lista de arquivos: [{"filename": str, "path": str, "clicksign_key": str|null}]

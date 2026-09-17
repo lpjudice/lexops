@@ -5,6 +5,7 @@ export type StatusContrato =
   | 'rascunho' | 'aguardando_assinatura' | 'parcialmente_assinado' | 'assinado' | 'cancelado'
 export type PapelSignatario = 'contratante' | 'contratado' | 'testemunha' | 'outro'
 export type StatusAssinatura = 'pendente' | 'assinado' | 'recusado'
+export type TipoDocumento = 'contrato' | 'procuracao'
 
 export interface Signatario {
   id: string
@@ -30,6 +31,7 @@ export interface Contrato {
   processo_id?: string
   titulo: string
   descricao?: string
+  tipo_documento: TipoDocumento
   arquivo_path?: string
   arquivo_assinado_path?: string
   arquivos: ContratoArquivo[]
@@ -66,6 +68,25 @@ export interface ContratoCreate {
   processo_id?: string
   titulo: string
   descricao?: string
+  tipo_documento?: TipoDocumento
+}
+
+export interface OutorgadoInput {
+  nome: string
+  oab?: string
+  cpf?: string
+}
+
+export interface GerarProcuracaoRequest {
+  outorgante_nome: string
+  outorgante_qualificacao?: string
+  outorgante_cpf_cnpj?: string
+  outorgante_endereco?: string
+  outorgante_email?: string
+  outorgados: OutorgadoInput[]
+  endereco_escritorio?: string
+  finalidade?: string
+  data_procuracao?: string
 }
 
 export interface SignatarioCreate {
@@ -108,6 +129,9 @@ export const contratosApi = {
 
   gerarPdf: (id: string, data: GerarPdfRequest) =>
     api.post<Contrato>(`/contratos/${id}/gerar-pdf`, data).then((r) => r.data),
+
+  gerarProcuracao: (id: string, data: GerarProcuracaoRequest) =>
+    api.post<Contrato>(`/contratos/${id}/gerar-procuracao`, data).then((r) => r.data),
 
   adicionarSignatario: (id: string, data: SignatarioCreate) =>
     api.post<Signatario>(`/contratos/${id}/signatarios`, data).then((r) => r.data),
@@ -163,8 +187,8 @@ export const contratosApi = {
     }
   },
 
-  pastaMestra: () =>
-    api.get<{ link: string | null }>('/contratos/pasta-mestra').then((r) => r.data),
+  pastaMestra: (tipoDocumento: TipoDocumento = 'contrato') =>
+    api.get<{ link: string | null }>('/contratos/pasta-mestra', { params: { tipo_documento: tipoDocumento } }).then((r) => r.data),
 }
 
 // ── Leitura de contratantes por IA ────────────────────────────────────────────

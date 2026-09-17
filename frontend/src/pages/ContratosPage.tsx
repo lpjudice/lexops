@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { contratosApi } from '../api/contratos'
-import type { ContratoCreate, SignatarioCreate, PapelSignatario, StatusContrato, GerarPdfRequest } from '../api/contratos'
+import type { ContratoCreate, SignatarioCreate, PapelSignatario, StatusContrato, GerarPdfRequest, TipoDocumento, GerarProcuracaoRequest, OutorgadoInput } from '../api/contratos'
 import { clientesApi } from '../api/clientes'
 import { processosApi } from '../api/processos'
 import ComboBox from '../components/ComboBox'
@@ -59,12 +59,20 @@ const OBJETOS_DISPONIVEIS = [
   { key: 'Personalizado', label: 'Personalizado (texto livre)' },
 ]
 
+const ENDERECO_ESCRITORIO_PADRAO = 'Av. Desembargador Sampaio, n. 300, Praia do Canto, Vitória/ES - CEP 29.055-250'
+
+const EMPTY_OUTORGADO: OutorgadoInput = { nome: '', oab: '', cpf: '' }
+
+const TIPO_LABEL: Record<TipoDocumento, string> = { contrato: 'Contrato', procuracao: 'Procuração' }
+const TIPO_LABEL_PLURAL: Record<TipoDocumento, string> = { contrato: 'Contratos', procuracao: 'Procurações' }
+
 export default function ContratosPage() {
   const qc = useQueryClient()
   const fileRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const autoSyncRef = useRef<Set<string>>(new Set())
 
   const [showForm, setShowForm] = useState(false)
+  const [abaTipo, setAbaTipo] = useState<TipoDocumento>('contrato')
   const [filtroStatus, setFiltroStatus] = useState<StatusContrato | ''>('')
   const [editandoTitulo, setEditandoTitulo] = useState<string | null>(null)
   const [editTitulo, setEditTitulo] = useState('')
@@ -73,7 +81,20 @@ export default function ContratosPage() {
   const [expandido, setExpandido] = useState<string | null>(null)
   const [sigForms, setSigForms] = useState<Record<string, SignatarioCreate>>({})
   const [gerarAberto, setGerarAberto] = useState<string | null>(null)
+  const [gerarProcAberto, setGerarProcAberto] = useState<string | null>(null)
   const [lerIAFor, setLerIAFor] = useState<string | null>(null)
+  const [gerarProcErro, setGerarProcErro] = useState<string | null>(null)
+  const [gerarProcForm, setGerarProcForm] = useState<GerarProcuracaoRequest>({
+    outorgante_nome: '',
+    outorgante_qualificacao: '',
+    outorgante_cpf_cnpj: '',
+    outorgante_endereco: '',
+    outorgante_email: '',
+    outorgados: [{ nome: 'Lucas Pimenta Júdice', oab: '', cpf: '' }],
+    endereco_escritorio: ENDERECO_ESCRITORIO_PADRAO,
+    finalidade: '',
+    data_procuracao: new Date().toISOString().slice(0, 10),
+  })
   const [gerarForm, setGerarForm] = useState<GerarPdfRequest>({
     contratante_nome: '',
     contratante_qualificacao: '',
@@ -105,8 +126,8 @@ export default function ContratosPage() {
     queryFn: () => processosApi.listar(),
   })
   const { data: pastaMestra } = useQuery({
-    queryKey: ['contratos-pasta-mestra'],
-    queryFn: () => contratosApi.pastaMestra(),
+    queryKey: ['contratos-pasta-mestra', abaTipo],
+    queryFn: () => contratosApi.pastaMestra(abaTipo),
   })
 
   const criar = useMutation({
@@ -143,6 +164,20 @@ export default function ContratosPage() {
     onError: (e: unknown) => {
       const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       setGerarErro(detail || 'Erro ao gerar PDF. Verifique o console.')
+    },
+  })
+
+  const gerarProcuracao = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: GerarProcuracaoRequest }) =>
+      contratosApi.gerarProcuracao(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['contratos'] })
+      setGerarProcAberto(null)
+      setGerarProcErro(null)
+    },
+    onError: (e: unknown) => {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setGerarProcErro(detail || 'Erro ao gerar PDF. Verifique o console.')
     },
   })
 
@@ -271,6 +306,23 @@ export default function ContratosPage() {
     setGerarAberto(cid)
   }
 
+  const abrirGerarProcuracao = (cid: string, clienteId: string) => {
+    const cliente = clientePorId(clienteId)
+    setGerarProcForm({
+      outorgante_nome: cliente?.nome || '',
+      outorgante_qualificacao: '',
+      outorgante_cpf_cnpj: cliente?.cpf_cnpj || '',
+      outorgante_endereco: '',
+      outorgante_email: cliente?.email || '',
+      outorgados: [{ nome: 'Lucas Pimenta Júdice', oab: '', cpf: '' }],
+      endereco_escritorio: ENDERECO_ESCRITORIO_PADRAO,
+      finalidade: '',
+      data_procuracao: new Date().toISOString().slice(0, 10),
+    })
+    setGerarProcErro(null)
+    setGerarProcAberto(cid)
+  }
+
   const adicionarContratadoAutomatico = (cid: string) => {
     adicionarSig.mutate({
       id: cid,
@@ -297,28 +349,50 @@ export default function ContratosPage() {
   const temArquivos = (c: (typeof contratos)[0]) =>
     (c.arquivos?.length ?? 0) > 0 || !!c.arquivo_path
 
+  const contratosDaAba = contratos.filter((c) => c.tipo_documento === abaTipo)
   const contratosFiltrados = filtroStatus
-    ? contratos.filter((c) => c.status === filtroStatus)
-    : contratos
+    ? contratosDaAba.filter((c) => c.status === filtroStatus)
+    : contratosDaAba
 
   return (
     <div>
       <div className={styles.pageHeader}>
-        <h1 className={styles.pageTitle}>Contratos</h1>
+        <h1 className={styles.pageTitle}>{TIPO_LABEL_PLURAL[abaTipo]}</h1>
         <div className={cs.headerActions}>
           {pastaMestra?.link && (
             <a href={pastaMestra.link} target="_blank" rel="noreferrer" className={cs.btnDrive}>
-              ☁ Pasta mestra de Contratos
+              ☁ Pasta mestra de {TIPO_LABEL_PLURAL[abaTipo]}
             </a>
           )}
           <button className={styles.btnPrimary} onClick={() => setShowForm(!showForm)}>
-            {showForm ? 'Cancelar' : '+ Novo Contrato'}
+            {showForm ? 'Cancelar' : `+ Novo${abaTipo === 'procuracao' ? 'a' : ''} ${TIPO_LABEL[abaTipo]}`}
           </button>
         </div>
       </div>
 
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        {(['contrato', 'procuracao'] as TipoDocumento[]).map((t) => (
+          <button
+            key={t}
+            onClick={() => { setAbaTipo(t); setFiltroStatus(''); setShowForm(false) }}
+            style={{
+              padding: '6px 16px',
+              borderRadius: 8,
+              border: '1px solid #e5e7eb',
+              background: abaTipo === t ? '#1d1e20' : '#fff',
+              color: abaTipo === t ? '#fff' : '#1d1e20',
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            {TIPO_LABEL_PLURAL[t]}
+          </button>
+        ))}
+      </div>
+
       {showForm && (
-        <form onSubmit={(e) => { e.preventDefault(); if (!form.cliente_id) { alert('Selecione ou crie um cliente'); return } criar.mutate(form) }} className={styles.form}>
+        <form onSubmit={(e) => { e.preventDefault(); if (!form.cliente_id) { alert('Selecione ou crie um cliente'); return } criar.mutate({ ...form, tipo_documento: abaTipo }) }} className={styles.form}>
           <div className={cs.twoCol}>
             <div className={styles.formRow}>
               <label className={styles.formLabel}>Título *</label>
@@ -353,10 +427,10 @@ export default function ContratosPage() {
         </form>
       )}
 
-      {contratos.length > 0 && (
+      {contratosDaAba.length > 0 && (
         <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
           {(['', ...Object.keys(STATUS_LABEL)] as (StatusContrato | '')[]).map((s) => {
-            const count = s === '' ? contratos.length : contratos.filter((c) => c.status === s).length
+            const count = s === '' ? contratosDaAba.length : contratosDaAba.filter((c) => c.status === s).length
             return (
               <button
                 key={s || 'todos'}
@@ -380,8 +454,8 @@ export default function ContratosPage() {
       )}
 
       {isLoading ? <p className={styles.empty}>Carregando...</p> :
-       contratos.length === 0 ? <p className={styles.empty}>Nenhum contrato cadastrado.</p> :
-       contratosFiltrados.length === 0 ? <p className={styles.empty}>Nenhum contrato com esse status.</p> : (
+       contratosDaAba.length === 0 ? <p className={styles.empty}>Nenhum{abaTipo === 'procuracao' ? 'a' : ''} {TIPO_LABEL[abaTipo].toLowerCase()} cadastrad{abaTipo === 'procuracao' ? 'a' : 'o'}.</p> :
+       contratosFiltrados.length === 0 ? <p className={styles.empty}>Nenhum{abaTipo === 'procuracao' ? 'a' : ''} {TIPO_LABEL[abaTipo].toLowerCase()} com esse status.</p> : (
         <div className={cs.lista}>
           {contratosFiltrados.map((c) => {
             const isOpen = expandido === c.id
@@ -461,10 +535,16 @@ export default function ContratosPage() {
                       <div className={cs.sectionHeader}>
                         <span className={cs.sectionTitle}>Documentos PDF</span>
                         <div className={cs.sectionActions}>
-                          {c.status === 'rascunho' && (
+                          {c.status === 'rascunho' && c.tipo_documento === 'contrato' && (
                             <button className={cs.btnSmall}
                               onClick={() => abrirGerar(c.id, c.cliente_id)}>
                               ✨ Gerar contrato
+                            </button>
+                          )}
+                          {c.status === 'rascunho' && c.tipo_documento === 'procuracao' && (
+                            <button className={cs.btnSmall}
+                              onClick={() => abrirGerarProcuracao(c.id, c.cliente_id)}>
+                              ✨ Gerar procuração
                             </button>
                           )}
                           <label className={cs.btnSmall}>
@@ -679,6 +759,119 @@ export default function ContratosPage() {
                             {gerarPdf.isPending ? '⏳ Gerando...' : '📄 Gerar e anexar PDF'}
                           </button>
                           <button className={styles.btnTable} onClick={() => setGerarAberto(null)}>Fechar</button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ── GERAR PROCURAÇÃO FORM ────────────────────────── */}
+                    {gerarProcAberto === c.id && (
+                      <div className={cs.gerarForm}>
+                        <div className={cs.sectionTitle}>✨ Gerar PDF da Procuração</div>
+
+                        <div className={cs.sectionTitle} style={{ fontSize: 12, marginTop: 4 }}>Outorgante (cliente)</div>
+                        <div className={cs.twoCol}>
+                          <div className={styles.formRow}>
+                            <label className={styles.formLabel}>Nome do outorgante *</label>
+                            <input className={styles.input} value={gerarProcForm.outorgante_nome}
+                              onChange={(e) => setGerarProcForm({ ...gerarProcForm, outorgante_nome: e.target.value })} />
+                          </div>
+                          <div className={styles.formRow}>
+                            <label className={styles.formLabel}>Qualificação</label>
+                            <input className={styles.input} placeholder="ex: brasileira, empresária, divorciada"
+                              value={gerarProcForm.outorgante_qualificacao}
+                              onChange={(e) => setGerarProcForm({ ...gerarProcForm, outorgante_qualificacao: e.target.value })} />
+                          </div>
+                        </div>
+                        <div className={cs.twoCol}>
+                          <div className={styles.formRow}>
+                            <label className={styles.formLabel}>CPF / CNPJ</label>
+                            <input className={styles.input} value={gerarProcForm.outorgante_cpf_cnpj}
+                              onChange={(e) => setGerarProcForm({ ...gerarProcForm, outorgante_cpf_cnpj: maskCPFCNPJ(e.target.value) })} />
+                          </div>
+                          <div className={styles.formRow}>
+                            <label className={styles.formLabel}>E-mail</label>
+                            <input type="email" className={styles.input} value={gerarProcForm.outorgante_email}
+                              onChange={(e) => setGerarProcForm({ ...gerarProcForm, outorgante_email: e.target.value })} />
+                          </div>
+                        </div>
+                        <div className={styles.formRow}>
+                          <label className={styles.formLabel}>Endereço (residencial/sede)</label>
+                          <input className={styles.input} value={gerarProcForm.outorgante_endereco}
+                            onChange={(e) => setGerarProcForm({ ...gerarProcForm, outorgante_endereco: e.target.value })} />
+                        </div>
+
+                        <div className={cs.sectionTitle} style={{ fontSize: 12, marginTop: 12 }}>Outorgado(s) — advogado(s)</div>
+                        {gerarProcForm.outorgados.map((adv, i) => (
+                          <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6, alignItems: 'center' }}>
+                            <input className={styles.input} placeholder="Nome do advogado" style={{ flex: 2 }}
+                              value={adv.nome}
+                              onChange={(e) => {
+                                const outorgados = [...gerarProcForm.outorgados]
+                                outorgados[i] = { ...outorgados[i], nome: e.target.value }
+                                setGerarProcForm({ ...gerarProcForm, outorgados })
+                              }} />
+                            <input className={styles.input} placeholder="OAB" style={{ flex: 1 }}
+                              value={adv.oab}
+                              onChange={(e) => {
+                                const outorgados = [...gerarProcForm.outorgados]
+                                outorgados[i] = { ...outorgados[i], oab: e.target.value }
+                                setGerarProcForm({ ...gerarProcForm, outorgados })
+                              }} />
+                            <input className={styles.input} placeholder="CPF" style={{ flex: 1 }}
+                              value={adv.cpf}
+                              onChange={(e) => {
+                                const outorgados = [...gerarProcForm.outorgados]
+                                outorgados[i] = { ...outorgados[i], cpf: maskCPFCNPJ(e.target.value) }
+                                setGerarProcForm({ ...gerarProcForm, outorgados })
+                              }} />
+                            {gerarProcForm.outorgados.length > 1 && (
+                              <button className={styles.btnDanger} type="button"
+                                onClick={() => setGerarProcForm({
+                                  ...gerarProcForm,
+                                  outorgados: gerarProcForm.outorgados.filter((_, idx) => idx !== i),
+                                })}>
+                                ×
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                        <button className={cs.btnAtalho} type="button" style={{ marginBottom: 8 }}
+                          onClick={() => setGerarProcForm({
+                            ...gerarProcForm,
+                            outorgados: [...gerarProcForm.outorgados, { ...EMPTY_OUTORGADO }],
+                          })}>
+                          + Adicionar outorgado
+                        </button>
+
+                        <div className={styles.formRow}>
+                          <label className={styles.formLabel}>Endereço profissional (escritório)</label>
+                          <input className={styles.input} value={gerarProcForm.endereco_escritorio}
+                            onChange={(e) => setGerarProcForm({ ...gerarProcForm, endereco_escritorio: e.target.value })} />
+                        </div>
+                        <div className={styles.formRow}>
+                          <label className={styles.formLabel}>Finalidade específica (opcional — se vazio, usa poderes gerais "ad judicia et extra")</label>
+                          <textarea className={styles.input} rows={3}
+                            placeholder="ex: representar o outorgante especificamente no processo nº..."
+                            value={gerarProcForm.finalidade}
+                            onChange={(e) => setGerarProcForm({ ...gerarProcForm, finalidade: e.target.value })} />
+                        </div>
+                        <div className={styles.formRow}>
+                          <label className={styles.formLabel}>Data da procuração</label>
+                          <input type="date" className={styles.input} value={gerarProcForm.data_procuracao}
+                            onChange={(e) => setGerarProcForm({ ...gerarProcForm, data_procuracao: e.target.value })} />
+                        </div>
+                        {gerarProcErro && (
+                          <div style={{ color: '#b91c1c', background: '#fee2e2', border: '1px solid #fecaca', borderRadius: 8, padding: '8px 12px', fontSize: 12 }}>
+                            ❌ {gerarProcErro}
+                          </div>
+                        )}
+                        <div className={cs.gerarAcoes}>
+                          <button className={styles.btnPrimary}
+                            disabled={gerarProcuracao.isPending || !gerarProcForm.outorgante_nome || !gerarProcForm.outorgados.some((o) => o.nome.trim())}
+                            onClick={() => gerarProcuracao.mutate({ id: c.id, data: gerarProcForm })}>
+                            {gerarProcuracao.isPending ? '⏳ Gerando...' : '📄 Gerar e anexar PDF'}
+                          </button>
+                          <button className={styles.btnTable} onClick={() => setGerarProcAberto(null)}>Fechar</button>
                         </div>
                       </div>
                     )}
