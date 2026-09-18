@@ -88,7 +88,11 @@ DEFAULT_PODERES_ESPECIAIS: list[PoderEspecial] = [
 ]
 
 
+TipoOutorgante = Literal["PF", "PJ"]
+
+
 class GerarProcuracaoRequest(BaseModel):
+    outorgante_tipo: TipoOutorgante = "PF"
     outorgante_nome: str
     outorgante_nacionalidade: str = "brasileiro(a)"
     outorgante_estado_civil: str = ""
@@ -96,6 +100,10 @@ class GerarProcuracaoRequest(BaseModel):
     outorgante_cpf_cnpj: str = ""
     outorgante_endereco: str = ""
     outorgante_email: str = ""
+    # Só relevante quando outorgante_tipo == "PJ" (representante legal da empresa).
+    outorgante_representante_nome: str = ""
+    outorgante_representante_cpf: str = ""
+    outorgante_representante_cargo: str = ""
     outorgados: list[OutorgadoInput] = []
     endereco_escritorio: str = ""
     incluir_poderes_gerais: bool = True

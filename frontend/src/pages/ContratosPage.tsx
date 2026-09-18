@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { contratosApi } from '../api/contratos'
-import type { ContratoCreate, SignatarioCreate, PapelSignatario, StatusContrato, GerarPdfRequest, TipoDocumento, GerarProcuracaoRequest, OutorgadoInput, PoderEspecial } from '../api/contratos'
+import type { ContratoCreate, SignatarioCreate, PapelSignatario, StatusContrato, GerarPdfRequest, TipoDocumento, GerarProcuracaoRequest, OutorgadoInput, PoderEspecial, TipoOutorgante } from '../api/contratos'
 import { clientesApi } from '../api/clientes'
 import { processosApi } from '../api/processos'
 import ComboBox from '../components/ComboBox'
@@ -78,10 +78,17 @@ const DEFAULT_PODERES_ESPECIAIS: PoderEspecial[] = PODERES_ESPECIAIS_OPCOES.map(
 
 function camposEmAbertoProcuracao(f: GerarProcuracaoRequest): string[] {
   const faltando: string[] = []
-  if (!f.outorgante_estado_civil?.trim()) faltando.push('Estado civil do outorgante')
-  if (!f.outorgante_profissao?.trim()) faltando.push('Profissão do outorgante')
-  if (!f.outorgante_cpf_cnpj?.trim()) faltando.push('CPF/CNPJ do outorgante')
-  if (!f.outorgante_endereco?.trim()) faltando.push('Endereço do outorgante')
+  if (f.outorgante_tipo === 'PJ') {
+    if (!f.outorgante_cpf_cnpj?.trim()) faltando.push('CNPJ do outorgante')
+    if (!f.outorgante_endereco?.trim()) faltando.push('Endereço (sede) do outorgante')
+    if (!f.outorgante_representante_nome?.trim()) faltando.push('Nome do representante legal')
+    if (!f.outorgante_representante_cpf?.trim()) faltando.push('CPF do representante legal')
+  } else {
+    if (!f.outorgante_estado_civil?.trim()) faltando.push('Estado civil do outorgante')
+    if (!f.outorgante_profissao?.trim()) faltando.push('Profissão do outorgante')
+    if (!f.outorgante_cpf_cnpj?.trim()) faltando.push('CPF do outorgante')
+    if (!f.outorgante_endereco?.trim()) faltando.push('Endereço do outorgante')
+  }
   if (!f.outorgante_email?.trim()) faltando.push('E-mail do outorgante')
   f.outorgados.forEach((o) => {
     if (!o.nome.trim()) return
@@ -92,6 +99,7 @@ function camposEmAbertoProcuracao(f: GerarProcuracaoRequest): string[] {
 }
 
 const EMPTY_GERAR_PROC_FORM: GerarProcuracaoRequest = {
+  outorgante_tipo: 'PF',
   outorgante_nome: '',
   outorgante_nacionalidade: 'brasileiro(a)',
   outorgante_estado_civil: '',
@@ -99,6 +107,9 @@ const EMPTY_GERAR_PROC_FORM: GerarProcuracaoRequest = {
   outorgante_cpf_cnpj: '',
   outorgante_endereco: '',
   outorgante_email: '',
+  outorgante_representante_nome: '',
+  outorgante_representante_cpf: '',
+  outorgante_representante_cargo: '',
   outorgados: [{ nome: 'Lucas Pimenta Júdice', oab: '', cpf: '' }],
   endereco_escritorio: ENDERECO_ESCRITORIO_PADRAO,
   incluir_poderes_gerais: true,
@@ -162,6 +173,11 @@ export default function ContratosPage() {
   const { data: pastaMestra } = useQuery({
     queryKey: ['contratos-pasta-mestra', abaTipo],
     queryFn: () => contratosApi.pastaMestra(abaTipo),
+  })
+  const { data: templateProcuracao } = useQuery({
+    queryKey: ['procuracao-template'],
+    queryFn: () => contratosApi.templateProcuracao(),
+    enabled: abaTipo === 'procuracao',
   })
 
   const criar = useMutation({
@@ -355,6 +371,7 @@ export default function ContratosPage() {
       const cliente = clientePorId(c.cliente_id)
       setGerarProcForm({
         ...EMPTY_GERAR_PROC_FORM,
+        outorgante_tipo: (cliente?.tipo as TipoOutorgante) || 'PF',
         outorgante_nome: cliente?.nome || '',
         outorgante_cpf_cnpj: cliente?.cpf_cnpj || '',
         outorgante_email: cliente?.email || '',
@@ -409,8 +426,14 @@ export default function ContratosPage() {
               ☁ Pasta mestra de {TIPO_LABEL_PLURAL[abaTipo]}
             </a>
           )}
+          {abaTipo === 'procuracao' && templateProcuracao?.link && (
+            <a href={templateProcuracao.link} target="_blank" rel="noreferrer" className={cs.btnDrive}
+              title="Modelo com dados de exemplo — só pra consultar/editar o padrão visual">
+              📝 Template Google Docs
+            </a>
+          )}
           <button className={styles.btnPrimary} onClick={() => setShowForm(!showForm)}>
-            {showForm ? 'Cancelar' : `+ Novo${abaTipo === 'procuracao' ? 'a' : ''} ${TIPO_LABEL[abaTipo]}`}
+            {showForm ? 'Cancelar' : `+ ${abaTipo === 'procuracao' ? 'Nova' : 'Novo'} ${TIPO_LABEL[abaTipo]}`}
           </button>
         </div>
       </div>
@@ -820,36 +843,51 @@ export default function ContratosPage() {
                         <div className={cs.sectionTitle}>✨ Gerar PDF da Procuração</div>
 
                         <div className={cs.sectionTitle} style={{ fontSize: 12, marginTop: 4 }}>Outorgante (cliente)</div>
+                        <div className={cs.chipRow} style={{ marginBottom: 8 }}>
+                          {(['PF', 'PJ'] as TipoOutorgante[]).map((t) => (
+                            <button key={t} type="button"
+                              className={`${cs.chip} ${gerarProcForm.outorgante_tipo === t ? cs.chipAtivo : ''}`}
+                              onClick={() => setGerarProcForm({ ...gerarProcForm, outorgante_tipo: t })}>
+                              {t === 'PF' ? 'Pessoa Física' : 'Pessoa Jurídica'}
+                            </button>
+                          ))}
+                        </div>
                         <div className={styles.formRow}>
-                          <label className={styles.formLabel}>Nome do outorgante *</label>
+                          <label className={styles.formLabel}>Nome {gerarProcForm.outorgante_tipo === 'PJ' ? '/ razão social' : ''} do outorgante *</label>
                           <input className={styles.input} value={gerarProcForm.outorgante_nome}
                             onChange={(e) => setGerarProcForm({ ...gerarProcForm, outorgante_nome: e.target.value })} />
                         </div>
-                        <div className={cs.twoCol} style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
-                          <div className={styles.formRow}>
-                            <label className={styles.formLabel}>Nacionalidade</label>
-                            <input className={styles.input}
-                              value={gerarProcForm.outorgante_nacionalidade}
-                              onChange={(e) => setGerarProcForm({ ...gerarProcForm, outorgante_nacionalidade: e.target.value })} />
+                        {gerarProcForm.outorgante_tipo === 'PF' && (
+                          <div className={cs.twoCol} style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
+                            <div className={styles.formRow}>
+                              <label className={styles.formLabel}>Nacionalidade</label>
+                              <input className={styles.input}
+                                value={gerarProcForm.outorgante_nacionalidade}
+                                onChange={(e) => setGerarProcForm({ ...gerarProcForm, outorgante_nacionalidade: e.target.value })} />
+                            </div>
+                            <div className={styles.formRow}>
+                              <label className={styles.formLabel}>Estado civil</label>
+                              <input className={styles.input} placeholder="ex: casado(a)"
+                                value={gerarProcForm.outorgante_estado_civil}
+                                onChange={(e) => setGerarProcForm({ ...gerarProcForm, outorgante_estado_civil: e.target.value })} />
+                            </div>
+                            <div className={styles.formRow}>
+                              <label className={styles.formLabel}>Profissão</label>
+                              <input className={styles.input} placeholder="ex: empresário(a)"
+                                value={gerarProcForm.outorgante_profissao}
+                                onChange={(e) => setGerarProcForm({ ...gerarProcForm, outorgante_profissao: e.target.value })} />
+                            </div>
                           </div>
-                          <div className={styles.formRow}>
-                            <label className={styles.formLabel}>Estado civil</label>
-                            <input className={styles.input} placeholder="ex: casado(a)"
-                              value={gerarProcForm.outorgante_estado_civil}
-                              onChange={(e) => setGerarProcForm({ ...gerarProcForm, outorgante_estado_civil: e.target.value })} />
-                          </div>
-                          <div className={styles.formRow}>
-                            <label className={styles.formLabel}>Profissão</label>
-                            <input className={styles.input} placeholder="ex: empresário(a)"
-                              value={gerarProcForm.outorgante_profissao}
-                              onChange={(e) => setGerarProcForm({ ...gerarProcForm, outorgante_profissao: e.target.value })} />
-                          </div>
-                        </div>
+                        )}
                         <div className={cs.twoCol}>
                           <div className={styles.formRow}>
-                            <label className={styles.formLabel}>CPF / CNPJ</label>
+                            <label className={styles.formLabel}>{gerarProcForm.outorgante_tipo === 'PJ' ? 'CNPJ' : 'CPF'}</label>
                             <input className={styles.input} value={gerarProcForm.outorgante_cpf_cnpj}
-                              onChange={(e) => setGerarProcForm({ ...gerarProcForm, outorgante_cpf_cnpj: maskCPFCNPJ(e.target.value) })} />
+                              onChange={(e) => setGerarProcForm({
+                                ...gerarProcForm,
+                                // CNPJ hoje pode ser alfanumérico — sem mask de dígitos nesse caso.
+                                outorgante_cpf_cnpj: gerarProcForm.outorgante_tipo === 'PJ' ? e.target.value : maskCPFCNPJ(e.target.value),
+                              })} />
                           </div>
                           <div className={styles.formRow}>
                             <label className={styles.formLabel}>E-mail</label>
@@ -858,10 +896,36 @@ export default function ContratosPage() {
                           </div>
                         </div>
                         <div className={styles.formRow}>
-                          <label className={styles.formLabel}>Endereço (residencial/sede)</label>
+                          <label className={styles.formLabel}>Endereço ({gerarProcForm.outorgante_tipo === 'PJ' ? 'sede' : 'residencial'})</label>
                           <input className={styles.input} value={gerarProcForm.outorgante_endereco}
                             onChange={(e) => setGerarProcForm({ ...gerarProcForm, outorgante_endereco: e.target.value })} />
                         </div>
+                        {gerarProcForm.outorgante_tipo === 'PJ' && (
+                          <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 12, marginBottom: 12, background: '#fafafa' }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
+                              Representante legal (opcional, mas recomendado)
+                            </div>
+                            <div className={cs.twoCol}>
+                              <div className={styles.formRow}>
+                                <label className={styles.formLabel}>Nome</label>
+                                <input className={styles.input} value={gerarProcForm.outorgante_representante_nome}
+                                  onChange={(e) => setGerarProcForm({ ...gerarProcForm, outorgante_representante_nome: e.target.value })} />
+                              </div>
+                              <div className={styles.formRow}>
+                                <label className={styles.formLabel}>Cargo</label>
+                                <input className={styles.input} placeholder="ex: sócio administrador"
+                                  value={gerarProcForm.outorgante_representante_cargo}
+                                  onChange={(e) => setGerarProcForm({ ...gerarProcForm, outorgante_representante_cargo: e.target.value })} />
+                              </div>
+                            </div>
+                            <div className={styles.formRow}>
+                              <label className={styles.formLabel}>CPF</label>
+                              <input className={styles.input}
+                                value={gerarProcForm.outorgante_representante_cpf}
+                                onChange={(e) => setGerarProcForm({ ...gerarProcForm, outorgante_representante_cpf: maskCPFCNPJ(e.target.value) })} />
+                            </div>
+                          </div>
+                        )}
 
                         <div className={cs.sectionTitle} style={{ fontSize: 12, marginTop: 12 }}>Outorgado(s) — advogado(s)</div>
                         {gerarProcForm.outorgados.map((adv, i) => (
@@ -1130,16 +1194,19 @@ export default function ContratosPage() {
                           {finalizarManual.isPending ? '⏳ Finalizando...' : '📥 Finalizar (já assinado, upload direto)'}
                         </button>
                       )}
+                      {c.clicksign_document_key && (
+                        ['aguardando_assinatura', 'parcialmente_assinado'].includes(c.status) ||
+                        (c.status === 'assinado' && !c.arquivo_assinado_path)
+                      ) && (
+                        <button className={styles.btnTable}
+                          onClick={() => sincronizar.mutate({ id: c.id, manual: true })}
+                          disabled={sincronizar.isPending}
+                          title="Puxa o status real das assinaturas direto do ClickSign e baixa o PDF assinado (pode levar até ~30s após todos assinarem)">
+                          {sincronizar.isPending ? '⏳ Buscando assinado...' : '🔄 Atualizar status / buscar assinado'}
+                        </button>
+                      )}
                       {['aguardando_assinatura', 'parcialmente_assinado'].includes(c.status) && (
                         <>
-                          {c.clicksign_document_key && (
-                            <button className={styles.btnTable}
-                              onClick={() => sincronizar.mutate({ id: c.id, manual: true })}
-                              disabled={sincronizar.isPending}
-                              title="Puxa o status real das assinaturas direto do ClickSign">
-                              {sincronizar.isPending ? '⏳ Atualizando...' : '🔄 Atualizar status'}
-                            </button>
-                          )}
                           <button className={styles.btnTable}
                             onClick={() => { if (confirm('Confirmar assinatura manual? Isso marca o contrato como Assinado e remove a tag "Pendente" do financeiro.')) confirmarAssinatura.mutate(c.id) }}
                             title="Para contratos assinados fora do ClickSign">

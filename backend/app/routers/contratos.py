@@ -144,6 +144,53 @@ def obter_pasta_mestra(tipo_documento: str = "contrato"):
     return {"link": get_folder_link_raiz([_pasta_drive(tipo_documento)])}
 
 
+_TEMPLATE_PROCURACAO_NOME = "Modelo de Procuração (editável)"
+
+
+@router.get("/template-procuracao")
+def obter_template_procuracao():
+    """
+    Link de um Google Doc modelo da procuração (com dados de exemplo), pra
+    consultar/editar o padrão visual sem depender de nenhum contrato específico.
+    Reaproveita o arquivo se já existir na pasta mestra /Procurações — só cria
+    da primeira vez que alguém pedir.
+    """
+    from app.services.google_drive import (
+        drive_disponivel, resolver_pasta_id_raiz, listar_filhos, upload_arquivo_raiz,
+    )
+    if not drive_disponivel():
+        return {"link": None}
+
+    folder_id = resolver_pasta_id_raiz([_pasta_drive("procuracao")])
+    if not folder_id:
+        return {"link": None}
+
+    filhos = listar_filhos(folder_id) or []
+    existente = next((f for f in filhos if f.get("name") == _TEMPLATE_PROCURACAO_NOME), None)
+    if existente and existente.get("web_view_link"):
+        return {"link": existente["web_view_link"]}
+
+    from app.services.procuracao_pdf import gerar_procuracao_html
+    html_bytes = gerar_procuracao_html(
+        outorgante_tipo="PF",
+        outorgante_nome="Nome do Outorgante",
+        outorgante_nacionalidade="brasileiro(a)",
+        outorgante_estado_civil="[estado civil]",
+        outorgante_profissao="[profissão]",
+        outorgante_cpf_cnpj="[CPF]",
+        outorgante_endereco="[endereço completo]",
+        outorgante_email="[email]",
+        outorgados=[{"nome": "Nome do Outorgado (advogado)", "oab": "[OAB]", "cpf": "[CPF]"}],
+        endereco_escritorio="Av. Desembargador Sampaio, n. 300, Praia do Canto, Vitória/ES - CEP 29.055-250",
+        finalidade="",
+    )
+    link = upload_arquivo_raiz(
+        html_bytes, _TEMPLATE_PROCURACAO_NOME, [_pasta_drive("procuracao")],
+        mimetype="text/html", converter_html_para_google_docs=True,
+    )
+    return {"link": link}
+
+
 @router.get("/{contrato_id}", response_model=ContratoOut)
 def obter_contrato(contrato_id: uuid.UUID, db: Session = Depends(get_db)):
     c = db.query(Contrato).filter(Contrato.id == contrato_id).first()
@@ -761,6 +808,7 @@ async def gerar_pdf_procuracao(
     data_validade = _parse_data(body.data_validade)
 
     kwargs = dict(
+        outorgante_tipo=body.outorgante_tipo,
         outorgante_nome=body.outorgante_nome,
         outorgante_nacionalidade=body.outorgante_nacionalidade,
         outorgante_estado_civil=body.outorgante_estado_civil,
@@ -768,6 +816,9 @@ async def gerar_pdf_procuracao(
         outorgante_cpf_cnpj=body.outorgante_cpf_cnpj,
         outorgante_endereco=body.outorgante_endereco,
         outorgante_email=body.outorgante_email,
+        outorgante_representante_nome=body.outorgante_representante_nome,
+        outorgante_representante_cpf=body.outorgante_representante_cpf,
+        outorgante_representante_cargo=body.outorgante_representante_cargo,
         outorgados=[o.model_dump() for o in body.outorgados],
         endereco_escritorio=body.endereco_escritorio,
         incluir_poderes_gerais=body.incluir_poderes_gerais,
@@ -844,14 +895,15 @@ async def gerar_pdf_procuracao(
             if not cli.endereco and novo_end:
                 cli.endereco = novo_end
                 mudou = True
-            novo_ec = (body.outorgante_estado_civil or "").strip()
-            if not cli.estado_civil and novo_ec:
-                cli.estado_civil = novo_ec
-                mudou = True
-            nova_prof = (body.outorgante_profissao or "").strip()
-            if not cli.profissao and nova_prof:
-                cli.profissao = nova_prof
-                mudou = True
+            if body.outorgante_tipo == "PF":
+                novo_ec = (body.outorgante_estado_civil or "").strip()
+                if not cli.estado_civil and novo_ec:
+                    cli.estado_civil = novo_ec
+                    mudou = True
+                nova_prof = (body.outorgante_profissao or "").strip()
+                if not cli.profissao and nova_prof:
+                    cli.profissao = nova_prof
+                    mudou = True
             if mudou:
                 db.commit()
     except Exception:
@@ -1152,8 +1204,10 @@ def sincronizar_status_clicksign(contrato_id: uuid.UUID, db: Session = Depends(g
         c.status = "assinado"
         # Baixa/arquiva o assinado sempre que já der pra considerar concluído — não só
         # quando o ClickSign reporta "closed" literalmente (evita ficar sem o PDF final
-        # se o status demorar a fechar por lá mas todos já assinaram por aqui).
-        _baixar_e_arquivar_assinado_clicksign(db, c, c.clicksign_document_key)
+        # se o status demorar a fechar por lá mas todos já assinaram por aqui). Endpoint
+        # síncrono (roda em threadpool) — pode esperar o ClickSign gerar o link do
+        # assinado, que leva alguns segundos após o fechamento.
+        _baixar_e_arquivar_assinado_clicksign(db, c, c.clicksign_document_key, tentativas=6, espera_s=4.0)
         try:
             from app.models.financeiro import Honorario
             h = db.query(Honorario).filter(Honorario.contrato_id == contrato_id).first()
@@ -1226,16 +1280,22 @@ async def webhook_clicksign(request: Request, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
-def _baixar_e_arquivar_assinado_clicksign(db: Session, contrato: Contrato, doc_key: str) -> None:
+def _baixar_e_arquivar_assinado_clicksign(
+    db: Session, contrato: Contrato, doc_key: str, tentativas: int = 1, espera_s: float = 4.0,
+) -> None:
     """
     Baixa o PDF final assinado do ClickSign (se ainda não baixado) e o duplica no Drive
-    — pasta do cliente e pasta mestra /Contratos. Idempotente: não baixa/reenvia de novo
-    se `arquivo_assinado_path` já estiver preenchido (evita duplicar em múltiplos eventos
-    de webhook para o mesmo documento, ex: "sign" do último signatário + "close").
+    — pasta do cliente e pasta mestra /Contratos ou /Procurações. Idempotente: não baixa/
+    reenvia de novo se `arquivo_assinado_path` já estiver preenchido (evita duplicar em
+    múltiplos eventos de webhook para o mesmo documento, ex: "sign" do último signatário
+    + "close"). `tentativas`/`espera_s`: o link do PDF assinado só fica pronto alguns
+    segundos após o ClickSign fechar o documento — no webhook (async) usa só 1 tentativa
+    pra não travar o event loop; quem chama de um endpoint síncrono (ex: sincronizar-
+    status, que roda em threadpool) pode pedir mais tentativas com espera entre elas.
     """
     if contrato.arquivo_assinado_path:
         return
-    pdf_bytes = clicksign.baixar_documento_assinado(doc_key)
+    pdf_bytes = clicksign.baixar_documento_assinado(doc_key, tentativas=tentativas, espera_s=espera_s)
     if not pdf_bytes:
         return
     nome_arquivo = f"{contrato.id}_assinado.pdf"

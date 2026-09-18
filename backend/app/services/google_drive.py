@@ -783,6 +783,7 @@ def upload_arquivo_raiz(
     nome_arquivo: str,
     subpath: list[str],
     mimetype: str = "application/octet-stream",
+    converter_html_para_google_docs: bool = False,
 ) -> str | None:
     """
     Upload de arquivo qualquer (PDF/imagem/etc) sob a raiz LexOps,
@@ -790,10 +791,18 @@ def upload_arquivo_raiz(
 
     Exemplo: subpath=["Backoffice", "Despesas", "2026-06"] →
       LexOps/Backoffice/Despesas/2026-06/{nome_arquivo}
+
+    `converter_html_para_google_docs`: quando o conteúdo é HTML, pede pro Drive
+    converter pra um Google Doc editável (mesma lógica de `upload_arquivo`).
     """
     tokens = _load_tokens()
     if not tokens:
         return None
+
+    media_mimetype = mimetype or "application/octet-stream"
+    target_mimetype = media_mimetype
+    if converter_html_para_google_docs and media_mimetype.lower() in {"text/html", "application/xhtml+xml"}:
+        target_mimetype = "application/vnd.google-apps.document"
 
     def _do(tkns: dict) -> str | None:
         h = _auth_headers(tkns)
@@ -804,13 +813,13 @@ def upload_arquivo_raiz(
         metadata = json.dumps({
             "name": nome_arquivo,
             "parents": [parent_id],
-            "mimeType": mimetype,
+            "mimeType": target_mimetype,
         }).encode()
         boundary = "boundary_lexops_upload"
         body = (
             f"--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n"
         ).encode() + metadata + (
-            f"\r\n--{boundary}\r\nContent-Type: {mimetype}\r\n\r\n"
+            f"\r\n--{boundary}\r\nContent-Type: {media_mimetype}\r\n\r\n"
         ).encode() + conteudo + f"\r\n--{boundary}--".encode()
 
         r = httpx.post(

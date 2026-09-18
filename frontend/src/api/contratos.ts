@@ -85,7 +85,10 @@ export interface OutorgadoInput {
 export type PoderEspecial =
   | 'confessar' | 'desistir' | 'transigir' | 'firmar_acordos' | 'receber_quitacao' | 'substabelecer'
 
+export type TipoOutorgante = 'PF' | 'PJ'
+
 export interface GerarProcuracaoRequest {
+  outorgante_tipo?: TipoOutorgante
   outorgante_nome: string
   outorgante_nacionalidade?: string
   outorgante_estado_civil?: string
@@ -93,6 +96,9 @@ export interface GerarProcuracaoRequest {
   outorgante_cpf_cnpj?: string
   outorgante_endereco?: string
   outorgante_email?: string
+  outorgante_representante_nome?: string
+  outorgante_representante_cpf?: string
+  outorgante_representante_cargo?: string
   outorgados: OutorgadoInput[]
   endereco_escritorio?: string
   incluir_poderes_gerais?: boolean
@@ -170,8 +176,12 @@ export const contratosApi = {
   finalizarAssinadoManual: (id: string) =>
     api.post<Contrato>(`/contratos/${id}/finalizar-assinado-manual`).then((r) => r.data),
 
+  // timeout maior: pode esperar o ClickSign gerar o link do PDF assinado (retry no backend)
   sincronizarStatus: (id: string) =>
-    api.post<Contrato>(`/contratos/${id}/sincronizar-status`).then((r) => r.data),
+    api.post<Contrato>(`/contratos/${id}/sincronizar-status`, undefined, { timeout: 45000 }).then((r) => r.data),
+
+  templateProcuracao: () =>
+    api.get<{ link: string | null }>('/contratos/template-procuracao').then((r) => r.data),
 
   lerContratantes: (id: string) =>
     api.post<{ contratantes: ContratanteLido[]; financeiro: ContratoFinanceiroIA }>(`/contratos/${id}/ler-contratantes`).then((r) => r.data),

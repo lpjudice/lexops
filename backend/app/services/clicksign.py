@@ -148,16 +148,34 @@ def cancelar_documento(document_key: str) -> bool:
 
 
 # ── 6. Baixar PDF assinado ────────────────────────────────────────────────────
+#
+# A API v1 não tem um endpoint de download direto — o link fica em
+# document.downloads.signed_file_url, devolvido por GET /documents/:key, e a
+# doc oficial avisa: "Disponível alguns segundos após o documento ser
+# finalizado". Por isso tenta de novo com espera entre tentativas.
 
-def baixar_documento_assinado(document_key: str) -> bytes | None:
-    resp = httpx.get(
-        _url(f"/api/v1/documents/{document_key}/download"),
-        headers={"Accept": "application/pdf"},
-        timeout=30,
-        follow_redirects=True,
-    )
-    if resp.is_success:
-        return resp.content
+def baixar_documento_assinado(
+    document_key: str, tentativas: int = 1, espera_s: float = 4.0,
+) -> bytes | None:
+    """
+    Baixa o PDF final assinado — já com as páginas de confirmação/certificação
+    da assinatura (é o `signed_file_url`, não o documento original).
+    `tentativas`/`espera_s`: o link só fica pronto alguns segundos depois do
+    documento fechar; para contextos que podem esperar (ex: endpoint síncrono
+    chamado pelo usuário), passe mais tentativas. Para webhooks (async, não
+    pode bloquear o event loop), deixe tentativas=1.
+    """
+    import time
+
+    for tentativa in range(max(tentativas, 1)):
+        doc = status_documento(document_key)
+        url = ((doc or {}).get("downloads") or {}).get("signed_file_url")
+        if url:
+            resp = httpx.get(url, timeout=30, follow_redirects=True)
+            if resp.is_success:
+                return resp.content
+        if tentativa < tentativas - 1:
+            time.sleep(espera_s)
     return None
 
 
