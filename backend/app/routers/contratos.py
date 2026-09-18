@@ -733,44 +733,86 @@ async def gerar_pdf_procuracao(
 ):
     """Gera o PDF da procuração e o adiciona à lista de arquivos. Mesma infra de
     upload/Drive do 'Gerar contrato', sem o lançamento automático no financeiro
-    (procuração não tem honorários)."""
+    (procuração não tem honorários). Reeditar e gerar de novo SOBRESCREVE a versão
+    anterior (arquivo local + Drive), em vez de duplicar — ver `doc_gerado_filename`."""
     from datetime import date as date_type
-    from app.services.procuracao_pdf import gerar_procuracao
+    from app.services.procuracao_pdf import gerar_procuracao, gerar_procuracao_html
+    from app.services.google_drive import extrair_file_id, deletar_arquivo_por_id
 
     c = db.query(Contrato).filter(Contrato.id == contrato_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Contrato não encontrado")
 
-    data_procuracao = None
-    if body.data_procuracao:
+    def _parse_data(s: str) -> date_type | None:
+        if not s:
+            return None
         try:
-            data_procuracao = date_type.fromisoformat(body.data_procuracao)
+            return date_type.fromisoformat(s)
         except ValueError:
-            pass
+            return None
 
-    pdf_bytes = gerar_procuracao(
+    data_procuracao = _parse_data(body.data_procuracao)
+    data_validade = _parse_data(body.data_validade)
+
+    kwargs = dict(
         outorgante_nome=body.outorgante_nome,
-        outorgante_qualificacao=body.outorgante_qualificacao,
+        outorgante_nacionalidade=body.outorgante_nacionalidade,
+        outorgante_estado_civil=body.outorgante_estado_civil,
+        outorgante_profissao=body.outorgante_profissao,
         outorgante_cpf_cnpj=body.outorgante_cpf_cnpj,
         outorgante_endereco=body.outorgante_endereco,
         outorgante_email=body.outorgante_email,
         outorgados=[o.model_dump() for o in body.outorgados],
         endereco_escritorio=body.endereco_escritorio,
+        incluir_poderes_gerais=body.incluir_poderes_gerais,
+        poderes_especiais=list(body.poderes_especiais),
+        poderes_adicionais=body.poderes_adicionais,
         finalidade=body.finalidade,
+        data_validade=data_validade,
         data_procuracao=data_procuracao,
     )
+    pdf_bytes = gerar_procuracao(**kwargs)
 
     nome_arquivo = f"Procuracao_{body.outorgante_nome.replace(' ', '_')}_{contrato_id.hex[:8]}.pdf"
     destino = UPLOADS_DIR / nome_arquivo
     destino.write_bytes(pdf_bytes)
 
+    # Remove a versão anterior gerada pelo sistema (edição sobrescreve, não duplica).
+    arquivos_atuais = list(c.arquivos or [])
+    if c.doc_gerado_filename:
+        anterior = next((a for a in arquivos_atuais if a.get("filename") == c.doc_gerado_filename), None)
+        arquivos_atuais = [a for a in arquivos_atuais if a.get("filename") != c.doc_gerado_filename]
+        if anterior and anterior.get("filename") != nome_arquivo:
+            try:
+                Path(anterior["path"]).unlink(missing_ok=True)
+            except Exception:
+                pass
+        if anterior:
+            for link_key in ("drive_link", "docs_link"):
+                link = anterior.get(link_key)
+                if not link:
+                    continue
+                try:
+                    fid = extrair_file_id(link)
+                    if fid:
+                        deletar_arquivo_por_id(fid)
+                except Exception:
+                    pass
+
     drive_link = None
+    docs_link = None
     try:
         from app.models.cliente import Cliente
         cliente = db.query(Cliente).filter(Cliente.id == c.cliente_id).first()
         if cliente:
             from app.services.google_drive import upload_arquivo
             drive_link = upload_arquivo(pdf_bytes, nome_arquivo, cliente.nome, _pasta_drive(c.tipo_documento))
+            html_bytes = gerar_procuracao_html(**kwargs)
+            nome_docs = f"{nome_arquivo[:-4]} (editável)"
+            docs_link = upload_arquivo(
+                html_bytes, nome_docs, cliente.nome, _pasta_drive(c.tipo_documento),
+                mimetype="text/html", converter_html_para_google_docs=True,
+            )
     except Exception:
         pass
 
@@ -801,10 +843,14 @@ async def gerar_pdf_procuracao(
     except Exception:
         db.rollback()
 
-    lista = list(c.arquivos or [])
-    lista.append({"filename": nome_arquivo, "path": str(destino), "clicksign_key": None, "drive_link": drive_link})
-    c.arquivos = lista
+    arquivos_atuais.append({
+        "filename": nome_arquivo, "path": str(destino), "clicksign_key": None,
+        "drive_link": drive_link, "docs_link": docs_link,
+    })
+    c.arquivos = arquivos_atuais
     c.arquivo_path = str(destino)
+    c.doc_gerado_filename = nome_arquivo
+    c.procuracao_dados = body.model_dump()
     db.commit()
     db.refresh(c)
     return c
@@ -864,7 +910,12 @@ def enviar_para_assinatura(contrato_id: uuid.UUID, db: Session = Depends(get_db)
             writer = PdfWriter()
             for arq in arquivos_para_enviar:
                 writer.append(arq["path"])
-            nome_merged = f"contrato_{contrato_id.hex[:8]}_completo.pdf"
+            # Usa o nome do arquivo principal já salvo no sistema (ex: gerado por
+            # "Gerar contrato"/"Gerar procuração") em vez de um nome genérico — é esse
+            # nome que aparece pro signatário no ClickSign e no e-mail de convite.
+            principal = next((a for a in arquivos_para_enviar if a.get("filename") == c.doc_gerado_filename), None)
+            prefixo = "Procuracao" if c.tipo_documento == "procuracao" else "Contrato"
+            nome_merged = (principal or arquivos_para_enviar[0]).get("filename") or f"{prefixo}_{contrato_id.hex[:8]}_completo.pdf"
             path_merged = UPLOADS_DIR / nome_merged
             with open(path_merged, "wb") as fout:
                 writer.write(fout)
@@ -964,7 +1015,9 @@ def finalizar_assinado_manual(contrato_id: uuid.UUID, db: Session = Depends(get_
             writer = PdfWriter()
             for arq in arquivos_atuais:
                 writer.append(arq["path"])
-            nome_final = f"contrato_{contrato_id.hex[:8]}_assinado.pdf"
+            principal = next((a for a in arquivos_atuais if a.get("filename") == c.doc_gerado_filename), None)
+            prefixo = "Procuracao" if c.tipo_documento == "procuracao" else "Contrato"
+            nome_final = (principal or arquivos_atuais[0]).get("filename") or f"{prefixo}_{contrato_id.hex[:8]}_assinado.pdf"
             path_final = UPLOADS_DIR / nome_final
             with open(path_final, "wb") as fout:
                 writer.write(fout)
@@ -1163,4 +1216,5 @@ def download_assinado(contrato_id: uuid.UUID, db: Session = Depends(get_db)):
     c = db.query(Contrato).filter(Contrato.id == contrato_id).first()
     if not c or not c.arquivo_assinado_path:
         raise HTTPException(status_code=404, detail="PDF assinado não disponível")
-    return FileResponse(c.arquivo_assinado_path, media_type="application/pdf", filename=f"contrato_{contrato_id}_assinado.pdf")
+    prefixo = "procuracao" if c.tipo_documento == "procuracao" else "contrato"
+    return FileResponse(c.arquivo_assinado_path, media_type="application/pdf", filename=f"{prefixo}_{contrato_id}_assinado.pdf")

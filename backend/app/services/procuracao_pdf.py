@@ -1,12 +1,15 @@
 """
-Gerador de Instrumento de Procuração em PDF.
+Gerador de Instrumento de Procuração (PDF + versão HTML editável no Google Docs).
 Mesmo padrão visual do Contrato de Honorários (contrato_pdf.py).
 
 Partes customizáveis:
-  - Outorgante (nome, qualificação, CPF/CNPJ, endereço, email) — o cliente
+  - Outorgante (nome, nacionalidade/estado civil/profissão, CPF/CNPJ, endereço, email)
   - Outorgado(s) — lista dinâmica de advogado(s): nome, OAB, CPF
   - Endereço profissional (do escritório) dos outorgados — pré-preenchido, editável
-  - Finalidade específica (texto livre, opcional) — some à cláusula padrão ad judicia
+  - Poderes: cláusula geral "ad judicia et extra" (pode ser desligada por completo),
+    com os poderes especiais escolhidos individualmente + texto adicional livre
+  - Finalidade específica (texto livre, opcional)
+  - Validade (opcional — se vazia, procuração não tem prazo)
   - Data da procuração
 """
 
@@ -36,20 +39,27 @@ DARK = colors.HexColor("#1d1e20")
 TEAL = colors.HexColor("#00b090")
 MID_GRAY = colors.HexColor("#6b7280")
 
-# Cláusula padrão "ad judicia et extra" — formulação genérica amplamente usada em
-# procurações no Brasil (poderes gerais para o foro em geral).
-PODERES_AD_JUDICIA = (
+# Base da cláusula "ad judicia et extra" — formulação genérica amplamente usada em
+# procurações no Brasil (poderes gerais para o foro em geral). Os "poderes especiais"
+# são compostos à parte, conforme a seleção do usuário (ver PODERES_ESPECIAIS_OPCOES).
+PODERES_GERAIS_BASE = (
     "Pelo presente instrumento particular de mandato, o(a) OUTORGANTE nomeia e constitui "
     "seu(s) bastante procurador(es) o(s) OUTORGADO(S) acima qualificado(s), a quem confere "
     "amplos, gerais e ilimitados poderes para o foro em geral, com a cláusula \"ad judicia "
     "et extra\", em qualquer Juízo, Instância ou Tribunal, podendo propor contra quem de "
     "direito as ações competentes e defendê-lo(a) nas contrárias, seguindo umas e outras, "
-    "até final decisão, usando os recursos legais e acompanhando-os, conferindo-lhe, ainda, "
-    "poderes especiais para confessar, desistir, transigir, firmar compromissos ou acordos, "
-    "receber e dar quitação, agindo em conjunto ou separadamente, podendo ainda "
-    "substabelecer esta a outrem, com ou sem reserva de iguais poderes, dando tudo por bom, "
-    "firme e valioso."
+    "até final decisão, usando os recursos legais e acompanhando-os"
 )
+
+# Chave → texto do poder especial (chaves espelham PoderEspecial em schemas/contrato.py).
+PODERES_ESPECIAIS_OPCOES: dict[str, str] = {
+    "confessar": "confessar",
+    "desistir": "desistir",
+    "transigir": "transigir",
+    "firmar_acordos": "firmar compromissos ou acordos",
+    "receber_quitacao": "receber e dar quitação",
+    "substabelecer": "substabelecer esta a outrem, com ou sem reserva de iguais poderes",
+}
 
 CLAUSULA_ASSINATURA = (
     "Por estarem assim justos, o(a) OUTORGANTE assina o presente instrumento, via "
@@ -68,6 +78,59 @@ def _data_por_extenso(d: date) -> str:
     """'%d de %B de %Y' depende do locale do processo (pode sair em inglês no
     servidor) — usa nomes de mês fixos em português para não depender disso."""
     return f"{d.day:02d} de {_MESES_PT[d.month - 1]} de {d.year}"
+
+
+def _compor_qualificacao(nacionalidade: str, estado_civil: str, profissao: str) -> str:
+    partes = [p.strip() for p in (nacionalidade, estado_civil, profissao) if p and p.strip()]
+    return ", ".join(partes)
+
+
+def _compor_clausula_poderes(poderes_especiais: list[str], poderes_adicionais: str) -> str:
+    """Monta a frase completa da cláusula ad judicia, incluindo só os poderes
+    especiais selecionados + texto adicional livre (na sequência da mesma frase)."""
+    extras = [PODERES_ESPECIAIS_OPCOES[k] for k in poderes_especiais if k in PODERES_ESPECIAIS_OPCOES]
+    if poderes_adicionais.strip():
+        extras.append(poderes_adicionais.strip())
+    frase = PODERES_GERAIS_BASE
+    if extras:
+        frase += ", conferindo-lhe, ainda, poderes especiais para " + ", ".join(extras)
+    frase += ", agindo em conjunto ou separadamente, dando tudo por bom, firme e valioso."
+    return frase
+
+
+def _linha_outorgante(
+    outorgante_nome: str, outorgante_nacionalidade: str, outorgante_estado_civil: str,
+    outorgante_profissao: str, outorgante_cpf_cnpj: str, outorgante_endereco: str,
+    outorgante_email: str,
+) -> str:
+    qualificacao = _compor_qualificacao(outorgante_nacionalidade, outorgante_estado_civil, outorgante_profissao)
+    partes = [outorgante_nome]
+    if qualificacao:
+        partes.append(qualificacao)
+    linha = ", ".join(partes)
+    if outorgante_cpf_cnpj:
+        linha += f", com {outorgante_cpf_cnpj}"
+    if outorgante_endereco:
+        linha += f", residente/domiciliado em {outorgante_endereco}"
+    if outorgante_email:
+        linha += f", e-mail {outorgante_email}"
+    linha += ", doravante denominado(a) OUTORGANTE;"
+    return linha
+
+
+def _linha_outorgado(adv: dict, endereco_escritorio: str) -> str | None:
+    nome = (adv.get("nome") or "").strip()
+    if not nome:
+        return None
+    oab = (adv.get("oab") or "").strip()
+    cpf = (adv.get("cpf") or "").strip()
+    partes = [f"{nome}, advogado(a)"]
+    if oab:
+        partes.append(f"inscrito(a) na OAB sob o n.º {oab}")
+    if cpf:
+        partes.append(f"portador(a) do CPF n.º {cpf}")
+    partes.append(f"com endereço profissional em {endereco_escritorio}")
+    return ", ".join(partes) + ";"
 
 
 def _estilos():
@@ -101,13 +164,19 @@ def _estilos():
 
 def gerar_procuracao(
     outorgante_nome: str,
-    outorgante_qualificacao: str,
+    outorgante_nacionalidade: str,
+    outorgante_estado_civil: str,
+    outorgante_profissao: str,
     outorgante_cpf_cnpj: str,
     outorgante_endereco: str,
     outorgante_email: str,
     outorgados: list[dict],
     endereco_escritorio: str,
+    incluir_poderes_gerais: bool = True,
+    poderes_especiais: list[str] | None = None,
+    poderes_adicionais: str = "",
     finalidade: str = "",
+    data_validade: date | None = None,
     data_procuracao: date | None = None,
 ) -> bytes:
     """
@@ -147,6 +216,7 @@ def gerar_procuracao(
         )))
 
     story.append(HRFlowable(width="100%", thickness=0.5, color=TEAL, spaceAfter=14))
+    story.append(Spacer(1, 0.4 * cm))
 
     story.append(Paragraph("PROCURAÇÃO", st["titulo"]))
     story.append(HRFlowable(width="50%", thickness=0.5, color=colors.HexColor("#e5e7eb"),
@@ -155,11 +225,10 @@ def gerar_procuracao(
     # ── OUTORGANTE ────────────────────────────────────────────────────────────
     story.append(Paragraph("<b>OUTORGANTE:</b>", st["parte_label"]))
     story.append(Paragraph(
-        f"{outorgante_nome}, {outorgante_qualificacao}, "
-        f"com {outorgante_cpf_cnpj}, "
-        f"residente/domiciliado em {outorgante_endereco}"
-        f"{', e-mail ' + outorgante_email if outorgante_email else ''}, "
-        "doravante denominado(a) <b>OUTORGANTE</b>;",
+        _linha_outorgante(
+            outorgante_nome, outorgante_nacionalidade, outorgante_estado_civil,
+            outorgante_profissao, outorgante_cpf_cnpj, outorgante_endereco, outorgante_email,
+        ),
         st["corpo"]
     ))
     story.append(Spacer(1, 0.2 * cm))
@@ -167,32 +236,35 @@ def gerar_procuracao(
     # ── OUTORGADO(S) — dinâmico, um ou mais advogados ───────────────────────────
     story.append(Paragraph("<b>OUTORGADO(S):</b>", st["parte_label"]))
     for adv in outorgados:
-        nome = (adv.get("nome") or "").strip()
-        oab = (adv.get("oab") or "").strip()
-        cpf = (adv.get("cpf") or "").strip()
-        if not nome:
-            continue
-        partes = [f"<b>{nome}</b>, advogado(a)"]
-        if oab:
-            partes.append(f"inscrito(a) na OAB sob o n.º {oab}")
-        if cpf:
-            partes.append(f"portador(a) do CPF n.º {cpf}")
-        partes.append(f"com endereço profissional em {endereco_escritorio}")
-        story.append(Paragraph(", ".join(partes) + ";", st["corpo"]))
+        linha = _linha_outorgado(adv, endereco_escritorio)
+        if linha:
+            story.append(Paragraph(linha, st["corpo"]))
 
     story.append(Spacer(1, 0.3 * cm))
 
     # ── PODERES ───────────────────────────────────────────────────────────────
     story.append(Paragraph("DOS PODERES", st["secao_titulo"]))
-    story.append(Paragraph(PODERES_AD_JUDICIA, st["corpo"]))
-
-    if finalidade.strip():
-        story.append(Spacer(1, 0.2 * cm))
-        story.append(Paragraph("DA FINALIDADE ESPECÍFICA", st["secao_titulo"]))
-        for paragrafo in finalidade.strip().split("\n\n"):
+    if incluir_poderes_gerais:
+        story.append(Paragraph(_compor_clausula_poderes(poderes_especiais or [], poderes_adicionais), st["corpo"]))
+        if finalidade.strip():
+            story.append(Spacer(1, 0.2 * cm))
+            story.append(Paragraph("DA FINALIDADE ESPECÍFICA", st["secao_titulo"]))
+            for paragrafo in finalidade.strip().split("\n\n"):
+                paragrafo = paragrafo.strip()
+                if paragrafo:
+                    story.append(Paragraph(paragrafo.replace("\n", " "), st["corpo"]))
+    else:
+        # Sem cláusula geral — os poderes são só o que estiver em `finalidade`.
+        for paragrafo in (finalidade.strip() or "—").split("\n\n"):
             paragrafo = paragrafo.strip()
             if paragrafo:
                 story.append(Paragraph(paragrafo.replace("\n", " "), st["corpo"]))
+
+    if data_validade:
+        story.append(Paragraph(
+            f"A presente procuração terá validade até {_data_por_extenso(data_validade)}.",
+            st["corpo"]
+        ))
 
     story.append(Spacer(1, 0.3 * cm))
     story.append(Paragraph(
@@ -228,3 +300,70 @@ def _bloco_assinatura(st: dict, nome: str, papel: str):
         Paragraph(nome, st["assinatura_label"]),
         Paragraph(papel, st["assinatura_sub"]),
     ]
+
+
+def _esc(s: str) -> str:
+    return (s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+
+def gerar_procuracao_html(
+    outorgante_nome: str,
+    outorgante_nacionalidade: str,
+    outorgante_estado_civil: str,
+    outorgante_profissao: str,
+    outorgante_cpf_cnpj: str,
+    outorgante_endereco: str,
+    outorgante_email: str,
+    outorgados: list[dict],
+    endereco_escritorio: str,
+    incluir_poderes_gerais: bool = True,
+    poderes_especiais: list[str] | None = None,
+    poderes_adicionais: str = "",
+    finalidade: str = "",
+    data_validade: date | None = None,
+    data_procuracao: date | None = None,
+) -> bytes:
+    """
+    Mesmo conteúdo de `gerar_procuracao`, em HTML simples — usado só para subir ao
+    Drive com conversão automática para Google Docs (versão editável pelo usuário).
+    """
+    data_str = _data_por_extenso(data_procuracao or date.today())
+
+    partes: list[str] = [
+        "<html><body style=\"font-family: Helvetica, Arial, sans-serif; font-size: 11pt; color: #1d1e20;\">",
+        "<h2 style=\"text-align:center;\">PROCURAÇÃO</h2>",
+        "<p><b>OUTORGANTE:</b><br>" + _esc(_linha_outorgante(
+            outorgante_nome, outorgante_nacionalidade, outorgante_estado_civil,
+            outorgante_profissao, outorgante_cpf_cnpj, outorgante_endereco, outorgante_email,
+        )) + "</p>",
+        "<p><b>OUTORGADO(S):</b><br>",
+    ]
+    for adv in outorgados:
+        linha = _linha_outorgado(adv, endereco_escritorio)
+        if linha:
+            partes.append(_esc(linha) + "<br>")
+    partes.append("</p>")
+
+    partes.append("<h3>DOS PODERES</h3>")
+    if incluir_poderes_gerais:
+        partes.append("<p>" + _esc(_compor_clausula_poderes(poderes_especiais or [], poderes_adicionais)) + "</p>")
+        if finalidade.strip():
+            partes.append("<h3>DA FINALIDADE ESPECÍFICA</h3>")
+            for paragrafo in finalidade.strip().split("\n\n"):
+                paragrafo = paragrafo.strip()
+                if paragrafo:
+                    partes.append("<p>" + _esc(paragrafo.replace("\n", " ")) + "</p>")
+    else:
+        for paragrafo in (finalidade.strip() or "—").split("\n\n"):
+            paragrafo = paragrafo.strip()
+            if paragrafo:
+                partes.append("<p>" + _esc(paragrafo.replace("\n", " ")) + "</p>")
+
+    if data_validade:
+        partes.append(f"<p>A presente procuração terá validade até {_data_por_extenso(data_validade)}.</p>")
+
+    partes.append("<p>" + _esc(CLAUSULA_ASSINATURA.format(data_procuracao=data_str)) + "</p>")
+    partes.append(f"<p style=\"text-align:center; margin-top:60px;\">____________________________________<br>"
+                   f"<b>{_esc(outorgante_nome.upper())}</b><br>OUTORGANTE</p>")
+    partes.append("</body></html>")
+    return "".join(partes).encode("utf-8")

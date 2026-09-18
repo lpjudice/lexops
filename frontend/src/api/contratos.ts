@@ -23,6 +23,7 @@ export interface ContratoArquivo {
   path: string
   clicksign_key?: string
   drive_link?: string | null
+  docs_link?: string | null
 }
 
 export interface Contrato {
@@ -41,6 +42,8 @@ export interface Contrato {
   drive_link_master?: string | null
   clicksign_document_key?: string
   signatarios: Signatario[]
+  doc_gerado_filename?: string | null
+  procuracao_dados?: GerarProcuracaoRequest | null
   created_at: string
   updated_at: string
 }
@@ -77,15 +80,24 @@ export interface OutorgadoInput {
   cpf?: string
 }
 
+export type PoderEspecial =
+  | 'confessar' | 'desistir' | 'transigir' | 'firmar_acordos' | 'receber_quitacao' | 'substabelecer'
+
 export interface GerarProcuracaoRequest {
   outorgante_nome: string
-  outorgante_qualificacao?: string
+  outorgante_nacionalidade?: string
+  outorgante_estado_civil?: string
+  outorgante_profissao?: string
   outorgante_cpf_cnpj?: string
   outorgante_endereco?: string
   outorgante_email?: string
   outorgados: OutorgadoInput[]
   endereco_escritorio?: string
+  incluir_poderes_gerais?: boolean
+  poderes_especiais?: PoderEspecial[]
+  poderes_adicionais?: string
   finalidade?: string
+  data_validade?: string
   data_procuracao?: string
 }
 

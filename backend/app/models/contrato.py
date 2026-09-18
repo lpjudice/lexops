@@ -28,8 +28,14 @@ class Contrato(Base):
     tipo_documento: Mapped[str] = mapped_column(String(20), nullable=False, default="contrato", server_default="contrato")
     arquivo_path: Mapped[str | None] = mapped_column(String(500))  # path local do PDF original (legado)
     arquivo_assinado_path: Mapped[str | None] = mapped_column(String(500))  # PDF assinado
-    # Lista de arquivos: [{"filename": str, "path": str, "clicksign_key": str|null}]
+    # Lista de arquivos: [{"filename": str, "path": str, "clicksign_key": str|null, "drive_link": str|null, "docs_link": str|null}]
     arquivos: Mapped[list] = mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))
+    # Nome do arquivo atualmente "gerado pelo sistema" (Gerar contrato/procuração) — ao
+    # regerar, esse é o entry removido/substituído em vez de duplicado.
+    doc_gerado_filename: Mapped[str | None] = mapped_column(String(500))
+    # Último payload usado para gerar a procuração (GerarProcuracaoRequest), para
+    # pré-preencher o formulário ao reabrir/editar.
+    procuracao_dados: Mapped[dict | None] = mapped_column(JSONB)
 
     status: Mapped[str] = mapped_column(
         Enum(

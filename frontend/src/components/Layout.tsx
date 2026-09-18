@@ -99,7 +99,7 @@ const navGroups: NavGroup[] = [
   {
     label: 'DOCUMENTOS',
     items: [
-      { to: '/contratos', label: 'Contratos', Icon: FileText },
+      { to: '/contratos', label: 'Contratos & Procurações', Icon: FileText },
       { to: '/organizador', label: 'Folder Organizer', Icon: FolderOpen },
     ],
   },
@@ -144,7 +144,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/diario2': 'Recorte Digital OAB',
   '/teses': 'Teses IA',
   '/jurisprudencia': 'Jurisprudência',
-  '/contratos': 'Contratos',
+  '/contratos': 'Contratos & Procurações',
   '/organizador': 'Folder Organizer',
   '/reembolsos': 'Reembolsos',
   '/financeiro': 'Financeiro',

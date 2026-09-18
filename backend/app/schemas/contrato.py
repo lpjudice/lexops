@@ -75,15 +75,32 @@ class OutorgadoInput(BaseModel):
     cpf: str = ""
 
 
+# Chaves válidas para GerarProcuracaoRequest.poderes_especiais — ver PODERES_ESPECIAIS_OPCOES
+# em app/services/procuracao_pdf.py para o texto de cada uma.
+PoderEspecial = Literal[
+    "confessar", "desistir", "transigir", "firmar_acordos", "receber_quitacao", "substabelecer"
+]
+
+DEFAULT_PODERES_ESPECIAIS: list[PoderEspecial] = [
+    "confessar", "desistir", "transigir", "firmar_acordos", "receber_quitacao", "substabelecer"
+]
+
+
 class GerarProcuracaoRequest(BaseModel):
     outorgante_nome: str
-    outorgante_qualificacao: str = ""
+    outorgante_nacionalidade: str = "brasileiro(a)"
+    outorgante_estado_civil: str = ""
+    outorgante_profissao: str = ""
     outorgante_cpf_cnpj: str = ""
     outorgante_endereco: str = ""
     outorgante_email: str = ""
     outorgados: list[OutorgadoInput] = []
     endereco_escritorio: str = ""
+    incluir_poderes_gerais: bool = True
+    poderes_especiais: list[PoderEspecial] = DEFAULT_PODERES_ESPECIAIS
+    poderes_adicionais: str = ""
     finalidade: str = ""
+    data_validade: str = ""           # YYYY-MM-DD, opcional
     data_procuracao: str = ""         # YYYY-MM-DD
 
 
