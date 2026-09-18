@@ -13,6 +13,8 @@ export interface Signatario {
   nome: string
   email: string
   papel: PapelSignatario
+  cpf?: string | null
+  data_nascimento?: string | null
   clicksign_signer_key?: string
   status_assinatura: StatusAssinatura
   assinado_em?: string
@@ -105,6 +107,8 @@ export interface SignatarioCreate {
   nome: string
   email: string
   papel: PapelSignatario
+  cpf?: string
+  data_nascimento?: string
 }
 
 export const contratosApi = {
@@ -150,6 +154,9 @@ export const contratosApi = {
 
   removerSignatario: (contratoId: string, sigId: string) =>
     api.delete(`/contratos/${contratoId}/signatarios/${sigId}`),
+
+  lembrarSignatario: (contratoId: string, sigId: string) =>
+    api.post(`/contratos/${contratoId}/signatarios/${sigId}/lembrar`).then((r) => r.data),
 
   enviar: (id: string) =>
     api.post<Contrato>(`/contratos/${id}/enviar`).then((r) => r.data),

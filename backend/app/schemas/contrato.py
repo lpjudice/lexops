@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, EmailStr
@@ -15,6 +15,8 @@ class SignatarioCreate(BaseModel):
     nome: str
     email: str
     papel: PapelSignatario = "outro"
+    cpf: str | None = None
+    data_nascimento: date | None = None
 
 
 class SignatarioOut(SignatarioCreate):
@@ -159,6 +161,8 @@ class ContratoOut(ContratoCreate):
     drive_link_master: str | None = None
     clicksign_document_key: str | None
     signatarios: list[SignatarioOut] = []
+    doc_gerado_filename: str | None = None
+    procuracao_dados: dict | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -1,7 +1,7 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String, Text, func, text
+from sqlalchemy import Date, DateTime, Enum, ForeignKey, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -92,6 +92,9 @@ class Signatario(Base):
         nullable=False,
         default="outro",
     )
+    # Opcionais — ajudam o ClickSign a pré-preencher os dados na hora de assinar.
+    cpf: Mapped[str | None] = mapped_column(String(18))
+    data_nascimento: Mapped[date | None] = mapped_column(Date)
 
     # ClickSign
     clicksign_signer_key: Mapped[str | None] = mapped_column(String(255))

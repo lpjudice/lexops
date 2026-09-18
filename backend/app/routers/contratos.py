@@ -19,6 +19,12 @@ UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 router = APIRouter(prefix="/contratos", tags=["contratos"],
                    dependencies=[Depends(get_current_user)])
 
+# Router SEM autenticação — só pro webhook do ClickSign, que não manda nosso token.
+# (O router principal acima aplica get_current_user a tudo; esse callback externo
+# precisa ficar fora dele. Se CLICKSIGN_WEBHOOK_SECRET estiver setado, exige
+# ?secret=... na URL configurada no painel do ClickSign.)
+router_publico = APIRouter(prefix="/contratos", tags=["contratos"])
+
 
 def _pasta_drive(tipo_documento: str) -> str:
     """Nome da pasta no Drive (cliente e mestra) conforme o tipo de documento."""
@@ -838,6 +844,14 @@ async def gerar_pdf_procuracao(
             if not cli.endereco and novo_end:
                 cli.endereco = novo_end
                 mudou = True
+            novo_ec = (body.outorgante_estado_civil or "").strip()
+            if not cli.estado_civil and novo_ec:
+                cli.estado_civil = novo_ec
+                mudou = True
+            nova_prof = (body.outorgante_profissao or "").strip()
+            if not cli.profissao and nova_prof:
+                cli.profissao = nova_prof
+                mudou = True
             if mudou:
                 db.commit()
     except Exception:
@@ -881,6 +895,24 @@ def remover_signatario(contrato_id: uuid.UUID, sig_id: uuid.UUID, db: Session = 
         raise HTTPException(status_code=404, detail="Signatário não encontrado")
     db.delete(sig)
     db.commit()
+
+
+@router.post("/{contrato_id}/signatarios/{sig_id}/lembrar")
+def lembrar_signatario(contrato_id: uuid.UUID, sig_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Reenvia o e-mail de convite de assinatura do ClickSign (mesmo recurso do
+    botão de lembrete no site deles)."""
+    sig = db.query(Signatario).filter(
+        Signatario.id == sig_id, Signatario.contrato_id == contrato_id
+    ).first()
+    if not sig:
+        raise HTTPException(status_code=404, detail="Signatário não encontrado")
+    if sig.status_assinatura == "assinado":
+        raise HTTPException(status_code=400, detail="Este signatário já assinou.")
+    if not sig.clicksign_request_key:
+        raise HTTPException(status_code=400, detail="Este signatário ainda não foi enviado para assinatura.")
+    if not clicksign.notificar_signatario(sig.clicksign_request_key):
+        raise HTTPException(status_code=502, detail="Falha ao enviar lembrete pelo ClickSign.")
+    return {"ok": True}
 
 
 # ── Envio para ClickSign ──────────────────────────────────────────────────────
@@ -942,7 +974,10 @@ def enviar_para_assinatura(contrato_id: uuid.UUID, db: Session = Depends(get_db)
     # ↳ POST /lists vincula mas NÃO envia email; é necessário chamar POST /notifications
     for sig in c.signatarios:
         try:
-            signer_key = clicksign.criar_signatario(sig.nome, sig.email)
+            signer_key = clicksign.criar_signatario(
+                sig.nome, sig.email, cpf=sig.cpf,
+                data_nascimento=sig.data_nascimento.isoformat() if sig.data_nascimento else None,
+            )
             sig.clicksign_signer_key = signer_key
             req_key = clicksign.adicionar_signatario_ao_documento(
                 doc_key_principal, signer_key, sig.papel
@@ -1115,8 +1150,10 @@ def sincronizar_status_clicksign(contrato_id: uuid.UUID, db: Session = Depends(g
 
     if doc_status == "closed" or todos_assinaram:
         c.status = "assinado"
-        if doc_status == "closed":
-            _baixar_e_arquivar_assinado_clicksign(db, c, c.clicksign_document_key)
+        # Baixa/arquiva o assinado sempre que já der pra considerar concluído — não só
+        # quando o ClickSign reporta "closed" literalmente (evita ficar sem o PDF final
+        # se o status demorar a fechar por lá mas todos já assinaram por aqui).
+        _baixar_e_arquivar_assinado_clicksign(db, c, c.clicksign_document_key)
         try:
             from app.models.financeiro import Honorario
             h = db.query(Honorario).filter(Honorario.contrato_id == contrato_id).first()
@@ -1132,14 +1169,19 @@ def sincronizar_status_clicksign(contrato_id: uuid.UUID, db: Session = Depends(g
     return c
 
 
-# ── Webhook ClickSign ─────────────────────────────────────────────────────────
+# ── Webhook ClickSign (router_publico — sem auth, ver comentário acima) ────────
 
-@router.post("/webhook/clicksign")
+@router_publico.post("/webhook/clicksign")
 async def webhook_clicksign(request: Request, db: Session = Depends(get_db)):
     """
     Recebe callbacks do ClickSign sobre eventos de assinatura.
     Atualiza status do contrato e signatários.
     """
+    import os
+    secret = os.getenv("CLICKSIGN_WEBHOOK_SECRET")
+    if secret and request.query_params.get("secret") != secret:
+        return {"ok": False}
+
     payload = await request.json()
     evento = payload.get("event", {})
     nome_evento = evento.get("name", "")

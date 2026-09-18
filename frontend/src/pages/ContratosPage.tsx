@@ -230,6 +230,13 @@ export default function ContratosPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['contratos'] }),
   })
 
+  const lembrarSig = useMutation({
+    mutationFn: ({ cid, sid }: { cid: string; sid: string }) =>
+      contratosApi.lembrarSignatario(cid, sid),
+    onSuccess: () => alert('Lembrete enviado.'),
+    onError: (e: any) => alert(`Erro ao enviar lembrete:\n${e?.response?.data?.detail || e?.message || 'Erro desconhecido'}`),
+  })
+
   const enviar = useMutation({
     mutationFn: (id: string) => contratosApi.enviar(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['contratos'] }),
@@ -351,6 +358,9 @@ export default function ContratosPage() {
         outorgante_nome: cliente?.nome || '',
         outorgante_cpf_cnpj: cliente?.cpf_cnpj || '',
         outorgante_email: cliente?.email || '',
+        outorgante_endereco: cliente?.endereco || '',
+        outorgante_estado_civil: cliente?.estado_civil || '',
+        outorgante_profissao: cliente?.profissao || '',
       })
     }
     setGerarProcErro(null)
@@ -619,7 +629,8 @@ export default function ContratosPage() {
                               </a>
                               {arq.drive_link && <span className={cs.arquivoNome}>Drive</span>}
                               {arq.docs_link && (
-                                <a href={arq.docs_link} target="_blank" rel="noreferrer" className={cs.arquivoNome}>
+                                <a href={arq.docs_link} target="_blank" rel="noreferrer" className={cs.arquivoNome}
+                                  title="Cópia editável — não sincroniza de volta com o PDF. Se alterar aqui, baixe como PDF no Google Docs e substitua o anexo (remova este e faça upload do novo).">
                                   📝 Editar no Google Docs
                                 </a>
                               )}
@@ -1044,7 +1055,15 @@ export default function ContratosPage() {
                                      s.status_assinatura === 'assinado' ? '✓ Assinado' : 'Recusado'}
                                   </span>
                                 </td>
-                                <td>
+                                <td style={{ display: 'flex', gap: 4 }}>
+                                  {s.status_assinatura === 'pendente' &&
+                                    ['aguardando_assinatura', 'parcialmente_assinado'].includes(c.status) && (
+                                    <button className={styles.btnTable} title="Reenviar e-mail de assinatura"
+                                      disabled={lembrarSig.isPending}
+                                      onClick={() => lembrarSig.mutate({ cid: c.id, sid: s.id })}>
+                                      🔔 Lembrar
+                                    </button>
+                                  )}
                                   {c.status === 'rascunho' && (
                                     <button className={styles.btnDanger}
                                       onClick={() => removerSig.mutate({ cid: c.id, sid: s.id })}>
@@ -1070,9 +1089,18 @@ export default function ContratosPage() {
                             onChange={(e) => setSigForms({ ...sigForms, [c.id]: { ...sf, papel: e.target.value as PapelSignatario } })}>
                             {PAPEIS.map((p) => <option key={p} value={p}>{PAPEL_LABEL[p]}</option>)}
                           </select>
+                          <input className={styles.input} placeholder="CPF (opcional)"
+                            value={sf.cpf ?? ''}
+                            onChange={(e) => setSigForms({ ...sigForms, [c.id]: { ...sf, cpf: maskCPFCNPJ(e.target.value) } })} />
+                          <input className={styles.input} type="date" placeholder="Nascimento (opcional)"
+                            value={sf.data_nascimento ?? ''}
+                            onChange={(e) => setSigForms({ ...sigForms, [c.id]: { ...sf, data_nascimento: e.target.value } })} />
                           <button className={styles.btnPrimary}
                             disabled={!sf.nome || !sf.email}
-                            onClick={() => adicionarSig.mutate({ id: c.id, data: sf })}>
+                            onClick={() => adicionarSig.mutate({
+                              id: c.id,
+                              data: { ...sf, cpf: sf.cpf?.trim() || undefined, data_nascimento: sf.data_nascimento?.trim() || undefined },
+                            })}>
                             + Adicionar
                           </button>
                         </div>

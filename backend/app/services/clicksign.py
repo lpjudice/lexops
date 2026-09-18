@@ -63,10 +63,14 @@ def upload_documento(arquivo_path: str, nome_arquivo: str) -> str | None:
 
 # ── 2. Criar signatário ───────────────────────────────────────────────────────
 
-def criar_signatario(nome: str, email: str) -> str | None:
+def criar_signatario(
+    nome: str, email: str, cpf: str | None = None, data_nascimento: str | None = None,
+) -> str | None:
     """
     Cria um signatário no ClickSign e retorna seu signer_key.
     Autenticação por e-mail (link de assinatura enviado ao email do signatário).
+    `cpf`/`data_nascimento` são opcionais — quando informados, vêm pré-preenchidos
+    na tela de assinatura do ClickSign (`data_nascimento` em formato YYYY-MM-DD).
     """
     payload = {
         "signer": {
@@ -74,9 +78,9 @@ def criar_signatario(nome: str, email: str) -> str | None:
             "auths": ["email"],        # campo correto na API v1
             "name": nome,
             "phone_number": None,
-            "documentation": None,
-            "birthday": None,
-            "has_documentation": False,
+            "documentation": cpf or None,
+            "birthday": data_nascimento or None,
+            "has_documentation": bool(cpf),
         }
     }
     resp = httpx.post(_url("/api/v1/signers"), json=payload, headers=_h(), timeout=15)
