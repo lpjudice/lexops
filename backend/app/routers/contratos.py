@@ -31,13 +31,17 @@ def _pasta_drive(tipo_documento: str) -> str:
     return "Procurações" if tipo_documento == "procuracao" else "Contratos"
 
 
-def _duplicar_assinado_para_drive(db: Session, contrato: Contrato, pdf_bytes: bytes, nome_arquivo: str) -> tuple[str | None, str | None]:
+def _duplicar_para_drive(
+    db: Session, contrato: Contrato, conteudo: bytes, nome_arquivo: str,
+    mimetype: str = "application/pdf", converter_html_para_google_docs: bool = False,
+) -> tuple[str | None, str | None]:
     """
-    Sobe o PDF final assinado para a pasta do cliente (LexOps/{cliente}/Contratos ou
-    /Procurações) e para a pasta mestra correspondente (LexOps/Contratos/{cliente} ou
-    LexOps/Procurações/{cliente}), que reúne todos os documentos finalizados daquele tipo.
-    Retorna (link_cliente, link_master); qualquer um pode vir None se o Drive não estiver
-    conectado ou o upload falhar.
+    Sobe um arquivo (PDF final assinado, ou o PDF/versão editável gerados em
+    rascunho) tanto pra pasta do cliente (LexOps/{cliente}/Contratos ou
+    /Procurações) quanto pra pasta mestra correspondente (LexOps/Contratos/
+    {cliente} ou LexOps/Procurações/{cliente}), que reúne todos os documentos
+    daquele tipo. Retorna (link_cliente, link_master); qualquer um pode vir
+    None se o Drive não estiver conectado ou o upload falhar.
     """
     from app.models.cliente import Cliente
     from app.services.google_drive import upload_arquivo, upload_arquivo_raiz
@@ -50,11 +54,17 @@ def _duplicar_assinado_para_drive(db: Session, contrato: Contrato, pdf_bytes: by
     link_cliente = None
     link_master = None
     try:
-        link_cliente = upload_arquivo(pdf_bytes, nome_arquivo, cliente.nome, pasta)
+        link_cliente = upload_arquivo(
+            conteudo, nome_arquivo, cliente.nome, pasta,
+            mimetype=mimetype, converter_html_para_google_docs=converter_html_para_google_docs,
+        )
     except Exception:
         pass
     try:
-        link_master = upload_arquivo_raiz(pdf_bytes, nome_arquivo, subpath=[pasta, cliente.nome], mimetype="application/pdf")
+        link_master = upload_arquivo_raiz(
+            conteudo, nome_arquivo, subpath=[pasta, cliente.nome],
+            mimetype=mimetype, converter_html_para_google_docs=converter_html_para_google_docs,
+        )
     except Exception:
         pass
     return link_cliente, link_master
@@ -172,15 +182,12 @@ def obter_template_procuracao():
 
     from app.services.procuracao_pdf import gerar_procuracao_html
     html_bytes = gerar_procuracao_html(
-        outorgante_tipo="PF",
-        outorgante_nome="Nome do Outorgante",
-        outorgante_nacionalidade="brasileiro(a)",
-        outorgante_estado_civil="[estado civil]",
-        outorgante_profissao="[profissão]",
-        outorgante_cpf_cnpj="[CPF]",
-        outorgante_endereco="[endereço completo]",
-        outorgante_email="[email]",
-        outorgados=[{"nome": "Nome do Outorgado (advogado)", "oab": "[OAB]", "cpf": "[CPF]"}],
+        outorgantes=[{
+            "tipo": "PF", "nome": "Nome do Outorgante", "nacionalidade": "brasileiro(a)",
+            "estado_civil": "[estado civil]", "profissao": "[profissão]",
+            "cpf_cnpj": "[CPF]", "endereco": "[endereço completo]", "email": "[email]",
+        }],
+        outorgados=[{"nome": "Nome do Outorgado (advogado)", "oab": "[OAB]", "oab_uf": "ES", "cpf": "[CPF]"}],
         endereco_escritorio="Av. Desembargador Sampaio, n. 300, Praia do Canto, Vitória/ES - CEP 29.055-250",
         finalidade="",
     )
@@ -783,18 +790,23 @@ async def gerar_pdf_procuracao(
     contrato_id: uuid.UUID,
     body: GerarProcuracaoRequest,
     db: Session = Depends(get_db),
+    usuario=Depends(get_current_user),
 ):
     """Gera o PDF da procuração e o adiciona à lista de arquivos. Mesma infra de
     upload/Drive do 'Gerar contrato', sem o lançamento automático no financeiro
     (procuração não tem honorários). Reeditar e gerar de novo SOBRESCREVE a versão
     anterior (arquivo local + Drive), em vez de duplicar — ver `doc_gerado_filename`."""
-    from datetime import date as date_type
+    from datetime import date as date_type, datetime, timezone
     from app.services.procuracao_pdf import gerar_procuracao, gerar_procuracao_html
     from app.services.google_drive import extrair_file_id, deletar_arquivo_por_id
 
     c = db.query(Contrato).filter(Contrato.id == contrato_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Contrato não encontrado")
+
+    outorgantes_validos = [o for o in body.outorgantes if o.nome.strip()]
+    if not outorgantes_validos:
+        raise HTTPException(status_code=400, detail="Informe ao menos um outorgante.")
 
     def _parse_data(s: str) -> date_type | None:
         if not s:
@@ -808,17 +820,7 @@ async def gerar_pdf_procuracao(
     data_validade = _parse_data(body.data_validade)
 
     kwargs = dict(
-        outorgante_tipo=body.outorgante_tipo,
-        outorgante_nome=body.outorgante_nome,
-        outorgante_nacionalidade=body.outorgante_nacionalidade,
-        outorgante_estado_civil=body.outorgante_estado_civil,
-        outorgante_profissao=body.outorgante_profissao,
-        outorgante_cpf_cnpj=body.outorgante_cpf_cnpj,
-        outorgante_endereco=body.outorgante_endereco,
-        outorgante_email=body.outorgante_email,
-        outorgante_representante_nome=body.outorgante_representante_nome,
-        outorgante_representante_cpf=body.outorgante_representante_cpf,
-        outorgante_representante_cargo=body.outorgante_representante_cargo,
+        outorgantes=[o.model_dump() for o in body.outorgantes],
         outorgados=[o.model_dump() for o in body.outorgados],
         endereco_escritorio=body.endereco_escritorio,
         incluir_poderes_gerais=body.incluir_poderes_gerais,
@@ -828,9 +830,10 @@ async def gerar_pdf_procuracao(
         data_validade=data_validade,
         data_procuracao=data_procuracao,
     )
-    pdf_bytes = gerar_procuracao(**kwargs)
+    pdf_bytes = gerar_procuracao(forcar_uma_pagina=body.forcar_uma_pagina, **kwargs)
 
-    nome_arquivo = f"Procuracao_{body.outorgante_nome.replace(' ', '_')}_{contrato_id.hex[:8]}.pdf"
+    primeiro_nome = outorgantes_validos[0].nome
+    nome_arquivo = f"Procuracao_{primeiro_nome.replace(' ', '_')}_{contrato_id.hex[:8]}.pdf"
     destino = UPLOADS_DIR / nome_arquivo
     destino.write_bytes(pdf_bytes)
 
@@ -856,30 +859,27 @@ async def gerar_pdf_procuracao(
                 except Exception:
                     pass
 
-    drive_link = None
+    # Sobe pra pasta do cliente (subpasta Procurações) E pra pasta mestra.
+    drive_link, _ = _duplicar_para_drive(db, c, pdf_bytes, nome_arquivo)
     docs_link = None
     try:
-        from app.models.cliente import Cliente
-        cliente = db.query(Cliente).filter(Cliente.id == c.cliente_id).first()
-        if cliente:
-            from app.services.google_drive import upload_arquivo
-            drive_link = upload_arquivo(pdf_bytes, nome_arquivo, cliente.nome, _pasta_drive(c.tipo_documento))
-            html_bytes = gerar_procuracao_html(**kwargs)
-            nome_docs = f"{nome_arquivo[:-4]} (editável)"
-            docs_link = upload_arquivo(
-                html_bytes, nome_docs, cliente.nome, _pasta_drive(c.tipo_documento),
-                mimetype="text/html", converter_html_para_google_docs=True,
-            )
+        html_bytes = gerar_procuracao_html(forcar_uma_pagina=body.forcar_uma_pagina, **kwargs)
+        nome_docs = f"{nome_arquivo[:-4]} (editável)"
+        docs_link, _ = _duplicar_para_drive(
+            db, c, html_bytes, nome_docs, mimetype="text/html", converter_html_para_google_docs=True,
+        )
     except Exception:
         pass
 
-    # Pré-preenchimento reverso (mesma lógica do contrato): preenche só campos vazios.
+    # Pré-preenchimento reverso (mesma lógica do contrato): preenche só campos vazios
+    # do cliente vinculado ao contrato, a partir do PRIMEIRO outorgante.
     try:
         from app.models.cliente import Cliente
         cli = db.query(Cliente).filter(Cliente.id == c.cliente_id).first()
+        primeiro = outorgantes_validos[0]
         if cli:
             mudou = False
-            novo_cpf = (body.outorgante_cpf_cnpj or "").strip()
+            novo_cpf = (primeiro.cpf_cnpj or "").strip()
             if not cli.cpf_cnpj and novo_cpf:
                 ja_usado = db.query(Cliente).filter(
                     Cliente.cpf_cnpj == novo_cpf, Cliente.id != cli.id
@@ -887,20 +887,20 @@ async def gerar_pdf_procuracao(
                 if not ja_usado:
                     cli.cpf_cnpj = novo_cpf
                     mudou = True
-            novo_email = (body.outorgante_email or "").strip()
+            novo_email = (primeiro.email or "").strip()
             if not cli.email and novo_email:
                 cli.email = novo_email
                 mudou = True
-            novo_end = (body.outorgante_endereco or "").strip()
+            novo_end = (primeiro.endereco or "").strip()
             if not cli.endereco and novo_end:
                 cli.endereco = novo_end
                 mudou = True
-            if body.outorgante_tipo == "PF":
-                novo_ec = (body.outorgante_estado_civil or "").strip()
+            if primeiro.tipo == "PF":
+                novo_ec = (primeiro.estado_civil or "").strip()
                 if not cli.estado_civil and novo_ec:
                     cli.estado_civil = novo_ec
                     mudou = True
-                nova_prof = (body.outorgante_profissao or "").strip()
+                nova_prof = (primeiro.profissao or "").strip()
                 if not cli.profissao and nova_prof:
                     cli.profissao = nova_prof
                     mudou = True
@@ -917,6 +917,8 @@ async def gerar_pdf_procuracao(
     c.arquivo_path = str(destino)
     c.doc_gerado_filename = nome_arquivo
     c.procuracao_dados = body.model_dump()
+    c.doc_gerado_por = getattr(usuario, "nome", None)
+    c.doc_gerado_em = datetime.now(timezone.utc)
     db.commit()
     db.refresh(c)
     return c
@@ -1119,7 +1121,7 @@ def finalizar_assinado_manual(contrato_id: uuid.UUID, db: Session = Depends(get_
     c.status = "assinado"
     c.assinatura_manual = True
 
-    link_cliente, link_master = _duplicar_assinado_para_drive(db, c, pdf_bytes, nome_final)
+    link_cliente, link_master = _duplicar_para_drive(db, c, pdf_bytes, nome_final)
     if link_cliente:
         c.drive_link_cliente = link_cliente
     if link_master:
@@ -1303,7 +1305,7 @@ def _baixar_e_arquivar_assinado_clicksign(
     path_assinado.write_bytes(pdf_bytes)
     contrato.arquivo_assinado_path = str(path_assinado)
 
-    link_cliente, link_master = _duplicar_assinado_para_drive(db, contrato, pdf_bytes, nome_arquivo)
+    link_cliente, link_master = _duplicar_para_drive(db, contrato, pdf_bytes, nome_arquivo)
     if link_cliente:
         contrato.drive_link_cliente = link_cliente
     if link_master:

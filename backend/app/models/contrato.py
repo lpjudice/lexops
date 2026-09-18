@@ -36,6 +36,9 @@ class Contrato(Base):
     # Último payload usado para gerar a procuração (GerarProcuracaoRequest), para
     # pré-preencher o formulário ao reabrir/editar.
     procuracao_dados: Mapped[dict | None] = mapped_column(JSONB)
+    # Auditoria de quem gerou o PDF (e quando) — atualiza a cada geração/edição.
+    doc_gerado_por: Mapped[str | None] = mapped_column(String(255))
+    doc_gerado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     status: Mapped[str] = mapped_column(
         Enum(

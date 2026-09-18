@@ -46,6 +46,8 @@ export interface Contrato {
   signatarios: Signatario[]
   doc_gerado_filename?: string | null
   procuracao_dados?: GerarProcuracaoRequest | null
+  doc_gerado_por?: string | null
+  doc_gerado_em?: string | null
   created_at: string
   updated_at: string
 }
@@ -79,6 +81,7 @@ export interface ContratoCreate {
 export interface OutorgadoInput {
   nome: string
   oab?: string
+  oab_uf?: string
   cpf?: string
 }
 
@@ -87,18 +90,22 @@ export type PoderEspecial =
 
 export type TipoOutorgante = 'PF' | 'PJ'
 
+export interface OutorganteInput {
+  tipo: TipoOutorgante
+  nome: string
+  nacionalidade?: string
+  estado_civil?: string
+  profissao?: string
+  cpf_cnpj?: string
+  endereco?: string
+  email?: string
+  representante_nome?: string
+  representante_cpf?: string
+  representante_cargo?: string
+}
+
 export interface GerarProcuracaoRequest {
-  outorgante_tipo?: TipoOutorgante
-  outorgante_nome: string
-  outorgante_nacionalidade?: string
-  outorgante_estado_civil?: string
-  outorgante_profissao?: string
-  outorgante_cpf_cnpj?: string
-  outorgante_endereco?: string
-  outorgante_email?: string
-  outorgante_representante_nome?: string
-  outorgante_representante_cpf?: string
-  outorgante_representante_cargo?: string
+  outorgantes: OutorganteInput[]
   outorgados: OutorgadoInput[]
   endereco_escritorio?: string
   incluir_poderes_gerais?: boolean
@@ -107,6 +114,7 @@ export interface GerarProcuracaoRequest {
   finalidade?: string
   data_validade?: string
   data_procuracao?: string
+  forcar_uma_pagina?: boolean
 }
 
 export interface SignatarioCreate {

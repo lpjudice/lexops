@@ -74,6 +74,7 @@ class GerarPdfRequest(BaseModel):
 class OutorgadoInput(BaseModel):
     nome: str = ""
     oab: str = ""
+    oab_uf: str = "ES"
     cpf: str = ""
 
 
@@ -91,19 +92,23 @@ DEFAULT_PODERES_ESPECIAIS: list[PoderEspecial] = [
 TipoOutorgante = Literal["PF", "PJ"]
 
 
+class OutorganteInput(BaseModel):
+    tipo: TipoOutorgante = "PF"
+    nome: str = ""
+    nacionalidade: str = "brasileiro(a)"
+    estado_civil: str = ""
+    profissao: str = ""
+    cpf_cnpj: str = ""
+    endereco: str = ""
+    email: str = ""
+    # Só relevante quando tipo == "PJ" (representante legal da empresa).
+    representante_nome: str = ""
+    representante_cpf: str = ""
+    representante_cargo: str = ""
+
+
 class GerarProcuracaoRequest(BaseModel):
-    outorgante_tipo: TipoOutorgante = "PF"
-    outorgante_nome: str
-    outorgante_nacionalidade: str = "brasileiro(a)"
-    outorgante_estado_civil: str = ""
-    outorgante_profissao: str = ""
-    outorgante_cpf_cnpj: str = ""
-    outorgante_endereco: str = ""
-    outorgante_email: str = ""
-    # Só relevante quando outorgante_tipo == "PJ" (representante legal da empresa).
-    outorgante_representante_nome: str = ""
-    outorgante_representante_cpf: str = ""
-    outorgante_representante_cargo: str = ""
+    outorgantes: list[OutorganteInput] = []
     outorgados: list[OutorgadoInput] = []
     endereco_escritorio: str = ""
     incluir_poderes_gerais: bool = True
@@ -112,6 +117,7 @@ class GerarProcuracaoRequest(BaseModel):
     finalidade: str = ""
     data_validade: str = ""           # YYYY-MM-DD, opcional
     data_procuracao: str = ""         # YYYY-MM-DD
+    forcar_uma_pagina: bool = False
 
 
 # ── Leitura de contratantes por IA (upload) ──────────────────────────────────
@@ -171,6 +177,8 @@ class ContratoOut(ContratoCreate):
     signatarios: list[SignatarioOut] = []
     doc_gerado_filename: str | None = None
     procuracao_dados: dict | None = None
+    doc_gerado_por: str | None = None
+    doc_gerado_em: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

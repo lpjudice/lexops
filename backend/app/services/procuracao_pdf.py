@@ -3,9 +3,12 @@ Gerador de Instrumento de Procuração (PDF + versão HTML editável no Google D
 Mesmo padrão visual do Contrato de Honorários (contrato_pdf.py).
 
 Partes customizáveis:
-  - Outorgante PF (nome, nacionalidade/estado civil/profissão, CPF, endereço, email)
-    ou PJ (nome, CNPJ, sede, email, representante legal opcional)
-  - Outorgado(s) — lista dinâmica de advogado(s): nome, OAB, CPF
+  - Outorgante(s) — lista dinâmica, cada um PF (nome, nacionalidade/estado civil/
+    profissão, CPF, endereço, email) ou PJ (nome, CNPJ, sede, email, representante
+    legal opcional)
+  - Outorgado(s) — lista dinâmica de advogado(s): nome, OAB/UF, CPF. Com mais de
+    um, vira um único parágrafo compacto ("OUTORGADO 1: ...; OUTORGADO 2: ...;
+    todos com endereço profissional à X") em vez de um parágrafo por pessoa.
   - Endereço profissional (do escritório) dos outorgados — pré-preenchido, editável
   - Poderes: cláusula geral "ad judicia et extra" (pode ser desligada por completo),
     com os poderes especiais escolhidos individualmente + texto adicional livre
@@ -14,7 +17,9 @@ Partes customizáveis:
   - Data da procuração
 
 O PDF tenta caber em 1 página: a fonte do corpo começa em 11pt e vai reduzindo
-(10.5, depois 10) até caber; 10pt é o piso — abaixo disso aceita 2 páginas.
+(10.5, depois 10) até caber; 10pt é o piso — abaixo disso aceita 2 páginas, a
+menos que `forcar_uma_pagina=True`, que aí reduz também o respiro antes da
+assinatura e vai até 9pt antes de desistir.
 """
 
 import io
@@ -46,8 +51,10 @@ TEAL = colors.HexColor("#00b090")
 MID_GRAY = colors.HexColor("#6b7280")
 
 # Tamanhos de fonte do corpo tentados em ordem até o PDF caber em 1 página; o
-# último (piso) é aceito mesmo que ainda resulte em 2 páginas.
+# último (piso) é aceito mesmo que ainda resulte em 2 páginas — a menos que
+# `forcar_uma_pagina` esteja ligado, que aí continua com TAMANHOS_FONTE_FORCADO.
 TAMANHOS_FONTE_CORPO = (11.0, 10.5, 10.0)
+TAMANHOS_FONTE_FORCADO = (10.0, 9.5, 9.0)  # com spacer reduzido antes da assinatura
 
 # Base da cláusula "ad judicia et extra" — formulação genérica amplamente usada em
 # procurações no Brasil (poderes gerais para o foro em geral). Os "poderes especiais"
@@ -90,8 +97,14 @@ def _data_por_extenso(d: date) -> str:
 
 
 def _compor_qualificacao(nacionalidade: str, estado_civil: str, profissao: str) -> str:
-    partes = [p.strip() for p in (nacionalidade, estado_civil, profissao) if p and p.strip()]
-    return ", ".join(partes)
+    # estado civil/profissão sempre em minúscula no documento, mesmo que o usuário
+    # (ou o cadastro do cliente) tenha digitado em CAIXA ALTA.
+    partes = [
+        nacionalidade.strip(),
+        estado_civil.strip().lower(),
+        profissao.strip().lower(),
+    ]
+    return ", ".join(p for p in partes if p)
 
 
 def _compor_clausula_poderes(poderes_especiais: list[str], poderes_adicionais: str) -> str:
@@ -107,71 +120,99 @@ def _compor_clausula_poderes(poderes_especiais: list[str], poderes_adicionais: s
     return frase
 
 
-def _linha_outorgante(
-    outorgante_tipo: str, outorgante_nome: str, outorgante_nacionalidade: str,
-    outorgante_estado_civil: str, outorgante_profissao: str, outorgante_cpf_cnpj: str,
-    outorgante_endereco: str, outorgante_email: str,
-    outorgante_representante_nome: str = "", outorgante_representante_cpf: str = "",
-    outorgante_representante_cargo: str = "",
-) -> str:
-    nome_fmt = f"<b>{outorgante_nome.strip().upper()}</b>"
+def _linha_outorgante(og: dict, numero: int | None = None) -> str:
+    """`og`: {"tipo": "PF"|"PJ", "nome", "nacionalidade", "estado_civil", "profissao",
+    "cpf_cnpj", "endereco", "email", "representante_nome", "representante_cpf",
+    "representante_cargo"}. `numero`: se houver mais de 1 outorgante, prefixa
+    "OUTORGANTE N: " no início do parágrafo."""
+    tipo = og.get("tipo") or "PF"
+    nome = (og.get("nome") or "").strip()
+    prefixo = f"<b>OUTORGANTE {numero}:</b> " if numero else ""
+    nome_fmt = f"<b>{nome.upper()}</b>"
 
-    if outorgante_tipo == "PJ":
+    if tipo == "PJ":
+        cpf_cnpj = (og.get("cpf_cnpj") or "").strip()
+        endereco = (og.get("endereco") or "").strip()
+        email = (og.get("email") or "").strip()
+        rep_nome = (og.get("representante_nome") or "").strip()
+        rep_cpf = (og.get("representante_cpf") or "").strip()
+        rep_cargo = (og.get("representante_cargo") or "").strip()
+
         partes = [nome_fmt, "pessoa jurídica de direito privado"]
-        if outorgante_cpf_cnpj:
-            partes.append(f"registrada sob o n. {outorgante_cpf_cnpj}")
+        if cpf_cnpj:
+            partes.append(f"registrada sob o n. {cpf_cnpj}")
         linha = ", ".join(partes)
-        if outorgante_endereco:
-            linha += f", com sede em {outorgante_endereco}"
-        if outorgante_email:
-            linha += f", e-mail {outorgante_email}"
-        if outorgante_representante_nome.strip():
-            rep_partes = [f"<b>{outorgante_representante_nome.strip().upper()}</b>"]
-            if outorgante_representante_cargo.strip():
-                rep_partes.append(outorgante_representante_cargo.strip())
+        if endereco:
+            linha += f", com sede em {endereco}"
+        if email:
+            linha += f", e-mail {email}"
+        if rep_nome:
+            rep_partes = [f"<b>{rep_nome.upper()}</b>"]
+            if rep_cargo:
+                rep_partes.append(rep_cargo)
             linha += ", neste ato representada por " + ", ".join(rep_partes)
-            if outorgante_representante_cpf.strip():
-                linha += f", portador(a) do CPF n. {outorgante_representante_cpf.strip()}"
+            if rep_cpf:
+                linha += f", portador(a) do CPF n. {rep_cpf}"
         linha += ", doravante denominada OUTORGANTE;"
-        return linha
+        return prefixo + linha
 
     # PF (padrão)
-    qualificacao = _compor_qualificacao(outorgante_nacionalidade, outorgante_estado_civil, outorgante_profissao)
+    qualificacao = _compor_qualificacao(
+        og.get("nacionalidade") or "", og.get("estado_civil") or "", og.get("profissao") or "",
+    )
+    cpf_cnpj = (og.get("cpf_cnpj") or "").strip()
+    endereco = (og.get("endereco") or "").strip()
+    email = (og.get("email") or "").strip()
     partes = [nome_fmt]
     if qualificacao:
         partes.append(qualificacao)
     linha = ", ".join(partes)
-    if outorgante_cpf_cnpj:
-        linha += f", cadastrado(a) no CPF/MF de n. {outorgante_cpf_cnpj}"
-    if outorgante_endereco:
-        linha += f", residente/domiciliado em {outorgante_endereco}"
-    if outorgante_email:
-        linha += f", e-mail {outorgante_email}"
+    if cpf_cnpj:
+        linha += f", cadastrado(a) no CPF/MF de n. {cpf_cnpj}"
+    if endereco:
+        linha += f", residente/domiciliado em {endereco}"
+    if email:
+        linha += f", e-mail {email}"
     linha += ", doravante denominado(a) OUTORGANTE;"
-    return linha
+    return prefixo + linha
 
 
-def _nome_assinatura(outorgante_tipo: str, outorgante_nome: str, outorgante_representante_nome: str) -> str:
-    """Quem 'assina' visualmente no rodapé: o representante legal (se PJ e informado)
-    ou o próprio outorgante."""
-    if outorgante_tipo == "PJ" and outorgante_representante_nome.strip():
-        return outorgante_representante_nome.strip().upper()
-    return outorgante_nome.strip().upper()
+def _nome_assinatura(og: dict) -> str:
+    """Quem 'assina' visualmente no rodapé: o representante legal (se PJ e
+    informado) ou o próprio outorgante."""
+    rep_nome = (og.get("representante_nome") or "").strip()
+    if (og.get("tipo") or "PF") == "PJ" and rep_nome:
+        return rep_nome.upper()
+    return (og.get("nome") or "").strip().upper()
 
 
-def _linha_outorgado(adv: dict, endereco_escritorio: str) -> str | None:
-    nome = (adv.get("nome") or "").strip()
-    if not nome:
+def _paragrafo_outorgados(outorgados: list[dict], endereco_escritorio: str) -> str | None:
+    """1 outorgado: parágrafo simples de sempre. 2+: parágrafo único compacto —
+    "OUTORGADO 1: NOME, advogado(a), inscrito(a) na OAB/UF sob o n.º X, portador(a)
+    do CPF n.º Y; OUTORGADO 2: ...; todos com endereço profissional à Z." — evita
+    repetir o mesmo endereço em cada um."""
+    validos = [o for o in outorgados if (o.get("nome") or "").strip()]
+    if not validos:
         return None
-    oab = (adv.get("oab") or "").strip()
-    cpf = (adv.get("cpf") or "").strip()
-    partes = [f"<b>{nome.upper()}</b>, advogado(a)"]
-    if oab:
-        partes.append(f"inscrito(a) na OAB sob o n.º {oab}")
-    if cpf:
-        partes.append(f"portador(a) do CPF n.º {cpf}")
-    partes.append(f"com endereço profissional em {endereco_escritorio}")
-    return ", ".join(partes) + ";"
+
+    def _pessoa(adv: dict, numero: int | None) -> str:
+        nome = adv["nome"].strip()
+        oab = (adv.get("oab") or "").strip()
+        oab_uf = (adv.get("oab_uf") or "").strip()
+        cpf = (adv.get("cpf") or "").strip()
+        prefixo = f"<b>OUTORGADO {numero}:</b> " if numero else ""
+        texto = f"{prefixo}<b>{nome.upper()}</b>, advogado(a)"
+        if oab:
+            texto += f", inscrito(a) na OAB/{oab_uf} sob o n.º {oab}" if oab_uf else f", inscrito(a) na OAB sob o n.º {oab}"
+        if cpf:
+            texto += f", portador(a) do CPF n.º {cpf}"
+        return texto
+
+    if len(validos) == 1:
+        return _pessoa(validos[0], None) + f", com endereço profissional em {endereco_escritorio};"
+
+    pessoas = [_pessoa(adv, i) for i, adv in enumerate(validos, start=1)]
+    return "; ".join(pessoas) + f"; todos com endereço profissional à {endereco_escritorio}."
 
 
 def _capitalizar_primeira(s: str) -> str:
@@ -229,17 +270,7 @@ def _num_paginas(pdf_bytes: bytes) -> int:
 
 def _montar_pdf(
     corpo_size: float,
-    outorgante_tipo: str,
-    outorgante_nome: str,
-    outorgante_nacionalidade: str,
-    outorgante_estado_civil: str,
-    outorgante_profissao: str,
-    outorgante_cpf_cnpj: str,
-    outorgante_endereco: str,
-    outorgante_email: str,
-    outorgante_representante_nome: str,
-    outorgante_representante_cpf: str,
-    outorgante_representante_cargo: str,
+    outorgantes: list[dict],
     outorgados: list[dict],
     endereco_escritorio: str,
     incluir_poderes_gerais: bool,
@@ -248,8 +279,11 @@ def _montar_pdf(
     finalidade: str,
     data_validade: date | None,
     data_procuracao: date | None,
+    spacer_assinatura_cm: float = 1.5,
 ) -> bytes:
     buf = io.BytesIO()
+    outorgantes_validos = [o for o in outorgantes if (o.get("nome") or "").strip()]
+    titulo_doc = outorgantes_validos[0]["nome"] if outorgantes_validos else "Procuração"
     doc = SimpleDocTemplate(
         buf,
         pagesize=A4,
@@ -257,7 +291,7 @@ def _montar_pdf(
         rightMargin=2.5 * cm,
         topMargin=2.5 * cm,
         bottomMargin=2.5 * cm,
-        title=f"Procuração — {outorgante_nome}",
+        title=f"Procuração — {titulo_doc}",
     )
 
     st = _estilos(corpo_size)
@@ -288,24 +322,19 @@ def _montar_pdf(
     story.append(HRFlowable(width="50%", thickness=0.5, color=colors.HexColor("#e5e7eb"),
                              spaceAfter=14, hAlign="CENTER"))
 
-    # ── OUTORGANTE ────────────────────────────────────────────────────────────
-    story.append(Paragraph("<b>OUTORGANTE:</b>", st["parte_label"]))
-    story.append(Paragraph(
-        _linha_outorgante(
-            outorgante_tipo, outorgante_nome, outorgante_nacionalidade, outorgante_estado_civil,
-            outorgante_profissao, outorgante_cpf_cnpj, outorgante_endereco, outorgante_email,
-            outorgante_representante_nome, outorgante_representante_cpf, outorgante_representante_cargo,
-        ),
-        st["corpo"]
-    ))
+    # ── OUTORGANTE(S) ─────────────────────────────────────────────────────────
+    rotulo_outorgante = "OUTORGANTE(S):" if len(outorgantes_validos) > 1 else "OUTORGANTE:"
+    story.append(Paragraph(f"<b>{rotulo_outorgante}</b>", st["parte_label"]))
+    numerar = len(outorgantes_validos) > 1
+    for i, og in enumerate(outorgantes_validos, start=1):
+        story.append(Paragraph(_linha_outorgante(og, i if numerar else None), st["corpo"]))
     story.append(Spacer(1, 0.2 * cm))
 
     # ── OUTORGADO(S) — dinâmico, um ou mais advogados ───────────────────────────
     story.append(Paragraph("<b>OUTORGADO(S):</b>", st["parte_label"]))
-    for adv in outorgados:
-        linha = _linha_outorgado(adv, endereco_escritorio)
-        if linha:
-            story.append(Paragraph(linha, st["corpo"]))
+    paragrafo_outorgados = _paragrafo_outorgados(outorgados, endereco_escritorio)
+    if paragrafo_outorgados:
+        story.append(Paragraph(paragrafo_outorgados, st["corpo"]))
 
     story.append(Spacer(1, 0.3 * cm))
 
@@ -343,21 +372,13 @@ def _montar_pdf(
         st["corpo"]
     ))
 
-    # ── ASSINATURA (só o outorgante — mandato unilateral) ───────────────────────
-    story.append(Spacer(1, 1.5 * cm))
+    # ── ASSINATURA(S) — 1 outorgante: bloco centralizado; 2+: tabela, 2 por linha ──
+    story.append(Spacer(1, spacer_assinatura_cm * cm))
     story.append(HRFlowable(width="100%", thickness=0.3, color=colors.HexColor("#e5e7eb"),
                              spaceAfter=12))
 
-    nome_assinatura = _nome_assinatura(outorgante_tipo, outorgante_nome, outorgante_representante_nome)
-    assinatura_data = [[_bloco_assinatura(st, nome_assinatura, "OUTORGANTE")]]
-    tabela_ass = Table(assinatura_data, colWidths=[16 * cm])
-    tabela_ass.setStyle(TableStyle([
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-    ]))
-    story.append(KeepTogether([tabela_ass]))
+    assinantes = [(_nome_assinatura(og), "OUTORGANTE") for og in outorgantes_validos] or [("", "OUTORGANTE")]
+    story.append(_tabela_assinaturas(st, assinantes))
 
     doc.build(story)
     buf.seek(0)
@@ -365,51 +386,44 @@ def _montar_pdf(
 
 
 def gerar_procuracao(
-    outorgante_nome: str,
-    outorgante_nacionalidade: str,
-    outorgante_estado_civil: str,
-    outorgante_profissao: str,
-    outorgante_cpf_cnpj: str,
-    outorgante_endereco: str,
-    outorgante_email: str,
+    outorgantes: list[dict],
     outorgados: list[dict],
     endereco_escritorio: str,
-    outorgante_tipo: str = "PF",
-    outorgante_representante_nome: str = "",
-    outorgante_representante_cpf: str = "",
-    outorgante_representante_cargo: str = "",
     incluir_poderes_gerais: bool = True,
     poderes_especiais: list[str] | None = None,
     poderes_adicionais: str = "",
     finalidade: str = "",
     data_validade: date | None = None,
     data_procuracao: date | None = None,
+    forcar_uma_pagina: bool = False,
 ) -> bytes:
     """
     Gera o PDF do instrumento de procuração. Retorna bytes.
-    `outorgados`: lista de {"nome": str, "oab": str, "cpf": str}.
+    `outorgantes`: lista de dicts (ver `_linha_outorgante`). `outorgados`: lista
+    de {"nome", "oab", "oab_uf", "cpf"}.
     Tenta caber em 1 página, reduzindo a fonte do corpo até o piso (10pt); se
-    mesmo assim não couber, aceita 2 páginas nessa fonte mínima.
+    `forcar_uma_pagina` estiver ligado e ainda não couber, reduz também o
+    respiro antes da assinatura e vai até 9pt antes de aceitar 2 páginas.
     """
     kwargs = dict(
-        outorgante_tipo=outorgante_tipo, outorgante_nome=outorgante_nome,
-        outorgante_nacionalidade=outorgante_nacionalidade,
-        outorgante_estado_civil=outorgante_estado_civil, outorgante_profissao=outorgante_profissao,
-        outorgante_cpf_cnpj=outorgante_cpf_cnpj, outorgante_endereco=outorgante_endereco,
-        outorgante_email=outorgante_email,
-        outorgante_representante_nome=outorgante_representante_nome,
-        outorgante_representante_cpf=outorgante_representante_cpf,
-        outorgante_representante_cargo=outorgante_representante_cargo,
-        outorgados=outorgados, endereco_escritorio=endereco_escritorio,
+        outorgantes=outorgantes, outorgados=outorgados, endereco_escritorio=endereco_escritorio,
         incluir_poderes_gerais=incluir_poderes_gerais, poderes_especiais=poderes_especiais,
         poderes_adicionais=poderes_adicionais, finalidade=finalidade, data_validade=data_validade,
         data_procuracao=data_procuracao,
     )
-    pdf_bytes = _montar_pdf(TAMANHOS_FONTE_CORPO[0], **kwargs)
+    pdf_bytes = _montar_pdf(TAMANHOS_FONTE_CORPO[0], spacer_assinatura_cm=1.5, **kwargs)
     for tamanho in TAMANHOS_FONTE_CORPO[1:]:
         if _num_paginas(pdf_bytes) <= 1:
-            break
-        pdf_bytes = _montar_pdf(tamanho, **kwargs)
+            return pdf_bytes
+        pdf_bytes = _montar_pdf(tamanho, spacer_assinatura_cm=1.5, **kwargs)
+
+    if forcar_uma_pagina and _num_paginas(pdf_bytes) > 1:
+        for tamanho in TAMANHOS_FONTE_FORCADO:
+            candidato = _montar_pdf(tamanho, spacer_assinatura_cm=0.6, **kwargs)
+            pdf_bytes = candidato
+            if _num_paginas(candidato) <= 1:
+                break
+
     return pdf_bytes
 
 
@@ -423,6 +437,37 @@ def _bloco_assinatura(st: dict, nome: str, papel: str):
     ]
 
 
+def _tabela_assinaturas(st: dict, assinantes: list[tuple[str, str]]) -> Table:
+    """1 assinante: 1 célula ocupando a largura toda. 2+: 2 por linha, igual à
+    versão Docs (mesma lógica, agora em reportlab)."""
+    if len(assinantes) <= 1:
+        nome, papel = assinantes[0]
+        linhas = [[_bloco_assinatura(st, nome, papel)]]
+        larguras = [16 * cm]
+    else:
+        linhas = []
+        linha_atual = []
+        for nome, papel in assinantes:
+            linha_atual.append(_bloco_assinatura(st, nome, papel))
+            if len(linha_atual) == 2:
+                linhas.append(linha_atual)
+                linha_atual = []
+        if linha_atual:
+            linha_atual.append("")  # completa a linha ímpar com célula vazia
+            linhas.append(linha_atual)
+        larguras = [8 * cm, 8 * cm]
+
+    tabela = Table(linhas, colWidths=larguras)
+    tabela.setStyle(TableStyle([
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 10),
+    ]))
+    return tabela
+
+
 def _esc(s: str) -> str:
     return (s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 
@@ -431,9 +476,10 @@ _RE_BOLD = re.compile(r"(<b>.*?</b>)")
 
 
 def _esc_bold(s: str) -> str:
-    """Escapa `s` pra HTML preservando tags <b>...</b> já embutidas (nomes e a
-    validade em negrito vêm assim de `_linha_outorgante`/`_linha_outorgado`/
-    `_finalidade_paragrafos`) — sem isso as tags apareceriam como texto literal."""
+    """Escapa `s` pra HTML preservando tags <b>...</b> já embutidas (nomes,
+    "OUTORGANTE N:"/"OUTORGADO N:" e a validade em negrito vêm assim de
+    `_linha_outorgante`/`_paragrafo_outorgados`/`_finalidade_paragrafos`) — sem
+    isso as tags apareceriam como texto literal."""
     partes = _RE_BOLD.split(s)
     out = []
     for p in partes:
@@ -445,26 +491,16 @@ def _esc_bold(s: str) -> str:
 
 
 def gerar_procuracao_html(
-    outorgante_nome: str,
-    outorgante_nacionalidade: str,
-    outorgante_estado_civil: str,
-    outorgante_profissao: str,
-    outorgante_cpf_cnpj: str,
-    outorgante_endereco: str,
-    outorgante_email: str,
+    outorgantes: list[dict],
     outorgados: list[dict],
     endereco_escritorio: str,
-    outorgante_tipo: str = "PF",
-    outorgante_representante_nome: str = "",
-    outorgante_representante_cpf: str = "",
-    outorgante_representante_cargo: str = "",
     incluir_poderes_gerais: bool = True,
     poderes_especiais: list[str] | None = None,
     poderes_adicionais: str = "",
     finalidade: str = "",
     data_validade: date | None = None,
     data_procuracao: date | None = None,
-    assinantes: list[tuple[str, str]] | None = None,
+    forcar_uma_pagina: bool = False,  # sem efeito no Docs (não paginado); mantido por simetria de assinatura
 ) -> bytes:
     """
     Mesmo conteúdo de `gerar_procuracao`, como HTML autocontido (logo embutida em
@@ -483,8 +519,9 @@ def gerar_procuracao_html(
     import base64
 
     data_str = _data_por_extenso(data_procuracao or date.today())
-    if assinantes is None:
-        assinantes = [(_nome_assinatura(outorgante_tipo, outorgante_nome, outorgante_representante_nome), "OUTORGANTE")]
+    outorgantes_validos = [o for o in outorgantes if (o.get("nome") or "").strip()]
+    numerar = len(outorgantes_validos) > 1
+    assinantes = [(_nome_assinatura(og), "OUTORGANTE") for og in outorgantes_validos] or [("", "OUTORGANTE")]
 
     logo_html = ""
     if _LOGO_PATH.exists():
@@ -504,23 +541,23 @@ def gerar_procuracao_html(
     corpo_style = "font-family:'Archivo', sans-serif; font-weight:200; font-size:11pt; color:#1d1e20;"
     justificado = "text-align:justify; margin:0 0 10px 0;"
 
+    rotulo_outorgante = "OUTORGANTE(S):" if len(outorgantes_validos) > 1 else "OUTORGANTE:"
     partes: list[str] = [
         f'<html><body style="{corpo_style} max-width:720px; margin:0 auto;">',
         logo_html,
         linha_verde,
         '<h1 style="text-align:center; font-weight:700; font-size:15pt; letter-spacing:1px;">PROCURAÇÃO</h1>',
         '<div style="height:1px; background:#e5e7eb; width:50%; margin:0 auto 18px auto;"></div>',
-        f'<p style="{justificado}"><b>OUTORGANTE:</b><br>' + _esc_bold(_linha_outorgante(
-            outorgante_tipo, outorgante_nome, outorgante_nacionalidade, outorgante_estado_civil,
-            outorgante_profissao, outorgante_cpf_cnpj, outorgante_endereco, outorgante_email,
-            outorgante_representante_nome, outorgante_representante_cpf, outorgante_representante_cargo,
-        )) + '</p>',
-        f'<p style="{justificado}"><b>OUTORGADO(S):</b><br>',
+        f'<p style="{justificado}"><b>{rotulo_outorgante}</b><br>',
     ]
-    for adv in outorgados:
-        linha = _linha_outorgado(adv, endereco_escritorio)
-        if linha:
-            partes.append(_esc_bold(linha) + "<br>")
+    for i, og in enumerate(outorgantes_validos, start=1):
+        partes.append(_esc_bold(_linha_outorgante(og, i if numerar else None)) + "<br>")
+    partes.append("</p>")
+
+    partes.append(f'<p style="{justificado}"><b>OUTORGADO(S):</b><br>')
+    paragrafo_outorgados = _paragrafo_outorgados(outorgados, endereco_escritorio)
+    if paragrafo_outorgados:
+        partes.append(_esc_bold(paragrafo_outorgados))
     partes.append("</p>")
 
     partes.append('<h3 style="text-align:center; font-weight:700;">DOS PODERES</h3>')

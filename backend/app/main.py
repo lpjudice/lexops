@@ -1343,6 +1343,8 @@ def _run_migrations() -> None:
         conn.execute(text("ALTER TABLE contratos ADD COLUMN IF NOT EXISTS procuracao_dados JSONB"))
         conn.execute(text("ALTER TABLE signatarios ADD COLUMN IF NOT EXISTS cpf VARCHAR(18)"))
         conn.execute(text("ALTER TABLE signatarios ADD COLUMN IF NOT EXISTS data_nascimento DATE"))
+        conn.execute(text("ALTER TABLE contratos ADD COLUMN IF NOT EXISTS doc_gerado_por VARCHAR(255)"))
+        conn.execute(text("ALTER TABLE contratos ADD COLUMN IF NOT EXISTS doc_gerado_em TIMESTAMPTZ"))
         conn.execute(text("ALTER TABLE informativos ADD COLUMN IF NOT EXISTS numero INTEGER"))
         conn.execute(text("ALTER TABLE informativos ADD COLUMN IF NOT EXISTS instrucoes_ia TEXT"))
         conn.execute(text("ALTER TABLE informativos ADD COLUMN IF NOT EXISTS rascunho_gerado_em TIMESTAMPTZ"))

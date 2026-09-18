@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { contratosApi } from '../api/contratos'
-import type { ContratoCreate, SignatarioCreate, PapelSignatario, StatusContrato, GerarPdfRequest, TipoDocumento, GerarProcuracaoRequest, OutorgadoInput, PoderEspecial, TipoOutorgante } from '../api/contratos'
+import type { ContratoCreate, SignatarioCreate, PapelSignatario, StatusContrato, GerarPdfRequest, TipoDocumento, GerarProcuracaoRequest, OutorgadoInput, OutorganteInput, PoderEspecial, TipoOutorgante } from '../api/contratos'
 import { clientesApi } from '../api/clientes'
 import { processosApi } from '../api/processos'
 import ComboBox from '../components/ComboBox'
@@ -61,7 +61,7 @@ const OBJETOS_DISPONIVEIS = [
 
 const ENDERECO_ESCRITORIO_PADRAO = 'Av. Desembargador Sampaio, n. 300, Praia do Canto, Vitória/ES - CEP 29.055-250'
 
-const EMPTY_OUTORGADO: OutorgadoInput = { nome: '', oab: '', cpf: '' }
+const EMPTY_OUTORGADO: OutorgadoInput = { nome: '', oab: '', oab_uf: 'ES', cpf: '' }
 
 const TIPO_LABEL: Record<TipoDocumento, string> = { contrato: 'Contrato', procuracao: 'Procuração' }
 const TIPO_LABEL_PLURAL: Record<TipoDocumento, string> = { contrato: 'Contratos', procuracao: 'Procurações' }
@@ -78,18 +78,22 @@ const DEFAULT_PODERES_ESPECIAIS: PoderEspecial[] = PODERES_ESPECIAIS_OPCOES.map(
 
 function camposEmAbertoProcuracao(f: GerarProcuracaoRequest): string[] {
   const faltando: string[] = []
-  if (f.outorgante_tipo === 'PJ') {
-    if (!f.outorgante_cpf_cnpj?.trim()) faltando.push('CNPJ do outorgante')
-    if (!f.outorgante_endereco?.trim()) faltando.push('Endereço (sede) do outorgante')
-    if (!f.outorgante_representante_nome?.trim()) faltando.push('Nome do representante legal')
-    if (!f.outorgante_representante_cpf?.trim()) faltando.push('CPF do representante legal')
-  } else {
-    if (!f.outorgante_estado_civil?.trim()) faltando.push('Estado civil do outorgante')
-    if (!f.outorgante_profissao?.trim()) faltando.push('Profissão do outorgante')
-    if (!f.outorgante_cpf_cnpj?.trim()) faltando.push('CPF do outorgante')
-    if (!f.outorgante_endereco?.trim()) faltando.push('Endereço do outorgante')
-  }
-  if (!f.outorgante_email?.trim()) faltando.push('E-mail do outorgante')
+  f.outorgantes.forEach((o) => {
+    if (!o.nome.trim()) return
+    const rotulo = f.outorgantes.length > 1 ? ` (${o.nome})` : ''
+    if (o.tipo === 'PJ') {
+      if (!o.cpf_cnpj?.trim()) faltando.push(`CNPJ do outorgante${rotulo}`)
+      if (!o.endereco?.trim()) faltando.push(`Endereço (sede) do outorgante${rotulo}`)
+      if (!o.representante_nome?.trim()) faltando.push(`Nome do representante legal${rotulo}`)
+      if (!o.representante_cpf?.trim()) faltando.push(`CPF do representante legal${rotulo}`)
+    } else {
+      if (!o.estado_civil?.trim()) faltando.push(`Estado civil do outorgante${rotulo}`)
+      if (!o.profissao?.trim()) faltando.push(`Profissão do outorgante${rotulo}`)
+      if (!o.cpf_cnpj?.trim()) faltando.push(`CPF do outorgante${rotulo}`)
+      if (!o.endereco?.trim()) faltando.push(`Endereço do outorgante${rotulo}`)
+    }
+    if (!o.email?.trim()) faltando.push(`E-mail do outorgante${rotulo}`)
+  })
   f.outorgados.forEach((o) => {
     if (!o.nome.trim()) return
     if (!o.oab?.trim()) faltando.push(`OAB de ${o.nome}`)
@@ -98,19 +102,23 @@ function camposEmAbertoProcuracao(f: GerarProcuracaoRequest): string[] {
   return faltando
 }
 
+const EMPTY_OUTORGANTE: OutorganteInput = {
+  tipo: 'PF',
+  nome: '',
+  nacionalidade: 'brasileiro(a)',
+  estado_civil: '',
+  profissao: '',
+  cpf_cnpj: '',
+  endereco: '',
+  email: '',
+  representante_nome: '',
+  representante_cpf: '',
+  representante_cargo: '',
+}
+
 const EMPTY_GERAR_PROC_FORM: GerarProcuracaoRequest = {
-  outorgante_tipo: 'PF',
-  outorgante_nome: '',
-  outorgante_nacionalidade: 'brasileiro(a)',
-  outorgante_estado_civil: '',
-  outorgante_profissao: '',
-  outorgante_cpf_cnpj: '',
-  outorgante_endereco: '',
-  outorgante_email: '',
-  outorgante_representante_nome: '',
-  outorgante_representante_cpf: '',
-  outorgante_representante_cargo: '',
-  outorgados: [{ nome: 'Lucas Pimenta Júdice', oab: '', cpf: '' }],
+  outorgantes: [{ ...EMPTY_OUTORGANTE }],
+  outorgados: [{ nome: 'Lucas Pimenta Júdice', oab: '14.477', oab_uf: 'ES', cpf: '' }],
   endereco_escritorio: ENDERECO_ESCRITORIO_PADRAO,
   incluir_poderes_gerais: true,
   poderes_especiais: DEFAULT_PODERES_ESPECIAIS,
@@ -118,6 +126,7 @@ const EMPTY_GERAR_PROC_FORM: GerarProcuracaoRequest = {
   finalidade: '',
   data_validade: '',
   data_procuracao: new Date().toISOString().slice(0, 10),
+  forcar_uma_pagina: false,
 }
 
 export default function ContratosPage() {
@@ -364,20 +373,23 @@ export default function ContratosPage() {
   }
 
   const abrirGerarProcuracao = (c: (typeof contratos)[0]) => {
-    if (c.procuracao_dados) {
+    if (c.procuracao_dados?.outorgantes?.length) {
       // Editando: reabre com os dados exatos da última geração (não os do cadastro do cliente).
       setGerarProcForm({ ...EMPTY_GERAR_PROC_FORM, ...c.procuracao_dados })
     } else {
       const cliente = clientePorId(c.cliente_id)
       setGerarProcForm({
         ...EMPTY_GERAR_PROC_FORM,
-        outorgante_tipo: (cliente?.tipo as TipoOutorgante) || 'PF',
-        outorgante_nome: cliente?.nome || '',
-        outorgante_cpf_cnpj: cliente?.cpf_cnpj || '',
-        outorgante_email: cliente?.email || '',
-        outorgante_endereco: cliente?.endereco || '',
-        outorgante_estado_civil: cliente?.estado_civil || '',
-        outorgante_profissao: cliente?.profissao || '',
+        outorgantes: [{
+          ...EMPTY_OUTORGANTE,
+          tipo: (cliente?.tipo as TipoOutorgante) || 'PF',
+          nome: cliente?.nome || '',
+          cpf_cnpj: cliente?.cpf_cnpj || '',
+          email: cliente?.email || '',
+          endereco: cliente?.endereco || '',
+          estado_civil: cliente?.estado_civil || '',
+          profissao: cliente?.profissao || '',
+        }],
       })
     }
     setGerarProcErro(null)
@@ -842,90 +854,113 @@ export default function ContratosPage() {
                       <div className={cs.gerarForm}>
                         <div className={cs.sectionTitle}>✨ Gerar PDF da Procuração</div>
 
-                        <div className={cs.sectionTitle} style={{ fontSize: 12, marginTop: 4 }}>Outorgante (cliente)</div>
-                        <div className={cs.chipRow} style={{ marginBottom: 8 }}>
-                          {(['PF', 'PJ'] as TipoOutorgante[]).map((t) => (
-                            <button key={t} type="button"
-                              className={`${cs.chip} ${gerarProcForm.outorgante_tipo === t ? cs.chipAtivo : ''}`}
-                              onClick={() => setGerarProcForm({ ...gerarProcForm, outorgante_tipo: t })}>
-                              {t === 'PF' ? 'Pessoa Física' : 'Pessoa Jurídica'}
-                            </button>
-                          ))}
-                        </div>
-                        <div className={styles.formRow}>
-                          <label className={styles.formLabel}>Nome {gerarProcForm.outorgante_tipo === 'PJ' ? '/ razão social' : ''} do outorgante *</label>
-                          <input className={styles.input} value={gerarProcForm.outorgante_nome}
-                            onChange={(e) => setGerarProcForm({ ...gerarProcForm, outorgante_nome: e.target.value })} />
-                        </div>
-                        {gerarProcForm.outorgante_tipo === 'PF' && (
-                          <div className={cs.twoCol} style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
-                            <div className={styles.formRow}>
-                              <label className={styles.formLabel}>Nacionalidade</label>
-                              <input className={styles.input}
-                                value={gerarProcForm.outorgante_nacionalidade}
-                                onChange={(e) => setGerarProcForm({ ...gerarProcForm, outorgante_nacionalidade: e.target.value })} />
-                            </div>
-                            <div className={styles.formRow}>
-                              <label className={styles.formLabel}>Estado civil</label>
-                              <input className={styles.input} placeholder="ex: casado(a)"
-                                value={gerarProcForm.outorgante_estado_civil}
-                                onChange={(e) => setGerarProcForm({ ...gerarProcForm, outorgante_estado_civil: e.target.value })} />
-                            </div>
-                            <div className={styles.formRow}>
-                              <label className={styles.formLabel}>Profissão</label>
-                              <input className={styles.input} placeholder="ex: empresário(a)"
-                                value={gerarProcForm.outorgante_profissao}
-                                onChange={(e) => setGerarProcForm({ ...gerarProcForm, outorgante_profissao: e.target.value })} />
-                            </div>
-                          </div>
-                        )}
-                        <div className={cs.twoCol}>
-                          <div className={styles.formRow}>
-                            <label className={styles.formLabel}>{gerarProcForm.outorgante_tipo === 'PJ' ? 'CNPJ' : 'CPF'}</label>
-                            <input className={styles.input} value={gerarProcForm.outorgante_cpf_cnpj}
-                              onChange={(e) => setGerarProcForm({
-                                ...gerarProcForm,
-                                // CNPJ hoje pode ser alfanumérico — sem mask de dígitos nesse caso.
-                                outorgante_cpf_cnpj: gerarProcForm.outorgante_tipo === 'PJ' ? e.target.value : maskCPFCNPJ(e.target.value),
-                              })} />
-                          </div>
-                          <div className={styles.formRow}>
-                            <label className={styles.formLabel}>E-mail</label>
-                            <input type="email" className={styles.input} value={gerarProcForm.outorgante_email}
-                              onChange={(e) => setGerarProcForm({ ...gerarProcForm, outorgante_email: e.target.value })} />
-                          </div>
-                        </div>
-                        <div className={styles.formRow}>
-                          <label className={styles.formLabel}>Endereço ({gerarProcForm.outorgante_tipo === 'PJ' ? 'sede' : 'residencial'})</label>
-                          <input className={styles.input} value={gerarProcForm.outorgante_endereco}
-                            onChange={(e) => setGerarProcForm({ ...gerarProcForm, outorgante_endereco: e.target.value })} />
-                        </div>
-                        {gerarProcForm.outorgante_tipo === 'PJ' && (
-                          <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 12, marginBottom: 12, background: '#fafafa' }}>
-                            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
-                              Representante legal (opcional, mas recomendado)
-                            </div>
-                            <div className={cs.twoCol}>
-                              <div className={styles.formRow}>
-                                <label className={styles.formLabel}>Nome</label>
-                                <input className={styles.input} value={gerarProcForm.outorgante_representante_nome}
-                                  onChange={(e) => setGerarProcForm({ ...gerarProcForm, outorgante_representante_nome: e.target.value })} />
+                        <div className={cs.sectionTitle} style={{ fontSize: 12, marginTop: 4 }}>Outorgante(s)</div>
+                        {gerarProcForm.outorgantes.map((og, i) => {
+                          const atualizar = (patch: Partial<OutorganteInput>) => {
+                            const outorgantes = [...gerarProcForm.outorgantes]
+                            outorgantes[i] = { ...outorgantes[i], ...patch }
+                            setGerarProcForm({ ...gerarProcForm, outorgantes })
+                          }
+                          return (
+                            <div key={i} style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 12, marginBottom: 10 }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                <div className={cs.chipRow}>
+                                  {(['PF', 'PJ'] as TipoOutorgante[]).map((t) => (
+                                    <button key={t} type="button"
+                                      className={`${cs.chip} ${og.tipo === t ? cs.chipAtivo : ''}`}
+                                      onClick={() => atualizar({ tipo: t })}>
+                                      {t === 'PF' ? 'Pessoa Física' : 'Pessoa Jurídica'}
+                                    </button>
+                                  ))}
+                                </div>
+                                {gerarProcForm.outorgantes.length > 1 && (
+                                  <button className={styles.btnDanger} type="button"
+                                    onClick={() => setGerarProcForm({
+                                      ...gerarProcForm,
+                                      outorgantes: gerarProcForm.outorgantes.filter((_, idx) => idx !== i),
+                                    })}>
+                                    ×
+                                  </button>
+                                )}
                               </div>
                               <div className={styles.formRow}>
-                                <label className={styles.formLabel}>Cargo</label>
-                                <input className={styles.input} placeholder="ex: sócio administrador"
-                                  value={gerarProcForm.outorgante_representante_cargo}
-                                  onChange={(e) => setGerarProcForm({ ...gerarProcForm, outorgante_representante_cargo: e.target.value })} />
+                                <label className={styles.formLabel}>Nome {og.tipo === 'PJ' ? '/ razão social' : ''} do outorgante *</label>
+                                <input className={styles.input} value={og.nome}
+                                  onChange={(e) => atualizar({ nome: e.target.value })} />
                               </div>
+                              {og.tipo === 'PF' && (
+                                <div className={cs.twoCol} style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
+                                  <div className={styles.formRow}>
+                                    <label className={styles.formLabel}>Nacionalidade</label>
+                                    <input className={styles.input} value={og.nacionalidade}
+                                      onChange={(e) => atualizar({ nacionalidade: e.target.value })} />
+                                  </div>
+                                  <div className={styles.formRow}>
+                                    <label className={styles.formLabel}>Estado civil</label>
+                                    <input className={styles.input} placeholder="ex: casado(a)" value={og.estado_civil}
+                                      onChange={(e) => atualizar({ estado_civil: e.target.value })} />
+                                  </div>
+                                  <div className={styles.formRow}>
+                                    <label className={styles.formLabel}>Profissão</label>
+                                    <input className={styles.input} placeholder="ex: empresário(a)" value={og.profissao}
+                                      onChange={(e) => atualizar({ profissao: e.target.value })} />
+                                  </div>
+                                </div>
+                              )}
+                              <div className={cs.twoCol}>
+                                <div className={styles.formRow}>
+                                  <label className={styles.formLabel}>{og.tipo === 'PJ' ? 'CNPJ' : 'CPF'}</label>
+                                  <input className={styles.input} value={og.cpf_cnpj}
+                                    onChange={(e) => atualizar({
+                                      // CNPJ hoje pode ser alfanumérico — sem mask de dígitos nesse caso.
+                                      cpf_cnpj: og.tipo === 'PJ' ? e.target.value : maskCPFCNPJ(e.target.value),
+                                    })} />
+                                </div>
+                                <div className={styles.formRow}>
+                                  <label className={styles.formLabel}>E-mail</label>
+                                  <input type="email" className={styles.input} value={og.email}
+                                    onChange={(e) => atualizar({ email: e.target.value })} />
+                                </div>
+                              </div>
+                              <div className={styles.formRow}>
+                                <label className={styles.formLabel}>Endereço ({og.tipo === 'PJ' ? 'sede' : 'residencial'})</label>
+                                <input className={styles.input} value={og.endereco}
+                                  onChange={(e) => atualizar({ endereco: e.target.value })} />
+                              </div>
+                              {og.tipo === 'PJ' && (
+                                <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 12, background: '#fafafa' }}>
+                                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
+                                    Representante legal (opcional, mas recomendado)
+                                  </div>
+                                  <div className={cs.twoCol}>
+                                    <div className={styles.formRow}>
+                                      <label className={styles.formLabel}>Nome</label>
+                                      <input className={styles.input} value={og.representante_nome}
+                                        onChange={(e) => atualizar({ representante_nome: e.target.value })} />
+                                    </div>
+                                    <div className={styles.formRow}>
+                                      <label className={styles.formLabel}>Cargo</label>
+                                      <input className={styles.input} placeholder="ex: sócio administrador" value={og.representante_cargo}
+                                        onChange={(e) => atualizar({ representante_cargo: e.target.value })} />
+                                    </div>
+                                  </div>
+                                  <div className={styles.formRow}>
+                                    <label className={styles.formLabel}>CPF</label>
+                                    <input className={styles.input} value={og.representante_cpf}
+                                      onChange={(e) => atualizar({ representante_cpf: maskCPFCNPJ(e.target.value) })} />
+                                  </div>
+                                </div>
+                              )}
                             </div>
-                            <div className={styles.formRow}>
-                              <label className={styles.formLabel}>CPF</label>
-                              <input className={styles.input}
-                                value={gerarProcForm.outorgante_representante_cpf}
-                                onChange={(e) => setGerarProcForm({ ...gerarProcForm, outorgante_representante_cpf: maskCPFCNPJ(e.target.value) })} />
-                            </div>
-                          </div>
-                        )}
+                          )
+                        })}
+                        <button className={cs.btnAtalho} type="button" style={{ marginBottom: 12 }}
+                          onClick={() => setGerarProcForm({
+                            ...gerarProcForm,
+                            outorgantes: [...gerarProcForm.outorgantes, { ...EMPTY_OUTORGANTE }],
+                          })}>
+                          + Adicionar outorgante
+                        </button>
 
                         <div className={cs.sectionTitle} style={{ fontSize: 12, marginTop: 12 }}>Outorgado(s) — advogado(s)</div>
                         {gerarProcForm.outorgados.map((adv, i) => (
@@ -942,6 +977,13 @@ export default function ContratosPage() {
                               onChange={(e) => {
                                 const outorgados = [...gerarProcForm.outorgados]
                                 outorgados[i] = { ...outorgados[i], oab: e.target.value }
+                                setGerarProcForm({ ...gerarProcForm, outorgados })
+                              }} />
+                            <input className={styles.input} placeholder="UF" style={{ flex: '0 0 56px' }}
+                              value={adv.oab_uf}
+                              onChange={(e) => {
+                                const outorgados = [...gerarProcForm.outorgados]
+                                outorgados[i] = { ...outorgados[i], oab_uf: e.target.value.toUpperCase().slice(0, 2) }
                                 setGerarProcForm({ ...gerarProcForm, outorgados })
                               }} />
                             <input className={styles.input} placeholder="CPF" style={{ flex: 1 }}
@@ -1049,6 +1091,16 @@ export default function ContratosPage() {
                               onChange={(e) => setGerarProcForm({ ...gerarProcForm, data_validade: e.target.value })} />
                           </div>
                         </div>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, marginBottom: 8 }}>
+                          <input type="checkbox" checked={gerarProcForm.forcar_uma_pagina}
+                            onChange={(e) => setGerarProcForm({ ...gerarProcForm, forcar_uma_pagina: e.target.checked })} />
+                          Forçar em 1 página (reduz a fonte um pouco mais se precisar)
+                        </label>
+                        {c.doc_gerado_por && c.doc_gerado_em && (
+                          <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 8 }}>
+                            Última geração por {c.doc_gerado_por} em {new Date(c.doc_gerado_em).toLocaleString('pt-BR')}
+                          </div>
+                        )}
                         {gerarProcErro && (
                           <div style={{ color: '#b91c1c', background: '#fee2e2', border: '1px solid #fecaca', borderRadius: 8, padding: '8px 12px', fontSize: 12 }}>
                             ❌ {gerarProcErro}
@@ -1057,7 +1109,7 @@ export default function ContratosPage() {
                         <div className={cs.gerarAcoes}>
                           <button className={styles.btnPrimary}
                             disabled={
-                              gerarProcuracao.isPending || !gerarProcForm.outorgante_nome ||
+                              gerarProcuracao.isPending || !gerarProcForm.outorgantes.some((o) => o.nome.trim()) ||
                               !gerarProcForm.outorgados.some((o) => o.nome.trim()) ||
                               (!gerarProcForm.incluir_poderes_gerais && !gerarProcForm.finalidade?.trim())
                             }
