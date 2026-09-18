@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { contratosApi } from '../api/contratos'
-import type { ContratoCreate, SignatarioCreate, PapelSignatario, StatusContrato, GerarPdfRequest, TipoDocumento, GerarProcuracaoRequest, OutorgadoInput, OutorganteInput, PoderEspecial, TipoOutorgante } from '../api/contratos'
+import type { ContratoCreate, SignatarioCreate, PapelSignatario, StatusContrato, GerarPdfRequest, TipoDocumento, GerarProcuracaoRequest, OutorgadoInput, OutorganteInput, PoderEspecial, PoderesModo, TipoOutorgante } from '../api/contratos'
 import { clientesApi } from '../api/clientes'
 import { processosApi } from '../api/processos'
 import ComboBox from '../components/ComboBox'
@@ -120,7 +120,8 @@ const EMPTY_GERAR_PROC_FORM: GerarProcuracaoRequest = {
   outorgantes: [{ ...EMPTY_OUTORGANTE }],
   outorgados: [{ nome: 'Lucas Pimenta Júdice', oab: '14.477', oab_uf: 'ES', cpf: '' }],
   endereco_escritorio: ENDERECO_ESCRITORIO_PADRAO,
-  incluir_poderes_gerais: true,
+  poderes_modo: 'ad_judicia',
+  poderes_template_texto: '',
   poderes_especiais: DEFAULT_PODERES_ESPECIAIS,
   poderes_adicionais: '',
   finalidade: '',
@@ -149,6 +150,7 @@ export default function ContratosPage() {
   const [gerarProcErro, setGerarProcErro] = useState<string | null>(null)
   const [gerarProcForm, setGerarProcForm] = useState<GerarProcuracaoRequest>(EMPTY_GERAR_PROC_FORM)
   const [poderesPanelOpen, setPoderesPanelOpen] = useState(false)
+  const [poderesTemplateId, setPoderesTemplateId] = useState('')
   const [gerarForm, setGerarForm] = useState<GerarPdfRequest>({
     contratante_nome: '',
     contratante_qualificacao: '',
@@ -187,6 +189,27 @@ export default function ContratosPage() {
     queryKey: ['procuracao-template'],
     queryFn: () => contratosApi.templateProcuracao(),
     enabled: abaTipo === 'procuracao',
+  })
+  const { data: poderesTemplates = [] } = useQuery({
+    queryKey: ['poderes-templates'],
+    queryFn: () => contratosApi.listarPoderesTemplates(),
+    enabled: abaTipo === 'procuracao',
+  })
+
+  const criarPoderesTemplate = useMutation({
+    mutationFn: contratosApi.criarPoderesTemplate,
+    onSuccess: (novo) => {
+      qc.invalidateQueries({ queryKey: ['poderes-templates'] })
+      setPoderesTemplateId(novo.id)
+    },
+  })
+
+  const excluirPoderesTemplate = useMutation({
+    mutationFn: contratosApi.excluirPoderesTemplate,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['poderes-templates'] })
+      setPoderesTemplateId('')
+    },
   })
 
   const criar = useMutation({
@@ -394,6 +417,7 @@ export default function ContratosPage() {
     }
     setGerarProcErro(null)
     setPoderesPanelOpen(false)
+    setPoderesTemplateId('')
     setGerarProcAberto(c.id)
   }
 
@@ -1027,13 +1051,21 @@ export default function ContratosPage() {
 
                         {poderesPanelOpen && (
                           <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 12, marginBottom: 8, background: '#fafafa' }}>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
-                              <input type="checkbox" checked={gerarProcForm.incluir_poderes_gerais}
-                                onChange={(e) => setGerarProcForm({ ...gerarProcForm, incluir_poderes_gerais: e.target.checked })} />
-                              Incluir cláusula geral "ad judicia et extra"
-                            </label>
+                            <div className={cs.chipRow} style={{ marginBottom: 10 }}>
+                              {([
+                                ['ad_judicia', 'Ad judicia padrão'],
+                                ['template', 'Outro template'],
+                                ['nenhum', 'Sem cláusula geral'],
+                              ] as [PoderesModo, string][]).map(([modo, label]) => (
+                                <button key={modo} type="button"
+                                  className={`${cs.chip} ${gerarProcForm.poderes_modo === modo ? cs.chipAtivo : ''}`}
+                                  onClick={() => setGerarProcForm({ ...gerarProcForm, poderes_modo: modo })}>
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
 
-                            {gerarProcForm.incluir_poderes_gerais ? (
+                            {gerarProcForm.poderes_modo === 'ad_judicia' && (
                               <>
                                 <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 6 }}>
                                   Poderes especiais a manter na cláusula:
@@ -1060,7 +1092,51 @@ export default function ContratosPage() {
                                   value={gerarProcForm.poderes_adicionais}
                                   onChange={(e) => setGerarProcForm({ ...gerarProcForm, poderes_adicionais: e.target.value })} />
                               </>
-                            ) : (
+                            )}
+
+                            {gerarProcForm.poderes_modo === 'template' && (
+                              <>
+                                <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                                  <select className={styles.input} style={{ flex: 1 }}
+                                    value={poderesTemplateId}
+                                    onChange={(e) => {
+                                      const tpl = poderesTemplates.find((t) => t.id === e.target.value)
+                                      setPoderesTemplateId(e.target.value)
+                                      setGerarProcForm({ ...gerarProcForm, poderes_template_texto: tpl?.texto ?? '' })
+                                    }}>
+                                    <option value="">— Carregar um template salvo —</option>
+                                    {poderesTemplates.map((t) => (
+                                      <option key={t.id} value={t.id}>{t.nome}</option>
+                                    ))}
+                                  </select>
+                                  {poderesTemplateId && (
+                                    <button className={styles.btnDanger} type="button"
+                                      onClick={() => {
+                                        if (confirm('Excluir este template salvo? Não afeta procurações já geradas com ele.'))
+                                          excluirPoderesTemplate.mutate(poderesTemplateId)
+                                      }}>
+                                      🗑️
+                                    </button>
+                                  )}
+                                </div>
+                                <label className={styles.formLabel}>Texto que substitui a cláusula ad judicia (mesmo lugar no documento)</label>
+                                <textarea className={styles.input} rows={5}
+                                  placeholder="Escreva aqui o texto completo dos poderes que vai substituir o ad judicia et extra..."
+                                  value={gerarProcForm.poderes_template_texto}
+                                  onChange={(e) => setGerarProcForm({ ...gerarProcForm, poderes_template_texto: e.target.value })} />
+                                <button className={cs.btnAtalho} type="button" style={{ marginTop: 6 }}
+                                  disabled={!gerarProcForm.poderes_template_texto?.trim() || criarPoderesTemplate.isPending}
+                                  onClick={() => {
+                                    const nome = prompt('Nome para identificar esse template depois:')
+                                    if (!nome?.trim()) return
+                                    criarPoderesTemplate.mutate({ nome: nome.trim(), texto: gerarProcForm.poderes_template_texto ?? '' })
+                                  }}>
+                                  💾 Salvar como template
+                                </button>
+                              </>
+                            )}
+
+                            {gerarProcForm.poderes_modo === 'nenhum' && (
                               <div style={{ fontSize: 12, color: '#6b7280' }}>
                                 Cláusula geral desligada — a procuração terá só os poderes descritos em "Finalidade específica" abaixo.
                               </div>
@@ -1070,9 +1146,9 @@ export default function ContratosPage() {
 
                         <div className={styles.formRow}>
                           <label className={styles.formLabel}>
-                            {gerarProcForm.incluir_poderes_gerais
-                              ? 'Finalidade específica (opcional — some à cláusula geral acima)'
-                              : 'Poderes específicos (obrigatório — cláusula geral está desligada)'}
+                            {gerarProcForm.poderes_modo === 'nenhum'
+                              ? 'Poderes específicos (obrigatório — cláusula geral está desligada)'
+                              : 'Finalidade específica (opcional — some à cláusula de poderes acima)'}
                           </label>
                           <textarea className={styles.input} rows={3}
                             placeholder="ex: representar o outorgante especificamente no processo nº..."
@@ -1111,7 +1187,8 @@ export default function ContratosPage() {
                             disabled={
                               gerarProcuracao.isPending || !gerarProcForm.outorgantes.some((o) => o.nome.trim()) ||
                               !gerarProcForm.outorgados.some((o) => o.nome.trim()) ||
-                              (!gerarProcForm.incluir_poderes_gerais && !gerarProcForm.finalidade?.trim())
+                              (gerarProcForm.poderes_modo === 'nenhum' && !gerarProcForm.finalidade?.trim()) ||
+                              (gerarProcForm.poderes_modo === 'template' && !gerarProcForm.poderes_template_texto?.trim())
                             }
                             onClick={() => {
                               const faltando = camposEmAbertoProcuracao(gerarProcForm)

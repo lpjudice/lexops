@@ -104,13 +104,23 @@ export interface OutorganteInput {
   representante_cargo?: string
 }
 
+export type PoderesModo = 'ad_judicia' | 'template' | 'nenhum'
+
+export interface PoderesTemplate {
+  id: string
+  nome: string
+  texto: string
+  created_at: string
+}
+
 export interface GerarProcuracaoRequest {
   outorgantes: OutorganteInput[]
   outorgados: OutorgadoInput[]
   endereco_escritorio?: string
-  incluir_poderes_gerais?: boolean
+  poderes_modo?: PoderesModo
   poderes_especiais?: PoderEspecial[]
   poderes_adicionais?: string
+  poderes_template_texto?: string
   finalidade?: string
   data_validade?: string
   data_procuracao?: string
@@ -190,6 +200,15 @@ export const contratosApi = {
 
   templateProcuracao: () =>
     api.get<{ link: string | null }>('/contratos/template-procuracao').then((r) => r.data),
+
+  listarPoderesTemplates: () =>
+    api.get<PoderesTemplate[]>('/contratos/poderes-templates').then((r) => r.data),
+
+  criarPoderesTemplate: (data: { nome: string; texto: string }) =>
+    api.post<PoderesTemplate>('/contratos/poderes-templates', data).then((r) => r.data),
+
+  excluirPoderesTemplate: (id: string) =>
+    api.delete(`/contratos/poderes-templates/${id}`),
 
   lerContratantes: (id: string) =>
     api.post<{ contratantes: ContratanteLido[]; financeiro: ContratoFinanceiroIA }>(`/contratos/${id}/ler-contratantes`).then((r) => r.data),

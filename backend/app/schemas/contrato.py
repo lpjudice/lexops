@@ -107,17 +107,33 @@ class OutorganteInput(BaseModel):
     representante_cargo: str = ""
 
 
+PoderesModo = Literal["ad_judicia", "template", "nenhum"]
+
+
 class GerarProcuracaoRequest(BaseModel):
     outorgantes: list[OutorganteInput] = []
     outorgados: list[OutorgadoInput] = []
     endereco_escritorio: str = ""
-    incluir_poderes_gerais: bool = True
-    poderes_especiais: list[PoderEspecial] = DEFAULT_PODERES_ESPECIAIS
-    poderes_adicionais: str = ""
+    poderes_modo: PoderesModo = "ad_judicia"
+    poderes_especiais: list[PoderEspecial] = DEFAULT_PODERES_ESPECIAIS  # só usado se poderes_modo == "ad_judicia"
+    poderes_adicionais: str = ""                                       # só usado se poderes_modo == "ad_judicia"
+    poderes_template_texto: str = ""                                   # só usado se poderes_modo == "template"
     finalidade: str = ""
     data_validade: str = ""           # YYYY-MM-DD, opcional
     data_procuracao: str = ""         # YYYY-MM-DD
     forcar_uma_pagina: bool = False
+
+
+class PoderesTemplateCreate(BaseModel):
+    nome: str
+    texto: str
+
+
+class PoderesTemplateOut(PoderesTemplateCreate):
+    id: uuid.UUID
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
 
 
 # ── Leitura de contratantes por IA (upload) ──────────────────────────────────

@@ -1345,6 +1345,15 @@ def _run_migrations() -> None:
         conn.execute(text("ALTER TABLE signatarios ADD COLUMN IF NOT EXISTS data_nascimento DATE"))
         conn.execute(text("ALTER TABLE contratos ADD COLUMN IF NOT EXISTS doc_gerado_por VARCHAR(255)"))
         conn.execute(text("ALTER TABLE contratos ADD COLUMN IF NOT EXISTS doc_gerado_em TIMESTAMPTZ"))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS poderes_templates (
+                id UUID PRIMARY KEY,
+                nome VARCHAR(255) NOT NULL,
+                texto TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
         conn.execute(text("ALTER TABLE informativos ADD COLUMN IF NOT EXISTS numero INTEGER"))
         conn.execute(text("ALTER TABLE informativos ADD COLUMN IF NOT EXISTS instrucoes_ia TEXT"))
         conn.execute(text("ALTER TABLE informativos ADD COLUMN IF NOT EXISTS rascunho_gerado_em TIMESTAMPTZ"))

@@ -6,10 +6,11 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models.contrato import Contrato, Signatario
+from app.models.contrato import Contrato, PoderesTemplate, Signatario
 from app.schemas.contrato import (
     AplicarContratantesRequest, ContratoCreate, ContratoOut, ContratoUpdate,
-    GerarPdfRequest, GerarProcuracaoRequest, SignatarioCreate, SignatarioOut,
+    GerarPdfRequest, GerarProcuracaoRequest, PoderesTemplateCreate, PoderesTemplateOut,
+    SignatarioCreate, SignatarioOut,
 )
 from app.services import clicksign
 
@@ -196,6 +197,31 @@ def obter_template_procuracao():
         mimetype="text/html", converter_html_para_google_docs=True,
     )
     return {"link": link}
+
+
+# ── Templates de poderes (substituem a cláusula ad judicia padrão) ─────────────
+
+@router.get("/poderes-templates", response_model=list[PoderesTemplateOut])
+def listar_poderes_templates(db: Session = Depends(get_db)):
+    return db.query(PoderesTemplate).order_by(PoderesTemplate.nome).all()
+
+
+@router.post("/poderes-templates", response_model=PoderesTemplateOut, status_code=status.HTTP_201_CREATED)
+def criar_poderes_template(data: PoderesTemplateCreate, db: Session = Depends(get_db)):
+    template = PoderesTemplate(**data.model_dump())
+    db.add(template)
+    db.commit()
+    db.refresh(template)
+    return template
+
+
+@router.delete("/poderes-templates/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remover_poderes_template(template_id: uuid.UUID, db: Session = Depends(get_db)):
+    template = db.query(PoderesTemplate).filter(PoderesTemplate.id == template_id).first()
+    if not template:
+        raise HTTPException(status_code=404, detail="Template não encontrado")
+    db.delete(template)
+    db.commit()
 
 
 @router.get("/{contrato_id}", response_model=ContratoOut)
@@ -823,9 +849,10 @@ async def gerar_pdf_procuracao(
         outorgantes=[o.model_dump() for o in body.outorgantes],
         outorgados=[o.model_dump() for o in body.outorgados],
         endereco_escritorio=body.endereco_escritorio,
-        incluir_poderes_gerais=body.incluir_poderes_gerais,
+        poderes_modo=body.poderes_modo,
         poderes_especiais=list(body.poderes_especiais),
         poderes_adicionais=body.poderes_adicionais,
+        poderes_template_texto=body.poderes_template_texto,
         finalidade=body.finalidade,
         data_validade=data_validade,
         data_procuracao=data_procuracao,

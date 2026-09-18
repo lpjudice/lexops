@@ -110,3 +110,23 @@ class Signatario(Base):
     assinado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     contrato: Mapped["Contrato"] = relationship("Contrato", back_populates="signatarios")
+
+
+class PoderesTemplate(Base):
+    """Texto salvo (com nome) para substituir a cláusula padrão "ad judicia et
+    extra" na seção DOS PODERES da procuração. Reutilizável entre procurações —
+    ver app/services/procuracao_pdf.py e o endpoint /contratos/poderes-templates."""
+    __tablename__ = "poderes_templates"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    nome: Mapped[str] = mapped_column(String(255), nullable=False)
+    texto: Mapped[str] = mapped_column(Text, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

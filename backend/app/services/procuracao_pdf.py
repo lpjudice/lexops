@@ -120,6 +120,21 @@ def _compor_clausula_poderes(poderes_especiais: list[str], poderes_adicionais: s
     return frase
 
 
+def _texto_poderes(
+    poderes_modo: str, poderes_especiais: list[str] | None, poderes_adicionais: str,
+    poderes_template_texto: str,
+) -> str | None:
+    """Texto que vai no lugar da cláusula ad judicia dentro de DOS PODERES —
+    None quando `poderes_modo == "nenhum"` (aí só entra o que estiver em
+    `finalidade`, ver chamadores)."""
+    if poderes_modo == "template":
+        texto = (poderes_template_texto or "").strip()
+        return texto or None
+    if poderes_modo == "nenhum":
+        return None
+    return _compor_clausula_poderes(poderes_especiais or [], poderes_adicionais)
+
+
 def _linha_outorgante(og: dict, numero: int | None = None) -> str:
     """`og`: {"tipo": "PF"|"PJ", "nome", "nacionalidade", "estado_civil", "profissao",
     "cpf_cnpj", "endereco", "email", "representante_nome", "representante_cpf",
@@ -273,9 +288,10 @@ def _montar_pdf(
     outorgantes: list[dict],
     outorgados: list[dict],
     endereco_escritorio: str,
-    incluir_poderes_gerais: bool,
+    poderes_modo: str,
     poderes_especiais: list[str] | None,
     poderes_adicionais: str,
+    poderes_template_texto: str,
     finalidade: str,
     data_validade: date | None,
     data_procuracao: date | None,
@@ -341,8 +357,9 @@ def _montar_pdf(
     # ── PODERES ───────────────────────────────────────────────────────────────
     story.append(Paragraph("DOS PODERES", st["secao_titulo"]))
     tem_finalidade = bool(finalidade.strip())
-    if incluir_poderes_gerais:
-        story.append(Paragraph(_compor_clausula_poderes(poderes_especiais or [], poderes_adicionais), st["corpo"]))
+    texto_poderes = _texto_poderes(poderes_modo, poderes_especiais, poderes_adicionais, poderes_template_texto)
+    if texto_poderes:
+        story.append(Paragraph(texto_poderes, st["corpo"]))
         if tem_finalidade:
             story.append(Spacer(1, 0.2 * cm))
             story.append(Paragraph("DA FINALIDADE ESPECÍFICA", st["secao_titulo"]))
@@ -389,9 +406,10 @@ def gerar_procuracao(
     outorgantes: list[dict],
     outorgados: list[dict],
     endereco_escritorio: str,
-    incluir_poderes_gerais: bool = True,
+    poderes_modo: str = "ad_judicia",
     poderes_especiais: list[str] | None = None,
     poderes_adicionais: str = "",
+    poderes_template_texto: str = "",
     finalidade: str = "",
     data_validade: date | None = None,
     data_procuracao: date | None = None,
@@ -400,14 +418,18 @@ def gerar_procuracao(
     """
     Gera o PDF do instrumento de procuração. Retorna bytes.
     `outorgantes`: lista de dicts (ver `_linha_outorgante`). `outorgados`: lista
-    de {"nome", "oab", "oab_uf", "cpf"}.
+    de {"nome", "oab", "oab_uf", "cpf"}. `poderes_modo`: "ad_judicia" (padrão,
+    usa `poderes_especiais`/`poderes_adicionais`), "template" (usa o texto
+    livre em `poderes_template_texto` no lugar da cláusula padrão) ou "nenhum"
+    (só o que estiver em `finalidade`).
     Tenta caber em 1 página, reduzindo a fonte do corpo até o piso (10pt); se
     `forcar_uma_pagina` estiver ligado e ainda não couber, reduz também o
     respiro antes da assinatura e vai até 9pt antes de aceitar 2 páginas.
     """
     kwargs = dict(
         outorgantes=outorgantes, outorgados=outorgados, endereco_escritorio=endereco_escritorio,
-        incluir_poderes_gerais=incluir_poderes_gerais, poderes_especiais=poderes_especiais,
+        poderes_modo=poderes_modo, poderes_especiais=poderes_especiais,
+        poderes_template_texto=poderes_template_texto,
         poderes_adicionais=poderes_adicionais, finalidade=finalidade, data_validade=data_validade,
         data_procuracao=data_procuracao,
     )
@@ -494,9 +516,10 @@ def gerar_procuracao_html(
     outorgantes: list[dict],
     outorgados: list[dict],
     endereco_escritorio: str,
-    incluir_poderes_gerais: bool = True,
+    poderes_modo: str = "ad_judicia",
     poderes_especiais: list[str] | None = None,
     poderes_adicionais: str = "",
+    poderes_template_texto: str = "",
     finalidade: str = "",
     data_validade: date | None = None,
     data_procuracao: date | None = None,
@@ -562,8 +585,9 @@ def gerar_procuracao_html(
 
     partes.append('<h3 style="text-align:center; font-weight:700;">DOS PODERES</h3>')
     tem_finalidade = bool(finalidade.strip())
-    if incluir_poderes_gerais:
-        partes.append(f'<p style="{justificado}">' + _esc(_compor_clausula_poderes(poderes_especiais or [], poderes_adicionais)) + "</p>")
+    texto_poderes = _texto_poderes(poderes_modo, poderes_especiais, poderes_adicionais, poderes_template_texto)
+    if texto_poderes:
+        partes.append(f'<p style="{justificado}">' + _esc(texto_poderes) + "</p>")
         if tem_finalidade:
             partes.append('<h3 style="text-align:center; font-weight:700;">DA FINALIDADE ESPECÍFICA</h3>')
             for paragrafo in _finalidade_paragrafos(finalidade, data_validade):
