@@ -51,10 +51,13 @@ TEAL = colors.HexColor("#00b090")
 MID_GRAY = colors.HexColor("#6b7280")
 
 # Tamanhos de fonte do corpo tentados em ordem até o PDF caber em 1 página; o
-# último (piso) é aceito mesmo que ainda resulte em 2 páginas — a menos que
-# `forcar_uma_pagina` esteja ligado, que aí continua com TAMANHOS_FONTE_FORCADO.
+# último (piso) é aceito mesmo que ainda resulte em 2 páginas. Antes de desistir,
+# SEMPRE tenta de novo no piso com o respiro antes da assinatura mais apertado —
+# resolve de graça (sem mudar fonte) o caso comum de só a assinatura vazar pra
+# uma 2ª página. Só continua reduzindo a fonte além disso (9.5/9pt) se
+# `forcar_uma_pagina` estiver ligado.
 TAMANHOS_FONTE_CORPO = (11.0, 10.5, 10.0)
-TAMANHOS_FONTE_FORCADO = (10.0, 9.5, 9.0)  # com spacer reduzido antes da assinatura
+TAMANHOS_FONTE_FORCADO = (9.5, 9.0)  # só entram com forcar_uma_pagina=True
 
 # Base da cláusula "ad judicia et extra" — formulação genérica amplamente usada em
 # procurações no Brasil (poderes gerais para o foro em geral). Os "poderes especiais"
@@ -422,9 +425,11 @@ def gerar_procuracao(
     usa `poderes_especiais`/`poderes_adicionais`), "template" (usa o texto
     livre em `poderes_template_texto` no lugar da cláusula padrão) ou "nenhum"
     (só o que estiver em `finalidade`).
-    Tenta caber em 1 página, reduzindo a fonte do corpo até o piso (10pt); se
-    `forcar_uma_pagina` estiver ligado e ainda não couber, reduz também o
-    respiro antes da assinatura e vai até 9pt antes de aceitar 2 páginas.
+    Tenta caber em 1 página, reduzindo a fonte do corpo até o piso (10pt); antes
+    de desistir, tenta de novo no piso com o respiro antes da assinatura mais
+    apertado (resolve de graça o caso comum de só a assinatura vazar pra uma
+    2ª página). Se `forcar_uma_pagina` estiver ligado e ainda não couber, reduz
+    a fonte mais um pouco (9.5, depois 9pt) antes de aceitar 2 páginas.
     """
     kwargs = dict(
         outorgantes=outorgantes, outorgados=outorgados, endereco_escritorio=endereco_escritorio,
@@ -438,6 +443,9 @@ def gerar_procuracao(
         if _num_paginas(pdf_bytes) <= 1:
             return pdf_bytes
         pdf_bytes = _montar_pdf(tamanho, spacer_assinatura_cm=1.5, **kwargs)
+
+    if _num_paginas(pdf_bytes) > 1:
+        pdf_bytes = _montar_pdf(TAMANHOS_FONTE_CORPO[-1], spacer_assinatura_cm=0.6, **kwargs)
 
     if forcar_uma_pagina and _num_paginas(pdf_bytes) > 1:
         for tamanho in TAMANHOS_FONTE_FORCADO:

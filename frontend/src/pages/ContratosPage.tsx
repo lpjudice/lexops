@@ -66,6 +66,8 @@ const EMPTY_OUTORGADO: OutorgadoInput = { nome: '', oab: '', oab_uf: 'ES', cpf: 
 const TIPO_LABEL: Record<TipoDocumento, string> = { contrato: 'Contrato', procuracao: 'Procuração' }
 const TIPO_LABEL_PLURAL: Record<TipoDocumento, string> = { contrato: 'Contratos', procuracao: 'Procurações' }
 
+const SUGESTAO_TEMPLATE_PODERES = 'Pelo presente instrumento particular de mandato, o(a) OUTORGANTE nomeia e constitui seu(s) bastante procurador(es) o(s) OUTORGADO(S) acima qualificado(s), a quem confere '
+
 const PODERES_ESPECIAIS_OPCOES: { key: PoderEspecial; label: string }[] = [
   { key: 'confessar', label: 'Confessar' },
   { key: 'desistir', label: 'Desistir' },
@@ -1059,7 +1061,13 @@ export default function ContratosPage() {
                               ] as [PoderesModo, string][]).map(([modo, label]) => (
                                 <button key={modo} type="button"
                                   className={`${cs.chip} ${gerarProcForm.poderes_modo === modo ? cs.chipAtivo : ''}`}
-                                  onClick={() => setGerarProcForm({ ...gerarProcForm, poderes_modo: modo })}>
+                                  onClick={() => setGerarProcForm({
+                                    ...gerarProcForm,
+                                    poderes_modo: modo,
+                                    poderes_template_texto: (modo === 'template' && !gerarProcForm.poderes_template_texto?.trim())
+                                      ? SUGESTAO_TEMPLATE_PODERES
+                                      : gerarProcForm.poderes_template_texto,
+                                  })}>
                                   {label}
                                 </button>
                               ))}
