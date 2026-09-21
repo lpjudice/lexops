@@ -78,7 +78,9 @@ def enviar_nf_ao_cliente(nf, pdf: bytes, master_email: str | None,
     outer = mime_multi.MIMEMultipart("mixed")
     outer["to"] = nf.tomador_email
     outer["from"] = "me"
-    outer["subject"] = f"NFS-e nº {nf.numero_nfse or ''} — {prestador_nome}"
+    # Prefixo temporário "26" no número do assunto (ex.: 41 -> 2641). Reverter depois.
+    _num_assunto = f"26{nf.numero_nfse}" if nf.numero_nfse else ""
+    outer["subject"] = f"NFS-e nº {_num_assunto} — {prestador_nome}"
     if master_email:
         outer["cc"] = master_email
     alt = mime_multi.MIMEMultipart("alternative")

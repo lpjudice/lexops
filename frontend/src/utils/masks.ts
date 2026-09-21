@@ -80,6 +80,7 @@ export interface ViaCepResult {
   bairro?: string
   localidade?: string
   uf?: string
+  ibge?: string   // código IBGE do município (7 dígitos) — usado como cod_municipio na NFS-e
   erro?: boolean
 }
 

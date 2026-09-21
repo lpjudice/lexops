@@ -14,6 +14,7 @@ import { backofficeApi, type SugestaoNF } from '../api/backoffice'
 import { financeiroApi } from '../api/financeiro'
 import { reembolsosApi } from '../api/reembolsos'
 import { mascaraDocumento, validaDocumento, mascaraTelefone, soDigitos, soAlfanum } from '../utils/documentos'
+import { maskCEP, buscarCep } from '../utils/masks'
 import styles from './Page.module.css'
 import cs from './FiscalPage.module.css'
 
@@ -333,6 +334,59 @@ function EmissaoModal({
   const [nomeClienteCompensacao, setNomeClienteCompensacao] = useState<string>('')
   const [paganteSelNome, setPaganteSelNome] = useState<string | null>(null)
 
+  // ── Endereço do tomador (obrigatório). Puxa do cadastro do cliente; CEP → ViaCEP ──
+  type EndForm = { cep: string; logradouro: string; numero: string; complemento: string; bairro: string; cidade: string; uf: string; cod_municipio: string }
+  const [end, setEnd] = useState<EndForm>({ cep: '', logradouro: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '', cod_municipio: '' })
+  const [endTouched, setEndTouched] = useState(false)
+  const [buscandoCep, setBuscandoCep] = useState(false)
+  const setEndCampo = (k: keyof EndForm, v: string) => { setEndTouched(true); setEnd((e) => ({ ...e, [k]: v })) }
+
+  // Cliente completo (para puxar endereço) — cobre seleção manual E prefill
+  const { data: clienteFull } = useQuery({
+    queryKey: ['cliente-full', form.cliente_id],
+    queryFn: () => clientesApi.obter(form.cliente_id!),
+    enabled: !!form.cliente_id,
+  })
+  // Prefill do endereço a partir do cadastro do cliente (sem sobrescrever edições)
+  useEffect(() => {
+    if (!clienteFull || endTouched) return
+    if (clienteFull.cep || clienteFull.logradouro) {
+      setEnd({
+        cep: clienteFull.cep || '', logradouro: clienteFull.logradouro || '',
+        numero: clienteFull.numero || '', complemento: clienteFull.complemento || '',
+        bairro: clienteFull.bairro || '', cidade: clienteFull.cidade || '',
+        uf: clienteFull.uf || '', cod_municipio: '',
+      })
+      if (clienteFull.cep) buscarCep(clienteFull.cep).then((r) => {
+        if (r?.ibge) setEnd((e) => ({ ...e, cod_municipio: r.ibge! }))
+      })
+    }
+  }, [clienteFull]) // eslint-disable-line
+  // Espelha o endereço no form (tomador_endereco) para a emissão
+  useEffect(() => {
+    setForm((f) => ({ ...f, tomador_endereco: {
+      logradouro: end.logradouro, numero: end.numero, bairro: end.bairro,
+      cod_municipio: end.cod_municipio, cep: soDigitos(end.cep), complemento: end.complemento || undefined,
+    } }))
+  }, [end]) // eslint-disable-line
+  async function onCepBlur() {
+    const dig = soDigitos(end.cep)
+    if (dig.length !== 8) return
+    setBuscandoCep(true)
+    try {
+      const r = await buscarCep(dig)
+      if (r && !r.erro) setEnd((e) => ({
+        ...e,
+        logradouro: r.logradouro || e.logradouro,
+        bairro: r.bairro || e.bairro,
+        cidade: r.localidade || e.cidade,
+        uf: r.uf || e.uf,
+        cod_municipio: r.ibge || e.cod_municipio,
+      }))
+    } finally { setBuscandoCep(false) }
+  }
+  const enderecoCompleto = !!(soDigitos(end.cep).length === 8 && end.logradouro && end.numero && end.bairro && end.cod_municipio)
+
   // Ao mudar tomador_nome, prefill com cache
   useEffect(() => {
     if (form.tomador_nome && !form.tomador_cpf_cnpj) {
@@ -403,6 +457,14 @@ function EmissaoModal({
     onSuccess: (nf) => {
       // Cache CPF/email do pagador para próximas emissões
       setCachePagador(form.tomador_nome, form.tomador_cpf_cnpj, form.tomador_email)
+      // Salva o endereço no cadastro do cliente se ele ainda não tiver (só popula, não sobrescreve)
+      if (form.cliente_id && clienteFull && !clienteFull.cep && !clienteFull.logradouro && (end.cep || end.logradouro)) {
+        clientesApi.atualizar(form.cliente_id, {
+          cep: soDigitos(end.cep), logradouro: end.logradouro, numero: end.numero,
+          complemento: end.complemento || undefined, bairro: end.bairro,
+          cidade: end.cidade, uf: end.uf,
+        } as any).then(() => qc.invalidateQueries({ queryKey: ['clientes'] })).catch(() => {})
+      }
       qc.invalidateQueries({ queryKey: ['notas-fiscais'] })
       onSucesso(nf)
     },
@@ -469,6 +531,7 @@ function EmissaoModal({
   function handleClienteSelect(c: Cliente | null, nome: string) {
     setClienteSelecionado(c)
     setPaganteSelNome(null)  // ao mexer no tomador, limpa flag de pagante selecionado
+    setEndTouched(false)     // permite repopular o endereço do novo cliente
     if (c) {
       setForm((f) => ({
         ...f,
@@ -478,6 +541,13 @@ function EmissaoModal({
         tomador_email: c.email || f.tomador_email,
         tomador_telefone: (c.telefone || '').replace(/\D/g, '') || f.tomador_telefone,
       }))
+      // Endereço direto do cadastro do cliente (c já vem completo)
+      setEnd({
+        cep: c.cep || '', logradouro: c.logradouro || '', numero: c.numero || '',
+        complemento: c.complemento || '', bairro: c.bairro || '', cidade: c.cidade || '',
+        uf: c.uf || '', cod_municipio: '',
+      })
+      if (c.cep) buscarCep(c.cep).then((r) => { if (r?.ibge) setEnd((e) => ({ ...e, cod_municipio: r.ibge! })) })
     } else {
       setForm((f) => ({ ...f, cliente_id: undefined, tomador_nome: nome }))
     }
@@ -487,6 +557,7 @@ function EmissaoModal({
   function handlePaganteSelect(p: PaganteOut) {
     setClienteSelecionado(null)
     setPaganteSelNome(p.nome)
+    setEndTouched(true)  // usa o endereço do pagante; não deixa o clienteFull sobrescrever
     setForm((f) => ({
       ...f,
       cliente_id: p.cliente_id || undefined,
@@ -494,15 +565,12 @@ function EmissaoModal({
       tomador_cpf_cnpj: (p.cpf_cnpj || '').replace(/\D/g, ''),
       tomador_email: p.email || f.tomador_email,
       tomador_telefone: (p.telefone || '').replace(/\D/g, '') || f.tomador_telefone,
-      tomador_endereco: (p.logradouro || p.cep) ? {
-        logradouro: p.logradouro || '',
-        numero: p.numero || '',
-        bairro: p.bairro || '',
-        cod_municipio: p.cod_municipio || '',
-        cep: p.cep || '',
-        complemento: p.complemento || undefined,
-      } : f.tomador_endereco,
     }))
+    setEnd({
+      cep: p.cep || '', logradouro: p.logradouro || '', numero: p.numero || '',
+      complemento: p.complemento || '', bairro: p.bairro || '', cidade: p.cidade || '',
+      uf: p.estado || '', cod_municipio: p.cod_municipio || '',
+    })
   }
 
   function aplicarContrato(c: any) {
@@ -779,6 +847,63 @@ function EmissaoModal({
               maxLength={16} />
           </div>
 
+          {/* ── Endereço do tomador (obrigatório) ───────────────────── */}
+          {!form.tomador_no_exterior && (
+            <div className={cs.formGridFull}>
+              <div className={cs.secaoTitulo}>
+                📍 Endereço do tomador <span style={{ color: '#b91c1c' }}>*</span>
+                {!enderecoCompleto && <span style={{ fontSize: 11, color: '#b45309', marginLeft: 8, fontWeight: 400 }}>obrigatório para emitir</span>}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: 10, marginTop: 6 }}>
+                <div>
+                  <label className={cs.formLabel}>CEP *</label>
+                  <input className={cs.input} placeholder="00000-000"
+                    value={maskCEP(end.cep)}
+                    onChange={(e) => setEndCampo('cep', e.target.value)}
+                    onBlur={onCepBlur} maxLength={9} />
+                  {buscandoCep && <p className={cs.fieldHint}>buscando…</p>}
+                </div>
+                <div>
+                  <label className={cs.formLabel}>Logradouro *</label>
+                  <input className={cs.input} value={end.logradouro}
+                    onChange={(e) => setEndCampo('logradouro', e.target.value)} />
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 1fr', gap: 10, marginTop: 8 }}>
+                <div>
+                  <label className={cs.formLabel}>Número *</label>
+                  <input className={cs.input} value={end.numero}
+                    onChange={(e) => setEndCampo('numero', e.target.value)} />
+                </div>
+                <div>
+                  <label className={cs.formLabel}>Complemento</label>
+                  <input className={cs.input} value={end.complemento}
+                    onChange={(e) => setEndCampo('complemento', e.target.value)} />
+                </div>
+                <div>
+                  <label className={cs.formLabel}>Bairro *</label>
+                  <input className={cs.input} value={end.bairro}
+                    onChange={(e) => setEndCampo('bairro', e.target.value)} />
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', gap: 10, marginTop: 8 }}>
+                <div>
+                  <label className={cs.formLabel}>Cidade</label>
+                  <input className={cs.input} value={end.cidade}
+                    onChange={(e) => setEndCampo('cidade', e.target.value)} />
+                </div>
+                <div>
+                  <label className={cs.formLabel}>UF</label>
+                  <input className={cs.input} value={end.uf} maxLength={2}
+                    onChange={(e) => setEndCampo('uf', e.target.value.toUpperCase().slice(0, 2))} />
+                </div>
+              </div>
+              <p className={cs.fieldHint} style={{ marginTop: 6 }}>
+                Digite o CEP para preencher automaticamente (editável). O endereço é salvo no cadastro do cliente se ainda não tiver.
+              </p>
+            </div>
+          )}
+
           {/* ── Sugestões de contratos ──────────────────────────────── */}
           {contratos.length > 0 && (
             <div className={cs.formGridFull}>
@@ -1025,8 +1150,10 @@ function EmissaoModal({
               mutation.isPending ||
               !form.tomador_cpf_cnpj || !form.tomador_nome ||
               !form.valor_servicos || !form.descricao_servico ||
-              (!form.tomador_no_exterior && !validaDocumento(form.tomador_cpf_cnpj).valido)
+              (!form.tomador_no_exterior && !validaDocumento(form.tomador_cpf_cnpj).valido) ||
+              (!form.tomador_no_exterior && !enderecoCompleto)
             }
+            title={!form.tomador_no_exterior && !enderecoCompleto ? 'Preencha o endereço do tomador (CEP, logradouro, número, bairro)' : undefined}
             onClick={() => { setErro(null); mutation.mutate(form) }}>
             {mutation.isPending ? 'Emitindo…'
               : form.ambiente === 2 ? '🧪 Emitir TESTE' : '📤 Emitir NFS-e'}
