@@ -179,6 +179,12 @@ export const autosIa = {
   cancelarSync: (casoId: string) =>
     api.post<Caso>(`/autos-ia/casos/${casoId}/cancelar-sync`).then((r) => r.data),
 
+  estimativaReclassificacao: (casoId: string) =>
+    api.get<EstimativaImportacao>(`/autos-ia/casos/${casoId}/estimativa-reclassificacao`).then((r) => r.data),
+
+  reclassificar: (casoId: string) =>
+    api.post<Caso>(`/autos-ia/casos/${casoId}/reclassificar`).then((r) => r.data),
+
   enviarBloco: (casoId: string, arquivo: File, paginaInicio: number | null, onProgress?: (pct: number) => void) => {
     const fd = new FormData()
     fd.append('arquivo', arquivo)

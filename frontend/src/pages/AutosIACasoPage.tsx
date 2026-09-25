@@ -46,6 +46,7 @@ const STATUS_SYNC_LABEL: Record<string, string> = {
 const ETAPA_SYNC_LABEL: Record<string, string> = {
   lendo: 'Lendo documentos',
   resumindo: 'Resumindo peças',
+  reclassificando: 'Reclassificando peças',
 }
 
 export default function AutosIACasoPage() {
@@ -69,6 +70,12 @@ export default function AutosIACasoPage() {
     enabled: !!casoId && !!caso?.processo_id && !emProcessamento,
   })
 
+  const { data: estimativaReclassificacao } = useQuery({
+    queryKey: ['autos-ia', 'estimativa-reclassificacao', casoId],
+    queryFn: () => autosIa.estimativaReclassificacao(casoId!),
+    enabled: !!casoId && !emProcessamento,
+  })
+
   const sincronizar = useMutation({
     mutationFn: () => autosIa.sincronizarAgora(casoId!),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] }),
@@ -88,6 +95,24 @@ export default function AutosIACasoPage() {
     mutationFn: () => autosIa.deletarCaso(casoId!),
     onSuccess: () => navigate('/autos-ia'),
   })
+
+  const reclassificar = useMutation({
+    mutationFn: () => autosIa.reclassificar(casoId!),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] }),
+  })
+
+  function confirmarReclassificar() {
+    const est = estimativaReclassificacao
+    if (!est || est.itens_pendentes === 0) {
+      window.alert('Nenhuma peça elegível para reclassificar (precisa já ter sido resumida).')
+      return
+    }
+    const aviso = `Reclassificar ${est.itens_pendentes} peça(s) já resumida(s) — atualiza tipo, `
+      + `peticionante e ID de referência pelo conteúdo real, sem gerar resumo de novo.\n\n`
+      + `Estimativa: ~${formatarUsd(est.custo_estimado_usd)} · ~${est.tempo_estimado_minutos} min.\n\nContinuar?`
+    if (!window.confirm(aviso)) return
+    reclassificar.mutate()
+  }
 
   function confirmarEDisparar(acao: 'sincronizar' | 'importar') {
     const est = estimativaImportacao
@@ -181,6 +206,16 @@ export default function AutosIACasoPage() {
                     </>
                   )}
                 </>
+              )}
+              {!emProcessamento && estimativaReclassificacao && estimativaReclassificacao.itens_pendentes > 0 && (
+                <button
+                  className={pageStyles.btnSmall}
+                  disabled={reclassificar.isPending}
+                  onClick={confirmarReclassificar}
+                  title="Atualiza tipo, peticionante e ID de referência das peças já resumidas, pelo conteúdo real — sem gerar resumo de novo"
+                >
+                  Reclassificar peças
+                </button>
               )}
               <button
                 className={pageStyles.btnDanger}

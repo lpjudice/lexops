@@ -15,6 +15,10 @@ SEGUNDOS_POR_CHAMADA_LLM = 8
 
 TOKENS_SAIDA_SEGMENTACAO = 2000
 TOKENS_SAIDA_RESUMO = 400
+# Reclassificação: só tipo/peticionante/id_proprio, sem resumo/keywords — saída
+# bem menor. Entrada também menor (reclassificar_peca corta pro início+fecho).
+TOKENS_ENTRADA_RECLASSIFICACAO = 2200
+TOKENS_SAIDA_RECLASSIFICACAO = 80
 
 
 def estimar_processamento(total_paginas: int) -> dict:
@@ -56,6 +60,23 @@ def estimar_importacao_existentes(total_itens: int) -> dict:
     custo = total_itens * (
         tokens_in / 1_000_000 * PRECO_INPUT_POR_MTOK_USD
         + TOKENS_SAIDA_RESUMO / 1_000_000 * PRECO_OUTPUT_POR_MTOK_USD
+    )
+    tempo_s = math.ceil(total_itens / RESUMO_MAX_WORKERS) * SEGUNDOS_POR_CHAMADA_LLM if total_itens else 0
+
+    return {
+        "itens_pendentes": total_itens,
+        "custo_estimado_usd": round(custo, 2),
+        "tempo_estimado_minutos": round(tempo_s / 60, 1),
+    }
+
+
+def estimar_reclassificacao(total_itens: int) -> dict:
+    """Reclassificar peças já resumidas: só tipo/peticionante/id_proprio, texto
+    truncado (início+fecho) e saída curta — bem mais barato que resumir de novo."""
+    total_itens = max(0, total_itens)
+    custo = total_itens * (
+        TOKENS_ENTRADA_RECLASSIFICACAO / 1_000_000 * PRECO_INPUT_POR_MTOK_USD
+        + TOKENS_SAIDA_RECLASSIFICACAO / 1_000_000 * PRECO_OUTPUT_POR_MTOK_USD
     )
     tempo_s = math.ceil(total_itens / RESUMO_MAX_WORKERS) * SEGUNDOS_POR_CHAMADA_LLM if total_itens else 0
 

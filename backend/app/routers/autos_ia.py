@@ -17,8 +17,8 @@ from app.schemas.autos_ia import (
 )
 from app.services.autos_ia import faq as faq_service
 from app.services.autos_ia.busca import buscar_pecas
-from app.services.autos_ia.estimativa import estimar_importacao_existentes
-from app.services.autos_ia.ingestao import processar_documento, retomar_documento
+from app.services.autos_ia.estimativa import estimar_importacao_existentes, estimar_reclassificacao
+from app.services.autos_ia.ingestao import processar_documento, reclassificar_caso, retomar_documento
 from app.services.autos_ia.jusbr_import import (
     importar_apenas_existentes, listar_andamentos_pendentes, sincronizar_caso_jusbr,
 )
@@ -292,6 +292,46 @@ def cancelar_sync(caso_id: uuid.UUID, db: Session = Depends(get_db)):
     caso.sync_cancelar = True
     db.commit()
     db.refresh(caso)
+    return caso
+
+
+@router.get("/casos/{caso_id}/estimativa-reclassificacao", response_model=EstimativaImportacaoOut)
+def estimar_reclassificacao_caso(caso_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Projeção de custo/tempo pra reclassificar (tipo/peticionante/ID próprio)
+    as peças-mãe já resumidas deste caso — bem mais barato que resumir de novo,
+    mas ainda assim uma chamada de IA por peça."""
+    caso = _get_caso(db, caso_id)
+    total = (
+        db.query(AutosIAPeca)
+        .filter(AutosIAPeca.caso_id == caso_id, AutosIAPeca.peca_pai_id.is_(None), AutosIAPeca.status == "resumida")
+        .count()
+    )
+    return estimar_reclassificacao(total)
+
+
+def _executar_reclassificacao_em_background(caso_id: uuid.UUID) -> None:
+    db = SessionLocal()
+    try:
+        caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
+        if caso:
+            reclassificar_caso(db, caso)
+    finally:
+        db.close()
+
+
+@router.post("/casos/{caso_id}/reclassificar", response_model=CasoOut, status_code=status.HTTP_202_ACCEPTED)
+def reclassificar_agora(caso_id: uuid.UUID, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Reclassifica tipo/peticionante/ID próprio das peças-mãe já resumidas do
+    caso — pra atualizar peças indexadas antes desses campos existirem, sem
+    pagar de novo pelo resumo inteiro."""
+    caso = _get_caso(db, caso_id)
+    if caso.ultimo_sync_status == "processando":
+        raise HTTPException(status_code=422, detail="Já há uma sincronização/reclassificação em andamento.")
+    caso.ultimo_sync_status = "processando"
+    caso.ultimo_sync_mensagem = None
+    db.commit()
+    db.refresh(caso)
+    background_tasks.add_task(_executar_reclassificacao_em_background, caso.id)
     return caso
 
 

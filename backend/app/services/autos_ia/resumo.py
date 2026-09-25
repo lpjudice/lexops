@@ -88,6 +88,80 @@ class ResumoPeca:
     custo_usd: float
 
 
+TOOL_SCHEMA_RECLASSIFICACAO = {
+    "name": "registrar_reclassificacao",
+    "description": "Registra só a classificação, peticionante e ID próprio de uma peça já resumida.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "tipo": TOOL_SCHEMA["input_schema"]["properties"]["tipo"],
+            "peticionante": TOOL_SCHEMA["input_schema"]["properties"]["peticionante"],
+            "id_proprio": TOOL_SCHEMA["input_schema"]["properties"]["id_proprio"],
+        },
+        "required": ["tipo", "peticionante", "id_proprio"],
+    },
+}
+
+# Reclassificação de peças já resumidas (ver reclassificar_peca) — só precisa
+# confirmar tipo/peticionante/ID, não o resumo inteiro de novo. Cabeçalho +
+# fecho cobrem a esmagadora maioria dos casos (tipo do ato, parte que assina,
+# número de evento/protocolo ficam no início ou na assinatura), e cortar o meio
+# do texto é o que reduz o custo de entrada — a IA não precisa reler a peça
+# inteira só pra confirmar esses três campos.
+LIMITE_CHARS_RECLASSIFICACAO_INICIO = 6000
+LIMITE_CHARS_RECLASSIFICACAO_FIM = 1500
+
+
+@dataclass
+class ReclassificacaoPeca:
+    tipo: str
+    peticionante: str | None
+    id_proprio: str | None
+    custo_usd: float
+
+
+def reclassificar_peca(texto_md: str, titulo: str, tipo_atual: str) -> ReclassificacaoPeca:
+    """Versão barata de resumir_peca: só tipo/peticionante/id_proprio, com saída
+    curta e entrada truncada (início + fecho do texto). Usada para reclassificar
+    peças que já foram resumidas antes desses três campos existirem, sem pagar
+    de novo pelo resumo/keywords/ids_mencionados (que não mudam)."""
+    import anthropic
+    client = anthropic.Anthropic()
+
+    texto = texto_md
+    if len(texto) > LIMITE_CHARS_RECLASSIFICACAO_INICIO + LIMITE_CHARS_RECLASSIFICACAO_FIM:
+        texto = (
+            texto[:LIMITE_CHARS_RECLASSIFICACAO_INICIO]
+            + "\n\n[...]\n\n"
+            + texto[-LIMITE_CHARS_RECLASSIFICACAO_FIM:]
+        )
+    prompt = (
+        f"Peça processual — classificação atual (a confirmar/corrigir): {tipo_atual}; título: {titulo}.\n\n"
+        f"Início e fecho do texto da peça:\n\n{texto}"
+    )
+
+    resp = client.messages.create(
+        model="claude-opus-4-5",
+        max_tokens=300,
+        system=SYSTEM_PROMPT,
+        tools=[TOOL_SCHEMA_RECLASSIFICACAO],
+        tool_choice={"type": "tool", "name": "registrar_reclassificacao"},
+        messages=[{"role": "user", "content": prompt}],
+    )
+    custo_usd = calcular_custo_usd(resp.usage.input_tokens, resp.usage.output_tokens)
+    for bloco in resp.content:
+        if bloco.type == "tool_use" and bloco.name == "registrar_reclassificacao":
+            dados = bloco.input
+            tipo_ia = (dados.get("tipo") or "").strip()
+            return ReclassificacaoPeca(
+                tipo=tipo_ia if tipo_ia in TIPOS_VALIDOS else tipo_atual,
+                peticionante=(dados.get("peticionante") or "").strip() or None,
+                id_proprio=(dados.get("id_proprio") or "").strip() or None,
+                custo_usd=custo_usd,
+            )
+    raise RuntimeError("Claude não devolveu reclassificação via tool_use")
+
+
 def resumir_peca(texto_md: str, titulo: str, tipo: str) -> ResumoPeca:
     import anthropic
     client = anthropic.Anthropic()

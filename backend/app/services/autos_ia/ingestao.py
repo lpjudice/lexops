@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.models.autos_ia import AutosIACaso, AutosIADocumento, AutosIAPeca, AutosIAReferencia
 from app.services.autos_ia.extracao import extrair_paginas
-from app.services.autos_ia.resumo import resumir_peca
+from app.services.autos_ia.resumo import reclassificar_peca, resumir_peca
 from app.services.autos_ia.segmentacao import segmentar_paginas
 
 logger = logging.getLogger(__name__)
@@ -149,6 +149,111 @@ def resumir_pecas_em_paralelo(
             if not cancelado and deve_cancelar and deve_cancelar():
                 cancelado = True
                 executor.shutdown(wait=False, cancel_futures=True)
+
+
+def reclassificar_pecas_em_paralelo(
+    db: Session,
+    pecas: list[AutosIAPeca],
+    on_progresso: Callable[[int], None] | None = None,
+    on_custo: Callable[[float], None] | None = None,
+    deve_cancelar: Callable[[], bool] | None = None,
+) -> None:
+    """Como resumir_pecas_em_paralelo, mas só atualiza tipo/autor/id_processual
+    (via reclassificar_peca) — não regenera resumo/keywords/ids_mencionados, que
+    já existem e não mudam. Usada para atualizar peças resumidas antes desses
+    três campos existirem (ver /casos/{id}/reclassificar), a um custo bem menor
+    que resumir tudo de novo."""
+    if not pecas:
+        return
+
+    with ThreadPoolExecutor(max_workers=min(RESUMO_MAX_WORKERS, len(pecas))) as executor:
+        futuros = {
+            executor.submit(reclassificar_peca, peca.texto_md, peca.titulo, peca.tipo): peca
+            for peca in pecas
+        }
+        feitas = 0
+        cancelado = False
+        for futuro in as_completed(futuros):
+            peca = futuros[futuro]
+            try:
+                resultado = futuro.result()
+                if not peca.autor and resultado.peticionante:
+                    peca.autor = resultado.peticionante[:255]
+                if resultado.id_proprio:
+                    peca.id_processual = resultado.id_proprio[:100]
+                if peca.peca_pai_id is None:
+                    peca.tipo = resultado.tipo
+                peca.custo_usd = (peca.custo_usd or 0) + resultado.custo_usd
+                db.commit()
+                if on_custo:
+                    on_custo(resultado.custo_usd)
+            except Exception as exc:
+                logger.error("Falha ao reclassificar peça %s: %s", peca.id, exc)
+            feitas += 1
+            if on_progresso:
+                on_progresso(feitas)
+            if not cancelado and deve_cancelar and deve_cancelar():
+                cancelado = True
+                executor.shutdown(wait=False, cancel_futures=True)
+
+
+def reclassificar_caso(db: Session, caso: AutosIACaso) -> int:
+    """Reclassifica as peças-mãe (não-anexo) já resumidas de um caso — tipo,
+    peticionante e ID próprio, pelo conteúdo real, sem regenerar resumo/
+    keywords. Retorna quantas peças foram reclassificadas."""
+    from datetime import datetime, timezone
+
+    pecas = (
+        db.query(AutosIAPeca)
+        .filter(
+            AutosIAPeca.caso_id == caso.id,
+            AutosIAPeca.peca_pai_id.is_(None),
+            AutosIAPeca.status == "resumida",
+        )
+        .all()
+    )
+    if not pecas:
+        caso.ultimo_sync_status = "ok"
+        caso.ultimo_sync_mensagem = "Nenhuma peça elegível para reclassificar."
+        caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
+        db.commit()
+        return 0
+
+    caso.sync_cancelar = False
+    caso.ultimo_sync_status = "processando"
+    caso.sync_etapa = "reclassificando"
+    caso.sync_total_itens = len(pecas)
+    caso.sync_itens_processados = 0
+    caso.sync_iniciado_em = datetime.now(timezone.utc)
+    db.commit()
+
+    def _progresso(feitas: int) -> None:
+        caso.sync_itens_processados = feitas
+        db.commit()
+
+    def _custo(valor: float) -> None:
+        caso.custo_usd_total = (caso.custo_usd_total or 0) + valor
+        db.commit()
+
+    def _cancelar() -> bool:
+        db.refresh(caso)
+        return caso.sync_cancelar
+
+    reclassificar_pecas_em_paralelo(db, pecas, on_progresso=_progresso, on_custo=_custo, deve_cancelar=_cancelar)
+
+    db.refresh(caso)
+    cancelado = caso.sync_cancelar
+    caso.ultimo_sync_status = "cancelado" if cancelado else "ok"
+    caso.ultimo_sync_mensagem = (
+        f"Cancelado: {caso.sync_itens_processados or 0}/{len(pecas)} peça(s) reclassificada(s)."
+        if cancelado else f"{len(pecas)} peça(s) reclassificada(s)."
+    )
+    caso.sync_etapa = None
+    caso.sync_total_itens = None
+    caso.sync_itens_processados = None
+    caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
+    db.commit()
+    return len(pecas)
 
 
 def processar_documento(db: Session, documento_id: uuid.UUID) -> None:
