@@ -8,6 +8,7 @@ juntados como imagem).
 """
 import io
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -77,8 +78,15 @@ def _ocr_claude_pagina(content: bytes, indice: int) -> str:
     return (resp.content[0].text if resp.content else "").strip()
 
 
-def extrair_paginas(content: bytes, pagina_inicio_global: int) -> list[PaginaExtraida]:
-    """Extrai o texto de cada página de `content`, numerando a partir de `pagina_inicio_global`."""
+def extrair_paginas(
+    content: bytes,
+    pagina_inicio_global: int,
+    on_progresso: Callable[[int, int], None] | None = None,
+) -> list[PaginaExtraida]:
+    """Extrai o texto de cada página de `content`, numerando a partir de `pagina_inicio_global`.
+
+    `on_progresso(paginas_feitas, total_paginas)`, quando informado, é chamado após cada página —
+    usado para atualizar o progresso exibido na tela durante blocos grandes."""
     try:
         textos_pypdf = _texto_pypdf_por_pagina(content)
     except Exception as exc:
@@ -116,6 +124,8 @@ def extrair_paginas(content: bytes, pagina_inicio_global: int) -> list[PaginaExt
                 logger.warning("OCR Claude falhou na página %d: %s", numero_global, exc)
 
         paginas.append(PaginaExtraida(numero_global=numero_global, texto=texto, ocr_usado=ocr_usado))
+        if on_progresso:
+            on_progresso(indice + 1, total_paginas)
 
     return paginas
 

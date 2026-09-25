@@ -5,6 +5,8 @@ import logging
 import re
 import unicodedata
 import uuid
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from pathlib import Path
 
@@ -16,6 +18,11 @@ from app.services.autos_ia.resumo import resumir_peca
 from app.services.autos_ia.segmentacao import segmentar_paginas
 
 logger = logging.getLogger(__name__)
+
+# Chamadas de resumo por peça são independentes entre si (só leem, não escrevem
+# no banco) — paralelizamos com um pool pequeno pra não estourar rate limit da
+# API, mas ainda cortar bastante o tempo total em blocos com muitas peças.
+RESUMO_MAX_WORKERS = 5
 
 
 def _normalizar_id(valor: str) -> str:
@@ -80,6 +87,42 @@ def _resolver_referencias_pendentes(db: Session, caso_id: uuid.UUID) -> None:
     db.commit()
 
 
+def resumir_pecas_em_paralelo(
+    db: Session,
+    pecas: list[AutosIAPeca],
+    on_progresso: Callable[[int], None] | None = None,
+) -> None:
+    """Resume várias peças concorrentemente (só a chamada à IA é paralela; toda
+    escrita no banco acontece de volta na thread principal, sem sessão concorrente)."""
+    if not pecas:
+        return
+
+    with ThreadPoolExecutor(max_workers=min(RESUMO_MAX_WORKERS, len(pecas))) as executor:
+        futuros = {
+            executor.submit(resumir_peca, peca.texto_md, peca.titulo, peca.tipo): peca
+            for peca in pecas
+        }
+        feitas = 0
+        for futuro in as_completed(futuros):
+            peca = futuros[futuro]
+            try:
+                resultado = futuro.result()
+                peca.resumo = resultado.resumo
+                peca.keywords = resultado.keywords
+                peca.ids_mencionados = resultado.ids_mencionados
+                peca.status = "resumida"
+                db.commit()
+                _persistir_referencias(db, peca, resultado.ids_mencionados)
+            except Exception as exc:
+                logger.error("Falha ao resumir peça %s: %s", peca.id, exc)
+                peca.status = "erro"
+                peca.erro_mensagem = str(exc)
+                db.commit()
+            feitas += 1
+            if on_progresso:
+                on_progresso(feitas)
+
+
 def processar_documento(db: Session, documento_id: uuid.UUID) -> None:
     doc = db.query(AutosIADocumento).filter(AutosIADocumento.id == documento_id).first()
     if not doc:
@@ -87,15 +130,29 @@ def processar_documento(db: Session, documento_id: uuid.UUID) -> None:
     caso = db.query(AutosIACaso).filter(AutosIACaso.id == doc.caso_id).first()
 
     doc.status = "processando"
+    doc.etapa = "extraindo"
     db.commit()
+
+    def _progresso_extracao(feitas: int, total: int) -> None:
+        if feitas % 10 == 0 or feitas == total:
+            doc.paginas_processadas = feitas
+            db.commit()
+
+    def _progresso_segmentacao(feitas: int, total: int) -> None:
+        doc.paginas_processadas = feitas
+        db.commit()
 
     try:
         content = Path(doc.caminho_arquivo).read_bytes()
-        paginas = extrair_paginas(content, doc.pagina_inicio)
+        paginas = extrair_paginas(content, doc.pagina_inicio, on_progresso=_progresso_extracao)
         doc.paginas_ocr = sum(1 for p in paginas if p.ocr_usado)
 
+        doc.etapa = "segmentando"
+        doc.paginas_processadas = 0
+        db.commit()
+
         segmentos, novo_buffer, novo_buffer_inicio = segmentar_paginas(
-            paginas, caso.buffer_incompleto, caso.buffer_pagina_inicio
+            paginas, caso.buffer_incompleto, caso.buffer_pagina_inicio, on_progresso=_progresso_segmentacao
         )
 
         pecas_criadas: list[AutosIAPeca] = []
@@ -115,22 +172,16 @@ def processar_documento(db: Session, documento_id: uuid.UUID) -> None:
             )
             db.add(peca)
             pecas_criadas.append(peca)
+        doc.etapa = "resumindo"
+        doc.pecas_geradas = len(pecas_criadas)
+        doc.pecas_resumidas = 0
         db.commit()
 
-        for peca in pecas_criadas:
-            try:
-                resultado = resumir_peca(peca.texto_md, peca.titulo, peca.tipo)
-                peca.resumo = resultado.resumo
-                peca.keywords = resultado.keywords
-                peca.ids_mencionados = resultado.ids_mencionados
-                peca.status = "resumida"
-                db.commit()
-                _persistir_referencias(db, peca, resultado.ids_mencionados)
-            except Exception as exc:
-                logger.error("Falha ao resumir peça %s: %s", peca.id, exc)
-                peca.status = "erro"
-                peca.erro_mensagem = str(exc)
-                db.commit()
+        def _progresso_resumo(feitas: int) -> None:
+            doc.pecas_resumidas = feitas
+            db.commit()
+
+        resumir_pecas_em_paralelo(db, pecas_criadas, on_progresso=_progresso_resumo)
 
         _resolver_referencias_pendentes(db, caso.id)
 
@@ -140,7 +191,7 @@ def processar_documento(db: Session, documento_id: uuid.UUID) -> None:
         db.commit()
 
         doc.status = "concluido"
-        doc.pecas_geradas = len(pecas_criadas)
+        doc.etapa = "concluido"
         db.commit()
     except Exception as exc:
         logger.error("Falha ao processar documento %s: %s", documento_id, exc)

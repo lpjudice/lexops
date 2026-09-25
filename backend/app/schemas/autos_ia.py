@@ -61,9 +61,23 @@ class DocumentoOut(BaseModel):
     erro_mensagem: str | None
     pecas_geradas: int
     paginas_ocr: int
+    etapa: str | None
+    paginas_processadas: int
+    pecas_resumidas: int
     criado_em: datetime
 
     model_config = {"from_attributes": True}
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def total_paginas(self) -> int:
+        return self.pagina_fim - self.pagina_inicio + 1
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def estimativa(self) -> dict:
+        from app.services.autos_ia.estimativa import estimar_processamento
+        return estimar_processamento(self.total_paginas)
 
 
 OrigemPeca = Literal["upload", "jusbr"]

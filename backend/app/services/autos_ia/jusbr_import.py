@@ -16,8 +16,11 @@ from sqlalchemy.orm import Session
 
 from app.models.andamento import AndamentoProcesso
 from app.models.autos_ia import AutosIACaso, AutosIAPeca
-from app.services.autos_ia.ingestao import _persistir_referencias, _resolver_referencias_pendentes
-from app.services.autos_ia.resumo import resumir_peca
+from app.services.autos_ia.ingestao import (
+    _persistir_referencias,
+    _resolver_referencias_pendentes,
+    resumir_pecas_em_paralelo,
+)
 from app.services.autos_ia.segmentacao import TIPOS_VALIDOS
 
 logger = logging.getLogger(__name__)
@@ -142,6 +145,27 @@ def sincronizar_caso_jusbr(db: Session, caso: AutosIACaso, session_data: dict | 
         db.commit()
 
 
+def importar_apenas_existentes(db: Session, caso: AutosIACaso) -> None:
+    """Só importa os andamentos/documentos que o jus.br JÁ baixou pro processo
+    vinculado — sem chamar DataJud/jus.br ao vivo. Usado no backfill inicial
+    (ex.: caso com centenas de documentos já baixados por outra rotina) e no
+    botão "Importar documentos existentes", quando não faz sentido esperar uma
+    sincronização de rede só pra reler o que já está salvo."""
+    from datetime import datetime, timezone
+
+    try:
+        novas = importar_andamentos_pendentes(db, caso)
+        caso.ultimo_sync_status = "ok"
+        caso.ultimo_sync_mensagem = f"{novas} peça(s) importada(s) a partir dos documentos já baixados."
+    except Exception as exc:
+        logger.warning("Autos IA: erro ao importar existentes do caso %s: %s", caso.id, exc)
+        caso.ultimo_sync_status = "erro"
+        caso.ultimo_sync_mensagem = str(exc)
+    finally:
+        caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
+        db.commit()
+
+
 def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
     """Importa como peças os andamentos do processo vinculado ainda não trazidos
     para este caso. Retorna quantas peças novas foram criadas."""
@@ -164,9 +188,13 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
     if not pendentes:
         return 0
 
+    caso.ultimo_sync_status = "processando"
+    caso.ultimo_sync_mensagem = f"Lendo documentos: 0/{len(pendentes)}"
+    db.commit()
+
     # ── Monta os dados de cada andamento (texto, tipo, página) antes de gravar ──
     itens = []
-    for andamento in pendentes:
+    for indice, andamento in enumerate(pendentes, start=1):
         conteudo = None
         texto = andamento.texto_extraido
         if not texto:
@@ -178,6 +206,10 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
                     db.commit()
         if not texto:
             texto = andamento.descricao or ""
+
+        if indice % 5 == 0 or indice == len(pendentes):
+            caso.ultimo_sync_mensagem = f"Lendo documentos: {indice}/{len(pendentes)}"
+            db.commit()
 
         paginas = _contar_paginas(conteudo, andamento.arquivo_nome)
         pagina_inicio = caso.total_paginas + 1
@@ -210,29 +242,25 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
             criadas.append(_criar_peca(db, caso, membro, peca_pai_id=peca_principal.id))
     db.commit()
 
-    for peca in criadas:
-        try:
-            if len(peca.texto_md) < LIMIAR_CHARS_PARA_RESUMO_IA:
-                peca.resumo = peca.texto_md
-                peca.keywords = []
-                peca.ids_mencionados = []
-                peca.status = "resumida"
-                db.commit()
-                continue
-            resultado = resumir_peca(peca.texto_md, peca.titulo, peca.tipo)
-            peca.resumo = resultado.resumo
-            peca.keywords = resultado.keywords
-            peca.ids_mencionados = resultado.ids_mencionados
-            peca.status = "resumida"
-            db.commit()
-            _persistir_referencias(db, peca, resultado.ids_mencionados)
-        except Exception as exc:
-            logger.error("Falha ao resumir peça %s (andamento %s): %s", peca.id, peca.andamento_id, exc)
-            peca.status = "erro"
-            peca.erro_mensagem = str(exc)
-            db.commit()
+    pecas_curtas = [p for p in criadas if len(p.texto_md) < LIMIAR_CHARS_PARA_RESUMO_IA]
+    pecas_para_ia = [p for p in criadas if p not in pecas_curtas]
+
+    for peca in pecas_curtas:
+        peca.resumo = peca.texto_md
+        peca.keywords = []
+        peca.ids_mencionados = []
+        peca.status = "resumida"
+    caso.ultimo_sync_mensagem = f"Resumindo peças: 0/{len(pecas_para_ia)}"
+    db.commit()
+
+    def _progresso_resumo(feitas: int) -> None:
+        caso.ultimo_sync_mensagem = f"Resumindo peças: {feitas}/{len(pecas_para_ia)}"
+        db.commit()
+
+    resumir_pecas_em_paralelo(db, pecas_para_ia, on_progresso=_progresso_resumo)
 
     _resolver_referencias_pendentes(db, caso.id)
+    caso.ultimo_sync_mensagem = f"{len(criadas)} peça(s) nova(s) importada(s)."
     db.commit()
     return len(criadas)
 

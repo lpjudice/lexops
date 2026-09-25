@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { autosIa } from '../api/autosIa'
-import { processosApi } from '../api/processos'
+import ProcessoCombobox from '../components/autosIa/ProcessoCombobox'
 import styles from './Page.module.css'
 
 export default function AutosIAPage() {
@@ -14,16 +14,11 @@ export default function AutosIAPage() {
   const [descricao, setDescricao] = useState('')
   const [processoId, setProcessoId] = useState('')
   const [syncAtivo, setSyncAtivo] = useState(false)
+  const [importarExistentes, setImportarExistentes] = useState(true)
 
   const { data: casos = [], isLoading } = useQuery({
     queryKey: ['autos-ia', 'casos'],
     queryFn: () => autosIa.listarCasos(),
-  })
-
-  const { data: processos = [] } = useQuery({
-    queryKey: ['processos'],
-    queryFn: () => processosApi.listar(),
-    enabled: showForm,
   })
 
   const criar = useMutation({
@@ -34,14 +29,18 @@ export default function AutosIAPage() {
       processo_id: processoId || undefined,
       sync_jusbr_ativo: !!processoId && syncAtivo,
     }),
-    onSuccess: (caso) => {
+    onSuccess: async (caso) => {
       qc.invalidateQueries({ queryKey: ['autos-ia', 'casos'] })
+      if (processoId && importarExistentes) {
+        try { await autosIa.importarExistentes(caso.id) } catch { /* segue pro caso mesmo assim */ }
+      }
       setShowForm(false)
       setNome('')
       setNumeroProcesso('')
       setDescricao('')
       setProcessoId('')
       setSyncAtivo(false)
+      setImportarExistentes(true)
       navigate(`/autos-ia/${caso.id}`)
     },
   })
@@ -96,25 +95,32 @@ export default function AutosIAPage() {
           </div>
           <div className={styles.formRow}>
             <label className={styles.formLabel}>Vincular a um processo do gestor (opcional)</label>
-            <select
-              className={styles.input}
+            <ProcessoCombobox
               value={processoId}
-              onChange={(e) => { setProcessoId(e.target.value); if (!e.target.value) setSyncAtivo(false) }}
-            >
-              <option value="">Nenhum — vou subir os PDFs manualmente</option>
-              {processos.map((p) => (
-                <option key={p.id} value={p.id}>{p.numero_cnj}{p.materia ? ` — ${p.materia}` : ''}</option>
-              ))}
-            </select>
+              onChange={(id) => { setProcessoId(id); if (!id) setSyncAtivo(false) }}
+            />
           </div>
           {processoId && (
-            <div className={styles.formRow}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
-                <input type="checkbox" checked={syncAtivo} onChange={(e) => setSyncAtivo(e.target.checked)} />
-                Sincronizar automaticamente com o jus.br (3x/dia) — importa os andamentos e
-                documentos já baixados, sem precisar subir PDF manualmente.
-              </label>
-            </div>
+            <>
+              <div className={styles.formRow}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={importarExistentes}
+                    onChange={(e) => setImportarExistentes(e.target.checked)}
+                  />
+                  Importar agora os documentos que o jus.br já baixou para esse processo
+                  (indexa tudo que já existe, sem precisar subir PDF manualmente).
+                </label>
+              </div>
+              <div className={styles.formRow}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={syncAtivo} onChange={(e) => setSyncAtivo(e.target.checked)} />
+                  Sincronizar automaticamente com o jus.br (3x/dia) — importa os andamentos e
+                  documentos novos, à medida que forem sendo baixados.
+                </label>
+              </div>
+            </>
           )}
           <button type="submit" className={styles.btnPrimary} disabled={criar.isPending || !nome.trim()}>
             {criar.isPending ? 'Criando...' : 'Criar caso'}

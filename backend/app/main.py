@@ -1388,6 +1388,15 @@ def _run_migrations() -> None:
             "USING gin (to_tsvector('portuguese', "
             "coalesce(titulo, '') || ' ' || coalesce(resumo, '') || ' ' || coalesce(texto_md, '')))"
         ))
+        # Autos IA — colunas de progresso adicionadas depois que a tabela já existia
+        # (create_all() não altera tabela existente; em produção o Alembic cuida disso).
+        conn.execute(text("ALTER TABLE autos_ia_documentos ADD COLUMN IF NOT EXISTS etapa VARCHAR(30)"))
+        conn.execute(text(
+            "ALTER TABLE autos_ia_documentos ADD COLUMN IF NOT EXISTS paginas_processadas INTEGER NOT NULL DEFAULT 0"
+        ))
+        conn.execute(text(
+            "ALTER TABLE autos_ia_documentos ADD COLUMN IF NOT EXISTS pecas_resumidas INTEGER NOT NULL DEFAULT 0"
+        ))
 
         conn.commit()
 

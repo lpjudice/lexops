@@ -43,16 +43,27 @@ export interface CasoResumo extends Caso {
   total_perguntas_faq: number
 }
 
+export interface EstimativaProcessamento {
+  pecas_estimadas: number
+  custo_estimado_usd: number
+  tempo_estimado_minutos: number
+}
+
 export interface Documento {
   id: string
   caso_id: string
   nome_arquivo: string
   pagina_inicio: number
   pagina_fim: number
+  total_paginas: number
   status: StatusDocumento
   erro_mensagem?: string | null
   pecas_geradas: number
   paginas_ocr: number
+  etapa?: string | null
+  paginas_processadas: number
+  pecas_resumidas: number
+  estimativa: EstimativaProcessamento
   criado_em: string
 }
 
@@ -143,6 +154,9 @@ export const autosIa = {
 
   sincronizarAgora: (casoId: string) =>
     api.post<Caso>(`/autos-ia/casos/${casoId}/sincronizar`).then((r) => r.data),
+
+  importarExistentes: (casoId: string) =>
+    api.post<Caso>(`/autos-ia/casos/${casoId}/importar-existentes`).then((r) => r.data),
 
   enviarBloco: (casoId: string, arquivo: File, paginaInicio: number | null, onProgress?: (pct: number) => void) => {
     const fd = new FormData()

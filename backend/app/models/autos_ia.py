@@ -96,6 +96,14 @@ class AutosIADocumento(Base):
     pecas_geradas: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     paginas_ocr: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
+    # Progresso incremental, atualizado durante o processamento em background —
+    # permite à tela mostrar "X/Y páginas" e estimar tempo restante em vez de
+    # só "processando" sem indicação nenhuma.
+    etapa: Mapped[str | None] = mapped_column(String(30))
+    # extraindo | segmentando | resumindo | concluido
+    paginas_processadas: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    pecas_resumidas: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     caso: Mapped["AutosIACaso"] = relationship(back_populates="documentos")
