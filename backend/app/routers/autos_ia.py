@@ -5,6 +5,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, get_db
@@ -17,6 +18,8 @@ from app.schemas.autos_ia import (
 from app.services.autos_ia import faq as faq_service
 from app.services.autos_ia.busca import buscar_pecas
 from app.services.autos_ia.ingestao import processar_documento
+from app.services.autos_ia.jusbr_import import sincronizar_caso_jusbr
+from app.services.autos_ia.pdf_merge import montar_pdf_pecas
 
 UPLOADS_DIR = Path("/app/uploads/autos_ia")
 
@@ -28,6 +31,14 @@ def _get_caso(db: Session, caso_id: uuid.UUID) -> AutosIACaso:
     if not caso:
         raise HTTPException(status_code=404, detail="Caso não encontrado")
     return caso
+
+
+def _validar_sync(processo_id, sync_jusbr_ativo: bool | None) -> None:
+    if sync_jusbr_ativo and not processo_id:
+        raise HTTPException(
+            status_code=422,
+            detail="Só é possível ativar a sincronização automática com um processo vinculado.",
+        )
 
 
 # ── Casos ────────────────────────────────────────────────────────────────────
@@ -47,6 +58,7 @@ def listar_casos(db: Session = Depends(get_db)):
 
 @router.post("/casos", response_model=CasoOut, status_code=status.HTTP_201_CREATED)
 def criar_caso(data: CasoCreate, db: Session = Depends(get_db), usuario=Depends(get_current_user)):
+    _validar_sync(data.processo_id, data.sync_jusbr_ativo)
     caso = AutosIACaso(**data.model_dump(), criado_por_id=usuario.id)
     db.add(caso)
     db.commit()
@@ -62,7 +74,11 @@ def obter_caso(caso_id: uuid.UUID, db: Session = Depends(get_db)):
 @router.patch("/casos/{caso_id}", response_model=CasoOut)
 def atualizar_caso(caso_id: uuid.UUID, data: CasoUpdate, db: Session = Depends(get_db)):
     caso = _get_caso(db, caso_id)
-    for campo, valor in data.model_dump(exclude_unset=True).items():
+    campos = data.model_dump(exclude_unset=True)
+    processo_id = campos.get("processo_id", caso.processo_id)
+    sync_jusbr_ativo = campos.get("sync_jusbr_ativo", caso.sync_jusbr_ativo)
+    _validar_sync(processo_id, sync_jusbr_ativo)
+    for campo, valor in campos.items():
         setattr(caso, campo, valor)
     db.commit()
     db.refresh(caso)
@@ -143,7 +159,49 @@ def listar_documentos(caso_id: uuid.UUID, db: Session = Depends(get_db)):
     )
 
 
+# ── Sincronização com o processo vinculado (jus.br) ─────────────────────────
+
+def _executar_sync_em_background(caso_id: uuid.UUID) -> None:
+    db = SessionLocal()
+    try:
+        from app.services.consulta_processual.jusbr_session import load_session
+        caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
+        if caso:
+            sincronizar_caso_jusbr(db, caso, load_session())
+    finally:
+        db.close()
+
+
+@router.post("/casos/{caso_id}/sincronizar", response_model=CasoOut, status_code=status.HTTP_202_ACCEPTED)
+def sincronizar_agora(caso_id: uuid.UUID, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    caso = _get_caso(db, caso_id)
+    if not caso.processo_id:
+        raise HTTPException(status_code=422, detail="Este caso não está vinculado a um processo.")
+    caso.ultimo_sync_status = "processando"
+    caso.ultimo_sync_mensagem = None
+    db.commit()
+    db.refresh(caso)
+    background_tasks.add_task(_executar_sync_em_background, caso.id)
+    return caso
+
+
 # ── Peças (busca por tema/data/tipo) ────────────────────────────────────────
+
+def _com_total_anexos(db: Session, caso_id: uuid.UUID, pecas: list[AutosIAPeca]) -> list[PecaOut]:
+    from sqlalchemy import func as sa_func
+    contagens = dict(
+        db.query(AutosIAPeca.peca_pai_id, sa_func.count(AutosIAPeca.id))
+        .filter(AutosIAPeca.caso_id == caso_id, AutosIAPeca.peca_pai_id.isnot(None))
+        .group_by(AutosIAPeca.peca_pai_id)
+        .all()
+    )
+    saida = []
+    for p in pecas:
+        item = PecaOut.model_validate(p)
+        item.total_anexos = contagens.get(p.id, 0)
+        saida.append(item)
+    return saida
+
 
 @router.get("/casos/{caso_id}/pecas", response_model=list[PecaOut])
 def listar_pecas(
@@ -152,13 +210,15 @@ def listar_pecas(
     tipo: str | None = None,
     data_inicio: str | None = None,
     data_fim: str | None = None,
+    incluir_anexos: bool = False,
     db: Session = Depends(get_db),
 ):
     from datetime import date as date_cls
     _get_caso(db, caso_id)
     di = date_cls.fromisoformat(data_inicio) if data_inicio else None
     df = date_cls.fromisoformat(data_fim) if data_fim else None
-    return buscar_pecas(db, caso_id, query=q, data_inicio=di, data_fim=df, tipo=tipo)
+    pecas = buscar_pecas(db, caso_id, query=q, data_inicio=di, data_fim=df, tipo=tipo, incluir_anexos=incluir_anexos)
+    return _com_total_anexos(db, caso_id, pecas)
 
 
 @router.get("/pecas/{peca_id}", response_model=PecaDetalheOut)
@@ -167,6 +227,39 @@ def obter_peca(peca_id: uuid.UUID, db: Session = Depends(get_db)):
     if not peca:
         raise HTTPException(status_code=404, detail="Peça não encontrada")
     return peca
+
+
+@router.get("/pecas/{peca_id}/anexos", response_model=list[PecaOut])
+def listar_anexos(peca_id: uuid.UUID, db: Session = Depends(get_db)):
+    peca = db.query(AutosIAPeca).filter(AutosIAPeca.id == peca_id).first()
+    if not peca:
+        raise HTTPException(status_code=404, detail="Peça não encontrada")
+    anexos = (
+        db.query(AutosIAPeca)
+        .filter(AutosIAPeca.peca_pai_id == peca_id)
+        .order_by(AutosIAPeca.pagina_inicio.asc())
+        .all()
+    )
+    return _com_total_anexos(db, peca.caso_id, anexos)
+
+
+@router.get("/casos/{caso_id}/pecas/download")
+def baixar_pecas_pdf(
+    caso_id: uuid.UUID,
+    apenas_principais: bool = True,
+    tipo: str | None = None,
+    ids: str | None = None,
+    db: Session = Depends(get_db),
+):
+    caso = _get_caso(db, caso_id)
+    peca_ids = [uuid.UUID(i) for i in ids.split(",") if i.strip()] if ids else None
+    conteudo = montar_pdf_pecas(db, caso_id, apenas_principais=apenas_principais, tipo=tipo, peca_ids=peca_ids)
+    nome_arquivo = f"{caso.nome.strip().replace(' ', '_')}_pecas.pdf"
+    return StreamingResponse(
+        iter([conteudo]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{nome_arquivo}"'},
+    )
 
 
 # ── Grafo de referências ─────────────────────────────────────────────────────

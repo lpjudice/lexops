@@ -29,14 +29,28 @@ function formatarData(d?: string | null) {
   return new Date(d).toLocaleDateString('pt-BR')
 }
 
+const STATUS_SYNC_LABEL: Record<string, string> = {
+  ok: 'sincronizado',
+  erro: 'falhou',
+  nenhum: 'sem novidades',
+  processando: 'sincronizando...',
+}
+
 export default function AutosIACasoPage() {
   const { casoId } = useParams<{ casoId: string }>()
+  const qc = useQueryClient()
   const [aba, setAba] = useState<Aba>('upload')
 
   const { data: caso } = useQuery({
     queryKey: ['autos-ia', 'caso', casoId],
     queryFn: () => autosIa.obterCaso(casoId!),
     enabled: !!casoId,
+    refetchInterval: (query) => (query.state.data?.ultimo_sync_status === 'processando' ? 3000 : false),
+  })
+
+  const sincronizar = useMutation({
+    mutationFn: () => autosIa.sincronizarAgora(casoId!),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] }),
   })
 
   const { data: grafo } = useQuery({
@@ -79,7 +93,28 @@ export default function AutosIACasoPage() {
                   peça em aberto — continue enviando os próximos blocos
                 </span>
               )}
+              {caso.processo_id && (
+                <>
+                  <span>
+                    {caso.sync_jusbr_ativo ? 'sync automático 3x/dia' : 'vinculado a um processo'}
+                    {caso.ultimo_sync_status && ` · última sync: ${STATUS_SYNC_LABEL[caso.ultimo_sync_status] ?? caso.ultimo_sync_status}`}
+                    {caso.ultima_sincronizacao_em && ` (${new Date(caso.ultima_sincronizacao_em).toLocaleString('pt-BR')})`}
+                  </span>
+                  <button
+                    className={pageStyles.btnSmall}
+                    disabled={sincronizar.isPending || caso.ultimo_sync_status === 'processando'}
+                    onClick={() => sincronizar.mutate()}
+                  >
+                    {caso.ultimo_sync_status === 'processando' ? 'Sincronizando...' : 'Sincronizar agora'}
+                  </button>
+                </>
+              )}
             </div>
+          )}
+          {caso?.ultimo_sync_status === 'erro' && caso.ultimo_sync_mensagem && (
+            <p style={{ fontSize: 12, color: '#b91c1c', marginTop: 6 }}>
+              Falha na última sincronização: {caso.ultimo_sync_mensagem}
+            </p>
           )}
         </div>
       </div>
@@ -96,7 +131,9 @@ export default function AutosIACasoPage() {
         ))}
       </div>
 
-      {aba === 'upload' && <AbaUpload casoId={casoId} totalPaginas={caso?.total_paginas ?? 0} />}
+      {aba === 'upload' && (
+        <AbaUpload casoId={casoId} totalPaginas={caso?.total_paginas ?? 0} vinculadoAProcesso={!!caso?.processo_id} />
+      )}
       {aba === 'pecas' && (
         <AbaPecas casoId={casoId} arestasPorOrigem={arestasPorOrigem} nosPorId={nosPorId} />
       )}
@@ -111,7 +148,7 @@ export default function AutosIACasoPage() {
 
 // ── Upload ───────────────────────────────────────────────────────────────
 
-function AbaUpload({ casoId, totalPaginas }: { casoId: string; totalPaginas: number }) {
+function AbaUpload({ casoId, totalPaginas, vinculadoAProcesso }: { casoId: string; totalPaginas: number; vinculadoAProcesso: boolean }) {
   const qc = useQueryClient()
   const inputRef = useRef<HTMLInputElement>(null)
   const [paginaInicio, setPaginaInicio] = useState('')
@@ -141,6 +178,13 @@ function AbaUpload({ casoId, totalPaginas }: { casoId: string; totalPaginas: num
 
   return (
     <div>
+      {vinculadoAProcesso && (
+        <p style={{ fontSize: 12.5, color: 'var(--gray-mid)', marginBottom: 14 }}>
+          Este caso está vinculado a um processo e sincroniza automaticamente com o jus.br —
+          normalmente você não precisa subir blocos manualmente. Use o upload abaixo só para
+          complementar com documentos que não estejam nos autos eletrônicos.
+        </p>
+      )}
       <form
         className={pageStyles.form}
         style={{ maxWidth: 640 }}
@@ -231,10 +275,16 @@ type NosMap = Map<string, GrafoNo>
 
 function PecaCard({ peca, arestasPorOrigem, nosPorId }: { peca: Peca; arestasPorOrigem: ArestasMap; nosPorId: NosMap }) {
   const [aberta, setAberta] = useState(false)
+  const [anexosAbertos, setAnexosAbertos] = useState(false)
   const { data: detalhe } = useQuery<PecaDetalhe>({
     queryKey: ['autos-ia', 'peca', peca.id],
     queryFn: () => autosIa.obterPeca(peca.id),
     enabled: aberta,
+  })
+  const { data: anexos = [] } = useQuery({
+    queryKey: ['autos-ia', 'anexos', peca.id],
+    queryFn: () => autosIa.listarAnexos(peca.id),
+    enabled: anexosAbertos,
   })
   const arestas = arestasPorOrigem.get(peca.id) ?? []
 
@@ -249,6 +299,7 @@ function PecaCard({ peca, arestasPorOrigem, nosPorId }: { peca: Peca; arestasPor
             {peca.autor && <span>{peca.autor}</span>}
             {peca.data_peca && <span>{formatarData(peca.data_peca)}</span>}
             {peca.id_processual && <span>ID {peca.id_processual}</span>}
+            {peca.origem === 'jusbr' && <span>jus.br</span>}
             {peca.status !== 'resumida' && (
               <span style={{ color: peca.status === 'erro' ? '#b91c1c' : '#a16207' }}>
                 {peca.status === 'erro' ? `erro ao resumir: ${peca.erro_mensagem}` : 'resumo pendente...'}
@@ -273,11 +324,27 @@ function PecaCard({ peca, arestasPorOrigem, nosPorId }: { peca: Peca; arestasPor
         </div>
       )}
 
-      <button className={styles.verTextoBtn} onClick={() => setAberta(!aberta)}>
-        {aberta ? 'Ocultar texto completo' : 'Ver texto completo'}
-      </button>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button className={styles.verTextoBtn} onClick={() => setAberta(!aberta)}>
+          {aberta ? 'Ocultar texto completo' : 'Ver texto completo'}
+        </button>
+        {peca.total_anexos > 0 && (
+          <button className={styles.verTextoBtn} onClick={() => setAnexosAbertos(!anexosAbertos)}>
+            {anexosAbertos ? '▲' : '▼'} {peca.total_anexos} documento{peca.total_anexos > 1 ? 's' : ''} anexo{peca.total_anexos > 1 ? 's' : ''}
+          </button>
+        )}
+      </div>
       {aberta && (
         <div className={styles.textoCompleto}>{detalhe?.texto_md ?? 'Carregando...'}</div>
+      )}
+      {anexosAbertos && (
+        <div className={styles.anexosLista}>
+          {anexos.length === 0 ? (
+            <p style={{ fontSize: 12, color: 'var(--gray-mid)' }}>Carregando...</p>
+          ) : (
+            anexos.map((a) => <PecaCard key={a.id} peca={a} arestasPorOrigem={arestasPorOrigem} nosPorId={nosPorId} />)
+          )}
+        </div>
       )}
     </div>
   )
@@ -322,6 +389,15 @@ function AbaPecas({ casoId, arestasPorOrigem, nosPorId }: { casoId: string; ares
         <div style={{ width: 150 }}>
           <input className={pageStyles.input} type="date" value={dataFim} onChange={(e) => setDataFim(e.target.value)} />
         </div>
+        <a
+          className={pageStyles.btnSmall}
+          style={{ whiteSpace: 'nowrap' }}
+          href={autosIa.urlDownloadPecas(casoId, { tipo: tipo || undefined })}
+          target="_blank"
+          rel="noreferrer"
+        >
+          ⬇ Baixar peças em PDF (sem anexos)
+        </a>
       </div>
 
       {isLoading ? (

@@ -177,6 +177,22 @@
   color: var(--teal);
 }
 
+.anexosLista {
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--light);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.anexosLista .pecaCard {
+  box-shadow: none;
+  border: 1px solid var(--gray-border);
+  margin-bottom: 0;
+}
+
 .textoCompleto {
   margin-top: 10px;
   background: var(--light);

@@ -24,9 +24,12 @@ def buscar_pecas(
     data_inicio: date | None = None,
     data_fim: date | None = None,
     tipo: str | None = None,
+    incluir_anexos: bool = False,
     limite: int = 200,
 ) -> list[AutosIAPeca]:
     q = db.query(AutosIAPeca).filter(AutosIAPeca.caso_id == caso_id)
+    if not incluir_anexos:
+        q = q.filter(AutosIAPeca.peca_pai_id.is_(None))
     if tipo:
         q = q.filter(AutosIAPeca.tipo == tipo)
     if data_inicio:

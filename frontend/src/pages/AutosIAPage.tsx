@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { autosIa } from '../api/autosIa'
+import { processosApi } from '../api/processos'
 import styles from './Page.module.css'
 
 export default function AutosIAPage() {
@@ -11,10 +12,18 @@ export default function AutosIAPage() {
   const [nome, setNome] = useState('')
   const [numeroProcesso, setNumeroProcesso] = useState('')
   const [descricao, setDescricao] = useState('')
+  const [processoId, setProcessoId] = useState('')
+  const [syncAtivo, setSyncAtivo] = useState(false)
 
   const { data: casos = [], isLoading } = useQuery({
     queryKey: ['autos-ia', 'casos'],
     queryFn: () => autosIa.listarCasos(),
+  })
+
+  const { data: processos = [] } = useQuery({
+    queryKey: ['processos'],
+    queryFn: () => processosApi.listar(),
+    enabled: showForm,
   })
 
   const criar = useMutation({
@@ -22,6 +31,8 @@ export default function AutosIAPage() {
       nome,
       numero_processo: numeroProcesso || undefined,
       descricao: descricao || undefined,
+      processo_id: processoId || undefined,
+      sync_jusbr_ativo: !!processoId && syncAtivo,
     }),
     onSuccess: (caso) => {
       qc.invalidateQueries({ queryKey: ['autos-ia', 'casos'] })
@@ -29,6 +40,8 @@ export default function AutosIAPage() {
       setNome('')
       setNumeroProcesso('')
       setDescricao('')
+      setProcessoId('')
+      setSyncAtivo(false)
       navigate(`/autos-ia/${caso.id}`)
     },
   })
@@ -81,6 +94,28 @@ export default function AutosIAPage() {
               onChange={(e) => setDescricao(e.target.value)}
             />
           </div>
+          <div className={styles.formRow}>
+            <label className={styles.formLabel}>Vincular a um processo do gestor (opcional)</label>
+            <select
+              className={styles.input}
+              value={processoId}
+              onChange={(e) => { setProcessoId(e.target.value); if (!e.target.value) setSyncAtivo(false) }}
+            >
+              <option value="">Nenhum — vou subir os PDFs manualmente</option>
+              {processos.map((p) => (
+                <option key={p.id} value={p.id}>{p.numero_cnj}{p.materia ? ` — ${p.materia}` : ''}</option>
+              ))}
+            </select>
+          </div>
+          {processoId && (
+            <div className={styles.formRow}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                <input type="checkbox" checked={syncAtivo} onChange={(e) => setSyncAtivo(e.target.checked)} />
+                Sincronizar automaticamente com o jus.br (3x/dia) — importa os andamentos e
+                documentos já baixados, sem precisar subir PDF manualmente.
+              </label>
+            </div>
+          )}
           <button type="submit" className={styles.btnPrimary} disabled={criar.isPending || !nome.trim()}>
             {criar.isPending ? 'Criando...' : 'Criar caso'}
           </button>
@@ -115,7 +150,14 @@ export default function AutosIAPage() {
                       </span>
                     )}
                   </td>
-                  <td>{c.numero_processo || '—'}</td>
+                  <td>
+                    {c.numero_processo || '—'}
+                    {c.processo_id && (
+                      <span className={styles.badge} style={{ marginLeft: 8 }}>
+                        {c.sync_jusbr_ativo ? 'jus.br 3x/dia' : 'vinculado'}
+                      </span>
+                    )}
+                  </td>
                   <td>{c.total_paginas}</td>
                   <td>{c.total_pecas}</td>
                   <td>{c.total_perguntas_faq}</td>

@@ -48,7 +48,10 @@ def _chamar_llm(pergunta: str, contexto: str) -> str:
 
 def responder_pergunta(db: Session, pergunta_obj: AutosIAPerguntaFaq) -> None:
     try:
-        pecas = buscar_pecas(db, pergunta_obj.caso_id, query=pergunta_obj.pergunta, limite=LIMITE_PECAS_CONTEXTO)
+        pecas = buscar_pecas(
+            db, pergunta_obj.caso_id, query=pergunta_obj.pergunta,
+            incluir_anexos=True, limite=LIMITE_PECAS_CONTEXTO,
+        )
         pecas = [p for p in pecas if p.resumo]
         if not pecas:
             pergunta_obj.resposta = (

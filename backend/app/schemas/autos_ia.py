@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 
 TipoPeca = Literal[
     "peticao", "decisao", "despacho", "certidao", "oficio", "recurso", "documento", "outro"
@@ -13,6 +13,8 @@ class CasoCreate(BaseModel):
     nome: str
     numero_processo: str | None = None
     descricao: str | None = None
+    processo_id: uuid.UUID | None = None
+    sync_jusbr_ativo: bool = False
 
 
 class CasoUpdate(BaseModel):
@@ -20,6 +22,8 @@ class CasoUpdate(BaseModel):
     numero_processo: str | None = None
     descricao: str | None = None
     status: Literal["ativo", "arquivado"] | None = None
+    processo_id: uuid.UUID | None = None
+    sync_jusbr_ativo: bool | None = None
 
 
 class CasoOut(BaseModel):
@@ -30,6 +34,11 @@ class CasoOut(BaseModel):
     status: str
     total_paginas: int
     tem_peca_pendente_continuacao: bool
+    processo_id: uuid.UUID | None
+    sync_jusbr_ativo: bool
+    ultima_sincronizacao_em: datetime | None
+    ultimo_sync_status: str | None
+    ultimo_sync_mensagem: str | None
     criado_em: datetime
     atualizado_em: datetime
 
@@ -57,10 +66,15 @@ class DocumentoOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+OrigemPeca = Literal["upload", "jusbr"]
+
+
 class PecaOut(BaseModel):
     id: uuid.UUID
     caso_id: uuid.UUID
     documento_id: uuid.UUID | None
+    andamento_id: uuid.UUID | None
+    peca_pai_id: uuid.UUID | None
     tipo: str
     titulo: str
     autor: str | None
@@ -74,8 +88,14 @@ class PecaOut(BaseModel):
     status: str
     erro_mensagem: str | None
     criado_em: datetime
+    total_anexos: int = 0
 
     model_config = {"from_attributes": True}
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def origem(self) -> OrigemPeca:
+        return "jusbr" if self.andamento_id else "upload"
 
 
 class PecaDetalheOut(PecaOut):
@@ -93,6 +113,7 @@ class GrafoNo(BaseModel):
     keywords: list[str] | None
     pagina_inicio: int
     pagina_fim: int
+    peca_pai_id: uuid.UUID | None = None
 
 
 class GrafoAresta(BaseModel):

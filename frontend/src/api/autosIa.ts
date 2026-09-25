@@ -1,4 +1,4 @@
-import api from './client'
+import api, { getToken } from './client'
 
 export type StatusCaso = 'ativo' | 'arquivado'
 export type StatusDocumento = 'pendente' | 'processando' | 'concluido' | 'erro'
@@ -18,6 +18,8 @@ export const TIPOS_PECA: { value: TipoPeca; label: string }[] = [
   { value: 'outro', label: 'Outro' },
 ]
 
+export type StatusSync = 'ok' | 'erro' | 'nenhum' | 'processando'
+
 export interface Caso {
   id: string
   nome: string
@@ -26,6 +28,11 @@ export interface Caso {
   status: StatusCaso
   total_paginas: number
   tem_peca_pendente_continuacao: boolean
+  processo_id?: string | null
+  sync_jusbr_ativo: boolean
+  ultima_sincronizacao_em?: string | null
+  ultimo_sync_status?: StatusSync | null
+  ultimo_sync_mensagem?: string | null
   criado_em: string
   atualizado_em: string
 }
@@ -49,10 +56,16 @@ export interface Documento {
   criado_em: string
 }
 
+export type OrigemPeca = 'upload' | 'jusbr'
+
 export interface Peca {
   id: string
   caso_id: string
   documento_id?: string | null
+  andamento_id?: string | null
+  peca_pai_id?: string | null
+  origem: OrigemPeca
+  total_anexos: number
   tipo: TipoPeca
   titulo: string
   autor?: string | null
@@ -111,15 +124,25 @@ export interface FaqPergunta {
 export const autosIa = {
   listarCasos: () => api.get<CasoResumo[]>('/autos-ia/casos').then((r) => r.data),
 
-  criarCaso: (data: { nome: string; numero_processo?: string; descricao?: string }) =>
-    api.post<Caso>('/autos-ia/casos', data).then((r) => r.data),
+  criarCaso: (data: {
+    nome: string
+    numero_processo?: string
+    descricao?: string
+    processo_id?: string
+    sync_jusbr_ativo?: boolean
+  }) => api.post<Caso>('/autos-ia/casos', data).then((r) => r.data),
 
   obterCaso: (casoId: string) => api.get<Caso>(`/autos-ia/casos/${casoId}`).then((r) => r.data),
 
-  atualizarCaso: (casoId: string, data: Partial<Pick<Caso, 'nome' | 'numero_processo' | 'descricao' | 'status'>>) =>
-    api.patch<Caso>(`/autos-ia/casos/${casoId}`, data).then((r) => r.data),
+  atualizarCaso: (
+    casoId: string,
+    data: Partial<Pick<Caso, 'nome' | 'numero_processo' | 'descricao' | 'status' | 'processo_id' | 'sync_jusbr_ativo'>>,
+  ) => api.patch<Caso>(`/autos-ia/casos/${casoId}`, data).then((r) => r.data),
 
   deletarCaso: (casoId: string) => api.delete(`/autos-ia/casos/${casoId}`),
+
+  sincronizarAgora: (casoId: string) =>
+    api.post<Caso>(`/autos-ia/casos/${casoId}/sincronizar`).then((r) => r.data),
 
   enviarBloco: (casoId: string, arquivo: File, paginaInicio: number | null, onProgress?: (pct: number) => void) => {
     const fd = new FormData()
@@ -137,10 +160,23 @@ export const autosIa = {
   listarDocumentos: (casoId: string) =>
     api.get<Documento[]>(`/autos-ia/casos/${casoId}/documentos`).then((r) => r.data),
 
-  listarPecas: (casoId: string, params: { q?: string; tipo?: string; data_inicio?: string; data_fim?: string }) =>
-    api.get<Peca[]>(`/autos-ia/casos/${casoId}/pecas`, { params }).then((r) => r.data),
+  listarPecas: (
+    casoId: string,
+    params: { q?: string; tipo?: string; data_inicio?: string; data_fim?: string; incluir_anexos?: boolean },
+  ) => api.get<Peca[]>(`/autos-ia/casos/${casoId}/pecas`, { params }).then((r) => r.data),
 
   obterPeca: (pecaId: string) => api.get<PecaDetalhe>(`/autos-ia/pecas/${pecaId}`).then((r) => r.data),
+
+  listarAnexos: (pecaId: string) => api.get<Peca[]>(`/autos-ia/pecas/${pecaId}/anexos`).then((r) => r.data),
+
+  urlDownloadPecas: (casoId: string, opts: { apenasPrincipais?: boolean; tipo?: string } = {}) => {
+    const params = new URLSearchParams()
+    params.set('apenas_principais', String(opts.apenasPrincipais ?? true))
+    if (opts.tipo) params.set('tipo', opts.tipo)
+    const token = getToken()
+    if (token) params.set('token', token)
+    return `/api/autos-ia/casos/${casoId}/pecas/download?${params.toString()}`
+  },
 
   obterGrafo: (casoId: string) => api.get<Grafo>(`/autos-ia/casos/${casoId}/grafo`).then((r) => r.data),
 

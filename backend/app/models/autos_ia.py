@@ -1,16 +1,25 @@
 """Autos IA — leitura incremental de autos processuais volumosos.
 
 Módulo paralelo ao restante do gestor: cada Caso é um processo judicial
-independente, alimentado por uploads sucessivos de blocos de páginas do PDF
-dos autos. Cada bloco é segmentado em peças (petições, decisões, despachos,
-certidões etc.), e cada peça recebe resumo, palavras-chave e a lista de IDs
-processuais que menciona, permitindo busca por tema/data, timeline e o grafo
-de referências entre peças.
+independente. Duas origens de peças, que podem coexistir no mesmo caso:
+
+- Upload manual: blocos de páginas do PDF dos autos, segmentados em peças
+  por IA (petições, decisões, despachos, certidões etc.).
+- Vínculo com um Processo do gestor (`processo_id`): as peças são
+  importadas diretamente dos andamentos/documentos que o jus.br já baixa
+  (sincronização própria, independente da rotina diária do restante do
+  gestor — ver app.services.autos_ia.jusbr_import).
+
+Cada peça recebe resumo, palavras-chave e a lista de IDs processuais que
+menciona, permitindo busca por tema/data, timeline e o grafo de referências
+entre peças. Documentos anexados a uma peça (procurações, comprovantes,
+documentos pessoais) ficam marcados via `peca_pai_id` e saem do menu
+principal por padrão.
 """
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import ARRAY, Date, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import ARRAY, Boolean, Date, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -35,6 +44,15 @@ class AutosIACaso(Base):
     # na segmentação do próximo bloco, para não duplicar nem perder a peça.
     buffer_incompleto: Mapped[str | None] = mapped_column(Text)
     buffer_pagina_inicio: Mapped[int | None] = mapped_column(Integer)
+
+    # Vínculo opcional com um Processo do gestor: quando definido, as peças passam
+    # a ser importadas a partir dos andamentos/documentos já baixados pelo jus.br
+    # (em vez de upload manual de blocos de PDF).
+    processo_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("processos.id"))
+    sync_jusbr_ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    ultima_sincronizacao_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ultimo_sync_status: Mapped[str | None] = mapped_column(String(20))  # ok | erro | nenhum
+    ultimo_sync_mensagem: Mapped[str | None] = mapped_column(Text)
 
     criado_por_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("usuarios.id"))
 
@@ -93,6 +111,18 @@ class AutosIAPeca(Base):
     documento_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("autos_ia_documentos.id")
     )
+    # Origem alternativa: peça importada diretamente de um andamento já baixado
+    # pelo jus.br (em vez de fatiada de um bloco de upload manual). Mutuamente
+    # exclusivo com documento_id.
+    andamento_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("andamentos_processo.id"), unique=True
+    )
+    # Quando definido, esta peça é um documento anexado a outra (peça_pai) —
+    # ex.: procuração, comprovante, documento pessoal juntados com uma petição.
+    # Fica de fora do menu principal de peças por padrão.
+    peca_pai_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("autos_ia_pecas.id")
+    )
 
     tipo: Mapped[str] = mapped_column(String(50), nullable=False, default="outro")
     # peticao | decisao | despacho | certidao | oficio | recurso | documento | outro
@@ -124,6 +154,7 @@ class AutosIAPeca(Base):
         foreign_keys="AutosIAReferencia.peca_origem_id",
         cascade="all, delete-orphan",
     )
+    peca_pai: Mapped["AutosIAPeca | None"] = relationship(remote_side=[id], foreign_keys=[peca_pai_id])
 
 
 class AutosIAReferencia(Base):

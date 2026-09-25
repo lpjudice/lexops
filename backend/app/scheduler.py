@@ -62,6 +62,38 @@ def _sync_all_processos() -> None:
         logger.exception("Erro crítico no scheduler de andamentos: %s", exc)
 
 
+def _sync_autos_ia_processos() -> None:
+    """Sincronização própria do módulo Autos IA (3x/dia), independente da rotina
+    noturna acima: roda só para os casos explicitamente vinculados a um
+    Processo com sync_jusbr_ativo=True, reaproveitando as mesmas rotinas de
+    sincronização já usadas pelo resto do gestor (DataJud + jus.br)."""
+    try:
+        from app.database import SessionLocal
+        from app.models.autos_ia import AutosIACaso
+        from app.services.autos_ia.jusbr_import import sincronizar_caso_jusbr
+        from app.services.consulta_processual.jusbr_session import load_session
+
+        db = SessionLocal()
+        try:
+            casos = (
+                db.query(AutosIACaso)
+                .filter(AutosIACaso.status == "ativo", AutosIACaso.sync_jusbr_ativo.is_(True))
+                .filter(AutosIACaso.processo_id.isnot(None))
+                .all()
+            )
+            if not casos:
+                return
+
+            session_data = load_session()
+            logger.info("Autos IA: sincronizando %d caso(s) vinculados a processo", len(casos))
+            for caso in casos:
+                sincronizar_caso_jusbr(db, caso, session_data)
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.exception("Erro crítico no scheduler do Autos IA: %s", exc)
+
+
 def _refresh_jusbr_session() -> None:
     try:
         from app.services.consulta_processual.jusbr_session import refresh_session_if_needed
@@ -741,6 +773,14 @@ def start_scheduler() -> None:
         _sync_all_processos,
         trigger=CronTrigger(hour=3, minute=0),
         id="sync_andamentos_noturno",
+        replace_existing=True,
+    )
+    # Autos IA — sincronização própria 3x/dia, só para os casos vinculados a um
+    # processo com sync ativo. Independente da rotina noturna acima.
+    scheduler.add_job(
+        _sync_autos_ia_processos,
+        trigger=CronTrigger(hour='7,13,19', minute=10, timezone="America/Sao_Paulo"),
+        id="sync_autos_ia_processos",
         replace_existing=True,
     )
     scheduler.add_job(
