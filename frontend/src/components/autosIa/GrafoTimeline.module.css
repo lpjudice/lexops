@@ -1,0 +1,209 @@
+.wrap {
+  color-scheme: light;
+}
+
+.vazio {
+  color: var(--gray-mid);
+  font-size: 13px;
+  padding: 24px 0;
+}
+
+.legendaTexto {
+  font-size: 12.5px;
+  color: var(--gray-mid);
+  margin-bottom: 18px;
+  max-width: 640px;
+}
+
+.chart {
+  position: relative;
+  display: flex;
+}
+
+.svgArestas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.arestaPath {
+  fill: none;
+  stroke: var(--gray-border);
+  stroke-width: 2px;
+  stroke-linecap: round;
+  transition: stroke var(--transition), stroke-width var(--transition);
+}
+
+.arestaEmFoco {
+  stroke: var(--teal);
+  stroke-width: 2.5px;
+}
+
+.linhas {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  padding-left: 82px;
+  width: 100%;
+}
+
+.linha {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.no {
+  position: absolute;
+  left: -60px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--white);
+  box-shadow: 0 0 0 1px var(--gray-border);
+  cursor: pointer;
+  padding: 0;
+  transition: transform var(--transition);
+}
+
+.no:hover,
+.no[aria-expanded='true'] {
+  transform: scale(1.35);
+}
+
+.linhaConteudo {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-family: 'Archivo', sans-serif;
+  transition: background var(--transition);
+}
+
+.linhaConteudo:hover,
+.linhaConteudo[aria-expanded='true'] {
+  background: var(--light);
+}
+
+.dataTxt {
+  font-size: 11px;
+  color: var(--gray-mid);
+  white-space: nowrap;
+  width: 72px;
+  flex-shrink: 0;
+}
+
+.tipoTxt {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.tituloTxt {
+  font-size: 13px;
+  color: var(--dark);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.entradasBadge {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--teal);
+  background: var(--teal-light);
+  border-radius: 999px;
+  padding: 1px 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.popup {
+  position: absolute;
+  left: 82px;
+  top: 100%;
+  z-index: 30;
+  width: 300px;
+  max-width: calc(100vw - 120px);
+  background: var(--dark);
+  color: #fff;
+  border-radius: 10px;
+  padding: 12px 14px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+  margin-top: 2px;
+}
+
+.popupTopo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.popupTipo {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.popupAutor {
+  font-size: 11px;
+  color: #b6c2c2;
+}
+
+.popupResumo {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #e5e7eb;
+}
+
+.popupKeywords {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.popupKeywords span {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 10px;
+}
+
+.legendaTipos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 24px;
+  padding-top: 14px;
+  border-top: 1px solid var(--gray-border);
+}
+
+.legendaItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--gray-mid);
+  text-transform: capitalize;
+}
+
+.legendaDot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}

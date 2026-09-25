@@ -4,6 +4,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import { autosIa, TIPOS_PECA } from '../api/autosIa'
 import type { Caso, Documento, GrafoAresta, GrafoNo, Peca, PecaDetalhe } from '../api/autosIa'
 import ReferenciaHover from '../components/autosIa/ReferenciaHover'
+import GrafoTimeline from '../components/autosIa/GrafoTimeline'
 import pageStyles from './Page.module.css'
 import styles from './AutosIACasoPage.module.css'
 
@@ -732,74 +733,10 @@ function AbaGrafo({ casoId }: { casoId: string }) {
     queryFn: () => autosIa.obterGrafo(casoId),
   })
 
-  const incomingCount = useMemo(() => {
-    const mapa = new Map<string, number>()
-    grafo?.arestas.forEach((a) => {
-      if (a.peca_destino_id) mapa.set(a.peca_destino_id, (mapa.get(a.peca_destino_id) ?? 0) + 1)
-    })
-    return mapa
-  }, [grafo])
-
-  const arestasPorOrigem = useMemo(() => {
-    const mapa = new Map<string, NonNullable<typeof grafo>['arestas']>()
-    grafo?.arestas.forEach((a) => {
-      const lista = mapa.get(a.peca_origem_id) ?? []
-      lista.push(a)
-      mapa.set(a.peca_origem_id, lista)
-    })
-    return mapa
-  }, [grafo])
-
-  const nosPorId = useMemo(() => {
-    const mapa = new Map<string, NonNullable<typeof grafo>['nos'][number]>()
-    grafo?.nos.forEach((n) => mapa.set(n.id, n))
-    return mapa
-  }, [grafo])
-
   if (isLoading) return <p className={pageStyles.empty}>Carregando...</p>
   if (!grafo || grafo.nos.length === 0) return <p className={pageStyles.empty}>Nenhuma peça indexada ainda.</p>
 
-  return (
-    <div>
-      <p style={{ fontSize: 12.5, color: 'var(--gray-mid)', marginBottom: 16 }}>
-        Passe o mouse sobre um ID mencionado para ver o resumo e as palavras-chave da peça
-        referenciada, sem precisar navegar até ela.
-      </p>
-      {grafo.nos.map((no) => {
-        const arestas = arestasPorOrigem.get(no.id) ?? []
-        const entrada = incomingCount.get(no.id) ?? 0
-        return (
-          <div key={no.id} className={styles.grafoNodeCard}>
-            <span className={styles.tipoBadge}>{no.tipo}</span>
-            <div className={styles.pecaTitulo}>{no.titulo}</div>
-            <div className={styles.pecaMeta}>
-              <span>págs. {no.pagina_inicio}-{no.pagina_fim}</span>
-              {no.id_processual && <span>ID {no.id_processual}</span>}
-              {no.data_peca && <span>{formatarData(no.data_peca)}</span>}
-              {entrada > 0 && (
-                <span className={styles.incomingBadge}>referenciada por {entrada} peça{entrada > 1 ? 's' : ''}</span>
-              )}
-            </div>
-            {no.resumo && <div className={styles.pecaResumo}>{no.resumo}</div>}
-            {arestas.length > 0 && (
-              <>
-                <div className={styles.grafoSecao}>Menciona</div>
-                <div className={styles.chipsRow}>
-                  {arestas.map((a) => (
-                    <ReferenciaHover
-                      key={a.id}
-                      idMencionado={a.id_mencionado}
-                      no={a.peca_destino_id ? nosPorId.get(a.peca_destino_id) : undefined}
-                    />
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        )
-      })}
-    </div>
-  )
+  return <GrafoTimeline nos={grafo.nos} arestas={grafo.arestas} />
 }
 
 // ── FAQ ──────────────────────────────────────────────────────────────────

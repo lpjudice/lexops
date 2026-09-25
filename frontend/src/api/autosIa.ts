@@ -121,6 +121,7 @@ export interface GrafoNo {
   keywords?: string[] | null
   pagina_inicio: number
   pagina_fim: number
+  peca_pai_id?: string | null
 }
 
 export interface GrafoAresta {
