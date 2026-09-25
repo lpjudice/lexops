@@ -202,7 +202,10 @@ export const autosIa = {
 
   listarPecas: (
     casoId: string,
-    params: { q?: string; tipo?: string; data_inicio?: string; data_fim?: string; incluir_anexos?: boolean },
+    params: {
+      q?: string; tipo?: string; data_inicio?: string; data_fim?: string; incluir_anexos?: boolean
+      offset?: number; limit?: number
+    },
   ) => api.get<Peca[]>(`/autos-ia/casos/${casoId}/pecas`, { params }).then((r) => r.data),
 
   obterPeca: (pecaId: string) => api.get<PecaDetalhe>(`/autos-ia/pecas/${pecaId}`).then((r) => r.data),

@@ -5,6 +5,7 @@ gestor jurídico (contexto do processo).
 """
 import io
 import logging
+from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +22,10 @@ def _extrair_com_pdfminer(content: bytes) -> str:
     return pdfminer_extract(io.BytesIO(content), maxpages=50) or ""
 
 
-def _extrair_com_claude_ocr(content: bytes) -> str:
-    """Último recurso: envia o PDF para Claude ler via visão nativa (PDFs escaneados sem texto)."""
+def _extrair_com_claude_ocr(content: bytes, on_custo: Callable[[float], None] | None = None) -> str:
+    """Último recurso: envia o PDF para Claude ler via visão nativa (PDFs escaneados sem texto).
+    `on_custo(custo_usd)`, quando informado, recebe o custo real dessa chamada — sem isso, o
+    fallback de OCR é uma chamada de IA paga que nenhum lugar do sistema contabiliza."""
     import base64
     import anthropic
     client = anthropic.Anthropic()
@@ -49,11 +52,16 @@ def _extrair_com_claude_ocr(content: bytes) -> str:
             ],
         }],
     )
+    if on_custo:
+        from app.services.autos_ia.precos import calcular_custo_ocr_usd
+        on_custo(calcular_custo_ocr_usd(resp.usage.input_tokens, resp.usage.output_tokens))
     return resp.content[0].text if resp.content else ""
 
 
-def extrair_texto_pdf(content: bytes) -> str:
-    """Extrai texto de um PDF em 3 tentativas. Retorna string vazia se todas falharem."""
+def extrair_texto_pdf(content: bytes, on_custo: Callable[[float], None] | None = None) -> str:
+    """Extrai texto de um PDF em 3 tentativas. Retorna string vazia se todas falharem.
+    `on_custo(custo_usd)`, quando informado, recebe o custo real de uma eventual chamada
+    de OCR via IA (a única etapa paga desta cascata — pypdf/pdfminer são locais e grátis)."""
     texto = ""
     try:
         texto = _extrair_com_pypdf(content)
@@ -68,7 +76,7 @@ def extrair_texto_pdf(content: bytes) -> str:
 
     if not texto.strip():
         try:
-            texto = _extrair_com_claude_ocr(content)
+            texto = _extrair_com_claude_ocr(content, on_custo=on_custo)
         except Exception as exc:
             logger.warning("Claude OCR falhou: %s", exc)
 

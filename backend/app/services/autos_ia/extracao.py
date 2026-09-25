@@ -35,8 +35,9 @@ def _texto_pdfminer_pagina(content: bytes, indice: int) -> str:
     return texto.strip()
 
 
-def _ocr_claude_pagina(content: bytes, indice: int) -> str:
-    """Isola a página `indice` num PDF de 1 página e manda para o Claude ler via visão nativa."""
+def _ocr_claude_pagina(content: bytes, indice: int, on_custo: Callable[[float], None] | None = None) -> str:
+    """Isola a página `indice` num PDF de 1 página e manda para o Claude ler via visão nativa.
+    `on_custo(custo_usd)`, quando informado, recebe o custo real dessa chamada."""
     import base64
     import anthropic
     from pypdf import PdfReader, PdfWriter
@@ -75,6 +76,9 @@ def _ocr_claude_pagina(content: bytes, indice: int) -> str:
             ],
         }],
     )
+    if on_custo:
+        from app.services.autos_ia.precos import calcular_custo_ocr_usd
+        on_custo(calcular_custo_ocr_usd(resp.usage.input_tokens, resp.usage.output_tokens))
     return (resp.content[0].text if resp.content else "").strip()
 
 
@@ -82,11 +86,14 @@ def extrair_paginas(
     content: bytes,
     pagina_inicio_global: int,
     on_progresso: Callable[[int, int], None] | None = None,
+    on_custo: Callable[[float], None] | None = None,
 ) -> list[PaginaExtraida]:
     """Extrai o texto de cada página de `content`, numerando a partir de `pagina_inicio_global`.
 
     `on_progresso(paginas_feitas, total_paginas)`, quando informado, é chamado após cada página —
-    usado para atualizar o progresso exibido na tela durante blocos grandes."""
+    usado para atualizar o progresso exibido na tela durante blocos grandes.
+    `on_custo(custo_usd)`, quando informado, recebe o custo real de cada página que precisou de
+    OCR via IA (a única etapa paga desta cascata — pypdf/pdfminer são locais e grátis)."""
     try:
         textos_pypdf = _texto_pypdf_por_pagina(content)
     except Exception as exc:
@@ -116,7 +123,7 @@ def extrair_paginas(
 
         if len(texto) < LIMIAR_CHARS_TEXTO_NATIVO:
             try:
-                texto_ocr = _ocr_claude_pagina(content, indice)
+                texto_ocr = _ocr_claude_pagina(content, indice, on_custo=on_custo)
                 if len(texto_ocr) > len(texto):
                     texto = texto_ocr
                     ocr_usado = True

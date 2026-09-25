@@ -167,6 +167,9 @@ class AutosIAPeca(Base):
     tipo: Mapped[str] = mapped_column(String(50), nullable=False, default="outro")
     # peticao | decisao | despacho | certidao | oficio | recurso | documento | outro
     titulo: Mapped[str] = mapped_column(String(500), nullable=False)
+    # Quem apresentou/assina a peça (parte, MP, ou o juízo em atos próprios do juízo).
+    # No upload, vem da segmentação; nas peças do jus.br/Drive (que não passam por
+    # segmentação), vem do mesmo passo de resumo — ver services/autos_ia/resumo.py.
     autor: Mapped[str | None] = mapped_column(String(255))
     data_peca: Mapped[date | None] = mapped_column(Date)
     id_processual: Mapped[str | None] = mapped_column(String(100), index=True)

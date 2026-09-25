@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { autosIa, TIPOS_PECA } from '../api/autosIa'
 import type { Caso, Documento, GrafoAresta, GrafoNo, Peca, PecaDetalhe } from '../api/autosIa'
 import ReferenciaHover from '../components/autosIa/ReferenciaHover'
@@ -583,21 +583,29 @@ function PecaCard({ peca, arestasPorOrigem, nosPorId }: { peca: Peca; arestasPor
   )
 }
 
+const TAMANHO_PAGINA_PECAS = 100
+
 function AbaPecas({ casoId, arestasPorOrigem, nosPorId }: { casoId: string; arestasPorOrigem: ArestasMap; nosPorId: NosMap }) {
   const [q, setQ] = useState('')
   const [tipo, setTipo] = useState('')
   const [dataInicio, setDataInicio] = useState('')
   const [dataFim, setDataFim] = useState('')
 
-  const { data: pecas = [], isLoading } = useQuery({
+  const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteQuery({
     queryKey: ['autos-ia', 'pecas', casoId, q, tipo, dataInicio, dataFim],
-    queryFn: () => autosIa.listarPecas(casoId, {
+    queryFn: ({ pageParam }) => autosIa.listarPecas(casoId, {
       q: q || undefined,
       tipo: tipo || undefined,
       data_inicio: dataInicio || undefined,
       data_fim: dataFim || undefined,
+      offset: pageParam,
+      limit: TAMANHO_PAGINA_PECAS,
     }),
+    initialPageParam: 0,
+    getNextPageParam: (ultimaPagina, todasPaginas) =>
+      ultimaPagina.length === TAMANHO_PAGINA_PECAS ? todasPaginas.length * TAMANHO_PAGINA_PECAS : undefined,
   })
+  const pecas = data?.pages.flat() ?? []
 
   return (
     <div>
@@ -638,9 +646,21 @@ function AbaPecas({ casoId, arestasPorOrigem, nosPorId }: { casoId: string; ares
       ) : pecas.length === 0 ? (
         <p className={pageStyles.empty}>Nenhuma peça encontrada.</p>
       ) : (
-        pecas.map((p) => (
-          <PecaCard key={p.id} peca={p} arestasPorOrigem={arestasPorOrigem} nosPorId={nosPorId} />
-        ))
+        <>
+          {pecas.map((p) => (
+            <PecaCard key={p.id} peca={p} arestasPorOrigem={arestasPorOrigem} nosPorId={nosPorId} />
+          ))}
+          {hasNextPage && (
+            <button
+              className={pageStyles.btnSmall}
+              style={{ display: 'block', margin: '16px auto' }}
+              disabled={isFetchingNextPage}
+              onClick={() => fetchNextPage()}
+            >
+              {isFetchingNextPage ? 'Carregando...' : `Carregar mais (${pecas.length} carregada(s))`}
+            </button>
+          )}
+        </>
       )}
     </div>
   )
@@ -649,13 +669,19 @@ function AbaPecas({ casoId, arestasPorOrigem, nosPorId }: { casoId: string; ares
 // ── Timeline ─────────────────────────────────────────────────────────────
 
 function AbaTimeline({ casoId, arestasPorOrigem, nosPorId }: { casoId: string; arestasPorOrigem: ArestasMap; nosPorId: NosMap }) {
-  const { data: pecas = [], isLoading } = useQuery({
+  const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteQuery({
     queryKey: ['autos-ia', 'pecas', casoId, 'timeline'],
-    queryFn: () => autosIa.listarPecas(casoId, {}),
+    queryFn: ({ pageParam }) => autosIa.listarPecas(casoId, { offset: pageParam, limit: TAMANHO_PAGINA_PECAS }),
+    initialPageParam: 0,
+    getNextPageParam: (ultimaPagina, todasPaginas) =>
+      ultimaPagina.length === TAMANHO_PAGINA_PECAS ? todasPaginas.length * TAMANHO_PAGINA_PECAS : undefined,
   })
+  const pecas = data?.pages.flat() ?? []
 
   const grupos = useMemo(() => {
-    const comData = pecas.filter((p) => p.data_peca).sort((a, b) => (a.data_peca! < b.data_peca! ? -1 : 1))
+    // Mais recentes primeiro — é assim que um advogado revisita um processo: o que
+    // aconteceu por último é o que importa saber primeiro.
+    const comData = pecas.filter((p) => p.data_peca).sort((a, b) => (a.data_peca! > b.data_peca! ? -1 : 1))
     const semData = pecas.filter((p) => !p.data_peca)
     const mapa = new Map<string, Peca[]>()
     comData.forEach((p) => {
@@ -684,6 +710,16 @@ function AbaTimeline({ casoId, arestasPorOrigem, nosPorId }: { casoId: string; a
           </div>
         </div>
       ))}
+      {hasNextPage && (
+        <button
+          className={pageStyles.btnSmall}
+          style={{ display: 'block', margin: '16px auto' }}
+          disabled={isFetchingNextPage}
+          onClick={() => fetchNextPage()}
+        >
+          {isFetchingNextPage ? 'Carregando...' : `Carregar mais antigas (${pecas.length} carregada(s))`}
+        </button>
+      )}
     </div>
   )
 }

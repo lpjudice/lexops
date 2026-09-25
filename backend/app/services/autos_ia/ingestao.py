@@ -121,6 +121,19 @@ def resumir_pecas_em_paralelo(
                 peca.ids_mencionados = resultado.ids_mencionados
                 peca.custo_usd = resultado.custo_usd
                 peca.status = "resumida"
+                if not peca.autor and resultado.peticionante:
+                    peca.autor = resultado.peticionante[:255]
+                # id_proprio (o número pelo qual a peça se autorreferencia) é mais
+                # confiável que um ID interno do sistema de origem pra casar com
+                # menções de outras peças — sobrescreve quando a IA encontrar um.
+                if resultado.id_proprio:
+                    peca.id_processual = resultado.id_proprio[:100]
+                # Peça-mãe (não é anexo de outra): confia na classificação da IA, que
+                # leu o texto inteiro — mais precisa que o rótulo bruto do tribunal ou
+                # o palpite por palavra-chave usado antes de chamar a IA. Anexos ficam
+                # com o tipo "documento" decidido no agrupamento (ver jusbr_import.py).
+                if peca.peca_pai_id is None:
+                    peca.tipo = resultado.tipo
                 db.commit()
                 _persistir_referencias(db, peca, resultado.ids_mencionados)
                 if on_custo:
@@ -166,6 +179,11 @@ def processar_documento(db: Session, documento_id: uuid.UUID) -> None:
         doc.paginas_processadas = feitas
         db.commit()
 
+    def _custo_extracao(valor: float) -> None:
+        doc.custo_usd = (doc.custo_usd or 0) + valor
+        caso.custo_usd_total = (caso.custo_usd_total or 0) + valor
+        db.commit()
+
     def _custo_segmentacao(valor: float) -> None:
         doc.custo_usd = (doc.custo_usd or 0) + valor
         caso.custo_usd_total = (caso.custo_usd_total or 0) + valor
@@ -182,7 +200,9 @@ def processar_documento(db: Session, documento_id: uuid.UUID) -> None:
 
     try:
         content = Path(doc.caminho_arquivo).read_bytes()
-        paginas = extrair_paginas(content, doc.pagina_inicio, on_progresso=_progresso_extracao)
+        paginas = extrair_paginas(
+            content, doc.pagina_inicio, on_progresso=_progresso_extracao, on_custo=_custo_extracao,
+        )
         doc.paginas_ocr = sum(1 for p in paginas if p.ocr_usado)
         db.commit()
 
@@ -309,3 +329,39 @@ def retomar_documento(db: Session, documento_id: uuid.UUID) -> None:
         doc.status = "concluido"
         doc.etapa = "concluido"
     db.commit()
+
+
+def resetar_processamentos_travados(db: Session) -> int:
+    """Chamado no startup do servidor: nenhuma tarefa em background sobrevive a
+    um restart/deploy, então qualquer caso ou documento que ficou "processando"
+    pertence a uma execução que foi interrompida à força (não a um cancelamento
+    gracioso) — sem isso, o status fica preso em "processando" pra sempre,
+    bloqueando novas sincronizações e a exclusão do caso. Retorna quantos itens
+    foram destravados."""
+    from datetime import datetime, timezone
+
+    MENSAGEM = "Cancelado automaticamente: o servidor reiniciou durante o processamento."
+    afetados = 0
+
+    casos = db.query(AutosIACaso).filter(AutosIACaso.ultimo_sync_status == "processando").all()
+    for caso in casos:
+        caso.ultimo_sync_status = "cancelado"
+        caso.ultimo_sync_mensagem = MENSAGEM
+        caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
+        caso.sync_etapa = None
+        caso.sync_total_itens = None
+        caso.sync_itens_processados = None
+        caso.sync_cancelar = False
+        afetados += 1
+
+    documentos = db.query(AutosIADocumento).filter(AutosIADocumento.status == "processando").all()
+    for doc in documentos:
+        doc.status = "cancelado"
+        doc.etapa = "cancelado"
+        doc.cancelar = False
+        doc.erro_mensagem = MENSAGEM
+        afetados += 1
+
+    if afetados:
+        db.commit()
+    return afetados

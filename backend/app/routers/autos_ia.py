@@ -321,13 +321,19 @@ def listar_pecas(
     data_inicio: str | None = None,
     data_fim: str | None = None,
     incluir_anexos: bool = False,
+    offset: int = 0,
+    limit: int = 100,
     db: Session = Depends(get_db),
 ):
     from datetime import date as date_cls
     _get_caso(db, caso_id)
     di = date_cls.fromisoformat(data_inicio) if data_inicio else None
     df = date_cls.fromisoformat(data_fim) if data_fim else None
-    pecas = buscar_pecas(db, caso_id, query=q, data_inicio=di, data_fim=df, tipo=tipo, incluir_anexos=incluir_anexos)
+    limit = max(1, min(limit, 300))
+    pecas = buscar_pecas(
+        db, caso_id, query=q, data_inicio=di, data_fim=df, tipo=tipo, incluir_anexos=incluir_anexos,
+        offset=max(0, offset), limite=limit,
+    )
     return _com_total_anexos(db, caso_id, pecas)
 
 

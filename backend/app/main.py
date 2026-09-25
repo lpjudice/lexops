@@ -1814,6 +1814,27 @@ def _startup():
         import logging
         logging.getLogger(__name__).warning("Erro ao registrar Drive webhook no startup: %s", exc)
 
+    # Destrava casos/documentos do Autos IA que ficaram "processando" porque o
+    # servidor foi reiniciado no meio de uma sincronização/upload em background
+    # (essa tarefa não sobrevive ao restart) — sem isso, o status preso bloqueia
+    # tanto uma nova sincronização quanto a exclusão do caso.
+    try:
+        from app.database import SessionLocal
+        from app.services.autos_ia.ingestao import resetar_processamentos_travados
+        db = SessionLocal()
+        try:
+            afetados = resetar_processamentos_travados(db)
+            if afetados:
+                import logging
+                logging.getLogger(__name__).info(
+                    "Autos IA: %d caso(s)/documento(s) destravado(s) de 'processando' no startup.", afetados
+                )
+        finally:
+            db.close()
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("Erro ao destravar Autos IA no startup: %s", exc)
+
 
 @app.on_event("shutdown")
 def _shutdown():

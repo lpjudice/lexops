@@ -85,7 +85,7 @@ def _obter_bytes(andamento: AndamentoProcesso) -> bytes | None:
     return None
 
 
-def _extrair_texto(conteudo: bytes, nome_arquivo: str | None) -> str:
+def _extrair_texto(conteudo: bytes, nome_arquivo: str | None, on_custo=None) -> str:
     if nome_arquivo and nome_arquivo.lower().endswith((".html", ".htm")):
         try:
             from bs4 import BeautifulSoup
@@ -95,7 +95,7 @@ def _extrair_texto(conteudo: bytes, nome_arquivo: str | None) -> str:
             return ""
 
     from app.services.pdf_extract import extrair_texto_pdf
-    return extrair_texto_pdf(conteudo)
+    return extrair_texto_pdf(conteudo, on_custo=on_custo)
 
 
 def _contar_paginas(conteudo: bytes | None, nome_arquivo: str | None) -> int:
@@ -300,7 +300,10 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
         if not texto:
             conteudo = _obter_bytes(andamento)
             if conteudo:
-                texto = _extrair_texto(conteudo, andamento.arquivo_nome)
+                def _custo_ocr(valor: float, _caso=caso) -> None:
+                    _caso.custo_usd_total = (_caso.custo_usd_total or 0) + valor
+                    db.commit()
+                texto = _extrair_texto(conteudo, andamento.arquivo_nome, on_custo=_custo_ocr)
                 if texto:
                     andamento.texto_extraido = texto
                     db.commit()
@@ -408,7 +411,11 @@ def _criar_peca(db: Session, caso: AutosIACaso, item: dict, peca_pai_id) -> Auto
         titulo=(andamento.tipo or andamento.descricao or "Andamento sem título").strip()[:500],
         autor=None,
         data_peca=andamento.data_andamento,
-        id_processual=andamento.documento_id,
+        # Não usa andamento.documento_id aqui: é um ID interno do jus.br, não o número
+        # (ex.: "Evento 45") que outras peças de fato citam no texto. O resumo (IA)
+        # preenche id_processual com o que a própria peça diz ser sua referência —
+        # ver ResumoPeca.id_proprio em services/autos_ia/resumo.py.
+        id_processual=None,
         pagina_inicio=item["pagina_inicio"],
         pagina_fim=item["pagina_fim"],
         texto_md=item["texto"] or "(sem texto extraído)",

@@ -25,8 +25,12 @@ def buscar_pecas(
     data_fim: date | None = None,
     tipo: str | None = None,
     incluir_anexos: bool = False,
-    limite: int = 200,
+    offset: int = 0,
+    limite: int = 100,
 ) -> list[AutosIAPeca]:
+    """`offset`/`limite` paginam o resultado — essencial num processo com centenas
+    de peças; sem paginação, um caso grande simplesmente não cabia na tela e a
+    maior parte ficava invisível (nem aparecia nem era possível "ver mais")."""
     q = db.query(AutosIAPeca).filter(AutosIAPeca.caso_id == caso_id)
     if not incluir_anexos:
         q = q.filter(AutosIAPeca.peca_pai_id.is_(None))
@@ -42,6 +46,10 @@ def buscar_pecas(
         q = q.filter(TSVECTOR_EXPR.op("@@")(tsquery))
         q = q.order_by(func.ts_rank(TSVECTOR_EXPR, tsquery).desc())
     else:
-        q = q.order_by(AutosIAPeca.pagina_inicio.asc())
+        # Mais recentes primeiro — como um advogado abriria os autos pra ver o
+        # que aconteceu por último; página costuma seguir a ordem cronológica
+        # de importação, então é a melhor proxy disponível sem custar uma
+        # junção por data em toda busca sem filtro de texto.
+        q = q.order_by(AutosIAPeca.pagina_inicio.desc())
 
-    return q.limit(limite).all()
+    return q.offset(offset).limit(limite).all()
