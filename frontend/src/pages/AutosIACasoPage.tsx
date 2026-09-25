@@ -1,0 +1,614 @@
+import { useMemo, useRef, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { autosIa, TIPOS_PECA } from '../api/autosIa'
+import type { GrafoAresta, GrafoNo, Peca, PecaDetalhe } from '../api/autosIa'
+import ReferenciaHover from '../components/autosIa/ReferenciaHover'
+import pageStyles from './Page.module.css'
+import styles from './AutosIACasoPage.module.css'
+
+type Aba = 'upload' | 'pecas' | 'timeline' | 'grafo' | 'faq'
+
+const ABAS: { key: Aba; label: string }[] = [
+  { key: 'upload', label: 'Upload & Blocos' },
+  { key: 'pecas', label: 'Peças & Busca' },
+  { key: 'timeline', label: 'Linha do Tempo' },
+  { key: 'grafo', label: 'Grafo de Referências' },
+  { key: 'faq', label: 'Perguntas' },
+]
+
+const STATUS_DOC_COR: Record<string, { bg: string; cor: string }> = {
+  pendente: { bg: '#f3f4f6', cor: 'var(--gray-mid)' },
+  processando: { bg: '#dbeafe', cor: '#1d4ed8' },
+  concluido: { bg: '#dcfce7', cor: '#15803d' },
+  erro: { bg: '#fee2e2', cor: '#b91c1c' },
+}
+
+function formatarData(d?: string | null) {
+  if (!d) return null
+  return new Date(d).toLocaleDateString('pt-BR')
+}
+
+const STATUS_SYNC_LABEL: Record<string, string> = {
+  ok: 'sincronizado',
+  erro: 'falhou',
+  nenhum: 'sem novidades',
+  processando: 'sincronizando...',
+}
+
+export default function AutosIACasoPage() {
+  const { casoId } = useParams<{ casoId: string }>()
+  const qc = useQueryClient()
+  const [aba, setAba] = useState<Aba>('upload')
+
+  const { data: caso } = useQuery({
+    queryKey: ['autos-ia', 'caso', casoId],
+    queryFn: () => autosIa.obterCaso(casoId!),
+    enabled: !!casoId,
+    refetchInterval: (query) => (query.state.data?.ultimo_sync_status === 'processando' ? 3000 : false),
+  })
+
+  const sincronizar = useMutation({
+    mutationFn: () => autosIa.sincronizarAgora(casoId!),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] }),
+  })
+
+  const { data: grafo } = useQuery({
+    queryKey: ['autos-ia', 'grafo', casoId],
+    queryFn: () => autosIa.obterGrafo(casoId!),
+    enabled: !!casoId,
+  })
+
+  const nosPorId = useMemo(() => {
+    const mapa = new Map<string, NonNullable<typeof grafo>['nos'][number]>()
+    grafo?.nos.forEach((n) => mapa.set(n.id, n))
+    return mapa
+  }, [grafo])
+
+  const arestasPorOrigem = useMemo(() => {
+    const mapa = new Map<string, NonNullable<typeof grafo>['arestas']>()
+    grafo?.arestas.forEach((a) => {
+      const lista = mapa.get(a.peca_origem_id) ?? []
+      lista.push(a)
+      mapa.set(a.peca_origem_id, lista)
+    })
+    return mapa
+  }, [grafo])
+
+  if (!casoId) return null
+
+  return (
+    <div>
+      <Link to="/autos-ia" className={styles.backLink}>← Voltar para Autos IA</Link>
+      <div className={pageStyles.pageHeader}>
+        <div>
+          <h1 className={pageStyles.pageTitle}>{caso?.nome ?? 'Carregando...'}</h1>
+          {caso && (
+            <div className={styles.headerMeta}>
+              {caso.numero_processo && <span>Processo {caso.numero_processo}</span>}
+              <span>{caso.total_paginas} páginas indexadas</span>
+              <span className={`${pageStyles.badge} ${pageStyles[`status_${caso.status}`]}`}>{caso.status}</span>
+              {caso.tem_peca_pendente_continuacao && (
+                <span className={styles.warningBuffer}>
+                  peça em aberto — continue enviando os próximos blocos
+                </span>
+              )}
+              {caso.processo_id && (
+                <>
+                  <span>
+                    {caso.sync_jusbr_ativo ? 'sync automático 3x/dia' : 'vinculado a um processo'}
+                    {caso.ultimo_sync_status && ` · última sync: ${STATUS_SYNC_LABEL[caso.ultimo_sync_status] ?? caso.ultimo_sync_status}`}
+                    {caso.ultima_sincronizacao_em && ` (${new Date(caso.ultima_sincronizacao_em).toLocaleString('pt-BR')})`}
+                  </span>
+                  <button
+                    className={pageStyles.btnSmall}
+                    disabled={sincronizar.isPending || caso.ultimo_sync_status === 'processando'}
+                    onClick={() => sincronizar.mutate()}
+                  >
+                    {caso.ultimo_sync_status === 'processando' ? 'Sincronizando...' : 'Sincronizar agora'}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+          {caso?.ultimo_sync_status === 'erro' && caso.ultimo_sync_mensagem && (
+            <p style={{ fontSize: 12, color: '#b91c1c', marginTop: 6 }}>
+              Falha na última sincronização: {caso.ultimo_sync_mensagem}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className={styles.tabs}>
+        {ABAS.map((a) => (
+          <button
+            key={a.key}
+            className={`${styles.tabBtn} ${aba === a.key ? styles.tabActive : ''}`}
+            onClick={() => setAba(a.key)}
+          >
+            {a.label}
+          </button>
+        ))}
+      </div>
+
+      {aba === 'upload' && (
+        <AbaUpload casoId={casoId} totalPaginas={caso?.total_paginas ?? 0} vinculadoAProcesso={!!caso?.processo_id} />
+      )}
+      {aba === 'pecas' && (
+        <AbaPecas casoId={casoId} arestasPorOrigem={arestasPorOrigem} nosPorId={nosPorId} />
+      )}
+      {aba === 'timeline' && (
+        <AbaTimeline casoId={casoId} arestasPorOrigem={arestasPorOrigem} nosPorId={nosPorId} />
+      )}
+      {aba === 'grafo' && <AbaGrafo casoId={casoId} />}
+      {aba === 'faq' && <AbaFaq casoId={casoId} nosPorId={nosPorId} />}
+    </div>
+  )
+}
+
+// ── Upload ───────────────────────────────────────────────────────────────
+
+function AbaUpload({ casoId, totalPaginas, vinculadoAProcesso }: { casoId: string; totalPaginas: number; vinculadoAProcesso: boolean }) {
+  const qc = useQueryClient()
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [paginaInicio, setPaginaInicio] = useState('')
+  const [progresso, setProgresso] = useState<number | null>(null)
+
+  const { data: documentos = [] } = useQuery({
+    queryKey: ['autos-ia', 'documentos', casoId],
+    queryFn: () => autosIa.listarDocumentos(casoId),
+    refetchInterval: (query) => {
+      const lista = query.state.data ?? []
+      return lista.some((d) => d.status === 'pendente' || d.status === 'processando') ? 3000 : false
+    },
+  })
+
+  const enviar = useMutation({
+    mutationFn: (arquivo: File) =>
+      autosIa.enviarBloco(casoId, arquivo, paginaInicio ? Number(paginaInicio) : null, setProgresso),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'documentos', casoId] })
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] })
+      setProgresso(null)
+      setPaginaInicio('')
+      if (inputRef.current) inputRef.current.value = ''
+    },
+    onError: () => setProgresso(null),
+  })
+
+  return (
+    <div>
+      {vinculadoAProcesso && (
+        <p style={{ fontSize: 12.5, color: 'var(--gray-mid)', marginBottom: 14 }}>
+          Este caso está vinculado a um processo e sincroniza automaticamente com o jus.br —
+          normalmente você não precisa subir blocos manualmente. Use o upload abaixo só para
+          complementar com documentos que não estejam nos autos eletrônicos.
+        </p>
+      )}
+      <form
+        className={pageStyles.form}
+        style={{ maxWidth: 640 }}
+        onSubmit={(e) => {
+          e.preventDefault()
+          const arquivo = inputRef.current?.files?.[0]
+          if (arquivo) enviar.mutate(arquivo)
+        }}
+      >
+        <div className={styles.uploadRow}>
+          <div className={pageStyles.formRow} style={{ flex: 1, marginBottom: 0 }}>
+            <label className={pageStyles.formLabel}>Bloco de PDF *</label>
+            <input ref={inputRef} type="file" accept="application/pdf" required />
+          </div>
+          <div className={pageStyles.formRow} style={{ width: 180, marginBottom: 0 }}>
+            <label className={pageStyles.formLabel}>Página inicial</label>
+            <input
+              className={pageStyles.input}
+              type="number"
+              min={1}
+              placeholder={`auto (${totalPaginas + 1})`}
+              value={paginaInicio}
+              onChange={(e) => setPaginaInicio(e.target.value)}
+            />
+          </div>
+          <button type="submit" className={pageStyles.btnPrimary} disabled={enviar.isPending}>
+            {enviar.isPending ? 'Enviando...' : 'Enviar bloco'}
+          </button>
+        </div>
+        {progresso != null && (
+          <div className={styles.progressBar}>
+            <div className={styles.progressFill} style={{ width: `${progresso}%` }} />
+          </div>
+        )}
+        {enviar.isError && (
+          <p style={{ color: '#b91c1c', fontSize: 12.5, marginTop: 10 }}>
+            Falha ao enviar o bloco. Tente novamente.
+          </p>
+        )}
+      </form>
+
+      {documentos.length === 0 ? (
+        <p className={pageStyles.empty}>Nenhum bloco enviado ainda.</p>
+      ) : (
+        <div className={pageStyles.tableCard}>
+          <table className={pageStyles.table}>
+            <thead>
+              <tr>
+                <th>Arquivo</th>
+                <th>Páginas</th>
+                <th>Peças geradas</th>
+                <th>OCR</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {documentos.map((d) => {
+                const cor = STATUS_DOC_COR[d.status] ?? STATUS_DOC_COR.pendente
+                return (
+                  <tr key={d.id}>
+                    <td>{d.nome_arquivo}</td>
+                    <td>{d.pagina_inicio}–{d.pagina_fim}</td>
+                    <td>{d.pecas_geradas}</td>
+                    <td>{d.paginas_ocr}</td>
+                    <td>
+                      <span className={pageStyles.badge} style={{ background: cor.bg, color: cor.cor }}>
+                        {d.status}
+                      </span>
+                      {d.erro_mensagem && (
+                        <div style={{ fontSize: 11, color: '#b91c1c', marginTop: 4 }}>{d.erro_mensagem}</div>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Peças / busca ────────────────────────────────────────────────────────
+
+type ArestasMap = Map<string, GrafoAresta[]>
+type NosMap = Map<string, GrafoNo>
+
+function PecaCard({ peca, arestasPorOrigem, nosPorId }: { peca: Peca; arestasPorOrigem: ArestasMap; nosPorId: NosMap }) {
+  const [aberta, setAberta] = useState(false)
+  const [anexosAbertos, setAnexosAbertos] = useState(false)
+  const { data: detalhe } = useQuery<PecaDetalhe>({
+    queryKey: ['autos-ia', 'peca', peca.id],
+    queryFn: () => autosIa.obterPeca(peca.id),
+    enabled: aberta,
+  })
+  const { data: anexos = [] } = useQuery({
+    queryKey: ['autos-ia', 'anexos', peca.id],
+    queryFn: () => autosIa.listarAnexos(peca.id),
+    enabled: anexosAbertos,
+  })
+  const arestas = arestasPorOrigem.get(peca.id) ?? []
+
+  return (
+    <div className={styles.pecaCard}>
+      <div className={styles.pecaTop}>
+        <div>
+          <span className={styles.tipoBadge}>{peca.tipo}</span>
+          <div className={styles.pecaTitulo}>{peca.titulo}</div>
+          <div className={styles.pecaMeta}>
+            <span>págs. {peca.pagina_inicio}-{peca.pagina_fim}</span>
+            {peca.autor && <span>{peca.autor}</span>}
+            {peca.data_peca && <span>{formatarData(peca.data_peca)}</span>}
+            {peca.id_processual && <span>ID {peca.id_processual}</span>}
+            {peca.origem === 'jusbr' && <span>jus.br</span>}
+            {peca.status !== 'resumida' && (
+              <span style={{ color: peca.status === 'erro' ? '#b91c1c' : '#a16207' }}>
+                {peca.status === 'erro' ? `erro ao resumir: ${peca.erro_mensagem}` : 'resumo pendente...'}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {peca.resumo && <div className={styles.pecaResumo}>{peca.resumo}</div>}
+
+      {((peca.keywords?.length ?? 0) > 0 || arestas.length > 0) && (
+        <div className={styles.chipsRow}>
+          {peca.keywords?.map((k) => <span key={k} className={styles.keywordChip}>{k}</span>)}
+          {arestas.map((a) => (
+            <ReferenciaHover
+              key={a.id}
+              idMencionado={a.id_mencionado}
+              no={a.peca_destino_id ? nosPorId.get(a.peca_destino_id) : undefined}
+            />
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button className={styles.verTextoBtn} onClick={() => setAberta(!aberta)}>
+          {aberta ? 'Ocultar texto completo' : 'Ver texto completo'}
+        </button>
+        {peca.total_anexos > 0 && (
+          <button className={styles.verTextoBtn} onClick={() => setAnexosAbertos(!anexosAbertos)}>
+            {anexosAbertos ? '▲' : '▼'} {peca.total_anexos} documento{peca.total_anexos > 1 ? 's' : ''} anexo{peca.total_anexos > 1 ? 's' : ''}
+          </button>
+        )}
+      </div>
+      {aberta && (
+        <div className={styles.textoCompleto}>{detalhe?.texto_md ?? 'Carregando...'}</div>
+      )}
+      {anexosAbertos && (
+        <div className={styles.anexosLista}>
+          {anexos.length === 0 ? (
+            <p style={{ fontSize: 12, color: 'var(--gray-mid)' }}>Carregando...</p>
+          ) : (
+            anexos.map((a) => <PecaCard key={a.id} peca={a} arestasPorOrigem={arestasPorOrigem} nosPorId={nosPorId} />)
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AbaPecas({ casoId, arestasPorOrigem, nosPorId }: { casoId: string; arestasPorOrigem: ArestasMap; nosPorId: NosMap }) {
+  const [q, setQ] = useState('')
+  const [tipo, setTipo] = useState('')
+  const [dataInicio, setDataInicio] = useState('')
+  const [dataFim, setDataFim] = useState('')
+
+  const { data: pecas = [], isLoading } = useQuery({
+    queryKey: ['autos-ia', 'pecas', casoId, q, tipo, dataInicio, dataFim],
+    queryFn: () => autosIa.listarPecas(casoId, {
+      q: q || undefined,
+      tipo: tipo || undefined,
+      data_inicio: dataInicio || undefined,
+      data_fim: dataFim || undefined,
+    }),
+  })
+
+  return (
+    <div>
+      <div className={styles.filtrosRow}>
+        <div className={styles.campo}>
+          <input
+            className={pageStyles.input}
+            placeholder="Buscar por tema (ex.: prescrição, honorários...)"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+        </div>
+        <div style={{ width: 160 }}>
+          <select className={pageStyles.input} value={tipo} onChange={(e) => setTipo(e.target.value)}>
+            <option value="">Todos os tipos</option>
+            {TIPOS_PECA.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+          </select>
+        </div>
+        <div style={{ width: 150 }}>
+          <input className={pageStyles.input} type="date" value={dataInicio} onChange={(e) => setDataInicio(e.target.value)} />
+        </div>
+        <div style={{ width: 150 }}>
+          <input className={pageStyles.input} type="date" value={dataFim} onChange={(e) => setDataFim(e.target.value)} />
+        </div>
+        <a
+          className={pageStyles.btnSmall}
+          style={{ whiteSpace: 'nowrap' }}
+          href={autosIa.urlDownloadPecas(casoId, { tipo: tipo || undefined })}
+          target="_blank"
+          rel="noreferrer"
+        >
+          ⬇ Baixar peças em PDF (sem anexos)
+        </a>
+      </div>
+
+      {isLoading ? (
+        <p className={pageStyles.empty}>Carregando...</p>
+      ) : pecas.length === 0 ? (
+        <p className={pageStyles.empty}>Nenhuma peça encontrada.</p>
+      ) : (
+        pecas.map((p) => (
+          <PecaCard key={p.id} peca={p} arestasPorOrigem={arestasPorOrigem} nosPorId={nosPorId} />
+        ))
+      )}
+    </div>
+  )
+}
+
+// ── Timeline ─────────────────────────────────────────────────────────────
+
+function AbaTimeline({ casoId, arestasPorOrigem, nosPorId }: { casoId: string; arestasPorOrigem: ArestasMap; nosPorId: NosMap }) {
+  const { data: pecas = [], isLoading } = useQuery({
+    queryKey: ['autos-ia', 'pecas', casoId, 'timeline'],
+    queryFn: () => autosIa.listarPecas(casoId, {}),
+  })
+
+  const grupos = useMemo(() => {
+    const comData = pecas.filter((p) => p.data_peca).sort((a, b) => (a.data_peca! < b.data_peca! ? -1 : 1))
+    const semData = pecas.filter((p) => !p.data_peca)
+    const mapa = new Map<string, Peca[]>()
+    comData.forEach((p) => {
+      const chave = p.data_peca!
+      mapa.set(chave, [...(mapa.get(chave) ?? []), p])
+    })
+    const entradas: [string, Peca[]][] = Array.from(mapa.entries())
+    if (semData.length > 0) entradas.push(['Sem data identificada', semData])
+    return entradas
+  }, [pecas])
+
+  if (isLoading) return <p className={pageStyles.empty}>Carregando...</p>
+  if (pecas.length === 0) return <p className={pageStyles.empty}>Nenhuma peça indexada ainda.</p>
+
+  return (
+    <div>
+      {grupos.map(([data, itens]) => (
+        <div key={data} className={styles.timelineGrupo}>
+          <div className={styles.timelineData}>
+            {data === 'Sem data identificada' ? data : formatarData(data)}
+          </div>
+          <div className={styles.timelineItens}>
+            {itens.map((p) => (
+              <PecaCard key={p.id} peca={p} arestasPorOrigem={arestasPorOrigem} nosPorId={nosPorId} />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Grafo ────────────────────────────────────────────────────────────────
+
+function AbaGrafo({ casoId }: { casoId: string }) {
+  const { data: grafo, isLoading } = useQuery({
+    queryKey: ['autos-ia', 'grafo', casoId],
+    queryFn: () => autosIa.obterGrafo(casoId),
+  })
+
+  const incomingCount = useMemo(() => {
+    const mapa = new Map<string, number>()
+    grafo?.arestas.forEach((a) => {
+      if (a.peca_destino_id) mapa.set(a.peca_destino_id, (mapa.get(a.peca_destino_id) ?? 0) + 1)
+    })
+    return mapa
+  }, [grafo])
+
+  const arestasPorOrigem = useMemo(() => {
+    const mapa = new Map<string, NonNullable<typeof grafo>['arestas']>()
+    grafo?.arestas.forEach((a) => {
+      const lista = mapa.get(a.peca_origem_id) ?? []
+      lista.push(a)
+      mapa.set(a.peca_origem_id, lista)
+    })
+    return mapa
+  }, [grafo])
+
+  const nosPorId = useMemo(() => {
+    const mapa = new Map<string, NonNullable<typeof grafo>['nos'][number]>()
+    grafo?.nos.forEach((n) => mapa.set(n.id, n))
+    return mapa
+  }, [grafo])
+
+  if (isLoading) return <p className={pageStyles.empty}>Carregando...</p>
+  if (!grafo || grafo.nos.length === 0) return <p className={pageStyles.empty}>Nenhuma peça indexada ainda.</p>
+
+  return (
+    <div>
+      <p style={{ fontSize: 12.5, color: 'var(--gray-mid)', marginBottom: 16 }}>
+        Passe o mouse sobre um ID mencionado para ver o resumo e as palavras-chave da peça
+        referenciada, sem precisar navegar até ela.
+      </p>
+      {grafo.nos.map((no) => {
+        const arestas = arestasPorOrigem.get(no.id) ?? []
+        const entrada = incomingCount.get(no.id) ?? 0
+        return (
+          <div key={no.id} className={styles.grafoNodeCard}>
+            <span className={styles.tipoBadge}>{no.tipo}</span>
+            <div className={styles.pecaTitulo}>{no.titulo}</div>
+            <div className={styles.pecaMeta}>
+              <span>págs. {no.pagina_inicio}-{no.pagina_fim}</span>
+              {no.id_processual && <span>ID {no.id_processual}</span>}
+              {no.data_peca && <span>{formatarData(no.data_peca)}</span>}
+              {entrada > 0 && (
+                <span className={styles.incomingBadge}>referenciada por {entrada} peça{entrada > 1 ? 's' : ''}</span>
+              )}
+            </div>
+            {no.resumo && <div className={styles.pecaResumo}>{no.resumo}</div>}
+            {arestas.length > 0 && (
+              <>
+                <div className={styles.grafoSecao}>Menciona</div>
+                <div className={styles.chipsRow}>
+                  {arestas.map((a) => (
+                    <ReferenciaHover
+                      key={a.id}
+                      idMencionado={a.id_mencionado}
+                      no={a.peca_destino_id ? nosPorId.get(a.peca_destino_id) : undefined}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── FAQ ──────────────────────────────────────────────────────────────────
+
+function AbaFaq({ casoId, nosPorId }: { casoId: string; nosPorId: NosMap }) {
+  const qc = useQueryClient()
+  const [pergunta, setPergunta] = useState('')
+
+  const { data: perguntas = [] } = useQuery({
+    queryKey: ['autos-ia', 'faq', casoId],
+    queryFn: () => autosIa.listarFaq(casoId),
+  })
+
+  const perguntar = useMutation({
+    mutationFn: () => autosIa.perguntar(casoId, pergunta),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'faq', casoId] })
+      setPergunta('')
+    },
+  })
+
+  const deletar = useMutation({
+    mutationFn: (id: string) => autosIa.deletarPergunta(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'faq', casoId] }),
+  })
+
+  const reprocessar = useMutation({
+    mutationFn: (id: string) => autosIa.reprocessarPergunta(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'faq', casoId] }),
+  })
+
+  return (
+    <div>
+      <form
+        className={styles.faqForm}
+        onSubmit={(e) => { e.preventDefault(); if (pergunta.trim()) perguntar.mutate() }}
+      >
+        <input
+          className={pageStyles.input}
+          placeholder="Pergunte algo sobre este processo (ex.: qual foi a última decisão sobre honorários?)"
+          value={pergunta}
+          onChange={(e) => setPergunta(e.target.value)}
+        />
+        <button className={pageStyles.btnPrimary} disabled={perguntar.isPending || !pergunta.trim()}>
+          {perguntar.isPending ? 'Pensando...' : 'Perguntar'}
+        </button>
+      </form>
+
+      {perguntas.length === 0 ? (
+        <p className={pageStyles.empty}>Nenhuma pergunta ainda.</p>
+      ) : (
+        perguntas.map((f) => (
+          <div key={f.id} className={styles.faqCard}>
+            <div className={styles.faqPergunta}>{f.pergunta}</div>
+            {f.status === 'pendente' && <p style={{ fontSize: 12.5, color: '#a16207' }}>Gerando resposta...</p>}
+            {f.status === 'erro' && <p style={{ fontSize: 12.5, color: '#b91c1c' }}>Erro: {f.erro_mensagem}</p>}
+            {f.resposta && <div className={styles.faqResposta}>{f.resposta}</div>}
+            {f.pecas_relacionadas && f.pecas_relacionadas.length > 0 && (
+              <div className={styles.faqFontes}>
+                {f.pecas_relacionadas.map((id) => {
+                  const no = nosPorId.get(id)
+                  return no ? (
+                    <span key={id} className={styles.keywordChip}>{no.titulo}</span>
+                  ) : null
+                })}
+              </div>
+            )}
+            <div className={styles.faqActions}>
+              <button className={pageStyles.btnSmall} onClick={() => reprocessar.mutate(f.id)}>
+                Regerar resposta
+              </button>
+              <button className={pageStyles.btnDanger} onClick={() => deletar.mutate(f.id)}>
+                Remover
+              </button>
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  )
+}
