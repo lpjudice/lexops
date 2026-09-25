@@ -18,7 +18,7 @@ from app.schemas.autos_ia import (
 from app.services.autos_ia import faq as faq_service
 from app.services.autos_ia.busca import buscar_pecas
 from app.services.autos_ia.ingestao import processar_documento
-from app.services.autos_ia.jusbr_import import sincronizar_caso_jusbr
+from app.services.autos_ia.jusbr_import import importar_apenas_existentes, sincronizar_caso_jusbr
 from app.services.autos_ia.pdf_merge import montar_pdf_pecas
 
 UPLOADS_DIR = Path("/app/uploads/autos_ia")
@@ -182,6 +182,32 @@ def sincronizar_agora(caso_id: uuid.UUID, background_tasks: BackgroundTasks, db:
     db.commit()
     db.refresh(caso)
     background_tasks.add_task(_executar_sync_em_background, caso.id)
+    return caso
+
+
+def _executar_importacao_existentes_em_background(caso_id: uuid.UUID) -> None:
+    db = SessionLocal()
+    try:
+        caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
+        if caso:
+            importar_apenas_existentes(db, caso)
+    finally:
+        db.close()
+
+
+@router.post("/casos/{caso_id}/importar-existentes", response_model=CasoOut, status_code=status.HTTP_202_ACCEPTED)
+def importar_existentes_agora(caso_id: uuid.UUID, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Importa só os documentos que o jus.br já baixou pro processo vinculado —
+    sem chamar jus.br/DataJud ao vivo. Ideal pro backfill inicial de um caso
+    vinculado a um processo que já tem muitos documentos salvos."""
+    caso = _get_caso(db, caso_id)
+    if not caso.processo_id:
+        raise HTTPException(status_code=422, detail="Este caso não está vinculado a um processo.")
+    caso.ultimo_sync_status = "processando"
+    caso.ultimo_sync_mensagem = None
+    db.commit()
+    db.refresh(caso)
+    background_tasks.add_task(_executar_importacao_existentes_em_background, caso.id)
     return caso
 
 

@@ -1,8 +1,8 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { autosIa, TIPOS_PECA } from '../api/autosIa'
-import type { GrafoAresta, GrafoNo, Peca, PecaDetalhe } from '../api/autosIa'
+import type { Documento, GrafoAresta, GrafoNo, Peca, PecaDetalhe } from '../api/autosIa'
 import ReferenciaHover from '../components/autosIa/ReferenciaHover'
 import pageStyles from './Page.module.css'
 import styles from './AutosIACasoPage.module.css'
@@ -50,6 +50,11 @@ export default function AutosIACasoPage() {
 
   const sincronizar = useMutation({
     mutationFn: () => autosIa.sincronizarAgora(casoId!),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] }),
+  })
+
+  const importarExistentes = useMutation({
+    mutationFn: () => autosIa.importarExistentes(casoId!),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] }),
   })
 
@@ -107,9 +112,20 @@ export default function AutosIACasoPage() {
                   >
                     {caso.ultimo_sync_status === 'processando' ? 'Sincronizando...' : 'Sincronizar agora'}
                   </button>
+                  <button
+                    className={pageStyles.btnSmall}
+                    disabled={importarExistentes.isPending || caso.ultimo_sync_status === 'processando'}
+                    onClick={() => importarExistentes.mutate()}
+                    title="Importa só os documentos já baixados pelo jus.br, sem consultar a rede"
+                  >
+                    Importar documentos existentes
+                  </button>
                 </>
               )}
             </div>
+          )}
+          {caso?.ultimo_sync_status === 'processando' && caso.ultimo_sync_mensagem && (
+            <p style={{ fontSize: 12, color: '#1d4ed8', marginTop: 6 }}>{caso.ultimo_sync_mensagem}</p>
           )}
           {caso?.ultimo_sync_status === 'erro' && caso.ultimo_sync_mensagem && (
             <p style={{ fontSize: 12, color: '#b91c1c', marginTop: 6 }}>
@@ -235,35 +251,95 @@ function AbaUpload({ casoId, totalPaginas, vinculadoAProcesso }: { casoId: strin
               <tr>
                 <th>Arquivo</th>
                 <th>Páginas</th>
-                <th>Peças geradas</th>
+                <th>Estimativa</th>
+                <th>Progresso</th>
                 <th>OCR</th>
-                <th>Status</th>
               </tr>
             </thead>
             <tbody>
-              {documentos.map((d) => {
-                const cor = STATUS_DOC_COR[d.status] ?? STATUS_DOC_COR.pendente
-                return (
-                  <tr key={d.id}>
-                    <td>{d.nome_arquivo}</td>
-                    <td>{d.pagina_inicio}–{d.pagina_fim}</td>
-                    <td>{d.pecas_geradas}</td>
-                    <td>{d.paginas_ocr}</td>
-                    <td>
-                      <span className={pageStyles.badge} style={{ background: cor.bg, color: cor.cor }}>
-                        {d.status}
-                      </span>
-                      {d.erro_mensagem && (
-                        <div style={{ fontSize: 11, color: '#b91c1c', marginTop: 4 }}>{d.erro_mensagem}</div>
-                      )}
-                    </td>
-                  </tr>
-                )
-              })}
+              {documentos.map((d) => (
+                <tr key={d.id}>
+                  <td>{d.nome_arquivo}</td>
+                  <td>{d.pagina_inicio}–{d.pagina_fim}</td>
+                  <td style={{ fontSize: 11.5, color: 'var(--gray-mid)' }}>
+                    ~{d.estimativa.pecas_estimadas} peças · ~US$ {d.estimativa.custo_estimado_usd.toFixed(2)} · ~{d.estimativa.tempo_estimado_minutos} min
+                  </td>
+                  <td style={{ minWidth: 200 }}>
+                    <ProgressoDocumento doc={d} />
+                  </td>
+                  <td>{d.paginas_ocr}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
       )}
+    </div>
+  )
+}
+
+const ETAPA_LABEL: Record<string, string> = {
+  extraindo: 'Extraindo texto',
+  segmentando: 'Identificando peças',
+  resumindo: 'Resumindo peças',
+}
+
+/** Relógio que atualiza periodicamente, para recalcular o ETA exibido mesmo
+ * entre um refetch e outro (evita ficar preso ao "agora" do primeiro render). */
+function useNow(intervalMs: number) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs)
+    return () => clearInterval(id)
+  }, [intervalMs])
+  return now
+}
+
+function ProgressoDocumento({ doc }: { doc: Documento }) {
+  const agora = useNow(5000)
+
+  if (doc.status === 'pendente') {
+    return <span style={{ fontSize: 12, color: 'var(--gray-mid)' }}>Na fila...</span>
+  }
+  if (doc.status === 'erro') {
+    return (
+      <div>
+        <span className={pageStyles.badge} style={{ background: STATUS_DOC_COR.erro.bg, color: STATUS_DOC_COR.erro.cor }}>
+          erro
+        </span>
+        {doc.erro_mensagem && <div style={{ fontSize: 11, color: '#b91c1c', marginTop: 4 }}>{doc.erro_mensagem}</div>}
+      </div>
+    )
+  }
+  if (doc.status === 'concluido') {
+    return (
+      <span className={pageStyles.badge} style={{ background: STATUS_DOC_COR.concluido.bg, color: STATUS_DOC_COR.concluido.cor }}>
+        concluído — {doc.pecas_geradas} peça{doc.pecas_geradas !== 1 ? 's' : ''}
+      </span>
+    )
+  }
+
+  const emResumo = doc.etapa === 'resumindo'
+  const total = emResumo ? doc.pecas_geradas : doc.total_paginas
+  const feito = emResumo ? doc.pecas_resumidas : doc.paginas_processadas
+  const pct = total > 0 ? Math.min(100, Math.round((feito / total) * 100)) : 0
+
+  const elapsedMs = agora - new Date(doc.criado_em).getTime()
+  let eta = ''
+  if (pct >= 5) {
+    const restanteMs = Math.max(0, elapsedMs / (pct / 100) - elapsedMs)
+    const min = Math.round(restanteMs / 60000)
+    eta = min < 1 ? '< 1 min restante' : `~${min} min restante`
+  }
+
+  return (
+    <div>
+      <div style={{ fontSize: 11.5, color: 'var(--gray-mid)', marginBottom: 4 }}>
+        {ETAPA_LABEL[doc.etapa ?? ''] ?? 'Processando'} — {feito}/{total}{eta && ` · ${eta}`}
+      </div>
+      <div className={styles.progressBar} style={{ maxWidth: 180 }}>
+        <div className={styles.progressFill} style={{ width: `${pct}%` }} />
+      </div>
     </div>
   )
 }

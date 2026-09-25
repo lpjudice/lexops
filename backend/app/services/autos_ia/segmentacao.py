@@ -12,6 +12,7 @@ marcado como incompleto e vira o "buffer" reaproveitado no próximo lote,
 para não duplicar nem cortar a peça ao meio.
 """
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from app.services.autos_ia.extracao import PaginaExtraida, montar_markdown_com_marcadores
@@ -139,13 +140,17 @@ def segmentar_paginas(
     paginas: list[PaginaExtraida],
     buffer_incompleto: str | None,
     buffer_pagina_inicio: int | None,
+    on_progresso: Callable[[int, int], None] | None = None,
 ) -> tuple[list[PecaSegmentada], str | None, int | None]:
     """Segmenta as páginas em peças, processando em sublotes internos.
+
+    `on_progresso(paginas_feitas, total_paginas)`, quando informado, é chamado após cada sublote.
 
     Retorna (peças completas, novo buffer de texto incompleto ou None, página de início do buffer ou None).
     """
     todas_pecas: list[PecaSegmentada] = []
     paginas_por_numero = {p.numero_global: p.texto for p in paginas}
+    total_paginas = len(paginas)
 
     for inicio in range(0, len(paginas), SUBLOTE_PAGINAS):
         sublote = paginas[inicio: inicio + SUBLOTE_PAGINAS]
@@ -198,5 +203,8 @@ def segmentar_paginas(
                 pagina_fim=p_fim,
                 texto_md=texto,
             ))
+
+        if on_progresso:
+            on_progresso(min(inicio + SUBLOTE_PAGINAS, total_paginas), total_paginas)
 
     return todas_pecas, buffer_incompleto, buffer_pagina_inicio
