@@ -6,14 +6,17 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, get_db
 from app.dependencies import get_current_user
+from app.models.andamento import AndamentoProcesso
 from app.models.autos_ia import AutosIACaso, AutosIADocumento, AutosIAPeca, AutosIAPerguntaFaq, AutosIAReferencia
 from app.schemas.autos_ia import (
-    CasoCreate, CasoOut, CasoResumo, CasoUpdate, DocumentoOut, EstimativaImportacaoOut, FaqPerguntaCreate,
-    FaqPerguntaOut, GrafoAresta, GrafoNo, GrafoOut, PecaDetalheOut, PecaOut,
+    CasoCreate, CasoOut, CasoResumo, CasoUpdate, DocumentoDriveAnexoOut, DocumentoDriveOut, DocumentoOut,
+    EstimativaImportacaoOut, FaqPerguntaCreate, FaqPerguntaOut, GrafoAresta, GrafoNo, GrafoOut, PecaDetalheOut,
+    PecaOut,
 )
 from app.services.autos_ia import faq as faq_service
 from app.services.autos_ia.busca import buscar_pecas
@@ -22,6 +25,7 @@ from app.services.autos_ia.ingestao import processar_documento, reclassificar_ca
 from app.services.autos_ia.jusbr_import import (
     importar_apenas_existentes, listar_andamentos_pendentes, sincronizar_caso_jusbr,
 )
+from app.services.autos_ia.nomes import derivar_nome_indexado
 from app.services.autos_ia.pdf_merge import montar_pdf_pecas
 
 UPLOADS_DIR = Path("/app/uploads/autos_ia")
@@ -375,6 +379,84 @@ def listar_pecas(
         offset=max(0, offset), limite=limit,
     )
     return _com_total_anexos(db, caso_id, pecas)
+
+
+# ── Documentos (listagem compacta com link pro Drive) ───────────────────────
+
+def _montar_documento_drive(peca: AutosIAPeca, andamento: AndamentoProcesso | None) -> DocumentoDriveAnexoOut:
+    arquivo_nome = andamento.arquivo_nome if andamento else None
+    return DocumentoDriveAnexoOut(
+        id=peca.id,
+        tipo=peca.tipo,
+        titulo=peca.titulo,
+        resumo=peca.resumo,
+        autor=peca.autor,
+        data_peca=peca.data_peca,
+        status=peca.status,
+        arquivo_nome=arquivo_nome,
+        arquivo_drive_link=andamento.arquivo_drive_link if andamento else None,
+        nome_indexado=derivar_nome_indexado(arquivo_nome),
+    )
+
+
+@router.get("/casos/{caso_id}/documentos-drive", response_model=list[DocumentoDriveOut])
+def listar_documentos_drive(
+    caso_id: uuid.UUID,
+    q: str | None = None,
+    offset: int = 0,
+    limit: int = 60,
+    db: Session = Depends(get_db),
+):
+    """Listagem compacta das peças/documentos vindos do jus.br/Drive, uma linha
+    por peça-mãe com seus anexos aninhados — pra identificar cada arquivo pelo
+    nome (derivado do próprio nome do arquivo, sem IA) e abrir direto no Drive,
+    sem precisar ler o resumo de cada um."""
+    _get_caso(db, caso_id)
+    limit = max(1, min(limit, 200))
+
+    base = db.query(AutosIAPeca).filter(
+        AutosIAPeca.caso_id == caso_id,
+        AutosIAPeca.peca_pai_id.is_(None),
+        AutosIAPeca.andamento_id.isnot(None),
+    )
+    if q and q.strip():
+        termo = f"%{q.strip()}%"
+        base = base.join(AndamentoProcesso, AutosIAPeca.andamento_id == AndamentoProcesso.id).filter(
+            or_(AutosIAPeca.titulo.ilike(termo), AndamentoProcesso.arquivo_nome.ilike(termo))
+        )
+    principais = (
+        base.order_by(AutosIAPeca.pagina_inicio.desc()).offset(max(0, offset)).limit(limit).all()
+    )
+
+    anexos: list[AutosIAPeca] = []
+    if principais:
+        anexos = (
+            db.query(AutosIAPeca)
+            .filter(AutosIAPeca.peca_pai_id.in_([p.id for p in principais]))
+            .order_by(AutosIAPeca.pagina_inicio.asc())
+            .all()
+        )
+
+    andamento_ids = {p.andamento_id for p in [*principais, *anexos] if p.andamento_id}
+    andamentos_por_id: dict[uuid.UUID, AndamentoProcesso] = {}
+    if andamento_ids:
+        for a in db.query(AndamentoProcesso).filter(AndamentoProcesso.id.in_(andamento_ids)).all():
+            andamentos_por_id[a.id] = a
+
+    anexos_por_pai: dict[uuid.UUID, list[DocumentoDriveAnexoOut]] = {}
+    for a in anexos:
+        anexos_por_pai.setdefault(a.peca_pai_id, []).append(
+            _montar_documento_drive(a, andamentos_por_id.get(a.andamento_id))
+        )
+
+    resultado = []
+    for p in principais:
+        item = DocumentoDriveOut(
+            **_montar_documento_drive(p, andamentos_por_id.get(p.andamento_id)).model_dump(),
+            anexos=anexos_por_pai.get(p.id, []),
+        )
+        resultado.append(item)
+    return resultado
 
 
 @router.get("/pecas/{peca_id}", response_model=PecaDetalheOut)

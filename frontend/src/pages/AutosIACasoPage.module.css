@@ -298,3 +298,113 @@
   gap: 8px;
   margin-top: 12px;
 }
+
+/* ── Documentos (listagem compacta) ── */
+
+.docLegenda {
+  font-size: 12.5px;
+  color: var(--gray-mid);
+  margin-bottom: 14px;
+  max-width: 680px;
+}
+
+.docLista {
+  background: var(--white);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: 6px 14px;
+}
+
+.docItem {
+  border-bottom: 1px solid var(--gray-border);
+}
+
+.docItem:last-child {
+  border-bottom: none;
+}
+
+.docRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0 2px;
+}
+
+.docChevron {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--gray-mid);
+  font-size: 11px;
+  width: 16px;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.docChevronVazio {
+  width: 16px;
+  flex-shrink: 0;
+}
+
+.docNomeIndexado {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dark);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.docData {
+  font-size: 11px;
+  color: var(--gray-mid);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.docAnexosCount {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--teal);
+  background: var(--teal-light);
+  border-radius: 999px;
+  padding: 1px 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.docDriveLink {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--teal);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.docRowSub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding-bottom: 8px;
+}
+
+.docArquivoNome {
+  font-size: 10.5px;
+  color: var(--gray-mid);
+  font-family: monospace;
+}
+
+.docResumo {
+  font-size: 11px;
+  color: #52514e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.docAnexos {
+  padding-bottom: 4px;
+}

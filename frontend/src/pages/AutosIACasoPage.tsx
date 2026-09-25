@@ -2,17 +2,18 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { autosIa, TIPOS_PECA } from '../api/autosIa'
-import type { Caso, Documento, GrafoAresta, GrafoNo, Peca, PecaDetalhe } from '../api/autosIa'
+import type { Caso, Documento, DocumentoDrive, DocumentoDriveAnexo, GrafoAresta, GrafoNo, Peca, PecaDetalhe } from '../api/autosIa'
 import ReferenciaHover from '../components/autosIa/ReferenciaHover'
 import GrafoTimeline from '../components/autosIa/GrafoTimeline'
 import pageStyles from './Page.module.css'
 import styles from './AutosIACasoPage.module.css'
 
-type Aba = 'upload' | 'pecas' | 'timeline' | 'grafo' | 'faq'
+type Aba = 'upload' | 'pecas' | 'documentos' | 'timeline' | 'grafo' | 'faq'
 
 const ABAS: { key: Aba; label: string }[] = [
   { key: 'upload', label: 'Upload & Blocos' },
   { key: 'pecas', label: 'Peças & Busca' },
+  { key: 'documentos', label: 'Documentos' },
   { key: 'timeline', label: 'Linha do Tempo' },
   { key: 'grafo', label: 'Grafo de Referências' },
   { key: 'faq', label: 'Perguntas' },
@@ -268,6 +269,7 @@ export default function AutosIACasoPage() {
       {aba === 'pecas' && (
         <AbaPecas casoId={casoId} arestasPorOrigem={arestasPorOrigem} nosPorId={nosPorId} />
       )}
+      {aba === 'documentos' && <AbaDocumentosDrive casoId={casoId} vinculadoAProcesso={!!caso?.processo_id} />}
       {aba === 'timeline' && (
         <AbaTimeline casoId={casoId} arestasPorOrigem={arestasPorOrigem} nosPorId={nosPorId} />
       )}
@@ -697,6 +699,121 @@ function AbaPecas({ casoId, arestasPorOrigem, nosPorId }: { casoId: string; ares
             </button>
           )}
         </>
+      )}
+    </div>
+  )
+}
+
+// ── Documentos (listagem compacta + link pro Drive) ─────────────────────────
+
+const TAMANHO_PAGINA_DOCUMENTOS = 60
+
+function LinhaDocumento({ doc, nivel }: { doc: DocumentoDrive | DocumentoDriveAnexo; nivel: number }) {
+  const anexos = 'anexos' in doc ? doc.anexos : []
+  const [aberto, setAberto] = useState(false)
+  const temAnexos = anexos.length > 0
+
+  return (
+    <div className={styles.docItem}>
+      <div className={styles.docRow} style={{ paddingLeft: nivel * 22 }}>
+        {temAnexos ? (
+          <button
+            type="button"
+            className={styles.docChevron}
+            onClick={() => setAberto(!aberto)}
+            aria-expanded={aberto}
+            aria-label={aberto ? 'Recolher anexos' : 'Expandir anexos'}
+          >
+            {aberto ? '▾' : '▸'}
+          </button>
+        ) : (
+          <span className={styles.docChevronVazio} />
+        )}
+        <span className={styles.docNomeIndexado}>{doc.nome_indexado || doc.titulo}</span>
+        <span className={styles.tipoBadge}>{doc.tipo}</span>
+        {doc.data_peca && <span className={styles.docData}>{formatarData(doc.data_peca)}</span>}
+        {temAnexos && <span className={styles.docAnexosCount}>{anexos.length} anexo{anexos.length > 1 ? 's' : ''}</span>}
+        {doc.arquivo_drive_link && (
+          <a
+            className={styles.docDriveLink}
+            href={doc.arquivo_drive_link}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => e.stopPropagation()}
+          >
+            Abrir no Drive ↗
+          </a>
+        )}
+      </div>
+      <div className={styles.docRowSub} style={{ paddingLeft: nivel * 22 + 22 }}>
+        {doc.arquivo_nome && <span className={styles.docArquivoNome}>{doc.arquivo_nome}</span>}
+        {doc.resumo && <span className={styles.docResumo}>{doc.resumo}</span>}
+      </div>
+      {temAnexos && aberto && (
+        <div className={styles.docAnexos}>
+          {anexos.map((a) => <LinhaDocumento key={a.id} doc={a} nivel={nivel + 1} />)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AbaDocumentosDrive({ casoId, vinculadoAProcesso }: { casoId: string; vinculadoAProcesso: boolean }) {
+  const [q, setQ] = useState('')
+
+  const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteQuery({
+    queryKey: ['autos-ia', 'documentos-drive', casoId, q],
+    queryFn: ({ pageParam }) => autosIa.listarDocumentosDrive(casoId, {
+      q: q || undefined, offset: pageParam, limit: TAMANHO_PAGINA_DOCUMENTOS,
+    }),
+    initialPageParam: 0,
+    getNextPageParam: (ultimaPagina, todasPaginas) =>
+      ultimaPagina.length === TAMANHO_PAGINA_DOCUMENTOS ? todasPaginas.length * TAMANHO_PAGINA_DOCUMENTOS : undefined,
+    enabled: vinculadoAProcesso,
+  })
+  const documentos = data?.pages.flat() ?? []
+
+  if (!vinculadoAProcesso) {
+    return (
+      <p className={pageStyles.empty}>
+        Esta aba só existe para casos vinculados a um processo (peças vindas do jus.br/Drive).
+      </p>
+    )
+  }
+
+  return (
+    <div>
+      <p className={styles.docLegenda}>
+        Uma linha por peça, com os anexos dela recolhidos por baixo — clique na seta pra abrir.
+        O nome em destaque vem do próprio nome do arquivo (sem IA); o resumo, quando já foi lido, aparece embaixo.
+      </p>
+      <div className={styles.filtrosRow} style={{ marginBottom: 12 }}>
+        <input
+          className={pageStyles.input}
+          placeholder="Buscar por nome da peça ou do arquivo..."
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+      </div>
+
+      {isLoading ? (
+        <p className={pageStyles.empty}>Carregando...</p>
+      ) : documentos.length === 0 ? (
+        <p className={pageStyles.empty}>Nenhum documento encontrado.</p>
+      ) : (
+        <div className={styles.docLista}>
+          {documentos.map((d) => <LinhaDocumento key={d.id} doc={d} nivel={0} />)}
+          {hasNextPage && (
+            <button
+              className={pageStyles.btnSmall}
+              style={{ display: 'block', margin: '16px auto' }}
+              disabled={isFetchingNextPage}
+              onClick={() => fetchNextPage()}
+            >
+              {isFetchingNextPage ? 'Carregando...' : `Carregar mais (${documentos.length} carregado(s))`}
+            </button>
+          )}
+        </div>
       )}
     </div>
   )

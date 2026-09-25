@@ -123,6 +123,29 @@ class PecaDetalheOut(PecaOut):
     texto_md: str
 
 
+class DocumentoDriveAnexoOut(BaseModel):
+    """Uma peça (ou anexo) na listagem compacta de Documentos — nome do arquivo
+    + link pro Drive, sem o texto/keywords completos (a lista pode ter
+    centenas de linhas, e essa tela é pra reconhecer documentos pelo nome/
+    resumo curto, não pra ler cada um)."""
+    id: uuid.UUID
+    tipo: str
+    titulo: str
+    resumo: str | None
+    autor: str | None
+    data_peca: date | None
+    status: str
+    arquivo_nome: str | None
+    arquivo_drive_link: str | None
+    nome_indexado: str | None
+
+    model_config = {"from_attributes": True}
+
+
+class DocumentoDriveOut(DocumentoDriveAnexoOut):
+    anexos: list[DocumentoDriveAnexoOut] = []
+
+
 class GrafoNo(BaseModel):
     id: uuid.UUID
     tipo: str

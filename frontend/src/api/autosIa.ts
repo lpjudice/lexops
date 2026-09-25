@@ -110,6 +110,23 @@ export interface PecaDetalhe extends Peca {
   texto_md: string
 }
 
+export interface DocumentoDriveAnexo {
+  id: string
+  tipo: TipoPeca
+  titulo: string
+  resumo?: string | null
+  autor?: string | null
+  data_peca?: string | null
+  status: StatusPeca
+  arquivo_nome?: string | null
+  arquivo_drive_link?: string | null
+  nome_indexado?: string | null
+}
+
+export interface DocumentoDrive extends DocumentoDriveAnexo {
+  anexos: DocumentoDriveAnexo[]
+}
+
 export interface GrafoNo {
   id: string
   tipo: TipoPeca
@@ -216,6 +233,9 @@ export const autosIa = {
   ) => api.get<Peca[]>(`/autos-ia/casos/${casoId}/pecas`, { params }).then((r) => r.data),
 
   obterPeca: (pecaId: string) => api.get<PecaDetalhe>(`/autos-ia/pecas/${pecaId}`).then((r) => r.data),
+
+  listarDocumentosDrive: (casoId: string, params: { q?: string; offset?: number; limit?: number }) =>
+    api.get<DocumentoDrive[]>(`/autos-ia/casos/${casoId}/documentos-drive`, { params }).then((r) => r.data),
 
   listarAnexos: (pecaId: string) => api.get<Peca[]>(`/autos-ia/pecas/${pecaId}/anexos`).then((r) => r.data),
 
