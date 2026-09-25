@@ -46,9 +46,9 @@ class CasoOut(BaseModel):
 
 
 class CasoResumo(CasoOut):
-    total_pecas: int
-    total_documentos: int
-    total_perguntas_faq: int
+    total_pecas: int = 0
+    total_documentos: int = 0
+    total_perguntas_faq: int = 0
 
 
 class DocumentoOut(BaseModel):
