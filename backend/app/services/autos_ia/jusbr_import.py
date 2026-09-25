@@ -185,7 +185,9 @@ def listar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> list[Andament
     if ja_importados:
         query = query.filter(~AndamentoProcesso.id.in_(ja_importados))
     return query.order_by(
-        AndamentoProcesso.data_andamento.asc().nulls_last(), AndamentoProcesso.created_at.asc()
+        AndamentoProcesso.data_andamento.asc().nulls_last(),
+        AndamentoProcesso.protocolado_em.asc().nulls_last(),
+        AndamentoProcesso.created_at.asc(),
     ).all()
 
 
@@ -284,7 +286,15 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
         nonlocal grupo_atual
         if not grupo_atual:
             return
-        principal = next((m for m in grupo_atual if not m["eh_anexo"]), grupo_atual[0])
+        if chave_atual is not None and chave_atual[0] == "protocolo":
+            # Grupo por hora exata de protocolo: confia na ordem de submissão —
+            # o primeiro documento protocolado na mesma transação é a petição,
+            # os demais são anexos dela (regra do próprio Lucas, mais confiável
+            # aqui que o heurístico de palavra-chave, que serve pro fallback
+            # por descrição).
+            principal = grupo_atual[0]
+        else:
+            principal = next((m for m in grupo_atual if not m["eh_anexo"]), grupo_atual[0])
         peca_principal = _criar_peca(db, caso, principal, peca_pai_id=None)
         criadas.append(peca_principal)
         for membro in grupo_atual:
@@ -322,11 +332,21 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
             "pagina_inicio": pagina_inicio,
             "pagina_fim": pagina_inicio + paginas - 1,
         }
-        # Andamentos vêm ordenados por data/criação, então itens da mesma
-        # movimentação (mesma data+descrição) são sempre contíguos na lista —
-        # dá pra fechar (persistir) um grupo assim que o próximo item muda de
-        # chave, em vez de esperar ler tudo antes de criar qualquer peça.
-        chave = (andamento.data_andamento, (andamento.descricao or "").strip())
+        # Preferência pela hora exata de protocolo (PDPJ/jus.br) pra agrupar
+        # petição+anexos: documentos protocolados juntos, na mesma transação de
+        # juntada, tipicamente vêm com o mesmo timestamp — sem custo de IA e mais
+        # confiável que casar por data+descrição. Andamentos sem essa granularidade
+        # (DataJud, ou sincronizados antes deste campo existir) caem no critério
+        # antigo. Os dois nunca se misturam (chave marcada por tipo), então um
+        # grupo por protocolo nunca "absorve" um grupo por descrição por engano.
+        if andamento.protocolado_em:
+            chave = ("protocolo", andamento.protocolado_em)
+        else:
+            chave = ("descricao", andamento.data_andamento, (andamento.descricao or "").strip())
+        # Andamentos vêm ordenados por data/hora de protocolo/criação, então itens
+        # do mesmo grupo são sempre contíguos na lista — dá pra fechar (persistir)
+        # um grupo assim que o próximo item muda de chave, em vez de esperar ler
+        # tudo antes de criar qualquer peça.
         if chave_atual is not None and chave != chave_atual:
             _flush_grupo()
         chave_atual = chave

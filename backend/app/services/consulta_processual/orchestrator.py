@@ -584,10 +584,14 @@ async def sincronizar_processo_jusbr(
         )
         existente = _buscar_andamento_existente_compativel(db, processo, a.data_andamento, a.descricao, h, doc_id)
         if existente:
-            # Backfill do identificador em linhas antigas, para que os próximos
-            # syncs casem de forma precisa (sem depender da descrição).
+            # Backfill do identificador e da hora de protocolo em linhas antigas,
+            # para que os próximos syncs casem de forma precisa (sem depender da
+            # descrição) e para que andamentos já sincronizados antes do campo
+            # protocolado_em existir ganhem o dado no próximo "sincronizar agora".
             if doc_id and not existente.documento_id:
                 existente.documento_id = doc_id
+            if a.data_hora_protocolo and not existente.protocolado_em:
+                existente.protocolado_em = a.data_hora_protocolo
             precisa_reprocessar = not _arquivo_andamento_util(existente)
             conteudo_doc = None
             mimetype_doc = a.arquivo_mimetype
@@ -678,6 +682,7 @@ async def sincronizar_processo_jusbr(
             hash_unico=h,
             lido=False,
             notificado=False,
+            protocolado_em=a.data_hora_protocolo,
         ))
         if a.documento_detectado and not arquivo_drive_link:
             docs_detectados_sem_arquivo += 1

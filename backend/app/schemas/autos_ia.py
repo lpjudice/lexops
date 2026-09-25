@@ -146,6 +146,10 @@ class DocumentoDriveOut(DocumentoDriveAnexoOut):
     anexos: list[DocumentoDriveAnexoOut] = []
 
 
+class PecaTipoUpdate(BaseModel):
+    tipo: TipoPeca
+
+
 class GrafoNo(BaseModel):
     id: uuid.UUID
     tipo: str

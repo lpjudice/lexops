@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { autosIa, TIPOS_PECA } from '../api/autosIa'
-import type { Caso, Documento, DocumentoDrive, DocumentoDriveAnexo, GrafoAresta, GrafoNo, Peca, PecaDetalhe } from '../api/autosIa'
+import type { Caso, Documento, DocumentoDrive, DocumentoDriveAnexo, GrafoAresta, GrafoNo, Peca, PecaDetalhe, TipoPeca } from '../api/autosIa'
 import ReferenciaHover from '../components/autosIa/ReferenciaHover'
 import GrafoTimeline from '../components/autosIa/GrafoTimeline'
 import pageStyles from './Page.module.css'
@@ -708,14 +708,24 @@ function AbaPecas({ casoId, arestasPorOrigem, nosPorId }: { casoId: string; ares
 
 const TAMANHO_PAGINA_DOCUMENTOS = 60
 
-function LinhaDocumento({ doc, nivel }: { doc: DocumentoDrive | DocumentoDriveAnexo; nivel: number }) {
+function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | DocumentoDriveAnexo; nivel: number; casoId: string }) {
+  const qc = useQueryClient()
   const anexos = 'anexos' in doc ? doc.anexos : []
   const [aberto, setAberto] = useState(false)
   const temAnexos = anexos.length > 0
+  const ehPeticao = doc.tipo === 'peticao'
+
+  const marcarTipo = useMutation({
+    mutationFn: (tipo: TipoPeca) => autosIa.atualizarTipoPeca(doc.id, tipo),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'documentos-drive', casoId] }),
+  })
 
   return (
     <div className={styles.docItem}>
-      <div className={styles.docRow} style={{ paddingLeft: nivel * 22 }}>
+      <div
+        className={`${styles.docRow} ${ehPeticao ? styles.docRowPeticao : ''}`}
+        style={{ paddingLeft: nivel * 22 }}
+      >
         {temAnexos ? (
           <button
             type="button"
@@ -729,20 +739,37 @@ function LinhaDocumento({ doc, nivel }: { doc: DocumentoDrive | DocumentoDriveAn
         ) : (
           <span className={styles.docChevronVazio} />
         )}
-        <span className={styles.docNomeIndexado}>{doc.nome_indexado || doc.titulo}</span>
-        <span className={styles.tipoBadge}>{doc.tipo}</span>
-        {doc.data_peca && <span className={styles.docData}>{formatarData(doc.data_peca)}</span>}
-        {temAnexos && <span className={styles.docAnexosCount}>{anexos.length} anexo{anexos.length > 1 ? 's' : ''}</span>}
-        {doc.arquivo_drive_link && (
+        <span className={styles.docData}>{doc.data_peca ? formatarData(doc.data_peca) : '—'}</span>
+        {doc.arquivo_drive_link ? (
           <a
-            className={styles.docDriveLink}
+            className={styles.docDriveIcone}
             href={doc.arquivo_drive_link}
             target="_blank"
             rel="noreferrer"
             onClick={(e) => e.stopPropagation()}
+            title="Abrir no Drive"
+            aria-label="Abrir no Drive"
           >
-            Abrir no Drive ↗
+            ↗
           </a>
+        ) : (
+          <span className={styles.docDriveIcone} />
+        )}
+        <span className={`${styles.docNomeIndexado} ${ehPeticao ? styles.docNomeIndexadoPeticao : ''}`}>
+          {doc.nome_indexado || doc.titulo}
+        </span>
+        <span className={styles.tipoBadge}>{doc.tipo}</span>
+        {temAnexos && <span className={styles.docAnexosCount}>{anexos.length} anexo{anexos.length > 1 ? 's' : ''}</span>}
+        {nivel === 0 && (
+          <button
+            type="button"
+            className={styles.docTogglePeticao}
+            disabled={marcarTipo.isPending}
+            onClick={() => marcarTipo.mutate(ehPeticao ? 'documento' : 'peticao')}
+            title={ehPeticao ? 'Desmarcar como petição' : 'Marcar como petição'}
+          >
+            {ehPeticao ? 'Desmarcar petição' : 'Marcar petição'}
+          </button>
         )}
       </div>
       <div className={styles.docRowSub} style={{ paddingLeft: nivel * 22 + 22 }}>
@@ -751,7 +778,7 @@ function LinhaDocumento({ doc, nivel }: { doc: DocumentoDrive | DocumentoDriveAn
       </div>
       {temAnexos && aberto && (
         <div className={styles.docAnexos}>
-          {anexos.map((a) => <LinhaDocumento key={a.id} doc={a} nivel={nivel + 1} />)}
+          {anexos.map((a) => <LinhaDocumento key={a.id} doc={a} nivel={nivel + 1} casoId={casoId} />)}
         </div>
       )}
     </div>
@@ -802,7 +829,7 @@ function AbaDocumentosDrive({ casoId, vinculadoAProcesso }: { casoId: string; vi
         <p className={pageStyles.empty}>Nenhum documento encontrado.</p>
       ) : (
         <div className={styles.docLista}>
-          {documentos.map((d) => <LinhaDocumento key={d.id} doc={d} nivel={0} />)}
+          {documentos.map((d) => <LinhaDocumento key={d.id} doc={d} nivel={0} casoId={casoId} />)}
           {hasNextPage && (
             <button
               className={pageStyles.btnSmall}

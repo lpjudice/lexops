@@ -357,11 +357,26 @@
   min-width: 0;
 }
 
+/* Mesmo azul do tipo "peticao" no grafo visual (GrafoTimeline) — paleta
+   categórica validada, pra manter a mesma identidade de cor nas duas telas. */
+.docNomeIndexadoPeticao {
+  color: #2a78d6;
+}
+
+.docRowPeticao {
+  background: #eaf2fb;
+  border-radius: 8px;
+  margin: 0 -8px;
+  padding-left: 8px !important;
+  padding-right: 8px;
+}
+
 .docData {
   font-size: 11px;
   color: var(--gray-mid);
   white-space: nowrap;
   flex-shrink: 0;
+  width: 66px;
 }
 
 .docAnexosCount {
@@ -375,12 +390,32 @@
   flex-shrink: 0;
 }
 
-.docDriveLink {
-  font-size: 11px;
-  font-weight: 600;
+.docDriveIcone {
+  font-size: 13px;
+  font-weight: 700;
   color: var(--teal);
+  flex-shrink: 0;
+  width: 16px;
+  text-align: center;
+}
+
+.docTogglePeticao {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--gray-mid);
+  background: none;
+  border: 1px solid var(--gray-border);
+  border-radius: 999px;
+  padding: 2px 9px;
   white-space: nowrap;
   flex-shrink: 0;
+  cursor: pointer;
+  font-family: 'Archivo', sans-serif;
+}
+
+.docTogglePeticao:hover {
+  border-color: var(--teal);
+  color: var(--teal);
 }
 
 .docRowSub {

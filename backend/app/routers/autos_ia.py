@@ -16,7 +16,7 @@ from app.models.autos_ia import AutosIACaso, AutosIADocumento, AutosIAPeca, Auto
 from app.schemas.autos_ia import (
     CasoCreate, CasoOut, CasoResumo, CasoUpdate, DocumentoDriveAnexoOut, DocumentoDriveOut, DocumentoOut,
     EstimativaImportacaoOut, FaqPerguntaCreate, FaqPerguntaOut, GrafoAresta, GrafoNo, GrafoOut, PecaDetalheOut,
-    PecaOut,
+    PecaOut, PecaTipoUpdate,
 )
 from app.services.autos_ia import faq as faq_service
 from app.services.autos_ia.busca import buscar_pecas
@@ -464,6 +464,20 @@ def obter_peca(peca_id: uuid.UUID, db: Session = Depends(get_db)):
     peca = db.query(AutosIAPeca).filter(AutosIAPeca.id == peca_id).first()
     if not peca:
         raise HTTPException(status_code=404, detail="Peça não encontrada")
+    return peca
+
+
+@router.patch("/pecas/{peca_id}/tipo", response_model=PecaOut)
+def atualizar_tipo_peca(peca_id: uuid.UUID, data: PecaTipoUpdate, db: Session = Depends(get_db)):
+    """Override manual do tipo de uma peça — usado na aba Documentos pra marcar/
+    desmarcar uma linha como petição quando a classificação automática (IA ou
+    agrupamento por hora de protocolo) erra."""
+    peca = db.query(AutosIAPeca).filter(AutosIAPeca.id == peca_id).first()
+    if not peca:
+        raise HTTPException(status_code=404, detail="Peça não encontrada")
+    peca.tipo = data.tipo
+    db.commit()
+    db.refresh(peca)
     return peca
 
 

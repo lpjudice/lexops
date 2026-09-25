@@ -237,6 +237,9 @@ export const autosIa = {
   listarDocumentosDrive: (casoId: string, params: { q?: string; offset?: number; limit?: number }) =>
     api.get<DocumentoDrive[]>(`/autos-ia/casos/${casoId}/documentos-drive`, { params }).then((r) => r.data),
 
+  atualizarTipoPeca: (pecaId: string, tipo: TipoPeca) =>
+    api.patch<Peca>(`/autos-ia/pecas/${pecaId}/tipo`, { tipo }).then((r) => r.data),
+
   listarAnexos: (pecaId: string) => api.get<Peca[]>(`/autos-ia/pecas/${pecaId}/anexos`).then((r) => r.data),
 
   urlDownloadPecas: (casoId: string, opts: { apenasPrincipais?: boolean; tipo?: string } = {}) => {
