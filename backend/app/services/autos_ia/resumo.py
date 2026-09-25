@@ -2,6 +2,8 @@
 import logging
 from dataclasses import dataclass
 
+from app.services.autos_ia.precos import calcular_custo_usd
+
 logger = logging.getLogger(__name__)
 
 LIMITE_CHARS_TEXTO = 300_000
@@ -47,6 +49,7 @@ class ResumoPeca:
     resumo: str
     keywords: list[str]
     ids_mencionados: list[str]
+    custo_usd: float
 
 
 def resumir_peca(texto_md: str, titulo: str, tipo: str) -> ResumoPeca:
@@ -67,6 +70,7 @@ def resumir_peca(texto_md: str, titulo: str, tipo: str) -> ResumoPeca:
         tool_choice={"type": "tool", "name": "registrar_resumo"},
         messages=[{"role": "user", "content": prompt}],
     )
+    custo_usd = calcular_custo_usd(resp.usage.input_tokens, resp.usage.output_tokens)
     for bloco in resp.content:
         if bloco.type == "tool_use" and bloco.name == "registrar_resumo":
             dados = bloco.input
@@ -74,5 +78,6 @@ def resumir_peca(texto_md: str, titulo: str, tipo: str) -> ResumoPeca:
                 resumo=(dados.get("resumo") or "").strip(),
                 keywords=[k.strip().lower() for k in (dados.get("palavras_chave") or []) if k.strip()][:8],
                 ids_mencionados=[i.strip() for i in (dados.get("ids_mencionados") or []) if i.strip()],
+                custo_usd=custo_usd,
             )
     raise RuntimeError("Claude não devolveu resumo via tool_use")

@@ -39,6 +39,11 @@ class CasoOut(BaseModel):
     ultima_sincronizacao_em: datetime | None
     ultimo_sync_status: str | None
     ultimo_sync_mensagem: str | None
+    sync_etapa: str | None
+    sync_total_itens: int | None
+    sync_itens_processados: int | None
+    sync_iniciado_em: datetime | None
+    custo_usd_total: float
     criado_em: datetime
     atualizado_em: datetime
 
@@ -64,6 +69,7 @@ class DocumentoOut(BaseModel):
     etapa: str | None
     paginas_processadas: int
     pecas_resumidas: int
+    custo_usd: float
     criado_em: datetime
 
     model_config = {"from_attributes": True}
@@ -101,6 +107,7 @@ class PecaOut(BaseModel):
     ids_mencionados: list[str] | None
     status: str
     erro_mensagem: str | None
+    custo_usd: float
     criado_em: datetime
     total_anexos: int = 0
 
@@ -140,6 +147,12 @@ class GrafoAresta(BaseModel):
 class GrafoOut(BaseModel):
     nos: list[GrafoNo]
     arestas: list[GrafoAresta]
+
+
+class EstimativaImportacaoOut(BaseModel):
+    itens_pendentes: int
+    custo_estimado_usd: float
+    tempo_estimado_minutos: float
 
 
 class FaqPerguntaCreate(BaseModel):

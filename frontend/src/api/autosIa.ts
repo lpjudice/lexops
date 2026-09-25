@@ -1,7 +1,7 @@
 import api, { getToken } from './client'
 
 export type StatusCaso = 'ativo' | 'arquivado'
-export type StatusDocumento = 'pendente' | 'processando' | 'concluido' | 'erro'
+export type StatusDocumento = 'pendente' | 'processando' | 'concluido' | 'erro' | 'cancelado'
 export type StatusPeca = 'pendente_resumo' | 'resumida' | 'erro'
 export type StatusFaq = 'pendente' | 'respondida' | 'erro'
 export type TipoPeca =
@@ -18,7 +18,8 @@ export const TIPOS_PECA: { value: TipoPeca; label: string }[] = [
   { value: 'outro', label: 'Outro' },
 ]
 
-export type StatusSync = 'ok' | 'erro' | 'nenhum' | 'processando'
+export type StatusSync = 'ok' | 'erro' | 'nenhum' | 'processando' | 'cancelado'
+export type EtapaSync = 'lendo' | 'resumindo'
 
 export interface Caso {
   id: string
@@ -33,6 +34,11 @@ export interface Caso {
   ultima_sincronizacao_em?: string | null
   ultimo_sync_status?: StatusSync | null
   ultimo_sync_mensagem?: string | null
+  sync_etapa?: EtapaSync | null
+  sync_total_itens?: number | null
+  sync_itens_processados?: number | null
+  sync_iniciado_em?: string | null
+  custo_usd_total: number
   criado_em: string
   atualizado_em: string
 }
@@ -45,6 +51,12 @@ export interface CasoResumo extends Caso {
 
 export interface EstimativaProcessamento {
   pecas_estimadas: number
+  custo_estimado_usd: number
+  tempo_estimado_minutos: number
+}
+
+export interface EstimativaImportacao {
+  itens_pendentes: number
   custo_estimado_usd: number
   tempo_estimado_minutos: number
 }
@@ -63,6 +75,7 @@ export interface Documento {
   etapa?: string | null
   paginas_processadas: number
   pecas_resumidas: number
+  custo_usd: number
   estimativa: EstimativaProcessamento
   criado_em: string
 }
@@ -89,6 +102,7 @@ export interface Peca {
   ids_mencionados?: string[] | null
   status: StatusPeca
   erro_mensagem?: string | null
+  custo_usd: number
   criado_em: string
 }
 
@@ -158,6 +172,12 @@ export const autosIa = {
   importarExistentes: (casoId: string) =>
     api.post<Caso>(`/autos-ia/casos/${casoId}/importar-existentes`).then((r) => r.data),
 
+  estimativaImportacao: (casoId: string) =>
+    api.get<EstimativaImportacao>(`/autos-ia/casos/${casoId}/estimativa-importacao`).then((r) => r.data),
+
+  cancelarSync: (casoId: string) =>
+    api.post<Caso>(`/autos-ia/casos/${casoId}/cancelar-sync`).then((r) => r.data),
+
   enviarBloco: (casoId: string, arquivo: File, paginaInicio: number | null, onProgress?: (pct: number) => void) => {
     const fd = new FormData()
     fd.append('arquivo', arquivo)
@@ -173,6 +193,12 @@ export const autosIa = {
 
   listarDocumentos: (casoId: string) =>
     api.get<Documento[]>(`/autos-ia/casos/${casoId}/documentos`).then((r) => r.data),
+
+  cancelarDocumento: (documentoId: string) =>
+    api.post<Documento>(`/autos-ia/documentos/${documentoId}/cancelar`).then((r) => r.data),
+
+  retomarDocumento: (documentoId: string) =>
+    api.post<Documento>(`/autos-ia/documentos/${documentoId}/retomar`).then((r) => r.data),
 
   listarPecas: (
     casoId: string,

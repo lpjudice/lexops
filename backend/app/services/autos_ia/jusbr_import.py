@@ -10,6 +10,7 @@ resumo/keywords/IDs mencionados usado no fluxo de upload manual.
 """
 import logging
 import unicodedata
+from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -113,7 +114,6 @@ def sincronizar_caso_jusbr(db: Session, caso: AutosIACaso, session_data: dict | 
     rotinas já existentes do orquestrador) e importa os andamentos novos como
     peças. Usada tanto pelo job agendado (3x/dia) quanto pelo botão de
     "sincronizar agora" na tela do caso."""
-    from datetime import datetime, timezone
     from app.models.processo import Processo
     from app.services.consulta_processual.orchestrator import (
         sincronizar_processo,
@@ -134,8 +134,10 @@ def sincronizar_caso_jusbr(db: Session, caso: AutosIACaso, session_data: dict | 
         if session_data:
             asyncio.run(sincronizar_processo_jusbr(processo, db, session_data=session_data))
         novas = importar_andamentos_pendentes(db, caso)
-        caso.ultimo_sync_status = "ok"
-        caso.ultimo_sync_mensagem = f"{novas} peça(s) nova(s) importada(s)."
+        db.refresh(caso)
+        if caso.ultimo_sync_status != "cancelado":
+            caso.ultimo_sync_status = "ok"
+            caso.ultimo_sync_mensagem = f"{novas} peça(s) nova(s) importada(s)."
     except Exception as exc:
         logger.warning("Autos IA: erro ao sincronizar caso %s: %s", caso.id, exc)
         caso.ultimo_sync_status = "erro"
@@ -151,12 +153,12 @@ def importar_apenas_existentes(db: Session, caso: AutosIACaso) -> None:
     (ex.: caso com centenas de documentos já baixados por outra rotina) e no
     botão "Importar documentos existentes", quando não faz sentido esperar uma
     sincronização de rede só pra reler o que já está salvo."""
-    from datetime import datetime, timezone
-
     try:
         novas = importar_andamentos_pendentes(db, caso)
-        caso.ultimo_sync_status = "ok"
-        caso.ultimo_sync_mensagem = f"{novas} peça(s) importada(s) a partir dos documentos já baixados."
+        db.refresh(caso)
+        if caso.ultimo_sync_status != "cancelado":
+            caso.ultimo_sync_status = "ok"
+            caso.ultimo_sync_mensagem = f"{novas} peça(s) importada(s) a partir dos documentos já baixados."
     except Exception as exc:
         logger.warning("Autos IA: erro ao importar existentes do caso %s: %s", caso.id, exc)
         caso.ultimo_sync_status = "erro"
@@ -166,11 +168,12 @@ def importar_apenas_existentes(db: Session, caso: AutosIACaso) -> None:
         db.commit()
 
 
-def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
-    """Importa como peças os andamentos do processo vinculado ainda não trazidos
-    para este caso. Retorna quantas peças novas foram criadas."""
+def listar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> list[AndamentoProcesso]:
+    """Andamentos do processo vinculado ainda não trazidos como peça para este
+    caso — mesma consulta usada pela importação e pela estimativa prévia, pra
+    não haver divergência entre o que se estima e o que de fato é processado."""
     if not caso.processo_id:
-        return 0
+        return []
 
     ja_importados = {
         row[0] for row in db.query(AutosIAPeca.andamento_id)
@@ -181,19 +184,116 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
     query = db.query(AndamentoProcesso).filter(AndamentoProcesso.processo_id == caso.processo_id)
     if ja_importados:
         query = query.filter(~AndamentoProcesso.id.in_(ja_importados))
-    pendentes = query.order_by(
+    return query.order_by(
         AndamentoProcesso.data_andamento.asc().nulls_last(), AndamentoProcesso.created_at.asc()
     ).all()
 
+
+def _cancelar_sync_solicitado(db: Session, caso: AutosIACaso) -> bool:
+    db.refresh(caso)
+    return caso.sync_cancelar
+
+
+def _retomar_pecas_pendentes(db: Session, caso: AutosIACaso) -> int:
+    """Retoma peças já criadas (desta caso, de uma execução anterior cancelada
+    ou que falhou) que ainda não foram resumidas, antes de importar andamentos
+    novos — assim um "importar existentes" depois de um cancelamento primeiro
+    termina o que ficou pra trás em vez de deixar pra sempre como pendente.
+
+    Só peças de origem jus.br/Drive (`andamento_id` preenchido) — peças de um
+    upload manual cancelado têm seu próprio fluxo de retomada, por documento
+    (POST /documentos/{id}/retomar), pra manter os contadores de cada
+    AutosIADocumento consistentes com o que de fato foi resumido."""
+    pendentes = (
+        db.query(AutosIAPeca)
+        .filter(
+            AutosIAPeca.caso_id == caso.id,
+            AutosIAPeca.andamento_id.isnot(None),
+            AutosIAPeca.status.in_(["pendente_resumo", "erro"]),
+        )
+        .all()
+    )
     if not pendentes:
         return 0
 
-    caso.ultimo_sync_status = "processando"
-    caso.ultimo_sync_mensagem = f"Lendo documentos: 0/{len(pendentes)}"
+    caso.sync_etapa = "resumindo"
+    caso.sync_total_itens = len(pendentes)
+    caso.sync_itens_processados = 0
     db.commit()
 
-    # ── Monta os dados de cada andamento (texto, tipo, página) antes de gravar ──
-    itens = []
+    def _progresso(feitas: int) -> None:
+        caso.sync_itens_processados = feitas
+        db.commit()
+
+    def _custo(valor: float) -> None:
+        caso.custo_usd_total = (caso.custo_usd_total or 0) + valor
+        db.commit()
+
+    def _cancelar() -> bool:
+        return _cancelar_sync_solicitado(db, caso)
+
+    resumir_pecas_em_paralelo(db, pendentes, on_progresso=_progresso, on_custo=_custo, deve_cancelar=_cancelar)
+    _resolver_referencias_pendentes(db, caso.id)
+    return len(pendentes)
+
+
+def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
+    """Importa como peças os andamentos do processo vinculado ainda não trazidos
+    para este caso. Lê e cria as peças em grupos pequenos (streaming, não tudo
+    de uma vez no final) para que o grafo/timeline reflitam o progresso real
+    mesmo se a importação for cancelada no meio. Retorna quantas peças novas
+    foram criadas (incluindo as retomadas de uma execução anterior)."""
+    if not caso.processo_id:
+        return 0
+
+    caso.sync_cancelar = False
+    caso.sync_iniciado_em = datetime.now(timezone.utc)
+    db.commit()
+
+    total_retomadas = _retomar_pecas_pendentes(db, caso)
+
+    if _cancelar_sync_solicitado(db, caso):
+        caso.ultimo_sync_status = "cancelado"
+        caso.ultimo_sync_mensagem = f"Cancelado: {total_retomadas} peça(s) retomada(s)."
+        caso.sync_etapa = None
+        caso.sync_total_itens = None
+        caso.sync_itens_processados = None
+        db.commit()
+        return total_retomadas
+
+    pendentes = listar_andamentos_pendentes(db, caso)
+    if not pendentes:
+        caso.sync_etapa = None
+        caso.sync_total_itens = None
+        caso.sync_itens_processados = None
+        db.commit()
+        return total_retomadas
+
+    caso.ultimo_sync_status = "processando"
+    caso.sync_etapa = "lendo"
+    caso.sync_total_itens = len(pendentes)
+    caso.sync_itens_processados = 0
+    db.commit()
+
+    criadas: list[AutosIAPeca] = []
+    grupo_atual: list[dict] = []
+    chave_atual: tuple | None = None
+    cancelado = False
+
+    def _flush_grupo() -> None:
+        nonlocal grupo_atual
+        if not grupo_atual:
+            return
+        principal = next((m for m in grupo_atual if not m["eh_anexo"]), grupo_atual[0])
+        peca_principal = _criar_peca(db, caso, principal, peca_pai_id=None)
+        criadas.append(peca_principal)
+        for membro in grupo_atual:
+            if membro is principal:
+                continue
+            criadas.append(_criar_peca(db, caso, membro, peca_pai_id=peca_principal.id))
+        db.commit()
+        grupo_atual = []
+
     for indice, andamento in enumerate(pendentes, start=1):
         conteudo = None
         texto = andamento.texto_extraido
@@ -207,40 +307,46 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
         if not texto:
             texto = andamento.descricao or ""
 
-        if indice % 5 == 0 or indice == len(pendentes):
-            caso.ultimo_sync_mensagem = f"Lendo documentos: {indice}/{len(pendentes)}"
-            db.commit()
-
         paginas = _contar_paginas(conteudo, andamento.arquivo_nome)
         pagina_inicio = caso.total_paginas + 1
         caso.total_paginas += paginas
 
-        itens.append({
+        item = {
             "andamento": andamento,
             "texto": texto,
             "tipo": _classificar_tipo(andamento),
             "eh_anexo": _eh_provavel_anexo(andamento),
             "pagina_inicio": pagina_inicio,
             "pagina_fim": pagina_inicio + paginas - 1,
-            "grupo": (andamento.data_andamento, (andamento.descricao or "").strip()),
-        })
-    db.commit()
+        }
+        # Andamentos vêm ordenados por data/criação, então itens da mesma
+        # movimentação (mesma data+descrição) são sempre contíguos na lista —
+        # dá pra fechar (persistir) um grupo assim que o próximo item muda de
+        # chave, em vez de esperar ler tudo antes de criar qualquer peça.
+        chave = (andamento.data_andamento, (andamento.descricao or "").strip())
+        if chave_atual is not None and chave != chave_atual:
+            _flush_grupo()
+        chave_atual = chave
+        grupo_atual.append(item)
 
-    # ── Agrupa por movimentação (mesma data + descrição) para achar a peça principal ──
-    grupos: dict[tuple, list[dict]] = {}
-    for item in itens:
-        grupos.setdefault(item["grupo"], []).append(item)
+        caso.sync_itens_processados = indice
+        db.commit()
 
-    criadas: list[AutosIAPeca] = []
-    for membros in grupos.values():
-        principal = next((m for m in membros if not m["eh_anexo"]), membros[0])
-        peca_principal = _criar_peca(db, caso, principal, peca_pai_id=None)
-        criadas.append(peca_principal)
-        for membro in membros:
-            if membro is principal:
-                continue
-            criadas.append(_criar_peca(db, caso, membro, peca_pai_id=peca_principal.id))
-    db.commit()
+        if indice % 5 == 0 or indice == len(pendentes):
+            if _cancelar_sync_solicitado(db, caso):
+                cancelado = True
+                break
+
+    _flush_grupo()  # fecha o grupo em aberto mesmo se cancelou, pra não perder o que já foi lido
+
+    if cancelado:
+        caso.ultimo_sync_status = "cancelado"
+        caso.ultimo_sync_mensagem = f"Cancelado: {len(criadas)} peça(s) lida(s) antes de parar (ainda sem resumo)."
+        caso.sync_etapa = None
+        caso.sync_total_itens = None
+        caso.sync_itens_processados = None
+        db.commit()
+        return len(criadas) + total_retomadas
 
     pecas_curtas = [p for p in criadas if len(p.texto_md) < LIMIAR_CHARS_PARA_RESUMO_IA]
     pecas_para_ia = [p for p in criadas if p not in pecas_curtas]
@@ -250,19 +356,42 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
         peca.keywords = []
         peca.ids_mencionados = []
         peca.status = "resumida"
-    caso.ultimo_sync_mensagem = f"Resumindo peças: 0/{len(pecas_para_ia)}"
+    db.commit()
+
+    caso.sync_etapa = "resumindo"
+    caso.sync_total_itens = len(pecas_para_ia)
+    caso.sync_itens_processados = 0
     db.commit()
 
     def _progresso_resumo(feitas: int) -> None:
-        caso.ultimo_sync_mensagem = f"Resumindo peças: {feitas}/{len(pecas_para_ia)}"
+        caso.sync_itens_processados = feitas
         db.commit()
 
-    resumir_pecas_em_paralelo(db, pecas_para_ia, on_progresso=_progresso_resumo)
+    def _custo_resumo(valor: float) -> None:
+        caso.custo_usd_total = (caso.custo_usd_total or 0) + valor
+        db.commit()
+
+    def _cancelar() -> bool:
+        return _cancelar_sync_solicitado(db, caso)
+
+    resumir_pecas_em_paralelo(
+        db, pecas_para_ia, on_progresso=_progresso_resumo, on_custo=_custo_resumo, deve_cancelar=_cancelar,
+    )
 
     _resolver_referencias_pendentes(db, caso.id)
-    caso.ultimo_sync_mensagem = f"{len(criadas)} peça(s) nova(s) importada(s)."
+
+    total = len(criadas) + total_retomadas
+    if _cancelar_sync_solicitado(db, caso):
+        caso.ultimo_sync_status = "cancelado"
+        caso.ultimo_sync_mensagem = f"Cancelado: {total} peça(s) processada(s) antes de parar."
+    else:
+        caso.ultimo_sync_status = "ok"
+        caso.ultimo_sync_mensagem = f"{total} peça(s) nova(s) importada(s)."
+    caso.sync_etapa = None
+    caso.sync_total_itens = None
+    caso.sync_itens_processados = None
     db.commit()
-    return len(criadas)
+    return total
 
 
 def _criar_peca(db: Session, caso: AutosIACaso, item: dict, peca_pai_id) -> AutosIAPeca:

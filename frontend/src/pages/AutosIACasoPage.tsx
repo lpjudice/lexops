@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { autosIa, TIPOS_PECA } from '../api/autosIa'
-import type { Documento, GrafoAresta, GrafoNo, Peca, PecaDetalhe } from '../api/autosIa'
+import type { Caso, Documento, GrafoAresta, GrafoNo, Peca, PecaDetalhe } from '../api/autosIa'
 import ReferenciaHover from '../components/autosIa/ReferenciaHover'
 import pageStyles from './Page.module.css'
 import styles from './AutosIACasoPage.module.css'
@@ -22,6 +22,7 @@ const STATUS_DOC_COR: Record<string, { bg: string; cor: string }> = {
   processando: { bg: '#dbeafe', cor: '#1d4ed8' },
   concluido: { bg: '#dcfce7', cor: '#15803d' },
   erro: { bg: '#fee2e2', cor: '#b91c1c' },
+  cancelado: { bg: '#f3f4f6', cor: 'var(--gray-mid)' },
 }
 
 function formatarData(d?: string | null) {
@@ -29,15 +30,26 @@ function formatarData(d?: string | null) {
   return new Date(d).toLocaleDateString('pt-BR')
 }
 
+function formatarUsd(v: number) {
+  return `US$ ${v.toFixed(v < 1 ? 3 : 2)}`
+}
+
 const STATUS_SYNC_LABEL: Record<string, string> = {
   ok: 'sincronizado',
   erro: 'falhou',
   nenhum: 'sem novidades',
   processando: 'sincronizando...',
+  cancelado: 'cancelado',
+}
+
+const ETAPA_SYNC_LABEL: Record<string, string> = {
+  lendo: 'Lendo documentos',
+  resumindo: 'Resumindo peças',
 }
 
 export default function AutosIACasoPage() {
   const { casoId } = useParams<{ casoId: string }>()
+  const navigate = useNavigate()
   const qc = useQueryClient()
   const [aba, setAba] = useState<Aba>('upload')
 
@@ -46,6 +58,14 @@ export default function AutosIACasoPage() {
     queryFn: () => autosIa.obterCaso(casoId!),
     enabled: !!casoId,
     refetchInterval: (query) => (query.state.data?.ultimo_sync_status === 'processando' ? 3000 : false),
+  })
+
+  const emProcessamento = caso?.ultimo_sync_status === 'processando'
+
+  const { data: estimativaImportacao } = useQuery({
+    queryKey: ['autos-ia', 'estimativa-importacao', casoId],
+    queryFn: () => autosIa.estimativaImportacao(casoId!),
+    enabled: !!casoId && !!caso?.processo_id && !emProcessamento,
   })
 
   const sincronizar = useMutation({
@@ -57,6 +77,26 @@ export default function AutosIACasoPage() {
     mutationFn: () => autosIa.importarExistentes(casoId!),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] }),
   })
+
+  const cancelarSync = useMutation({
+    mutationFn: () => autosIa.cancelarSync(casoId!),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] }),
+  })
+
+  const deletarCaso = useMutation({
+    mutationFn: () => autosIa.deletarCaso(casoId!),
+    onSuccess: () => navigate('/autos-ia'),
+  })
+
+  function confirmarEDisparar(acao: 'sincronizar' | 'importar') {
+    const est = estimativaImportacao
+    const aviso = est && est.itens_pendentes > 0
+      ? `${est.itens_pendentes} documento(s) pendente(s) · estimativa ~${formatarUsd(est.custo_estimado_usd)} · ~${est.tempo_estimado_minutos} min.\n\nContinuar?`
+      : 'Continuar?'
+    if (!window.confirm(aviso)) return
+    if (acao === 'sincronizar') sincronizar.mutate()
+    else importarExistentes.mutate()
+  }
 
   const { data: grafo } = useQuery({
     queryKey: ['autos-ia', 'grafo', casoId],
@@ -92,6 +132,9 @@ export default function AutosIACasoPage() {
             <div className={styles.headerMeta}>
               {caso.numero_processo && <span>Processo {caso.numero_processo}</span>}
               <span>{caso.total_paginas} páginas indexadas</span>
+              <span title="Custo real acumulado em chamadas de IA (segmentação + resumo) neste caso">
+                {formatarUsd(caso.custo_usd_total)} gastos
+              </span>
               <span className={`${pageStyles.badge} ${pageStyles[`status_${caso.status}`]}`}>{caso.status}</span>
               {caso.tem_peca_pendente_continuacao && (
                 <span className={styles.warningBuffer}>
@@ -105,27 +148,63 @@ export default function AutosIACasoPage() {
                     {caso.ultimo_sync_status && ` · última sync: ${STATUS_SYNC_LABEL[caso.ultimo_sync_status] ?? caso.ultimo_sync_status}`}
                     {caso.ultima_sincronizacao_em && ` (${new Date(caso.ultima_sincronizacao_em).toLocaleString('pt-BR')})`}
                   </span>
-                  <button
-                    className={pageStyles.btnSmall}
-                    disabled={sincronizar.isPending || caso.ultimo_sync_status === 'processando'}
-                    onClick={() => sincronizar.mutate()}
-                  >
-                    {caso.ultimo_sync_status === 'processando' ? 'Sincronizando...' : 'Sincronizar agora'}
-                  </button>
-                  <button
-                    className={pageStyles.btnSmall}
-                    disabled={importarExistentes.isPending || caso.ultimo_sync_status === 'processando'}
-                    onClick={() => importarExistentes.mutate()}
-                    title="Importa só os documentos já baixados pelo jus.br, sem consultar a rede"
-                  >
-                    Importar documentos existentes
-                  </button>
+                  {emProcessamento ? (
+                    <button
+                      className={pageStyles.btnSmall}
+                      disabled={cancelarSync.isPending}
+                      onClick={() => {
+                        if (window.confirm('Cancelar a sincronização em andamento? As peças já lidas/resumidas até agora ficam salvas.')) {
+                          cancelarSync.mutate()
+                        }
+                      }}
+                    >
+                      {cancelarSync.isPending ? 'Cancelando...' : 'Cancelar'}
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        className={pageStyles.btnSmall}
+                        disabled={sincronizar.isPending}
+                        onClick={() => confirmarEDisparar('sincronizar')}
+                      >
+                        Sincronizar agora
+                      </button>
+                      <button
+                        className={pageStyles.btnSmall}
+                        disabled={importarExistentes.isPending}
+                        onClick={() => confirmarEDisparar('importar')}
+                        title="Importa só os documentos já baixados pelo jus.br, sem consultar a rede"
+                      >
+                        Importar documentos existentes
+                      </button>
+                    </>
+                  )}
                 </>
               )}
+              <button
+                className={pageStyles.btnDanger}
+                disabled={deletarCaso.isPending || emProcessamento}
+                title={emProcessamento ? 'Cancele a sincronização em andamento antes de excluir' : undefined}
+                onClick={() => {
+                  if (window.confirm(`Excluir o caso "${caso.nome}"? Apaga todas as peças, o grafo e as perguntas já indexadas — não pode ser desfeito.`)) {
+                    deletarCaso.mutate()
+                  }
+                }}
+              >
+                {deletarCaso.isPending ? 'Excluindo...' : 'Excluir caso'}
+              </button>
             </div>
           )}
-          {caso?.ultimo_sync_status === 'processando' && caso.ultimo_sync_mensagem && (
-            <p style={{ fontSize: 12, color: '#1d4ed8', marginTop: 6 }}>{caso.ultimo_sync_mensagem}</p>
+          {caso?.processo_id && !emProcessamento && estimativaImportacao && estimativaImportacao.itens_pendentes > 0 && (
+            <p style={{ fontSize: 12, color: 'var(--gray-mid)', marginTop: 6 }}>
+              {estimativaImportacao.itens_pendentes} documento(s) do processo ainda não indexado(s) — projeção
+              ~{formatarUsd(estimativaImportacao.custo_estimado_usd)} · ~{estimativaImportacao.tempo_estimado_minutos} min
+              para importar tudo.
+            </p>
+          )}
+          {emProcessamento && <SyncProgress caso={caso!} />}
+          {caso?.ultimo_sync_status === 'cancelado' && caso.ultimo_sync_mensagem && (
+            <p style={{ fontSize: 12, color: '#a16207', marginTop: 6 }}>{caso.ultimo_sync_mensagem}</p>
           )}
           {caso?.ultimo_sync_status === 'erro' && caso.ultimo_sync_mensagem && (
             <p style={{ fontSize: 12, color: '#b91c1c', marginTop: 6 }}>
@@ -179,12 +258,26 @@ function AbaUpload({ casoId, totalPaginas, vinculadoAProcesso }: { casoId: strin
     },
   })
 
+  const invalidarDocumentos = () => {
+    qc.invalidateQueries({ queryKey: ['autos-ia', 'documentos', casoId] })
+    qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] })
+  }
+
+  const cancelarDocumento = useMutation({
+    mutationFn: (documentoId: string) => autosIa.cancelarDocumento(documentoId),
+    onSuccess: invalidarDocumentos,
+  })
+
+  const retomarDocumento = useMutation({
+    mutationFn: (documentoId: string) => autosIa.retomarDocumento(documentoId),
+    onSuccess: invalidarDocumentos,
+  })
+
   const enviar = useMutation({
     mutationFn: (arquivo: File) =>
       autosIa.enviarBloco(casoId, arquivo, paginaInicio ? Number(paginaInicio) : null, setProgresso),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['autos-ia', 'documentos', casoId] })
-      qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] })
+      invalidarDocumentos()
       setProgresso(null)
       setPaginaInicio('')
       if (inputRef.current) inputRef.current.value = ''
@@ -253,7 +346,9 @@ function AbaUpload({ casoId, totalPaginas, vinculadoAProcesso }: { casoId: strin
                 <th>Páginas</th>
                 <th>Estimativa</th>
                 <th>Progresso</th>
+                <th>Custo real</th>
                 <th>OCR</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -267,7 +362,32 @@ function AbaUpload({ casoId, totalPaginas, vinculadoAProcesso }: { casoId: strin
                   <td style={{ minWidth: 200 }}>
                     <ProgressoDocumento doc={d} />
                   </td>
+                  <td style={{ fontSize: 11.5, color: 'var(--gray-mid)' }}>{formatarUsd(d.custo_usd)}</td>
                   <td>{d.paginas_ocr}</td>
+                  <td>
+                    {d.status === 'processando' && (
+                      <button
+                        className={pageStyles.btnSmall}
+                        disabled={cancelarDocumento.isPending}
+                        onClick={() => {
+                          if (window.confirm('Cancelar o processamento deste bloco? As peças já resumidas ficam salvas.')) {
+                            cancelarDocumento.mutate(d.id)
+                          }
+                        }}
+                      >
+                        Cancelar
+                      </button>
+                    )}
+                    {(d.status === 'cancelado' || d.status === 'erro') && (
+                      <button
+                        className={pageStyles.btnSmall}
+                        disabled={retomarDocumento.isPending}
+                        onClick={() => retomarDocumento.mutate(d.id)}
+                      >
+                        Retomar
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -295,6 +415,36 @@ function useNow(intervalMs: number) {
   return now
 }
 
+function SyncProgress({ caso }: { caso: Caso }) {
+  const agora = useNow(5000)
+
+  const total = caso.sync_total_itens ?? 0
+  const feito = caso.sync_itens_processados ?? 0
+  const pct = total > 0 ? Math.min(100, Math.round((feito / total) * 100)) : 0
+
+  let eta = ''
+  if (caso.sync_iniciado_em && pct >= 3) {
+    const elapsedMs = agora - new Date(caso.sync_iniciado_em).getTime()
+    const restanteMs = Math.max(0, elapsedMs / (pct / 100) - elapsedMs)
+    const min = Math.round(restanteMs / 60000)
+    eta = min < 1 ? '< 1 min restante' : `~${min} min restante`
+  }
+
+  return (
+    <div style={{ marginTop: 8, maxWidth: 420 }}>
+      <div style={{ fontSize: 12, color: '#1d4ed8', marginBottom: 4 }}>
+        {ETAPA_SYNC_LABEL[caso.sync_etapa ?? ''] ?? 'Processando'}
+        {total > 0 && ` — ${feito}/${total}`}
+        {eta && ` · ${eta}`}
+        {` · ${formatarUsd(caso.custo_usd_total)} gastos até agora`}
+      </div>
+      <div className={styles.progressBar}>
+        <div className={styles.progressFill} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  )
+}
+
 function ProgressoDocumento({ doc }: { doc: Documento }) {
   const agora = useNow(5000)
 
@@ -315,6 +465,13 @@ function ProgressoDocumento({ doc }: { doc: Documento }) {
     return (
       <span className={pageStyles.badge} style={{ background: STATUS_DOC_COR.concluido.bg, color: STATUS_DOC_COR.concluido.cor }}>
         concluído — {doc.pecas_geradas} peça{doc.pecas_geradas !== 1 ? 's' : ''}
+      </span>
+    )
+  }
+  if (doc.status === 'cancelado') {
+    return (
+      <span className={pageStyles.badge} style={{ background: STATUS_DOC_COR.cancelado.bg, color: STATUS_DOC_COR.cancelado.cor }}>
+        cancelado — {doc.pecas_resumidas}/{doc.pecas_geradas || '?'} peça{doc.pecas_geradas !== 1 ? 's' : ''} resumida(s)
       </span>
     )
   }

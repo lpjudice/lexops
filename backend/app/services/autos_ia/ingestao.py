@@ -91,9 +91,17 @@ def resumir_pecas_em_paralelo(
     db: Session,
     pecas: list[AutosIAPeca],
     on_progresso: Callable[[int], None] | None = None,
+    on_custo: Callable[[float], None] | None = None,
+    deve_cancelar: Callable[[], bool] | None = None,
 ) -> None:
     """Resume várias peças concorrentemente (só a chamada à IA é paralela; toda
-    escrita no banco acontece de volta na thread principal, sem sessão concorrente)."""
+    escrita no banco acontece de volta na thread principal, sem sessão concorrente).
+
+    Depois de cada peça concluída, se `deve_cancelar()` retornar True, para de
+    aguardar/submeter novas peças — as que já estavam em voo terminam e têm seu
+    resultado salvo normalmente, mas nenhuma peça nova é iniciada. As peças que
+    nem chegaram a começar ficam com status "pendente_resumo", prontas para
+    serem retomadas depois."""
     if not pecas:
         return
 
@@ -103,6 +111,7 @@ def resumir_pecas_em_paralelo(
             for peca in pecas
         }
         feitas = 0
+        cancelado = False
         for futuro in as_completed(futuros):
             peca = futuros[futuro]
             try:
@@ -110,9 +119,12 @@ def resumir_pecas_em_paralelo(
                 peca.resumo = resultado.resumo
                 peca.keywords = resultado.keywords
                 peca.ids_mencionados = resultado.ids_mencionados
+                peca.custo_usd = resultado.custo_usd
                 peca.status = "resumida"
                 db.commit()
                 _persistir_referencias(db, peca, resultado.ids_mencionados)
+                if on_custo:
+                    on_custo(resultado.custo_usd)
             except Exception as exc:
                 logger.error("Falha ao resumir peça %s: %s", peca.id, exc)
                 peca.status = "erro"
@@ -121,6 +133,9 @@ def resumir_pecas_em_paralelo(
             feitas += 1
             if on_progresso:
                 on_progresso(feitas)
+            if not cancelado and deve_cancelar and deve_cancelar():
+                cancelado = True
+                executor.shutdown(wait=False, cancel_futures=True)
 
 
 def processar_documento(db: Session, documento_id: uuid.UUID) -> None:
@@ -133,6 +148,15 @@ def processar_documento(db: Session, documento_id: uuid.UUID) -> None:
     doc.etapa = "extraindo"
     db.commit()
 
+    def _cancelado() -> bool:
+        db.refresh(doc)
+        return doc.cancelar
+
+    def _marcar_cancelado() -> None:
+        doc.status = "cancelado"
+        doc.etapa = "cancelado"
+        db.commit()
+
     def _progresso_extracao(feitas: int, total: int) -> None:
         if feitas % 10 == 0 or feitas == total:
             doc.paginas_processadas = feitas
@@ -142,18 +166,40 @@ def processar_documento(db: Session, documento_id: uuid.UUID) -> None:
         doc.paginas_processadas = feitas
         db.commit()
 
+    def _custo_segmentacao(valor: float) -> None:
+        doc.custo_usd = (doc.custo_usd or 0) + valor
+        caso.custo_usd_total = (caso.custo_usd_total or 0) + valor
+        db.commit()
+
+    def _progresso_resumo(feitas: int) -> None:
+        doc.pecas_resumidas = feitas
+        db.commit()
+
+    def _custo_resumo(valor: float) -> None:
+        doc.custo_usd = (doc.custo_usd or 0) + valor
+        caso.custo_usd_total = (caso.custo_usd_total or 0) + valor
+        db.commit()
+
     try:
         content = Path(doc.caminho_arquivo).read_bytes()
         paginas = extrair_paginas(content, doc.pagina_inicio, on_progresso=_progresso_extracao)
         doc.paginas_ocr = sum(1 for p in paginas if p.ocr_usado)
+        db.commit()
+
+        if _cancelado():
+            return _marcar_cancelado()
 
         doc.etapa = "segmentando"
         doc.paginas_processadas = 0
         db.commit()
 
         segmentos, novo_buffer, novo_buffer_inicio = segmentar_paginas(
-            paginas, caso.buffer_incompleto, caso.buffer_pagina_inicio, on_progresso=_progresso_segmentacao
+            paginas, caso.buffer_incompleto, caso.buffer_pagina_inicio,
+            on_progresso=_progresso_segmentacao, on_custo=_custo_segmentacao,
         )
+
+        if _cancelado():
+            return _marcar_cancelado()
 
         pecas_criadas: list[AutosIAPeca] = []
         for seg in segmentos:
@@ -172,23 +218,31 @@ def processar_documento(db: Session, documento_id: uuid.UUID) -> None:
             )
             db.add(peca)
             pecas_criadas.append(peca)
+
+        # Atualiza buffer/total_paginas do caso já aqui (não só no final) — assim,
+        # se o cancelamento acontecer durante o resumo (a etapa mais demorada), a
+        # continuação por página do caso não fica pra trás nem se perde.
+        caso.buffer_incompleto = novo_buffer
+        caso.buffer_pagina_inicio = novo_buffer_inicio
+        caso.total_paginas = max(caso.total_paginas, doc.pagina_fim)
         doc.etapa = "resumindo"
         doc.pecas_geradas = len(pecas_criadas)
         doc.pecas_resumidas = 0
         db.commit()
 
-        def _progresso_resumo(feitas: int) -> None:
-            doc.pecas_resumidas = feitas
-            db.commit()
+        if _cancelado():
+            return _marcar_cancelado()
 
-        resumir_pecas_em_paralelo(db, pecas_criadas, on_progresso=_progresso_resumo)
+        resumir_pecas_em_paralelo(
+            db, pecas_criadas, on_progresso=_progresso_resumo, on_custo=_custo_resumo, deve_cancelar=_cancelado,
+        )
 
         _resolver_referencias_pendentes(db, caso.id)
 
-        caso.buffer_incompleto = novo_buffer
-        caso.buffer_pagina_inicio = novo_buffer_inicio
-        caso.total_paginas = max(caso.total_paginas, doc.pagina_fim)
-        db.commit()
+        if _cancelado():
+            # As peças já resumidas continuam salvas; as que não chegaram a
+            # começar ficam "pendente_resumo" para retomar depois.
+            return _marcar_cancelado()
 
         doc.status = "concluido"
         doc.etapa = "concluido"
@@ -198,3 +252,60 @@ def processar_documento(db: Session, documento_id: uuid.UUID) -> None:
         doc.status = "erro"
         doc.erro_mensagem = str(exc)
         db.commit()
+
+
+def retomar_documento(db: Session, documento_id: uuid.UUID) -> None:
+    """Retoma um documento cancelado (ou com erro) antes de terminar. Se o
+    cancelamento aconteceu antes da segmentação (nenhuma peça criada ainda),
+    reprocessa o bloco do zero; se já havia peças criadas, só retoma o resumo
+    das que ainda estão pendentes — não repete extração nem segmentação."""
+    doc = db.query(AutosIADocumento).filter(AutosIADocumento.id == documento_id).first()
+    if not doc:
+        return
+    doc.cancelar = False
+    db.commit()
+
+    if doc.etapa not in ("segmentando", "resumindo", "concluido", "cancelado") or doc.pecas_geradas == 0:
+        processar_documento(db, documento_id)
+        return
+
+    caso = db.query(AutosIACaso).filter(AutosIACaso.id == doc.caso_id).first()
+    pendentes = (
+        db.query(AutosIAPeca)
+        .filter(AutosIAPeca.documento_id == doc.id, AutosIAPeca.status.in_(["pendente_resumo", "erro"]))
+        .all()
+    )
+    if not pendentes:
+        doc.status = "concluido"
+        doc.etapa = "concluido"
+        db.commit()
+        return
+
+    doc.status = "processando"
+    doc.etapa = "resumindo"
+    ja_resumidas = doc.pecas_geradas - len(pendentes)
+    db.commit()
+
+    def _cancelado() -> bool:
+        db.refresh(doc)
+        return doc.cancelar
+
+    def _progresso(feitas: int) -> None:
+        doc.pecas_resumidas = ja_resumidas + feitas
+        db.commit()
+
+    def _custo(valor: float) -> None:
+        doc.custo_usd = (doc.custo_usd or 0) + valor
+        caso.custo_usd_total = (caso.custo_usd_total or 0) + valor
+        db.commit()
+
+    resumir_pecas_em_paralelo(db, pendentes, on_progresso=_progresso, on_custo=_custo, deve_cancelar=_cancelado)
+    _resolver_referencias_pendentes(db, caso.id)
+
+    if _cancelado():
+        doc.status = "cancelado"
+        doc.etapa = "cancelado"
+    else:
+        doc.status = "concluido"
+        doc.etapa = "concluido"
+    db.commit()

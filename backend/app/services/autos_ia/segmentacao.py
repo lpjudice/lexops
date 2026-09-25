@@ -16,6 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from app.services.autos_ia.extracao import PaginaExtraida, montar_markdown_com_marcadores
+from app.services.autos_ia.precos import calcular_custo_usd
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +112,9 @@ def _montar_prompt(pagina_inicio_lote: int, pagina_fim_lote: int, buffer_pagina_
     )
 
 
-def _chamar_llm(markdown: str, pagina_inicio_lote: int, pagina_fim_lote: int, buffer_pagina_inicio: int | None) -> list[dict]:
+def _chamar_llm(
+    markdown: str, pagina_inicio_lote: int, pagina_fim_lote: int, buffer_pagina_inicio: int | None
+) -> tuple[list[dict], float]:
     import anthropic
     client = anthropic.Anthropic()
     prompt = _montar_prompt(pagina_inicio_lote, pagina_fim_lote, buffer_pagina_inicio)
@@ -125,9 +128,10 @@ def _chamar_llm(markdown: str, pagina_inicio_lote: int, pagina_fim_lote: int, bu
             "content": f"{prompt}\n\n---\n\n{markdown}",
         }],
     )
+    custo_usd = calcular_custo_usd(resp.usage.input_tokens, resp.usage.output_tokens)
     for bloco in resp.content:
         if bloco.type == "tool_use" and bloco.name == "registrar_segmentos":
-            return bloco.input.get("segmentos", [])
+            return bloco.input.get("segmentos", []), custo_usd
     raise RuntimeError("Claude não devolveu segmentos via tool_use")
 
 
@@ -141,10 +145,12 @@ def segmentar_paginas(
     buffer_incompleto: str | None,
     buffer_pagina_inicio: int | None,
     on_progresso: Callable[[int, int], None] | None = None,
+    on_custo: Callable[[float], None] | None = None,
 ) -> tuple[list[PecaSegmentada], str | None, int | None]:
     """Segmenta as páginas em peças, processando em sublotes internos.
 
     `on_progresso(paginas_feitas, total_paginas)`, quando informado, é chamado após cada sublote.
+    `on_custo(custo_usd)`, quando informado, é chamado com o custo real de cada chamada à IA.
 
     Retorna (peças completas, novo buffer de texto incompleto ou None, página de início do buffer ou None).
     """
@@ -159,7 +165,9 @@ def segmentar_paginas(
         pagina_fim_lote = sublote[-1].numero_global
 
         try:
-            segmentos = _chamar_llm(markdown, pagina_inicio_lote, pagina_fim_lote, buffer_pagina_inicio)
+            segmentos, custo = _chamar_llm(markdown, pagina_inicio_lote, pagina_fim_lote, buffer_pagina_inicio)
+            if on_custo:
+                on_custo(custo)
         except Exception as exc:
             logger.error("Segmentação falhou no lote %d-%d: %s", pagina_inicio_lote, pagina_fim_lote, exc)
             # Fallback seguro: trata o lote inteiro como uma peça única "outro", sem perder texto.

@@ -12,13 +12,16 @@ from app.database import SessionLocal, get_db
 from app.dependencies import get_current_user
 from app.models.autos_ia import AutosIACaso, AutosIADocumento, AutosIAPeca, AutosIAPerguntaFaq, AutosIAReferencia
 from app.schemas.autos_ia import (
-    CasoCreate, CasoOut, CasoResumo, CasoUpdate, DocumentoOut, FaqPerguntaCreate, FaqPerguntaOut,
-    GrafoAresta, GrafoNo, GrafoOut, PecaDetalheOut, PecaOut,
+    CasoCreate, CasoOut, CasoResumo, CasoUpdate, DocumentoOut, EstimativaImportacaoOut, FaqPerguntaCreate,
+    FaqPerguntaOut, GrafoAresta, GrafoNo, GrafoOut, PecaDetalheOut, PecaOut,
 )
 from app.services.autos_ia import faq as faq_service
 from app.services.autos_ia.busca import buscar_pecas
-from app.services.autos_ia.ingestao import processar_documento
-from app.services.autos_ia.jusbr_import import importar_apenas_existentes, sincronizar_caso_jusbr
+from app.services.autos_ia.estimativa import estimar_importacao_existentes
+from app.services.autos_ia.ingestao import processar_documento, retomar_documento
+from app.services.autos_ia.jusbr_import import (
+    importar_apenas_existentes, listar_andamentos_pendentes, sincronizar_caso_jusbr,
+)
 from app.services.autos_ia.pdf_merge import montar_pdf_pecas
 
 UPLOADS_DIR = Path("/app/uploads/autos_ia")
@@ -88,6 +91,19 @@ def atualizar_caso(caso_id: uuid.UUID, data: CasoUpdate, db: Session = Depends(g
 @router.delete("/casos/{caso_id}", status_code=status.HTTP_204_NO_CONTENT)
 def deletar_caso(caso_id: uuid.UUID, db: Session = Depends(get_db)):
     caso = _get_caso(db, caso_id)
+    if caso.ultimo_sync_status == "processando":
+        raise HTTPException(
+            status_code=422, detail="Cancele a sincronização em andamento antes de excluir o caso."
+        )
+    doc_processando = (
+        db.query(AutosIADocumento)
+        .filter(AutosIADocumento.caso_id == caso_id, AutosIADocumento.status == "processando")
+        .first()
+    )
+    if doc_processando:
+        raise HTTPException(
+            status_code=422, detail="Cancele o processamento do bloco em andamento antes de excluir o caso."
+        )
     db.delete(caso)
     db.commit()
 
@@ -159,6 +175,48 @@ def listar_documentos(caso_id: uuid.UUID, db: Session = Depends(get_db)):
     )
 
 
+def _get_documento(db: Session, documento_id: uuid.UUID) -> AutosIADocumento:
+    doc = db.query(AutosIADocumento).filter(AutosIADocumento.id == documento_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Documento não encontrado")
+    return doc
+
+
+@router.post("/documentos/{documento_id}/cancelar", response_model=DocumentoOut)
+def cancelar_documento(documento_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Pede o cancelamento gracioso do processamento de um bloco em andamento —
+    para assim que checar a flag, preservando as peças já resumidas."""
+    doc = _get_documento(db, documento_id)
+    if doc.status != "processando":
+        raise HTTPException(status_code=422, detail="Este documento não está em processamento.")
+    doc.cancelar = True
+    db.commit()
+    db.refresh(doc)
+    return doc
+
+
+def _executar_retomada_em_background(documento_id: uuid.UUID) -> None:
+    db = SessionLocal()
+    try:
+        retomar_documento(db, documento_id)
+    finally:
+        db.close()
+
+
+@router.post("/documentos/{documento_id}/retomar", response_model=DocumentoOut, status_code=status.HTTP_202_ACCEPTED)
+def retomar_documento_agora(documento_id: uuid.UUID, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Retoma um documento cancelado (ou que ficou com peças em erro): resume só
+    o que ainda falta, sem repetir extração/segmentação já feitas."""
+    doc = _get_documento(db, documento_id)
+    if doc.status not in ("cancelado", "erro"):
+        raise HTTPException(status_code=422, detail="Só é possível retomar um documento cancelado ou com erro.")
+    doc.status = "processando"
+    db.commit()
+    db.refresh(doc)
+    background_tasks.add_task(_executar_retomada_em_background, doc.id)
+    return doc
+
+
 # ── Sincronização com o processo vinculado (jus.br) ─────────────────────────
 
 def _executar_sync_em_background(caso_id: uuid.UUID) -> None:
@@ -208,6 +266,32 @@ def importar_existentes_agora(caso_id: uuid.UUID, background_tasks: BackgroundTa
     db.commit()
     db.refresh(caso)
     background_tasks.add_task(_executar_importacao_existentes_em_background, caso.id)
+    return caso
+
+
+@router.get("/casos/{caso_id}/estimativa-importacao", response_model=EstimativaImportacaoOut)
+def estimar_importacao(caso_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Projeção de custo/tempo pra importar os documentos já baixados que ainda
+    não viraram peça — pra decidir antes de disparar um backfill grande (ex.:
+    um caso com centenas de documentos pendentes)."""
+    caso = _get_caso(db, caso_id)
+    if not caso.processo_id:
+        raise HTTPException(status_code=422, detail="Este caso não está vinculado a um processo.")
+    pendentes = listar_andamentos_pendentes(db, caso)
+    return estimar_importacao_existentes(len(pendentes))
+
+
+@router.post("/casos/{caso_id}/cancelar-sync", response_model=CasoOut)
+def cancelar_sync(caso_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Pede o cancelamento gracioso de uma sincronização/importação em
+    andamento — a rotina para assim que checar a flag, preservando as peças
+    já lidas/resumidas até aquele ponto."""
+    caso = _get_caso(db, caso_id)
+    if caso.ultimo_sync_status != "processando":
+        raise HTTPException(status_code=422, detail="Não há sincronização em andamento para cancelar.")
+    caso.sync_cancelar = True
+    db.commit()
+    db.refresh(caso)
     return caso
 
 

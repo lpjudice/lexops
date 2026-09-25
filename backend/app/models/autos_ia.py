@@ -19,7 +19,7 @@ principal por padrão.
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import ARRAY, Boolean, Date, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import ARRAY, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -51,8 +51,23 @@ class AutosIACaso(Base):
     processo_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("processos.id"))
     sync_jusbr_ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     ultima_sincronizacao_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    ultimo_sync_status: Mapped[str | None] = mapped_column(String(20))  # ok | erro | nenhum
+    ultimo_sync_status: Mapped[str | None] = mapped_column(String(20))  # ok | erro | nenhum | processando | cancelado
     ultimo_sync_mensagem: Mapped[str | None] = mapped_column(Text)
+
+    # Progresso estruturado da sincronização/importação em andamento (jus.br/Drive) —
+    # permite barra de progresso e ETA reais na tela, além do texto em ultimo_sync_mensagem.
+    sync_etapa: Mapped[str | None] = mapped_column(String(20))  # lendo | resumindo
+    sync_total_itens: Mapped[int | None] = mapped_column(Integer)
+    sync_itens_processados: Mapped[int | None] = mapped_column(Integer)
+    sync_iniciado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Marcado por um pedido de cancelamento (endpoint /cancelar-sync); a rotina em andamento
+    # confere esta flag periodicamente e para de forma graciosa, preservando o que já foi lido.
+    sync_cancelar: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    # Custo real acumulado (USD) de todas as chamadas de IA já feitas para este caso —
+    # upload manual e importação jus.br/Drive juntos. Atualizado em tempo real durante o
+    # processamento, a partir do `usage` de cada resposta da API (ver services/autos_ia/precos.py).
+    custo_usd_total: Mapped[float] = mapped_column(Float, nullable=False, default=0)
 
     criado_por_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("usuarios.id"))
 
@@ -61,14 +76,21 @@ class AutosIACaso(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
+    # passive_deletes=True em todas: ao apagar o caso, confiamos no ON DELETE CASCADE do banco
+    # (ver migration) em vez do ORM carregar e apagar cada peça/referência uma a uma — necessário
+    # porque autos_ia_referencias tem FKs cruzadas (origem/destino) entre peças do mesmo caso, e
+    # deixar o Postgres resolver a cascata evita erro de FK por ordem de exclusão.
     documentos: Mapped[list["AutosIADocumento"]] = relationship(
-        back_populates="caso", cascade="all, delete-orphan", order_by="AutosIADocumento.pagina_inicio"
+        back_populates="caso", cascade="all, delete-orphan", passive_deletes=True,
+        order_by="AutosIADocumento.pagina_inicio",
     )
     pecas: Mapped[list["AutosIAPeca"]] = relationship(
-        back_populates="caso", cascade="all, delete-orphan", order_by="AutosIAPeca.pagina_inicio"
+        back_populates="caso", cascade="all, delete-orphan", passive_deletes=True,
+        order_by="AutosIAPeca.pagina_inicio",
     )
     perguntas_faq: Mapped[list["AutosIAPerguntaFaq"]] = relationship(
-        back_populates="caso", cascade="all, delete-orphan", order_by="AutosIAPerguntaFaq.criado_em"
+        back_populates="caso", cascade="all, delete-orphan", passive_deletes=True,
+        order_by="AutosIAPerguntaFaq.criado_em",
     )
 
     @property
@@ -82,7 +104,9 @@ class AutosIADocumento(Base):
     __tablename__ = "autos_ia_documentos"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    caso_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("autos_ia_casos.id"), nullable=False)
+    caso_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("autos_ia_casos.id", ondelete="CASCADE"), nullable=False
+    )
 
     nome_arquivo: Mapped[str] = mapped_column(String(500), nullable=False)
     caminho_arquivo: Mapped[str] = mapped_column(String(1000), nullable=False)
@@ -91,7 +115,7 @@ class AutosIADocumento(Base):
     pagina_fim: Mapped[int] = mapped_column(Integer, nullable=False)
 
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pendente")
-    # pendente | processando | concluido | erro
+    # pendente | processando | concluido | erro | cancelado
     erro_mensagem: Mapped[str | None] = mapped_column(Text)
     pecas_geradas: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     paginas_ocr: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -100,9 +124,15 @@ class AutosIADocumento(Base):
     # permite à tela mostrar "X/Y páginas" e estimar tempo restante em vez de
     # só "processando" sem indicação nenhuma.
     etapa: Mapped[str | None] = mapped_column(String(30))
-    # extraindo | segmentando | resumindo | concluido
+    # extraindo | segmentando | resumindo | concluido | cancelado
     paginas_processadas: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     pecas_resumidas: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # Custo real (USD) já gasto processando este bloco, somado a cada chamada de IA concluída.
+    custo_usd: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    # Marcado por um pedido de cancelamento (endpoint /documentos/{id}/cancelar); checado entre
+    # as etapas e durante o resumo em paralelo, parando sem perder as peças já resumidas.
+    cancelar: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -115,9 +145,11 @@ class AutosIAPeca(Base):
     __tablename__ = "autos_ia_pecas"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    caso_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("autos_ia_casos.id"), nullable=False)
+    caso_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("autos_ia_casos.id", ondelete="CASCADE"), nullable=False
+    )
     documento_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("autos_ia_documentos.id")
+        UUID(as_uuid=True), ForeignKey("autos_ia_documentos.id", ondelete="CASCADE")
     )
     # Origem alternativa: peça importada diretamente de um andamento já baixado
     # pelo jus.br (em vez de fatiada de um bloco de upload manual). Mutuamente
@@ -129,7 +161,7 @@ class AutosIAPeca(Base):
     # ex.: procuração, comprovante, documento pessoal juntados com uma petição.
     # Fica de fora do menu principal de peças por padrão.
     peca_pai_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("autos_ia_pecas.id")
+        UUID(as_uuid=True), ForeignKey("autos_ia_pecas.id", ondelete="CASCADE")
     )
 
     tipo: Mapped[str] = mapped_column(String(50), nullable=False, default="outro")
@@ -150,6 +182,8 @@ class AutosIAPeca(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pendente_resumo")
     # pendente_resumo | resumida | erro
     erro_mensagem: Mapped[str | None] = mapped_column(Text)
+    # Custo real (USD) da chamada de IA que gerou o resumo desta peça.
+    custo_usd: Mapped[float] = mapped_column(Float, nullable=False, default=0)
 
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     atualizado_em: Mapped[datetime] = mapped_column(
@@ -161,6 +195,7 @@ class AutosIAPeca(Base):
         back_populates="peca_origem",
         foreign_keys="AutosIAReferencia.peca_origem_id",
         cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     peca_pai: Mapped["AutosIAPeca | None"] = relationship(remote_side=[id], foreign_keys=[peca_pai_id])
 
@@ -171,12 +206,14 @@ class AutosIAReferencia(Base):
     __tablename__ = "autos_ia_referencias"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    caso_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("autos_ia_casos.id"), nullable=False)
+    caso_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("autos_ia_casos.id", ondelete="CASCADE"), nullable=False
+    )
     peca_origem_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("autos_ia_pecas.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("autos_ia_pecas.id", ondelete="CASCADE"), nullable=False
     )
     peca_destino_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("autos_ia_pecas.id")
+        UUID(as_uuid=True), ForeignKey("autos_ia_pecas.id", ondelete="CASCADE")
     )
 
     id_mencionado: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -196,7 +233,9 @@ class AutosIAPerguntaFaq(Base):
     __tablename__ = "autos_ia_faq"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    caso_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("autos_ia_casos.id"), nullable=False)
+    caso_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("autos_ia_casos.id", ondelete="CASCADE"), nullable=False
+    )
 
     pergunta: Mapped[str] = mapped_column(Text, nullable=False)
     resposta: Mapped[str | None] = mapped_column(Text)
