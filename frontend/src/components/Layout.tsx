@@ -29,6 +29,7 @@ import {
   Landmark,
   Camera,
   Mail,
+  Search,
 } from 'lucide-react'
 import api from '../api/client'
 import { useAuth } from '../contexts/AuthContext'
@@ -101,6 +102,12 @@ const navGroups: NavGroup[] = [
     items: [
       { to: '/contratos', label: 'Contratos & Procurações', Icon: FileText },
       { to: '/organizador', label: 'Folder Organizer', Icon: FolderOpen },
+    ],
+  },
+  {
+    label: 'AUTOS IA',
+    items: [
+      { to: '/autos-ia', label: 'Autos IA', Icon: Search },
     ],
   },
   {

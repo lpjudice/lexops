@@ -39,6 +39,8 @@ import InstagramBrindesPage from './pages/InstagramBrindesPage'
 import PostPublicoPage from './pages/PostPublicoPage'
 import InformativosPage from './pages/InformativosPage'
 import InformativoAssinantesPage from './pages/InformativoAssinantesPage'
+import AutosIAPage from './pages/AutosIAPage'
+import AutosIACasoPage from './pages/AutosIACasoPage'
 
 const queryClient = new QueryClient()
 
@@ -99,6 +101,8 @@ function AppRoutes() {
         <Route path="precedentcheck" element={<PrecedentCheckPage />} />
         <Route path="despacho" element={<DespachoPage />} />
         <Route path="conselho-juridico" element={<ConselhoJuridicoPage />} />
+        <Route path="autos-ia" element={<AutosIAPage />} />
+        <Route path="autos-ia/:casoId" element={<AutosIACasoPage />} />
       </Route>
     </Routes>
   )
