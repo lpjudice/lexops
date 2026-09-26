@@ -489,6 +489,59 @@
   max-width: 100%;
 }
 
+.docEditarBtn {
+  background: none;
+  border: none;
+  color: var(--gray-mid);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+
+.docEditarBtn:hover {
+  color: var(--teal);
+}
+
+.docNomeOriginal {
+  font-size: 10.5px;
+  color: var(--gray-mid);
+  font-style: italic;
+}
+
+.docNotaUsuario {
+  font-size: 11px;
+  color: #8a5a00;
+  background: #fef3d9;
+  border-radius: 6px;
+  padding: 1px 7px;
+}
+
+.docKeywordsUsuario {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.docEditarPainel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 10px;
+  margin-bottom: 6px;
+  background: var(--light);
+  border-radius: 8px;
+}
+
+.docEditarPainel textarea {
+  resize: vertical;
+}
+
+.docEditarAcoes {
+  display: flex;
+  gap: 8px;
+}
+
 .docAnexos {
   padding-bottom: 4px;
 }

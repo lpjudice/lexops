@@ -755,15 +755,34 @@ const TAMANHO_PAGINA_DOCUMENTOS = 60
 function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | DocumentoDriveAnexo; nivel: number; casoId: string }) {
   const qc = useQueryClient()
   const anexos = 'anexos' in doc ? doc.anexos : []
-  const [aberto, setAberto] = useState(false)
+  const [aberto, setAberto] = useState(true)
   const [resumoAberto, setResumoAberto] = useState(false)
+  const [editando, setEditando] = useState(false)
+  const [rascunhoTitulo, setRascunhoTitulo] = useState(doc.titulo_customizado ?? '')
+  const [rascunhoNota, setRascunhoNota] = useState(doc.nota_usuario ?? '')
+  const [rascunhoKeywords, setRascunhoKeywords] = useState((doc.keywords_usuario ?? []).join(', '))
   const temAnexos = anexos.length > 0
   const ehPeticao = doc.tipo === 'peticao'
   const temResumo = !!doc.resumo
+  const nomeOriginal = doc.nome_indexado || doc.titulo
 
   const marcarTipo = useMutation({
     mutationFn: (tipo: TipoPeca) => autosIa.atualizarTipoPeca(doc.id, tipo),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'documentos-drive', casoId] }),
+  })
+
+  const salvarAnotacao = useMutation({
+    mutationFn: () => autosIa.atualizarAnotacaoPeca(doc.id, {
+      titulo_customizado: rascunhoTitulo.trim() || null,
+      nota_usuario: rascunhoNota.trim() || null,
+      keywords_usuario: rascunhoKeywords.trim()
+        ? rascunhoKeywords.split(',').map((k) => k.trim()).filter(Boolean)
+        : null,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'documentos-drive', casoId] })
+      setEditando(false)
+    },
   })
 
   return (
@@ -803,8 +822,17 @@ function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | Document
             <span className={styles.docDriveIcone} />
           )}
           <span className={`${styles.docNomeIndexado} ${ehPeticao ? styles.docNomeIndexadoPeticao : ''}`}>
-            {doc.nome_indexado || doc.titulo}
+            {doc.titulo_customizado || nomeOriginal}
           </span>
+          <button
+            type="button"
+            className={styles.docEditarBtn}
+            onClick={() => setEditando(!editando)}
+            aria-expanded={editando}
+            title="Editar nome, nota e palavras-chave"
+          >
+            ✎
+          </button>
           {ehPeticao && (
             <button
               type="button"
@@ -830,12 +858,55 @@ function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | Document
           </button>
         </div>
         <div className={styles.docRowSub} style={{ paddingLeft: nivel * 22 + 22 }}>
+          {doc.titulo_customizado && <span className={styles.docNomeOriginal}>original: {nomeOriginal}</span>}
           {doc.arquivo_nome && <span className={styles.docArquivoNome}>{doc.arquivo_nome}</span>}
           {doc.resumo && <span className={styles.docResumo}>{doc.resumo}</span>}
+          {doc.nota_usuario && <span className={styles.docNotaUsuario}>{doc.nota_usuario}</span>}
+          {doc.keywords_usuario && doc.keywords_usuario.length > 0 && (
+            <span className={styles.docKeywordsUsuario}>
+              {doc.keywords_usuario.map((k) => <span key={k} className={styles.keywordChip}>{k}</span>)}
+            </span>
+          )}
         </div>
         {resumoAberto && temResumo && (
           <div className={styles.docResumoPopup} style={{ left: nivel * 22 + 22 }} role="dialog">
             {doc.resumo}
+          </div>
+        )}
+        {editando && (
+          <div className={styles.docEditarPainel} style={{ marginLeft: nivel * 22 + 22 }}>
+            <input
+              className={pageStyles.input}
+              placeholder={`Nome customizado (original: ${nomeOriginal})`}
+              value={rascunhoTitulo}
+              onChange={(e) => setRascunhoTitulo(e.target.value)}
+            />
+            <textarea
+              className={pageStyles.input}
+              placeholder="Minha nota sobre este andamento..."
+              rows={2}
+              value={rascunhoNota}
+              onChange={(e) => setRascunhoNota(e.target.value)}
+            />
+            <input
+              className={pageStyles.input}
+              placeholder="Palavras-chave, separadas por vírgula"
+              value={rascunhoKeywords}
+              onChange={(e) => setRascunhoKeywords(e.target.value)}
+            />
+            <div className={styles.docEditarAcoes}>
+              <button
+                type="button"
+                className={pageStyles.btnSmall}
+                disabled={salvarAnotacao.isPending}
+                onClick={() => salvarAnotacao.mutate()}
+              >
+                {salvarAnotacao.isPending ? 'Salvando...' : 'Salvar'}
+              </button>
+              <button type="button" className={styles.docTogglePeticao} onClick={() => setEditando(false)}>
+                Cancelar
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -850,11 +921,12 @@ function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | Document
 
 function AbaDocumentosDrive({ casoId, vinculadoAProcesso }: { casoId: string; vinculadoAProcesso: boolean }) {
   const [q, setQ] = useState('')
+  const [ordem, setOrdem] = useState<'asc' | 'desc'>('desc')
 
   const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteQuery({
-    queryKey: ['autos-ia', 'documentos-drive', casoId, q],
+    queryKey: ['autos-ia', 'documentos-drive', casoId, q, ordem],
     queryFn: ({ pageParam }) => autosIa.listarDocumentosDrive(casoId, {
-      q: q || undefined, offset: pageParam, limit: TAMANHO_PAGINA_DOCUMENTOS,
+      q: q || undefined, ordem, offset: pageParam, limit: TAMANHO_PAGINA_DOCUMENTOS,
     }),
     initialPageParam: 0,
     getNextPageParam: (ultimaPagina, todasPaginas) =>
@@ -880,10 +952,18 @@ function AbaDocumentosDrive({ casoId, vinculadoAProcesso }: { casoId: string; vi
       <div className={styles.filtrosRow} style={{ marginBottom: 12 }}>
         <input
           className={pageStyles.input}
-          placeholder="Buscar por nome da peça ou do arquivo..."
+          placeholder="Buscar por nome, nota ou palavra-chave..."
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
+        <button
+          type="button"
+          className={pageStyles.btnSmall}
+          onClick={() => setOrdem(ordem === 'desc' ? 'asc' : 'desc')}
+          title="Alternar ordem cronológica"
+        >
+          {ordem === 'desc' ? '↓ Mais novas primeiro' : '↑ Mais antigas primeiro'}
+        </button>
       </div>
 
       {isLoading ? (

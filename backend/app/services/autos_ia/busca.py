@@ -11,9 +11,17 @@ TSVECTOR_EXPR = func.to_tsvector(
     "portuguese",
     func.coalesce(AutosIAPeca.titulo, "")
     .concat(" ")
+    .concat(func.coalesce(AutosIAPeca.titulo_customizado, ""))
+    .concat(" ")
     .concat(func.coalesce(AutosIAPeca.resumo, ""))
     .concat(" ")
-    .concat(func.coalesce(AutosIAPeca.texto_md, "")),
+    .concat(func.coalesce(AutosIAPeca.texto_md, ""))
+    .concat(" ")
+    .concat(func.coalesce(func.array_to_string(AutosIAPeca.keywords, " "), ""))
+    .concat(" ")
+    .concat(func.coalesce(func.array_to_string(AutosIAPeca.keywords_usuario, " "), ""))
+    .concat(" ")
+    .concat(func.coalesce(AutosIAPeca.nota_usuario, "")),
 )
 
 

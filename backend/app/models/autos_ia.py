@@ -182,6 +182,13 @@ class AutosIAPeca(Base):
     keywords: Mapped[list[str] | None] = mapped_column(ARRAY(String(100)))
     ids_mencionados: Mapped[list[str] | None] = mapped_column(ARRAY(String(100)))
 
+    # Anotação do próprio Lucas (não gerada por IA) — nota livre + palavras-chave
+    # próprias, e um título que ele escolhe mostrar no lugar do nome_indexado
+    # (o nome original nunca é apagado, só deixa de ser o texto principal).
+    nota_usuario: Mapped[str | None] = mapped_column(Text)
+    keywords_usuario: Mapped[list[str] | None] = mapped_column(ARRAY(String(100)))
+    titulo_customizado: Mapped[str | None] = mapped_column(String(500))
+
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pendente_resumo")
     # pendente_resumo | resumida | erro
     erro_mensagem: Mapped[str | None] = mapped_column(Text)

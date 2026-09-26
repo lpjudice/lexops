@@ -3,10 +3,11 @@ ao restante do gestor. Cada Caso é um processo independente; os PDFs são
 enviados em blocos de páginas, segmentados em peças e resumidos por IA."""
 import uuid
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, get_db
@@ -15,8 +16,8 @@ from app.models.andamento import AndamentoProcesso
 from app.models.autos_ia import AutosIACaso, AutosIADocumento, AutosIAPeca, AutosIAPerguntaFaq, AutosIAReferencia
 from app.schemas.autos_ia import (
     CasoCreate, CasoOut, CasoResumo, CasoUpdate, DocumentoDriveAnexoOut, DocumentoDriveOut, DocumentoOut,
-    EstimativaImportacaoOut, FaqPerguntaCreate, FaqPerguntaOut, GrafoAresta, GrafoNo, GrafoOut, PecaDetalheOut,
-    PecaOut, PecaTipoUpdate,
+    EstimativaImportacaoOut, FaqPerguntaCreate, FaqPerguntaOut, GrafoAresta, GrafoNo, GrafoOut, PecaAnotacaoUpdate,
+    PecaDetalheOut, PecaOut, PecaTipoUpdate,
 )
 from app.services.autos_ia import faq as faq_service
 from app.services.autos_ia.busca import buscar_pecas
@@ -475,6 +476,9 @@ def _montar_documento_drive(peca: AutosIAPeca, andamento: AndamentoProcesso | No
         arquivo_nome=arquivo_nome,
         arquivo_drive_link=andamento.arquivo_drive_link if andamento else None,
         nome_indexado=derivar_nome_indexado(arquivo_nome),
+        nota_usuario=peca.nota_usuario,
+        keywords_usuario=peca.keywords_usuario,
+        titulo_customizado=peca.titulo_customizado,
     )
 
 
@@ -482,6 +486,7 @@ def _montar_documento_drive(peca: AutosIAPeca, andamento: AndamentoProcesso | No
 def listar_documentos_drive(
     caso_id: uuid.UUID,
     q: str | None = None,
+    ordem: Literal["asc", "desc"] = "desc",
     offset: int = 0,
     limit: int = 60,
     db: Session = Depends(get_db),
@@ -489,23 +494,44 @@ def listar_documentos_drive(
     """Listagem compacta das peças/documentos vindos do jus.br/Drive, uma linha
     por peça-mãe com seus anexos aninhados — pra identificar cada arquivo pelo
     nome (derivado do próprio nome do arquivo, sem IA) e abrir direto no Drive,
-    sem precisar ler o resumo de cada um."""
+    sem precisar ler o resumo de cada um. Ordena pela data/hora real do
+    andamento (jus.br) — não por pagina_inicio, que só reflete a ordem em que
+    cada peça foi importada e pode ficar fora de ordem dentro do mesmo dia
+    quando a hora de protocolo chega depois, num "Atualizar metadados"."""
     _get_caso(db, caso_id)
     limit = max(1, min(limit, 200))
 
-    base = db.query(AutosIAPeca).filter(
-        AutosIAPeca.caso_id == caso_id,
-        AutosIAPeca.peca_pai_id.is_(None),
-        AutosIAPeca.andamento_id.isnot(None),
+    base = (
+        db.query(AutosIAPeca)
+        .join(AndamentoProcesso, AutosIAPeca.andamento_id == AndamentoProcesso.id)
+        .filter(
+            AutosIAPeca.caso_id == caso_id,
+            AutosIAPeca.peca_pai_id.is_(None),
+            AutosIAPeca.andamento_id.isnot(None),
+        )
     )
     if q and q.strip():
         termo = f"%{q.strip()}%"
-        base = base.join(AndamentoProcesso, AutosIAPeca.andamento_id == AndamentoProcesso.id).filter(
-            or_(AutosIAPeca.titulo.ilike(termo), AndamentoProcesso.arquivo_nome.ilike(termo))
+        base = base.filter(or_(
+            AutosIAPeca.titulo.ilike(termo),
+            AutosIAPeca.titulo_customizado.ilike(termo),
+            AutosIAPeca.nota_usuario.ilike(termo),
+            func.array_to_string(AutosIAPeca.keywords_usuario, " ").ilike(termo),
+            AndamentoProcesso.arquivo_nome.ilike(termo),
+        ))
+    if ordem == "asc":
+        base = base.order_by(
+            AndamentoProcesso.data_andamento.asc().nulls_last(),
+            AndamentoProcesso.protocolado_em.asc().nulls_last(),
+            AutosIAPeca.pagina_inicio.asc(),
         )
-    principais = (
-        base.order_by(AutosIAPeca.pagina_inicio.desc()).offset(max(0, offset)).limit(limit).all()
-    )
+    else:
+        base = base.order_by(
+            AndamentoProcesso.data_andamento.desc().nulls_last(),
+            AndamentoProcesso.protocolado_em.desc().nulls_last(),
+            AutosIAPeca.pagina_inicio.desc(),
+        )
+    principais = base.offset(max(0, offset)).limit(limit).all()
 
     anexos: list[AutosIAPeca] = []
     if principais:
@@ -555,6 +581,22 @@ def atualizar_tipo_peca(peca_id: uuid.UUID, data: PecaTipoUpdate, db: Session = 
     if not peca:
         raise HTTPException(status_code=404, detail="Peça não encontrada")
     peca.tipo = data.tipo
+    db.commit()
+    db.refresh(peca)
+    return peca
+
+
+@router.patch("/pecas/{peca_id}/anotacao", response_model=PecaOut)
+def atualizar_anotacao_peca(peca_id: uuid.UUID, data: PecaAnotacaoUpdate, db: Session = Depends(get_db)):
+    """Anotação própria do Lucas numa peça — nota livre, palavras-chave e um
+    título customizado (o nome original nunca é sobrescrito, só deixa de ser
+    o texto principal exibido). Só altera os campos enviados; mandar um campo
+    como null o limpa de propósito."""
+    peca = db.query(AutosIAPeca).filter(AutosIAPeca.id == peca_id).first()
+    if not peca:
+        raise HTTPException(status_code=404, detail="Peça não encontrada")
+    for campo, valor in data.model_dump(exclude_unset=True).items():
+        setattr(peca, campo, valor)
     db.commit()
     db.refresh(peca)
     return peca

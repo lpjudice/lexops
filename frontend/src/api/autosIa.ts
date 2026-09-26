@@ -122,6 +122,9 @@ export interface DocumentoDriveAnexo {
   arquivo_nome?: string | null
   arquivo_drive_link?: string | null
   nome_indexado?: string | null
+  nota_usuario?: string | null
+  keywords_usuario?: string[] | null
+  titulo_customizado?: string | null
 }
 
 export interface DocumentoDrive extends DocumentoDriveAnexo {
@@ -241,11 +244,18 @@ export const autosIa = {
 
   obterPeca: (pecaId: string) => api.get<PecaDetalhe>(`/autos-ia/pecas/${pecaId}`).then((r) => r.data),
 
-  listarDocumentosDrive: (casoId: string, params: { q?: string; offset?: number; limit?: number }) =>
-    api.get<DocumentoDrive[]>(`/autos-ia/casos/${casoId}/documentos-drive`, { params }).then((r) => r.data),
+  listarDocumentosDrive: (
+    casoId: string,
+    params: { q?: string; ordem?: 'asc' | 'desc'; offset?: number; limit?: number },
+  ) => api.get<DocumentoDrive[]>(`/autos-ia/casos/${casoId}/documentos-drive`, { params }).then((r) => r.data),
 
   atualizarTipoPeca: (pecaId: string, tipo: TipoPeca) =>
     api.patch<Peca>(`/autos-ia/pecas/${pecaId}/tipo`, { tipo }).then((r) => r.data),
+
+  atualizarAnotacaoPeca: (
+    pecaId: string,
+    data: { nota_usuario?: string | null; keywords_usuario?: string[] | null; titulo_customizado?: string | null },
+  ) => api.patch<Peca>(`/autos-ia/pecas/${pecaId}/anotacao`, data).then((r) => r.data),
 
   listarAnexos: (pecaId: string) => api.get<Peca[]>(`/autos-ia/pecas/${pecaId}/anexos`).then((r) => r.data),
 

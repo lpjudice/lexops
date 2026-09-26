@@ -192,8 +192,12 @@ def reagrupar_pecas_jusbr(db: Session, caso: AutosIACaso) -> int:
     """Reaplica o agrupamento petição/anexo nas peças JÁ IMPORTADAS do jus.br/
     Drive deste caso, preferindo a hora de protocolo quando disponível — sem
     chamar IA nem a rede, só reorganiza peca_pai_id entre peças que já existem
-    (o resumo/tipo/keywords de cada uma não mudam). Retorna quantas peças
-    tiveram o pai reatribuído."""
+    (o resumo/keywords de cada uma não mudam). Também corrige o tipo de
+    qualquer peça marcada "peticao" cujo nome/descrição bata com um sinal de
+    anexo explícito (procuração, comprovante, "Documento de Comprovação"...)
+    pra "documento" — a classificação por conteúdo da IA (rodada uma vez,
+    antes deste sinal existir) pode ter errado nesses casos. Retorna quantas
+    peças tiveram o pai reatribuído ou o tipo corrigido."""
     from datetime import date
 
     pecas = (
@@ -277,6 +281,16 @@ def reagrupar_pecas_jusbr(db: Session, caso: AutosIACaso) -> int:
             if m.peca_pai_id != principal.id:
                 m.peca_pai_id = principal.id
                 reagrupadas += 1
+
+    # Corrige o tipo mesmo fora de um grupo multi-membro (ex.: um "Documento de
+    # Comprovação" protocolado sozinho, sem petição junto no mesmo grupo) —
+    # esse sinal de nome/descrição é forte o bastante pra sobrepor uma
+    # classificação de IA anterior.
+    for p in pecas:
+        a = andamentos.get(p.andamento_id)
+        if a and p.tipo == "peticao" and _eh_provavel_anexo(a):
+            p.tipo = "documento"
+            reagrupadas += 1
 
     db.commit()
     return reagrupadas

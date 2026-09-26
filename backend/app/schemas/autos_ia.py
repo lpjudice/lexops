@@ -139,6 +139,9 @@ class DocumentoDriveAnexoOut(BaseModel):
     arquivo_nome: str | None
     arquivo_drive_link: str | None
     nome_indexado: str | None
+    nota_usuario: str | None
+    keywords_usuario: list[str] | None
+    titulo_customizado: str | None
 
     model_config = {"from_attributes": True}
 
@@ -149,6 +152,14 @@ class DocumentoDriveOut(DocumentoDriveAnexoOut):
 
 class PecaTipoUpdate(BaseModel):
     tipo: TipoPeca
+
+
+class PecaAnotacaoUpdate(BaseModel):
+    """Atualização parcial — só os campos enviados são alterados (permite
+    limpar um campo mandando null explicitamente, sem mexer nos outros)."""
+    nota_usuario: str | None = None
+    keywords_usuario: list[str] | None = None
+    titulo_customizado: str | None = None
 
 
 class GrafoNo(BaseModel):
