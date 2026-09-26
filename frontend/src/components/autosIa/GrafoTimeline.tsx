@@ -70,6 +70,36 @@ export default function GrafoTimeline({ nos, arestas }: Props) {
     return mapa
   }, [arestas])
 
+  const noPorId = useMemo(() => {
+    const mapa = new Map<string, GrafoNo>()
+    nosOrdenados.forEach((n) => mapa.set(n.id, n))
+    return mapa
+  }, [nosOrdenados])
+
+  // Quem esta peça menciona (saída) e quem a menciona (entrada) — pra navegar
+  // a cadeia de referências: clicar num ID mencionado pula pra peça dele.
+  const mencionaPorOrigem = useMemo(() => {
+    const mapa = new Map<string, GrafoAresta[]>()
+    arestas.forEach((a) => {
+      if (!indicePorId.has(a.peca_origem_id)) return
+      const lista = mapa.get(a.peca_origem_id) ?? []
+      lista.push(a)
+      mapa.set(a.peca_origem_id, lista)
+    })
+    return mapa
+  }, [arestas, indicePorId])
+
+  const citadaPorDestino = useMemo(() => {
+    const mapa = new Map<string, GrafoAresta[]>()
+    arestas.forEach((a) => {
+      if (!a.peca_destino_id || !indicePorId.has(a.peca_destino_id)) return
+      const lista = mapa.get(a.peca_destino_id) ?? []
+      lista.push(a)
+      mapa.set(a.peca_destino_id, lista)
+    })
+    return mapa
+  }, [arestas, indicePorId])
+
   const arestasVisiveis = useMemo(() => {
     return arestas
       .filter((a) => a.peca_destino_id && indicePorId.has(a.peca_origem_id) && indicePorId.has(a.peca_destino_id))
@@ -144,6 +174,7 @@ export default function GrafoTimeline({ nos, arestas }: Props) {
                   <span className={styles.dataTxt}>{formatarData(n.data_peca)}</span>
                   <span className={styles.tipoTxt} style={{ color: cor }}>{n.tipo}</span>
                   <span className={styles.tituloTxt}>{n.titulo}</span>
+                  {n.id_processual && <span className={styles.idBadge}>{n.id_processual}</span>}
                   {entradas > 0 && <span className={styles.entradasBadge}>{entradas}×citada</span>}
                 </button>
 
@@ -152,11 +183,52 @@ export default function GrafoTimeline({ nos, arestas }: Props) {
                     <div className={styles.popupTopo}>
                       <span className={styles.popupTipo} style={{ color: cor }}>{n.tipo}</span>
                       {n.autor && <span className={styles.popupAutor}>{n.autor}</span>}
+                      {n.id_processual && <span className={styles.popupId}>{n.id_processual}</span>}
                     </div>
                     <div className={styles.popupResumo}>{resumoCurto(n.resumo)}</div>
                     {n.keywords && n.keywords.length > 0 && (
                       <div className={styles.popupKeywords}>
                         {n.keywords.map((k) => <span key={k}>{k}</span>)}
+                      </div>
+                    )}
+                    {(mencionaPorOrigem.get(n.id) ?? []).length > 0 && (
+                      <div className={styles.popupRefs}>
+                        <span className={styles.popupRefsLabel}>Menciona:</span>
+                        {(mencionaPorOrigem.get(n.id) ?? []).map((a) => {
+                          const alvo = a.peca_destino_id ? noPorId.get(a.peca_destino_id) : undefined
+                          return (
+                            <button
+                              key={a.id}
+                              type="button"
+                              className={alvo ? styles.refChip : styles.refChipVazio}
+                              disabled={!alvo}
+                              onClick={() => alvo && setSelecionado(alvo.id)}
+                              title={alvo ? `Ir para: ${alvo.titulo}` : 'Peça ainda não identificada nos autos'}
+                            >
+                              {a.id_mencionado}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
+                    {(citadaPorDestino.get(n.id) ?? []).length > 0 && (
+                      <div className={styles.popupRefs}>
+                        <span className={styles.popupRefsLabel}>Citada por:</span>
+                        {(citadaPorDestino.get(n.id) ?? []).map((a) => {
+                          const origemNo = noPorId.get(a.peca_origem_id)
+                          if (!origemNo) return null
+                          return (
+                            <button
+                              key={a.id}
+                              type="button"
+                              className={styles.refChip}
+                              onClick={() => setSelecionado(origemNo.id)}
+                              title={`Ir para: ${origemNo.titulo}`}
+                            >
+                              {origemNo.titulo.length > 28 ? `${origemNo.titulo.slice(0, 28)}…` : origemNo.titulo}
+                            </button>
+                          )
+                        })}
                       </div>
                     )}
                   </div>

@@ -754,7 +754,7 @@ function AbaPecas({ casoId, arestasPorOrigem, nosPorId }: { casoId: string; ares
         <div className={styles.campo}>
           <input
             className={pageStyles.input}
-            placeholder="Buscar por tema (ex.: prescrição, honorários...)"
+            placeholder="Buscar por tema, palavra-chave ou ID (ex.: prescrição, honorários, Evento 45...)"
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
@@ -1013,7 +1013,7 @@ function AbaDocumentosDrive({ casoId, vinculadoAProcesso }: { casoId: string; vi
       <div className={styles.filtrosRow} style={{ marginBottom: 12 }}>
         <input
           className={pageStyles.input}
-          placeholder="Buscar por nome, nota ou palavra-chave..."
+          placeholder="Buscar por nome, ID, nota ou palavra-chave..."
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />

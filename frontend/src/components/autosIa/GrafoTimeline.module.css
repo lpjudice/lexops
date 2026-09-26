@@ -118,6 +118,18 @@
   flex: 1;
 }
 
+.idBadge {
+  font-size: 10px;
+  font-weight: 600;
+  font-family: monospace;
+  color: var(--gray-mid);
+  background: var(--light);
+  border-radius: 999px;
+  padding: 1px 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .entradasBadge {
   font-size: 10px;
   font-weight: 600;
@@ -161,6 +173,59 @@
 .popupAutor {
   font-size: 11px;
   color: #b6c2c2;
+}
+
+.popupId {
+  font-size: 10px;
+  font-family: monospace;
+  color: #9aa5a5;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  padding: 1px 8px;
+  margin-left: auto;
+}
+
+.popupRefs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.popupRefsLabel {
+  font-size: 10px;
+  color: #9aa5a5;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-right: 2px;
+}
+
+.refChip {
+  font-size: 10.5px;
+  font-family: monospace;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);
+  border: none;
+  border-radius: 999px;
+  padding: 2px 9px;
+  cursor: pointer;
+  font-family: 'Archivo', monospace;
+}
+
+.refChip:hover {
+  background: rgba(255, 255, 255, 0.26);
+}
+
+.refChipVazio {
+  font-size: 10.5px;
+  font-family: monospace;
+  color: #7c8686;
+  background: none;
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  padding: 1px 8px;
+  cursor: default;
 }
 
 .popupResumo {

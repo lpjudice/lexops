@@ -1,6 +1,7 @@
 """Autos IA — leitura incremental de autos processuais volumosos, em paralelo
 ao restante do gestor. Cada Caso é um processo independente; os PDFs são
 enviados em blocos de páginas, segmentados em peças e resumidos por IA."""
+import logging
 import uuid
 from pathlib import Path
 from typing import Literal
@@ -29,6 +30,8 @@ from app.services.autos_ia.jusbr_import import (
 )
 from app.services.autos_ia.nomes import derivar_nome_indexado
 from app.services.autos_ia.pdf_merge import montar_pdf_pecas
+
+logger = logging.getLogger(__name__)
 
 UPLOADS_DIR = Path("/app/uploads/autos_ia")
 
@@ -240,12 +243,38 @@ def _carregar_sessao_jusbr() -> dict | None:
     return load_session_bot()
 
 
+def _forcar_status_erro(caso_id: uuid.UUID, mensagem: str) -> None:
+    """Última rede de segurança: se a sincronização travar em algo que nem o
+    próprio try/except dela trata (ex.: o pool de conexões do banco esgotado
+    no meio do processo), sem isso o caso ficava preso em "processando" pra
+    sempre — só um redeploy (que reseta tudo no /health de novo) desemperrava.
+    Abre uma sessão NOVA de propósito: a sessão original pode ser a própria
+    quebrada."""
+    db = SessionLocal()
+    try:
+        caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
+        if caso:
+            caso.ultimo_sync_status = "erro"
+            caso.ultimo_sync_mensagem = mensagem[:500]
+            caso.sync_etapa = None
+            caso.sync_total_itens = None
+            caso.sync_itens_processados = None
+            db.commit()
+    except Exception:
+        logger.exception("Autos IA: falha ao registrar erro do caso %s (banco indisponível?)", caso_id)
+    finally:
+        db.close()
+
+
 def _executar_sync_em_background(caso_id: uuid.UUID) -> None:
     db = SessionLocal()
     try:
         caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
         if caso:
             sincronizar_caso_jusbr(db, caso, _carregar_sessao_jusbr())
+    except Exception as exc:
+        logger.exception("Autos IA: sincronização do caso %s travou de forma inesperada", caso_id)
+        _forcar_status_erro(caso_id, f"Interrompida por um erro inesperado: {exc}")
     finally:
         db.close()
 
@@ -269,6 +298,9 @@ def _executar_atualizar_metadados_em_background(caso_id: uuid.UUID) -> None:
         caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
         if caso:
             atualizar_metadados_jusbr(db, caso, _carregar_sessao_jusbr())
+    except Exception as exc:
+        logger.exception("Autos IA: atualizar-metadados do caso %s travou de forma inesperada", caso_id)
+        _forcar_status_erro(caso_id, f"Interrompida por um erro inesperado: {exc}")
     finally:
         db.close()
 
@@ -366,13 +398,22 @@ def estimar_importacao(caso_id: uuid.UUID, db: Session = Depends(get_db)):
 
 @router.post("/casos/{caso_id}/cancelar-sync", response_model=CasoOut)
 def cancelar_sync(caso_id: uuid.UUID, db: Session = Depends(get_db)):
-    """Pede o cancelamento gracioso de uma sincronização/importação em
-    andamento — a rotina para assim que checar a flag, preservando as peças
-    já lidas/resumidas até aquele ponto."""
+    """Cancela a sincronização/importação em andamento. Libera a tela na hora
+    (muda o status já nesta própria requisição) em vez de só pedir e esperar
+    a rotina de fundo perceber — se ela estiver presa numa chamada de IA ou
+    numa conexão de banco lenta, podia nunca chegar a checar a flag, e a tela
+    ficava travada no botão de cancelar até um redeploy. As peças já lidas/
+    resumidas até agora continuam salvas; se a rotina de fundo ainda estiver
+    viva e reagir depois, ela só confirma o mesmo status, sem conflito."""
     caso = _get_caso(db, caso_id)
     if caso.ultimo_sync_status != "processando":
         raise HTTPException(status_code=422, detail="Não há sincronização em andamento para cancelar.")
     caso.sync_cancelar = True
+    caso.ultimo_sync_status = "cancelado"
+    caso.ultimo_sync_mensagem = "Cancelado pelo usuário."
+    caso.sync_etapa = None
+    caso.sync_total_itens = None
+    caso.sync_itens_processados = None
     db.commit()
     db.refresh(caso)
     return caso
@@ -525,6 +566,7 @@ def listar_documentos_drive(
             AutosIAPeca.titulo.ilike(termo),
             AutosIAPeca.titulo_customizado.ilike(termo),
             AutosIAPeca.nota_usuario.ilike(termo),
+            AutosIAPeca.id_processual.ilike(termo),
             func.array_to_string(AutosIAPeca.keywords_usuario, " ").ilike(termo),
             AndamentoProcesso.arquivo_nome.ilike(termo),
         ))

@@ -2,7 +2,7 @@
 import uuid
 from datetime import date
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.models.autos_ia import AutosIAPeca
@@ -50,8 +50,15 @@ def buscar_pecas(
         q = q.filter(AutosIAPeca.data_peca <= data_fim)
 
     if query and query.strip():
-        tsquery = func.websearch_to_tsquery("portuguese", query.strip())
-        q = q.filter(TSVECTOR_EXPR.op("@@")(tsquery))
+        termo = query.strip()
+        tsquery = func.websearch_to_tsquery("portuguese", termo)
+        # ID processual (ex.: "Evento 45", protocolos com ponto/hífen) não
+        # tokeniza bem pelo full-text — casa também por substring direta,
+        # senão uma busca pelo ID exato de uma peça citada em outra não acha.
+        q = q.filter(or_(
+            TSVECTOR_EXPR.op("@@")(tsquery),
+            AutosIAPeca.id_processual.ilike(f"%{termo}%"),
+        ))
         q = q.order_by(func.ts_rank(TSVECTOR_EXPR, tsquery).desc())
     else:
         # Mais recentes primeiro — como um advogado abriria os autos pra ver o
