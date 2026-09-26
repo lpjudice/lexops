@@ -43,6 +43,7 @@ class CasoOut(BaseModel):
     sync_total_itens: int | None
     sync_itens_processados: int | None
     sync_iniciado_em: datetime | None
+    sync_detalhe: str | None
     custo_usd_total: float
     criado_em: datetime
     atualizado_em: datetime

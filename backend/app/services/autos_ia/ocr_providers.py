@@ -101,21 +101,34 @@ _PROVEDORES = [
 _contador = itertools.count()
 
 
-def ocr_pagina_rotativo(pagina_bytes: bytes, on_custo=None) -> str:
+_NOME_EXIBICAO = {"claude": "Claude", "gemini": "Gemini"}
+
+
+def ocr_pagina_rotativo(pagina_bytes: bytes, on_custo=None, on_status=None) -> str:
     """Alterna o provedor a cada chamada (rodízio simples, não por custo) —
-    se o da vez falhar, tenta o outro antes de desistir da página."""
+    se o da vez falhar, tenta o outro antes de desistir da página.
+    `on_status(msg)`, quando informado, recebe uma frase curta a cada
+    tentativa/troca de provedor — é o que aparece na tela como "OCR via
+    Gemini...", "Gemini falhou, tentando Claude..." etc."""
     indice_inicial = next(_contador) % len(_PROVEDORES)
     ultimo_erro: Exception | None = None
     for offset in range(len(_PROVEDORES)):
         nome, fn = _PROVEDORES[(indice_inicial + offset) % len(_PROVEDORES)]
+        if on_status:
+            on_status(f"OCR via {_NOME_EXIBICAO.get(nome, nome)}...")
         try:
             texto, custo = fn(pagina_bytes)
         except Exception as exc:
             ultimo_erro = exc
             logger.warning("OCR via %s falhou, tentando próximo provedor: %s", nome, exc)
+            proximo = _PROVEDORES[(indice_inicial + offset + 1) % len(_PROVEDORES)][0]
+            if on_status and offset + 1 < len(_PROVEDORES):
+                on_status(f"{_NOME_EXIBICAO.get(nome, nome)} falhou, tentando {_NOME_EXIBICAO.get(proximo, proximo)}...")
             continue
         if on_custo and custo:
             on_custo(custo)
         return texto
+    if on_status:
+        on_status("OCR falhou em todos os provedores para esta página — pulada.")
     logger.warning("OCR falhou em todos os provedores: %s", ultimo_erro)
     return ""

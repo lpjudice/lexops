@@ -95,7 +95,7 @@ def _obter_bytes(andamento: AndamentoProcesso) -> bytes | None:
     return None
 
 
-def _extrair_texto(conteudo: bytes, nome_arquivo: str | None, on_custo=None) -> str:
+def _extrair_texto(conteudo: bytes, nome_arquivo: str | None, on_custo=None, on_status=None) -> str:
     if nome_arquivo and nome_arquivo.lower().endswith((".html", ".htm")):
         try:
             from bs4 import BeautifulSoup
@@ -106,7 +106,7 @@ def _extrair_texto(conteudo: bytes, nome_arquivo: str | None, on_custo=None) -> 
 
     from app.services.autos_ia.ocr_providers import ocr_pagina_rotativo
     from app.services.pdf_extract import extrair_texto_pdf
-    return extrair_texto_pdf(conteudo, on_custo=on_custo, ocr_pagina=ocr_pagina_rotativo)
+    return extrair_texto_pdf(conteudo, on_custo=on_custo, ocr_pagina=ocr_pagina_rotativo, on_status=on_status)
 
 
 def _contar_paginas(conteudo: bytes | None, nome_arquivo: str | None) -> int:
@@ -403,7 +403,13 @@ def _retomar_pecas_pendentes(db: Session, caso: AutosIACaso) -> int:
     def _cancelar() -> bool:
         return _cancelar_sync_solicitado(db, caso)
 
-    resumir_pecas_em_paralelo(db, pendentes, on_progresso=_progresso, on_custo=_custo, deve_cancelar=_cancelar)
+    def _status(msg: str) -> None:
+        caso.sync_detalhe = msg[:500]
+        db.commit()
+
+    resumir_pecas_em_paralelo(
+        db, pendentes, on_progresso=_progresso, on_custo=_custo, deve_cancelar=_cancelar, on_status=_status,
+    )
     _resolver_referencias_pendentes(db, caso.id)
     return len(pendentes)
 
@@ -429,6 +435,7 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
         caso.sync_etapa = None
         caso.sync_total_itens = None
         caso.sync_itens_processados = None
+        caso.sync_detalhe = None
         db.commit()
         return total_retomadas
 
@@ -437,6 +444,7 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
         caso.sync_etapa = None
         caso.sync_total_itens = None
         caso.sync_itens_processados = None
+        caso.sync_detalhe = None
         db.commit()
         return total_retomadas
 
@@ -477,6 +485,11 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
         db.commit()
         grupo_atual = []
 
+    def _status_leitura(msg: str, _idx=None, _total=len(pendentes)) -> None:
+        prefixo = f"Documento {_idx}/{_total}: " if _idx is not None else ""
+        caso.sync_detalhe = f"{prefixo}{msg}"[:500]
+        db.commit()
+
     for indice, andamento in enumerate(pendentes, start=1):
         conteudo = None
         texto = andamento.texto_extraido
@@ -487,7 +500,9 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
                 def _custo_ocr(valor: float, _caso=caso) -> None:
                     _caso.custo_usd_total = (_caso.custo_usd_total or 0) + valor
                     db.commit()
-                texto = _extrair_texto(conteudo, andamento.arquivo_nome, on_custo=_custo_ocr)
+                def _status_ocr(msg: str, _i=indice, _n=len(pendentes)) -> None:
+                    _status_leitura(msg, _i, _n)
+                texto = _extrair_texto(conteudo, andamento.arquivo_nome, on_custo=_custo_ocr, on_status=_status_ocr)
                 if texto:
                     andamento.texto_extraido = texto
                     db.commit()
@@ -559,6 +574,7 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
         caso.sync_etapa = None
         caso.sync_total_itens = None
         caso.sync_itens_processados = None
+        caso.sync_detalhe = None
         db.commit()
         return len(criadas) + total_retomadas
 
@@ -588,8 +604,13 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
     def _cancelar() -> bool:
         return _cancelar_sync_solicitado(db, caso)
 
+    def _status_resumo(msg: str) -> None:
+        caso.sync_detalhe = msg[:500]
+        db.commit()
+
     resumir_pecas_em_paralelo(
         db, pecas_para_ia, on_progresso=_progresso_resumo, on_custo=_custo_resumo, deve_cancelar=_cancelar,
+        on_status=_status_resumo,
     )
 
     _resolver_referencias_pendentes(db, caso.id)
@@ -604,6 +625,7 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
     caso.sync_etapa = None
     caso.sync_total_itens = None
     caso.sync_itens_processados = None
+    caso.sync_detalhe = None
     db.commit()
     return total
 

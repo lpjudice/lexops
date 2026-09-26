@@ -603,6 +603,11 @@ function SyncProgress({ caso }: { caso: Caso }) {
       <div className={styles.progressBar}>
         <div className={styles.progressFill} style={{ width: `${pct}%` }} />
       </div>
+      {caso.sync_detalhe && (
+        <div style={{ fontSize: 11, color: 'var(--gray-mid)', marginTop: 5, fontStyle: 'italic' }}>
+          {caso.sync_detalhe}
+        </div>
+      )}
       {pctDocumentoAtual != null && (
         <>
           <div style={{ fontSize: 10, color: 'var(--gray-mid)', marginTop: 5 }}>

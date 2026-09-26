@@ -259,6 +259,7 @@ def _forcar_status_erro(caso_id: uuid.UUID, mensagem: str) -> None:
             caso.sync_etapa = None
             caso.sync_total_itens = None
             caso.sync_itens_processados = None
+            caso.sync_detalhe = None
             db.commit()
     except Exception:
         logger.exception("Autos IA: falha ao registrar erro do caso %s (banco indisponível?)", caso_id)
@@ -414,6 +415,7 @@ def cancelar_sync(caso_id: uuid.UUID, db: Session = Depends(get_db)):
     caso.sync_etapa = None
     caso.sync_total_itens = None
     caso.sync_itens_processados = None
+    caso.sync_detalhe = None
     db.commit()
     db.refresh(caso)
     return caso

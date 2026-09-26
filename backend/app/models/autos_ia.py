@@ -60,6 +60,12 @@ class AutosIACaso(Base):
     sync_total_itens: Mapped[int | None] = mapped_column(Integer)
     sync_itens_processados: Mapped[int | None] = mapped_column(Integer)
     sync_iniciado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # O que está acontecendo AGORA no documento atual (ex.: "Documento 13/34:
+    # dividindo em 6 página(s) para OCR", "...OCR página 3/6 via Gemini",
+    # "...Gemini falhou, tentando Claude") — sem isso, um documento lento (mas
+    # progredindo normalmente) e um documento travado de verdade pareciam a
+    # mesma coisa na tela: o contador parado, sem nenhuma pista do porquê.
+    sync_detalhe: Mapped[str | None] = mapped_column(String(500))
     # Marcado por um pedido de cancelamento (endpoint /cancelar-sync); a rotina em andamento
     # confere esta flag periodicamente e para de forma graciosa, preservando o que já foi lido.
     sync_cancelar: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

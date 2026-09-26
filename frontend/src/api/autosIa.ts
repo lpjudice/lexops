@@ -38,6 +38,7 @@ export interface Caso {
   sync_total_itens?: number | null
   sync_itens_processados?: number | null
   sync_iniciado_em?: string | null
+  sync_detalhe?: string | null
   custo_usd_total: number
   criado_em: string
   atualizado_em: string

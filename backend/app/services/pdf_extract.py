@@ -40,13 +40,19 @@ _OCR_TIMEOUT_SEGUNDOS = 90.0
 _OCR_MAX_PAGINAS = 200
 
 
-def _ocr_pagina_claude(pagina_bytes: bytes, on_custo: Callable[[float], None] | None) -> str:
+def _ocr_pagina_claude(
+    pagina_bytes: bytes,
+    on_custo: Callable[[float], None] | None,
+    on_status: Callable[[str], None] | None = None,
+) -> str:
     """OCR padrão de 1 página — só Claude. Usado quando `extrair_texto_pdf`
     não recebe um `ocr_pagina` alternativo (PrecedentCheck e demais chamadores
     fora do Autos IA continuam só no Claude, sem mudança de comportamento)."""
     import base64
     import anthropic
 
+    if on_status:
+        on_status("OCR via Claude...")
     client = anthropic.Anthropic(timeout=_OCR_TIMEOUT_SEGUNDOS, max_retries=1)
     resp = client.messages.create(
         model="claude-haiku-4-5-20251001",
@@ -78,17 +84,22 @@ def _ocr_pagina_claude(pagina_bytes: bytes, on_custo: Callable[[float], None] | 
 def _extrair_com_claude_ocr(
     content: bytes,
     on_custo: Callable[[float], None] | None = None,
-    ocr_pagina: Callable[[bytes, Callable[[float], None] | None], str] | None = None,
+    ocr_pagina: Callable[..., str] | None = None,
+    on_status: Callable[[str], None] | None = None,
 ) -> str:
     """Último recurso: OCR de cada página do PDF, uma chamada por página — nunca
     o documento inteiro numa chamada só (limita tempo/tamanho por chamada e
     torna a falha granular: uma página que falha é pulada, as demais
     preservam o texto). `on_custo(custo_usd)`, quando informado, recebe o
     custo real de cada chamada — sem isso, o OCR é uma chamada de IA paga que
-    nenhum lugar do sistema contabiliza. `ocr_pagina(pagina_bytes, on_custo)`,
-    quando informado, substitui o OCR padrão (só Claude) por outra estratégia
-    — usado pelo fluxo do jus.br pra diluir custo entre provedores; ver
-    services/autos_ia/ocr_providers.py."""
+    nenhum lugar do sistema contabiliza. `ocr_pagina(pagina_bytes, on_custo,
+    on_status)`, quando informado, substitui o OCR padrão (só Claude) por
+    outra estratégia — usado pelo fluxo do jus.br pra diluir custo entre
+    provedores; ver services/autos_ia/ocr_providers.py. `on_status(msg)`,
+    quando informado, recebe uma frase curta a cada página/tentativa — é o
+    que dá visibilidade de "documento sendo dividido em N páginas", "OCR
+    página X/N via Y", "Y falhou, tentando Z" em vez de só um contador
+    parado sem explicação."""
     from pypdf import PdfReader, PdfWriter
 
     ocr_pagina = ocr_pagina or _ocr_pagina_claude
@@ -96,6 +107,12 @@ def _extrair_com_claude_ocr(
     if len(paginas) > _OCR_MAX_PAGINAS:
         logger.warning("PDF com %d páginas — OCR limitado às primeiras %d", len(paginas), _OCR_MAX_PAGINAS)
         paginas = paginas[:_OCR_MAX_PAGINAS]
+
+    if on_status:
+        on_status(
+            f"Sem texto nativo — dividindo em {len(paginas)} página(s) para OCR"
+            if len(paginas) != 1 else "Sem texto nativo — OCR de 1 página"
+        )
 
     textos: list[str] = []
     for indice, pagina in enumerate(paginas):
@@ -106,12 +123,20 @@ def _extrair_com_claude_ocr(
         pagina_bytes = buf.getvalue()
         if len(pagina_bytes) > 5 * 1024 * 1024:
             logger.warning("Página %d grande demais para OCR (>5MB) — pulada", indice)
+            if on_status:
+                on_status(f"Página {indice + 1}/{len(paginas)}: grande demais para OCR (>5MB), pulada")
             continue
 
+        def _status_pagina(msg: str, _i: int = indice, _n: int = len(paginas)) -> None:
+            if on_status:
+                on_status(f"OCR página {_i + 1}/{_n}: {msg}")
+
         try:
-            texto_pagina = ocr_pagina(pagina_bytes, on_custo)
+            texto_pagina = ocr_pagina(pagina_bytes, on_custo, _status_pagina)
         except Exception as exc:
             logger.warning("OCR falhou na página %d (%s): %s", indice, exc.__class__.__name__, exc)
+            if on_status:
+                on_status(f"OCR página {indice + 1}/{len(paginas)}: falhou ({exc.__class__.__name__}), pulada")
             continue
         if texto_pagina:
             textos.append(texto_pagina)
@@ -122,12 +147,13 @@ def _extrair_com_claude_ocr(
 def extrair_texto_pdf(
     content: bytes,
     on_custo: Callable[[float], None] | None = None,
-    ocr_pagina: Callable[[bytes, Callable[[float], None] | None], str] | None = None,
+    ocr_pagina: Callable[..., str] | None = None,
+    on_status: Callable[[str], None] | None = None,
 ) -> str:
     """Extrai texto de um PDF em 3 tentativas. Retorna string vazia se todas falharem.
     `on_custo(custo_usd)`, quando informado, recebe o custo real de uma eventual chamada
     de OCR via IA (a única etapa paga desta cascata — pypdf/pdfminer são locais e grátis).
-    `ocr_pagina`: ver _extrair_com_claude_ocr."""
+    `ocr_pagina`/`on_status`: ver _extrair_com_claude_ocr."""
     texto = ""
     try:
         texto = _extrair_com_pypdf(content)
@@ -142,7 +168,7 @@ def extrair_texto_pdf(
 
     if not texto.strip():
         try:
-            texto = _extrair_com_claude_ocr(content, on_custo=on_custo, ocr_pagina=ocr_pagina)
+            texto = _extrair_com_claude_ocr(content, on_custo=on_custo, ocr_pagina=ocr_pagina, on_status=on_status)
         except Exception as exc:
             logger.warning("OCR falhou: %s", exc)
 

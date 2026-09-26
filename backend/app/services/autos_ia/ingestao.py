@@ -93,6 +93,7 @@ def resumir_pecas_em_paralelo(
     on_progresso: Callable[[int], None] | None = None,
     on_custo: Callable[[float], None] | None = None,
     deve_cancelar: Callable[[], bool] | None = None,
+    on_status: Callable[[str], None] | None = None,
 ) -> None:
     """Resume várias peças concorrentemente (só a chamada à IA é paralela; toda
     escrita no banco acontece de volta na thread principal, sem sessão concorrente).
@@ -101,7 +102,11 @@ def resumir_pecas_em_paralelo(
     aguardar/submeter novas peças — as que já estavam em voo terminam e têm seu
     resultado salvo normalmente, mas nenhuma peça nova é iniciada. As peças que
     nem chegaram a começar ficam com status "pendente_resumo", prontas para
-    serem retomadas depois."""
+    serem retomadas depois.
+
+    `on_status(msg)`, quando informado, recebe uma frase curta a cada peça
+    concluída (sucesso ou falha) — é o que dá visibilidade de qual peça está
+    sendo resumida agora em vez de só um contador."""
     if not pecas:
         return
 
@@ -143,6 +148,8 @@ def resumir_pecas_em_paralelo(
                 _persistir_referencias(db, peca, peca.ids_mencionados)
                 if on_custo:
                     on_custo(resultado.custo_usd)
+                if on_status:
+                    on_status(f"Resumida: {peca.titulo}")
             except Exception as exc:
                 logger.error("Falha ao resumir peça %s: %s", peca.id, exc)
                 # Um commit que falhou no flush deixa a sessão em rollback
@@ -153,6 +160,8 @@ def resumir_pecas_em_paralelo(
                 peca.status = "erro"
                 peca.erro_mensagem = str(exc)[:2000]
                 db.commit()
+                if on_status:
+                    on_status(f"Falhou ao resumir: {peca.titulo} ({exc.__class__.__name__})")
             feitas += 1
             if on_progresso:
                 on_progresso(feitas)
@@ -265,6 +274,7 @@ def reclassificar_caso(db: Session, caso: AutosIACaso) -> int:
     caso.sync_etapa = None
     caso.sync_total_itens = None
     caso.sync_itens_processados = None
+    caso.sync_detalhe = None
     caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
     db.commit()
     return len(pecas)
@@ -470,6 +480,7 @@ def resetar_processamentos_travados(db: Session) -> int:
         caso.sync_etapa = None
         caso.sync_total_itens = None
         caso.sync_itens_processados = None
+        caso.sync_detalhe = None
         caso.sync_cancelar = False
         afetados += 1
 
