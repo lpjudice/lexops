@@ -70,6 +70,21 @@ export default function AutosIACasoPage() {
 
   const emProcessamento = caso?.ultimo_sync_status === 'processando'
 
+  // Enquanto uma sincronização roda, só o card de progresso (que tem sua
+  // própria query) se atualiza sozinho — as abas de Documentos/Peças/Grafo
+  // ficavam paradas na foto de quando a aba foi aberta, mesmo com peças
+  // novas sendo criadas no banco em tempo real. Sem isso, dava a impressão
+  // de sincronização travada mesmo quando ela estava avançando normalmente.
+  useEffect(() => {
+    if (!emProcessamento || !casoId) return
+    const id = setInterval(() => {
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'documentos-drive', casoId] })
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'pecas', casoId] })
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'grafo', casoId] })
+    }, 5000)
+    return () => clearInterval(id)
+  }, [emProcessamento, casoId, qc])
+
   const { data: estimativaImportacao } = useQuery({
     queryKey: ['autos-ia', 'estimativa-importacao', casoId],
     queryFn: () => autosIa.estimativaImportacao(casoId!),
