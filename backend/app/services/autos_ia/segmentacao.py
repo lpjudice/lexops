@@ -116,7 +116,9 @@ def _chamar_llm(
     markdown: str, pagina_inicio_lote: int, pagina_fim_lote: int, buffer_pagina_inicio: int | None
 ) -> tuple[list[dict], float]:
     import anthropic
-    client = anthropic.Anthropic()
+    # Mesmo motivo do client em resumo.py: timeout curto, sem retries longos,
+    # pra uma chamada travada não prender o processamento do bloco inteiro.
+    client = anthropic.Anthropic(timeout=90.0, max_retries=1)
     prompt = _montar_prompt(pagina_inicio_lote, pagina_fim_lote, buffer_pagina_inicio)
     resp = client.messages.create(
         model="claude-opus-4-5",

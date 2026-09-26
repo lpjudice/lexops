@@ -126,7 +126,12 @@ def reclassificar_peca(texto_md: str, titulo: str, tipo_atual: str) -> Reclassif
     peças que já foram resumidas antes desses três campos existirem, sem pagar
     de novo pelo resumo/keywords/ids_mencionados (que não mudam)."""
     import anthropic
-    client = anthropic.Anthropic()
+    # Timeout curto e sem retries longos: com várias peças em paralelo (ver
+    # RESUMO_MAX_WORKERS em ingestao.py), uma chamada travada (erro de rede,
+    # rate limit, saldo insuficiente) prende um worker inteiro por até o
+    # timeout padrão do SDK — o suficiente pra "congelar" a sincronização
+    # inteira se isso acontecer nos poucos workers ativos ao mesmo tempo.
+    client = anthropic.Anthropic(timeout=90.0, max_retries=1)
 
     texto = texto_md
     if len(texto) > LIMITE_CHARS_RECLASSIFICACAO_INICIO + LIMITE_CHARS_RECLASSIFICACAO_FIM:
@@ -164,7 +169,9 @@ def reclassificar_peca(texto_md: str, titulo: str, tipo_atual: str) -> Reclassif
 
 def resumir_peca(texto_md: str, titulo: str, tipo: str) -> ResumoPeca:
     import anthropic
-    client = anthropic.Anthropic()
+    # Mesmo motivo do client em reclassificar_peca: timeout curto, sem retries
+    # longos, pra uma chamada travada não prender um worker do pool paralelo.
+    client = anthropic.Anthropic(timeout=90.0, max_retries=1)
 
     texto = texto_md[:LIMITE_CHARS_TEXTO]
     prompt = (
