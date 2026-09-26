@@ -27,6 +27,30 @@ from app.services.pdf_extract import remover_nul
 
 logger = logging.getLogger(__name__)
 
+
+def _commit_resiliente(db: Session) -> bool:
+    """Commit "melhor esforço" para escritas puramente informativas (status,
+    progresso, custo acumulado) — nunca a peça/andamento em si. O Postgres do
+    Fly já derrubou conexão no meio de uma sincronização mais de uma vez
+    (`OperationalError: server closed the connection unexpectedly`); antes,
+    isso deixava a sessão inteira em rollback pendente e qualquer commit
+    seguinte (inclusive o de status "erro" no except de baixo) falhava em
+    cascata, derrubando a sincronização inteira em vez de só aquele item.
+    Aqui, se o commit falhar, desfaz a transação e loga — a próxima operação
+    real (criar/gravar uma peça) tenta de novo com uma conexão nova do pool
+    (pool_pre_ping), sem carregar uma sessão já quebrada."""
+    try:
+        db.commit()
+        return True
+    except Exception as exc:
+        logger.warning("Falha ao gravar status/progresso (conexão instável?): %s", exc)
+        try:
+            db.rollback()
+        except Exception:
+            logger.exception("Rollback também falhou após commit informativo malsucedido")
+        return False
+
+
 LIMIAR_CHARS_PARA_RESUMO_IA = 200
 
 # PDPJ registra a hora de juntada por DOCUMENTO — documentos de uma mesma
@@ -394,18 +418,18 @@ def _retomar_pecas_pendentes(db: Session, caso: AutosIACaso) -> int:
 
     def _progresso(feitas: int) -> None:
         caso.sync_itens_processados = feitas
-        db.commit()
+        _commit_resiliente(db)
 
     def _custo(valor: float) -> None:
         caso.custo_usd_total = (caso.custo_usd_total or 0) + valor
-        db.commit()
+        _commit_resiliente(db)
 
     def _cancelar() -> bool:
         return _cancelar_sync_solicitado(db, caso)
 
     def _status(msg: str) -> None:
         caso.sync_detalhe = msg[:500]
-        db.commit()
+        _commit_resiliente(db)
 
     resumir_pecas_em_paralelo(
         db, pendentes, on_progresso=_progresso, on_custo=_custo, deve_cancelar=_cancelar, on_status=_status,
@@ -488,7 +512,7 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
     def _status_leitura(msg: str, _idx=None, _total=len(pendentes)) -> None:
         prefixo = f"Documento {_idx}/{_total}: " if _idx is not None else ""
         caso.sync_detalhe = f"{prefixo}{msg}"[:500]
-        db.commit()
+        _commit_resiliente(db)
 
     for indice, andamento in enumerate(pendentes, start=1):
         conteudo = None
@@ -499,7 +523,7 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
             if conteudo:
                 def _custo_ocr(valor: float, _caso=caso) -> None:
                     _caso.custo_usd_total = (_caso.custo_usd_total or 0) + valor
-                    db.commit()
+                    _commit_resiliente(db)
                 def _status_ocr(msg: str, _i=indice, _n=len(pendentes)) -> None:
                     _status_leitura(msg, _i, _n)
                 texto = _extrair_texto(conteudo, andamento.arquivo_nome, on_custo=_custo_ocr, on_status=_status_ocr)
@@ -559,7 +583,7 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
         grupo_atual.append(item)
 
         caso.sync_itens_processados = indice
-        db.commit()
+        _commit_resiliente(db)
 
         if indice % 5 == 0 or indice == len(pendentes):
             if _cancelar_sync_solicitado(db, caso):
@@ -595,18 +619,18 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
 
     def _progresso_resumo(feitas: int) -> None:
         caso.sync_itens_processados = feitas
-        db.commit()
+        _commit_resiliente(db)
 
     def _custo_resumo(valor: float) -> None:
         caso.custo_usd_total = (caso.custo_usd_total or 0) + valor
-        db.commit()
+        _commit_resiliente(db)
 
     def _cancelar() -> bool:
         return _cancelar_sync_solicitado(db, caso)
 
     def _status_resumo(msg: str) -> None:
         caso.sync_detalhe = msg[:500]
-        db.commit()
+        _commit_resiliente(db)
 
     resumir_pecas_em_paralelo(
         db, pecas_para_ia, on_progresso=_progresso_resumo, on_custo=_custo_resumo, deve_cancelar=_cancelar,

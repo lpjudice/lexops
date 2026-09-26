@@ -19,6 +19,25 @@ from app.services.autos_ia.segmentacao import segmentar_paginas
 
 logger = logging.getLogger(__name__)
 
+
+def _commit_resiliente(db: Session) -> bool:
+    """Commit "melhor esforço" para escritas informativas (progresso/custo) —
+    nunca a peça em si. Ver mesma função em jusbr_import.py: sem isso, uma
+    conexão que cai no meio (o Postgres do Fly já fez isso mais de uma vez)
+    deixa a sessão em rollback pendente e qualquer commit seguinte falha em
+    cascata, derrubando o lote inteiro em vez de só aquele item."""
+    try:
+        db.commit()
+        return True
+    except Exception as exc:
+        logger.warning("Falha ao gravar status/progresso (conexão instável?): %s", exc)
+        try:
+            db.rollback()
+        except Exception:
+            logger.exception("Rollback também falhou após commit informativo malsucedido")
+        return False
+
+
 # Chamadas de resumo por peça são independentes entre si (só leem, não escrevem
 # no banco) — paralelizamos com um pool pequeno pra não estourar rate limit da
 # API, mas ainda cortar bastante o tempo total em blocos com muitas peças.
@@ -155,11 +174,28 @@ def resumir_pecas_em_paralelo(
                 # Um commit que falhou no flush deixa a sessão em rollback
                 # pendente — sem isso, o commit de erro abaixo falha também, e
                 # ISSO derruba a thread inteira (toda peça seguinte na mesma
-                # leva também falha, em cascata).
-                db.rollback()
-                peca.status = "erro"
-                peca.erro_mensagem = str(exc)[:2000]
-                db.commit()
+                # leva também falha, em cascata). E se a conexão em si caiu
+                # (não só o commit desta peça), até o rollback/commit de
+                # recuperação pode falhar de novo — sem os try/except aqui
+                # dentro, ESSA segunda falha propagava e derrubava o lote
+                # inteiro (foi o que aconteceu numa sincronização real: um
+                # "server closed the connection unexpectedly" no meio do
+                # resumo interrompeu tudo em vez de só marcar aquela peça
+                # como erro e seguir para as próximas).
+                try:
+                    db.rollback()
+                    peca.status = "erro"
+                    peca.erro_mensagem = str(exc)[:2000]
+                    db.commit()
+                except Exception:
+                    logger.exception(
+                        "Falha ao gravar status de erro da peça %s (conexão instável?) — "
+                        "fica pendente_resumo para retomar depois", peca.id,
+                    )
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
                 if on_status:
                     on_status(f"Falhou ao resumir: {peca.titulo} ({exc.__class__.__name__})")
             feitas += 1
