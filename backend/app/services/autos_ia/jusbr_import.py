@@ -147,6 +147,134 @@ def sincronizar_caso_jusbr(db: Session, caso: AutosIACaso, session_data: dict | 
         db.commit()
 
 
+def atualizar_metadados_jusbr(db: Session, caso: AutosIACaso, session_data: dict | None) -> None:
+    """Só consulta o jus.br pra atualizar metadados dos andamentos já conhecidos
+    (em especial a hora de protocolo — ver protocolado_em) e cadastrar andamentos
+    novos como pendentes — sem processar nenhum em peça. Zero custo de IA: é só
+    a consulta em si (rede) e o backfill/cadastro no banco. Útil pra testar o
+    agrupamento por hora de protocolo (ver reagrupar_pecas_jusbr) sem forçar o
+    processamento de um backlog grande de documentos pendentes de uma vez."""
+    from app.models.processo import Processo
+    from app.services.consulta_processual.orchestrator import sincronizar_processo_jusbr
+
+    processo = db.query(Processo).filter(Processo.id == caso.processo_id).first()
+    if not processo:
+        caso.ultimo_sync_status = "erro"
+        caso.ultimo_sync_mensagem = "Processo vinculado não encontrado."
+        caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
+        db.commit()
+        return
+    if not session_data:
+        caso.ultimo_sync_status = "erro"
+        caso.ultimo_sync_mensagem = "Sessão do jus.br não encontrada — cole o token novamente."
+        caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
+        db.commit()
+        return
+
+    try:
+        import asyncio
+        asyncio.run(sincronizar_processo_jusbr(processo, db, session_data=session_data))
+        caso.ultimo_sync_status = "ok"
+        caso.ultimo_sync_mensagem = (
+            "Metadados atualizados (hora de protocolo etc.) — nenhuma peça nova foi processada."
+        )
+    except Exception as exc:
+        logger.warning("Autos IA: erro ao atualizar metadados do caso %s: %s", caso.id, exc)
+        caso.ultimo_sync_status = "erro"
+        caso.ultimo_sync_mensagem = str(exc)
+    finally:
+        caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
+        db.commit()
+
+
+def reagrupar_pecas_jusbr(db: Session, caso: AutosIACaso) -> int:
+    """Reaplica o agrupamento petição/anexo nas peças JÁ IMPORTADAS do jus.br/
+    Drive deste caso, preferindo a hora de protocolo quando disponível — sem
+    chamar IA nem a rede, só reorganiza peca_pai_id entre peças que já existem
+    (o resumo/tipo/keywords de cada uma não mudam). Retorna quantas peças
+    tiveram o pai reatribuído."""
+    from datetime import date
+
+    pecas = (
+        db.query(AutosIAPeca)
+        .filter(AutosIAPeca.caso_id == caso.id, AutosIAPeca.andamento_id.isnot(None))
+        .all()
+    )
+    if not pecas:
+        return 0
+
+    andamentos = {
+        a.id: a for a in db.query(AndamentoProcesso)
+        .filter(AndamentoProcesso.id.in_([p.andamento_id for p in pecas]))
+        .all()
+    }
+
+    DATA_MAX = date(9999, 12, 31)
+    DT_MAX = datetime(9999, 12, 31, tzinfo=timezone.utc)
+
+    def _ordenar(p: AutosIAPeca):
+        a = andamentos.get(p.andamento_id)
+        return (
+            (a.data_andamento if a else None) or DATA_MAX,
+            (a.protocolado_em if a else None) or DT_MAX,
+            p.criado_em,
+        )
+
+    def _chave(p: AutosIAPeca):
+        a = andamentos.get(p.andamento_id)
+        if a and a.protocolado_em:
+            return ("protocolo", a.protocolado_em)
+        return ("descricao", a.data_andamento if a else None, (a.descricao or "").strip() if a else "")
+
+    pecas_ordenadas = sorted(pecas, key=_ordenar)
+
+    grupos: list[list[AutosIAPeca]] = []
+    grupo_atual: list[AutosIAPeca] = []
+    chave_atual = None
+    for p in pecas_ordenadas:
+        chave = _chave(p)
+        if chave_atual is not None and chave != chave_atual:
+            grupos.append(grupo_atual)
+            grupo_atual = []
+        chave_atual = chave
+        grupo_atual.append(p)
+    if grupo_atual:
+        grupos.append(grupo_atual)
+
+    reagrupadas = 0
+    for membros in grupos:
+        if len(membros) == 1:
+            if membros[0].peca_pai_id is not None:
+                membros[0].peca_pai_id = None
+                reagrupadas += 1
+            continue
+
+        primeiro_andamento = andamentos.get(membros[0].andamento_id)
+        eh_grupo_protocolo = bool(primeiro_andamento and primeiro_andamento.protocolado_em)
+        if eh_grupo_protocolo:
+            # Mesma hora exata de protocolo: o primeiro protocolado é a petição
+            # (regra combinada com o Lucas) — não depende de heurística de tipo.
+            principal = membros[0]
+        else:
+            # Fallback (sem hora de protocolo): usa a classificação real que a
+            # IA já deu à peça (mais confiável que a palavra-chave usada na
+            # importação original) — prefere a primeira que não seja "documento".
+            principal = next((m for m in membros if m.tipo != "documento"), membros[0])
+
+        if principal.peca_pai_id is not None:
+            principal.peca_pai_id = None
+            reagrupadas += 1
+        for m in membros:
+            if m is principal:
+                continue
+            if m.peca_pai_id != principal.id:
+                m.peca_pai_id = principal.id
+                reagrupadas += 1
+
+    db.commit()
+    return reagrupadas
+
+
 def importar_apenas_existentes(db: Session, caso: AutosIACaso) -> None:
     """Só importa os andamentos/documentos que o jus.br JÁ baixou pro processo
     vinculado — sem chamar DataJud/jus.br ao vivo. Usado no backfill inicial

@@ -196,6 +196,12 @@ export const autosIa = {
   cancelarSync: (casoId: string) =>
     api.post<Caso>(`/autos-ia/casos/${casoId}/cancelar-sync`).then((r) => r.data),
 
+  atualizarMetadados: (casoId: string) =>
+    api.post<Caso>(`/autos-ia/casos/${casoId}/atualizar-metadados`).then((r) => r.data),
+
+  reagrupar: (casoId: string) =>
+    api.post<Caso>(`/autos-ia/casos/${casoId}/reagrupar`).then((r) => r.data),
+
   estimativaReclassificacao: (casoId: string) =>
     api.get<EstimativaImportacao>(`/autos-ia/casos/${casoId}/estimativa-reclassificacao`).then((r) => r.data),
 

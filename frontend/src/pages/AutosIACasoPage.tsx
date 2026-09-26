@@ -92,6 +92,21 @@ export default function AutosIACasoPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] }),
   })
 
+  const atualizarMetadados = useMutation({
+    mutationFn: () => autosIa.atualizarMetadados(casoId!),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] }),
+  })
+
+  const reagrupar = useMutation({
+    mutationFn: () => autosIa.reagrupar(casoId!),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] })
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'documentos-drive', casoId] })
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'grafo', casoId] })
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'pecas', casoId] })
+    },
+  })
+
   const deletarCaso = useMutation({
     mutationFn: () => autosIa.deletarCaso(casoId!),
     onSuccess: () => navigate('/autos-ia'),
@@ -203,6 +218,30 @@ export default function AutosIACasoPage() {
                         title="Importa só os documentos já baixados pelo jus.br, sem consultar a rede"
                       >
                         Importar documentos existentes
+                      </button>
+                      <button
+                        className={pageStyles.btnSmall}
+                        disabled={atualizarMetadados.isPending}
+                        onClick={() => {
+                          if (window.confirm('Consultar o jus.br só para atualizar metadados (ex.: hora de protocolo) dos andamentos já conhecidos? Não processa nenhuma peça nova — zero custo de IA.')) {
+                            atualizarMetadados.mutate()
+                          }
+                        }}
+                        title="Só atualiza dados como a hora de protocolo — não baixa nem processa peças novas"
+                      >
+                        {atualizarMetadados.isPending ? 'Atualizando...' : 'Atualizar metadados'}
+                      </button>
+                      <button
+                        className={pageStyles.btnSmall}
+                        disabled={reagrupar.isPending}
+                        onClick={() => {
+                          if (window.confirm('Reorganizar petição/anexo das peças já importadas, usando a hora de protocolo quando disponível? 100% local, sem IA nem rede.')) {
+                            reagrupar.mutate()
+                          }
+                        }}
+                        title="Reaplica o agrupamento petição/anexo nas peças já importadas — sem IA, sem rede"
+                      >
+                        {reagrupar.isPending ? 'Reagrupando...' : 'Reagrupar peças'}
                       </button>
                     </>
                   )}

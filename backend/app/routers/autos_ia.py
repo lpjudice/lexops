@@ -23,7 +23,8 @@ from app.services.autos_ia.busca import buscar_pecas
 from app.services.autos_ia.estimativa import estimar_importacao_existentes, estimar_reclassificacao
 from app.services.autos_ia.ingestao import processar_documento, reclassificar_caso, retomar_documento
 from app.services.autos_ia.jusbr_import import (
-    importar_apenas_existentes, listar_andamentos_pendentes, sincronizar_caso_jusbr,
+    atualizar_metadados_jusbr, importar_apenas_existentes, listar_andamentos_pendentes,
+    reagrupar_pecas_jusbr, sincronizar_caso_jusbr,
 )
 from app.services.autos_ia.nomes import derivar_nome_indexado
 from app.services.autos_ia.pdf_merge import montar_pdf_pecas
@@ -244,6 +245,70 @@ def sincronizar_agora(caso_id: uuid.UUID, background_tasks: BackgroundTasks, db:
     db.commit()
     db.refresh(caso)
     background_tasks.add_task(_executar_sync_em_background, caso.id)
+    return caso
+
+
+def _executar_atualizar_metadados_em_background(caso_id: uuid.UUID) -> None:
+    db = SessionLocal()
+    try:
+        from app.services.consulta_processual.jusbr_session import load_session
+        caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
+        if caso:
+            atualizar_metadados_jusbr(db, caso, load_session())
+    finally:
+        db.close()
+
+
+@router.post("/casos/{caso_id}/atualizar-metadados", response_model=CasoOut, status_code=status.HTTP_202_ACCEPTED)
+def atualizar_metadados_agora(caso_id: uuid.UUID, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Só consulta o jus.br pra atualizar metadados dos andamentos já conhecidos
+    (hora de protocolo etc.) — sem processar nenhuma peça nova. Zero custo de
+    IA. Use antes de "Reagrupar peças" pra dar a ela dado novo pra trabalhar."""
+    caso = _get_caso(db, caso_id)
+    if not caso.processo_id:
+        raise HTTPException(status_code=422, detail="Este caso não está vinculado a um processo.")
+    if caso.ultimo_sync_status == "processando":
+        raise HTTPException(status_code=422, detail="Já há uma sincronização em andamento.")
+    caso.ultimo_sync_status = "processando"
+    caso.ultimo_sync_mensagem = None
+    db.commit()
+    db.refresh(caso)
+    background_tasks.add_task(_executar_atualizar_metadados_em_background, caso.id)
+    return caso
+
+
+def _executar_reagrupar_em_background(caso_id: uuid.UUID) -> None:
+    from datetime import datetime, timezone
+    db = SessionLocal()
+    try:
+        caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
+        if caso:
+            try:
+                total = reagrupar_pecas_jusbr(db, caso)
+                caso.ultimo_sync_status = "ok"
+                caso.ultimo_sync_mensagem = f"{total} peça(s) reagrupada(s) (petição/anexo)."
+            except Exception as exc:
+                caso.ultimo_sync_status = "erro"
+                caso.ultimo_sync_mensagem = str(exc)
+            finally:
+                caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
+                db.commit()
+    finally:
+        db.close()
+
+
+@router.post("/casos/{caso_id}/reagrupar", response_model=CasoOut, status_code=status.HTTP_202_ACCEPTED)
+def reagrupar_agora(caso_id: uuid.UUID, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Reaplica o agrupamento petição/anexo nas peças já importadas, usando a
+    hora de protocolo quando disponível — 100% local, sem IA nem rede."""
+    caso = _get_caso(db, caso_id)
+    if caso.ultimo_sync_status == "processando":
+        raise HTTPException(status_code=422, detail="Já há uma sincronização/reagrupamento em andamento.")
+    caso.ultimo_sync_status = "processando"
+    caso.ultimo_sync_mensagem = None
+    db.commit()
+    db.refresh(caso)
+    background_tasks.add_task(_executar_reagrupar_em_background, caso.id)
     return caso
 
 
