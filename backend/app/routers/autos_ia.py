@@ -7,7 +7,7 @@ from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, or_
+from sqlalchemy import DateTime, cast, func, or_
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, get_db
@@ -473,6 +473,7 @@ def _montar_documento_drive(peca: AutosIAPeca, andamento: AndamentoProcesso | No
         data_peca=peca.data_peca,
         protocolado_em=andamento.protocolado_em if andamento else None,
         status=peca.status,
+        erro_mensagem=peca.erro_mensagem,
         arquivo_nome=arquivo_nome,
         arquivo_drive_link=andamento.arquivo_drive_link if andamento else None,
         nome_indexado=derivar_nome_indexado(arquivo_nome),
@@ -486,7 +487,7 @@ def _montar_documento_drive(peca: AutosIAPeca, andamento: AndamentoProcesso | No
 def listar_documentos_drive(
     caso_id: uuid.UUID,
     q: str | None = None,
-    ordem: Literal["asc", "desc"] = "desc",
+    ordem: Literal["asc", "desc"] = "asc",
     offset: int = 0,
     limit: int = 60,
     db: Session = Depends(get_db),
@@ -494,12 +495,19 @@ def listar_documentos_drive(
     """Listagem compacta das peças/documentos vindos do jus.br/Drive, uma linha
     por peça-mãe com seus anexos aninhados — pra identificar cada arquivo pelo
     nome (derivado do próprio nome do arquivo, sem IA) e abrir direto no Drive,
-    sem precisar ler o resumo de cada um. Ordena pela data/hora real do
-    andamento (jus.br) — não por pagina_inicio, que só reflete a ordem em que
-    cada peça foi importada e pode ficar fora de ordem dentro do mesmo dia
-    quando a hora de protocolo chega depois, num "Atualizar metadados"."""
+    sem precisar ler o resumo de cada um. Ordena por uma chave única de data/
+    hora (protocolado_em quando existe, senão meia-noite de data_andamento) —
+    ordenar por data_andamento e protocolado_em como colunas SEPARADAS (cada
+    uma com seu próprio nulls_last) fazia andamentos sem hora de protocolo
+    "pular" pro fim do dia mesmo quando vieram antes na realidade, o que
+    intercalava documento(s) e a petição deles fora de ordem."""
     _get_caso(db, caso_id)
     limit = max(1, min(limit, 200))
+
+    chave_ordem = func.coalesce(
+        AndamentoProcesso.protocolado_em,
+        cast(AndamentoProcesso.data_andamento, DateTime(timezone=True)),
+    )
 
     base = (
         db.query(AutosIAPeca)
@@ -520,17 +528,9 @@ def listar_documentos_drive(
             AndamentoProcesso.arquivo_nome.ilike(termo),
         ))
     if ordem == "asc":
-        base = base.order_by(
-            AndamentoProcesso.data_andamento.asc().nulls_last(),
-            AndamentoProcesso.protocolado_em.asc().nulls_last(),
-            AutosIAPeca.pagina_inicio.asc(),
-        )
+        base = base.order_by(chave_ordem.asc().nulls_last(), AutosIAPeca.pagina_inicio.asc())
     else:
-        base = base.order_by(
-            AndamentoProcesso.data_andamento.desc().nulls_last(),
-            AndamentoProcesso.protocolado_em.desc().nulls_last(),
-            AutosIAPeca.pagina_inicio.desc(),
-        )
+        base = base.order_by(chave_ordem.desc().nulls_last(), AutosIAPeca.pagina_inicio.desc())
     principais = base.offset(max(0, offset)).limit(limit).all()
 
     anexos: list[AutosIAPeca] = []

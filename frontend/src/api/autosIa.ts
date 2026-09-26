@@ -119,6 +119,7 @@ export interface DocumentoDriveAnexo {
   data_peca?: string | null
   protocolado_em?: string | null
   status: StatusPeca
+  erro_mensagem?: string | null
   arquivo_nome?: string | null
   arquivo_drive_link?: string | null
   nome_indexado?: string | null

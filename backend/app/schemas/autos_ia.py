@@ -136,6 +136,7 @@ class DocumentoDriveAnexoOut(BaseModel):
     data_peca: date | None
     protocolado_em: datetime | None
     status: str
+    erro_mensagem: str | None
     arquivo_nome: str | None
     arquivo_drive_link: str | None
     nome_indexado: str | None

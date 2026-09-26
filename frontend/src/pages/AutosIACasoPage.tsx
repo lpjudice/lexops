@@ -846,6 +846,7 @@ function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | Document
             </button>
           )}
           <span className={styles.tipoBadge}>{doc.tipo}</span>
+          {doc.erro_mensagem && <span className={styles.docAvisoLeitura} title={doc.erro_mensagem}>⚠</span>}
           {temAnexos && <span className={styles.docAnexosCount}>{anexos.length} anexo{anexos.length > 1 ? 's' : ''}</span>}
           <button
             type="button"
@@ -921,7 +922,7 @@ function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | Document
 
 function AbaDocumentosDrive({ casoId, vinculadoAProcesso }: { casoId: string; vinculadoAProcesso: boolean }) {
   const [q, setQ] = useState('')
-  const [ordem, setOrdem] = useState<'asc' | 'desc'>('desc')
+  const [ordem, setOrdem] = useState<'asc' | 'desc'>('asc')
 
   const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteQuery({
     queryKey: ['autos-ia', 'documentos-drive', casoId, q, ordem],

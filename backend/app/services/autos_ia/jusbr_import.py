@@ -453,6 +453,7 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
     for indice, andamento in enumerate(pendentes, start=1):
         conteudo = None
         texto = andamento.texto_extraido
+        tem_arquivo = bool(andamento.arquivo_path or andamento.arquivo_drive_link)
         if not texto:
             conteudo = _obter_bytes(andamento)
             if conteudo:
@@ -463,6 +464,10 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
                 if texto:
                     andamento.texto_extraido = texto
                     db.commit()
+        # Só é "leitura incompleta" quando HÁ arquivo mas nada saiu dele (download
+        # falhou, ou pypdf/pdfminer/OCR falharam todos) — não quando o andamento
+        # nunca teve arquivo pra começo de conversa.
+        leitura_incompleta = tem_arquivo and not texto
         if not texto:
             texto = andamento.descricao or ""
 
@@ -473,6 +478,7 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
         item = {
             "andamento": andamento,
             "texto": texto,
+            "leitura_incompleta": leitura_incompleta,
             "tipo": _classificar_tipo(andamento),
             "eh_anexo": _eh_provavel_anexo(andamento),
             "pagina_inicio": pagina_inicio,
@@ -586,6 +592,10 @@ def _criar_peca(db: Session, caso: AutosIACaso, item: dict, peca_pai_id) -> Auto
         pagina_fim=item["pagina_fim"],
         texto_md=item["texto"] or "(sem texto extraído)",
         status="pendente_resumo",
+        erro_mensagem=(
+            "Não foi possível ler o conteúdo do arquivo (download ou OCR falharam) — "
+            "esta peça ficou só com a descrição do andamento, sem o texto do documento."
+        ) if item.get("leitura_incompleta") else None,
     )
     db.add(peca)
     db.flush()

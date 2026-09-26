@@ -49,7 +49,9 @@ def _ocr_claude_pagina(content: bytes, indice: int, on_custo: Callable[[float], 
     writer.write(buf)
     pagina_bytes = buf.getvalue()
 
-    client = anthropic.Anthropic()
+    # Timeout curto e sem retries longos: uma página travada não pode prender a
+    # fila inteira de páginas do bloco (mesmo problema resolvido em pdf_extract.py).
+    client = anthropic.Anthropic(timeout=90.0, max_retries=1)
     resp = client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=4096,

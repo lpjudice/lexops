@@ -428,6 +428,13 @@
   opacity: 0.75;
 }
 
+.docAvisoLeitura {
+  font-size: 11px;
+  color: #b45309;
+  flex-shrink: 0;
+  cursor: help;
+}
+
 .docAnexosCount {
   font-size: 10px;
   font-weight: 600;

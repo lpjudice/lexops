@@ -22,40 +22,76 @@ def _extrair_com_pdfminer(content: bytes) -> str:
     return pdfminer_extract(io.BytesIO(content), maxpages=50) or ""
 
 
+# Cada chamada de OCR isola 1 página — nunca o documento inteiro numa chamada só.
+# Isso limita o tempo/tamanho de cada chamada (evita travar a fila inteira de
+# importação numa chamada grande e sem limite de tempo) e torna a falha
+# granular: uma página que falha (timeout, erro da API) é pulada e as demais
+# preservam o texto já extraído, em vez de o documento inteiro virar nada.
+_OCR_TIMEOUT_SEGUNDOS = 90.0
+_OCR_MAX_PAGINAS = 200
+
+
 def _extrair_com_claude_ocr(content: bytes, on_custo: Callable[[float], None] | None = None) -> str:
-    """Último recurso: envia o PDF para Claude ler via visão nativa (PDFs escaneados sem texto).
-    `on_custo(custo_usd)`, quando informado, recebe o custo real dessa chamada — sem isso, o
-    fallback de OCR é uma chamada de IA paga que nenhum lugar do sistema contabiliza."""
+    """Último recurso: envia cada página do PDF para Claude ler via visão nativa
+    (PDFs escaneados sem texto), uma chamada por página. `on_custo(custo_usd)`,
+    quando informado, recebe o custo real de cada chamada — sem isso, o
+    fallback de OCR é uma chamada de IA paga que nenhum lugar do sistema
+    contabiliza. Retorna o texto das páginas que deram certo; uma página que
+    falhar não derruba as demais."""
     import base64
     import anthropic
-    client = anthropic.Anthropic()
-    if len(content) > 5 * 1024 * 1024:
-        content = content[:5 * 1024 * 1024]
-    resp = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=8192,
-        messages=[{
-            "role": "user",
-            "content": [
-                {
-                    "type": "document",
-                    "source": {"type": "base64", "media_type": "application/pdf", "data": base64.b64encode(content).decode()},
-                },
-                {
-                    "type": "text",
-                    "text": (
-                        "Extraia TODO o texto desta peça ou decisão judicial exatamente como está, "
-                        "preservando parágrafos, numerações e formatação. "
-                        "Retorne APENAS o texto extraído, sem comentários adicionais."
-                    ),
-                },
-            ],
-        }],
-    )
-    if on_custo:
-        from app.services.autos_ia.precos import calcular_custo_ocr_usd
-        on_custo(calcular_custo_ocr_usd(resp.usage.input_tokens, resp.usage.output_tokens))
-    return resp.content[0].text if resp.content else ""
+    from pypdf import PdfReader, PdfWriter
+
+    client = anthropic.Anthropic(timeout=_OCR_TIMEOUT_SEGUNDOS, max_retries=1)
+    paginas = PdfReader(io.BytesIO(content)).pages
+    if len(paginas) > _OCR_MAX_PAGINAS:
+        logger.warning("PDF com %d páginas — OCR limitado às primeiras %d", len(paginas), _OCR_MAX_PAGINAS)
+        paginas = paginas[:_OCR_MAX_PAGINAS]
+
+    textos: list[str] = []
+    for indice, pagina in enumerate(paginas):
+        writer = PdfWriter()
+        writer.add_page(pagina)
+        buf = io.BytesIO()
+        writer.write(buf)
+        pagina_bytes = buf.getvalue()
+        if len(pagina_bytes) > 5 * 1024 * 1024:
+            logger.warning("Página %d grande demais para OCR (>5MB) — pulada", indice)
+            continue
+
+        try:
+            resp = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=8192,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "document",
+                            "source": {"type": "base64", "media_type": "application/pdf", "data": base64.b64encode(pagina_bytes).decode()},
+                        },
+                        {
+                            "type": "text",
+                            "text": (
+                                "Extraia TODO o texto desta página exatamente como está, "
+                                "preservando parágrafos, numerações e formatação. "
+                                "Retorne APENAS o texto extraído, sem comentários adicionais."
+                            ),
+                        },
+                    ],
+                }],
+            )
+        except Exception as exc:
+            logger.warning("Claude OCR falhou na página %d (%s): %s", indice, exc.__class__.__name__, exc)
+            continue
+
+        if on_custo:
+            from app.services.autos_ia.precos import calcular_custo_ocr_usd
+            on_custo(calcular_custo_ocr_usd(resp.usage.input_tokens, resp.usage.output_tokens))
+        if resp.content:
+            textos.append(resp.content[0].text)
+
+    return "\n\n".join(t.strip() for t in textos if t.strip())
 
 
 def extrair_texto_pdf(content: bytes, on_custo: Callable[[float], None] | None = None) -> str:
