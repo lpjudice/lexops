@@ -23,6 +23,7 @@ from app.services.autos_ia.ingestao import (
     resumir_pecas_em_paralelo,
 )
 from app.services.autos_ia.segmentacao import TIPOS_VALIDOS
+from app.services.pdf_extract import remover_nul
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,7 @@ def _extrair_texto(conteudo: bytes, nome_arquivo: str | None, on_custo=None) -> 
     if nome_arquivo and nome_arquivo.lower().endswith((".html", ".htm")):
         try:
             from bs4 import BeautifulSoup
-            return BeautifulSoup(conteudo, "html.parser").get_text("\n").strip()
+            return remover_nul(BeautifulSoup(conteudo, "html.parser").get_text("\n").strip())
         except Exception as exc:
             logger.warning("Falha ao extrair texto de HTML: %s", exc)
             return ""
@@ -494,7 +495,7 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
         # nunca teve arquivo pra começo de conversa.
         leitura_incompleta = tem_arquivo and not texto
         if not texto:
-            texto = andamento.descricao or ""
+            texto = remover_nul(andamento.descricao or "")
 
         paginas = _contar_paginas(conteudo, andamento.arquivo_nome)
         pagina_inicio = caso.total_paginas + 1
@@ -617,7 +618,7 @@ def _criar_peca(db: Session, caso: AutosIACaso, item: dict, peca_pai_id) -> Auto
         andamento_id=andamento.id,
         peca_pai_id=peca_pai_id,
         tipo=tipo,
-        titulo=(andamento.tipo or andamento.descricao or "Andamento sem título").strip()[:500],
+        titulo=remover_nul((andamento.tipo or andamento.descricao or "Andamento sem título").strip())[:500],
         autor=None,
         data_peca=andamento.data_andamento,
         # Não usa andamento.documento_id aqui: é um ID interno do jus.br, não o número
@@ -627,7 +628,7 @@ def _criar_peca(db: Session, caso: AutosIACaso, item: dict, peca_pai_id) -> Auto
         id_processual=None,
         pagina_inicio=item["pagina_inicio"],
         pagina_fim=item["pagina_fim"],
-        texto_md=item["texto"] or "(sem texto extraído)",
+        texto_md=remover_nul(item["texto"]) or "(sem texto extraído)",
         status="pendente_resumo",
         erro_mensagem=(
             "Não foi possível ler o conteúdo do arquivo (download ou OCR falharam) — "

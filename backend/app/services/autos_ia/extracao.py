@@ -11,6 +11,8 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from app.services.pdf_extract import remover_nul
+
 logger = logging.getLogger(__name__)
 
 LIMIAR_CHARS_TEXTO_NATIVO = 40
@@ -132,7 +134,7 @@ def extrair_paginas(
             except Exception as exc:
                 logger.warning("OCR Claude falhou na página %d: %s", numero_global, exc)
 
-        paginas.append(PaginaExtraida(numero_global=numero_global, texto=texto, ocr_usado=ocr_usado))
+        paginas.append(PaginaExtraida(numero_global=numero_global, texto=remover_nul(texto), ocr_usado=ocr_usado))
         if on_progresso:
             on_progresso(indice + 1, total_paginas)
 

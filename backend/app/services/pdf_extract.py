@@ -10,6 +10,15 @@ from collections.abc import Callable
 logger = logging.getLogger(__name__)
 
 
+def remover_nul(texto: str) -> str:
+    """Postgres/psycopg2 rejeita string com NUL (0x00) embutido — PDFs
+    malformados ou digitalizados às vezes produzem esse byte no texto
+    extraído (pypdf/pdfminer/OCR), e sem isso o commit falha com "A string
+    literal cannot contain NUL (0x00) characters", derrubando a peça (e a
+    sincronização inteira, antes de qualquer rede de segurança) sem aviso."""
+    return texto.replace("\x00", "") if texto else texto
+
+
 def _extrair_com_pypdf(content: bytes) -> str:
     from pypdf import PdfReader
     reader = PdfReader(io.BytesIO(content))
@@ -116,4 +125,4 @@ def extrair_texto_pdf(content: bytes, on_custo: Callable[[float], None] | None =
         except Exception as exc:
             logger.warning("Claude OCR falhou: %s", exc)
 
-    return texto.strip()
+    return remover_nul(texto.strip())
