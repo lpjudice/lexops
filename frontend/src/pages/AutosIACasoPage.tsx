@@ -289,7 +289,7 @@ export default function AutosIACasoPage() {
               </button>
             </div>
           )}
-          {modalExcluir && (
+          {caso && modalExcluir && (
             <ModalConfirmarExclusao
               nomeCaso={caso.nome}
               isPending={deletarCaso.isPending}
