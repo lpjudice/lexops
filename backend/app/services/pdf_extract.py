@@ -40,18 +40,58 @@ _OCR_TIMEOUT_SEGUNDOS = 90.0
 _OCR_MAX_PAGINAS = 200
 
 
-def _extrair_com_claude_ocr(content: bytes, on_custo: Callable[[float], None] | None = None) -> str:
-    """Último recurso: envia cada página do PDF para Claude ler via visão nativa
-    (PDFs escaneados sem texto), uma chamada por página. `on_custo(custo_usd)`,
-    quando informado, recebe o custo real de cada chamada — sem isso, o
-    fallback de OCR é uma chamada de IA paga que nenhum lugar do sistema
-    contabiliza. Retorna o texto das páginas que deram certo; uma página que
-    falhar não derruba as demais."""
+def _ocr_pagina_claude(pagina_bytes: bytes, on_custo: Callable[[float], None] | None) -> str:
+    """OCR padrão de 1 página — só Claude. Usado quando `extrair_texto_pdf`
+    não recebe um `ocr_pagina` alternativo (PrecedentCheck e demais chamadores
+    fora do Autos IA continuam só no Claude, sem mudança de comportamento)."""
     import base64
     import anthropic
-    from pypdf import PdfReader, PdfWriter
 
     client = anthropic.Anthropic(timeout=_OCR_TIMEOUT_SEGUNDOS, max_retries=1)
+    resp = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=8192,
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "document",
+                    "source": {"type": "base64", "media_type": "application/pdf", "data": base64.b64encode(pagina_bytes).decode()},
+                },
+                {
+                    "type": "text",
+                    "text": (
+                        "Extraia TODO o texto desta página exatamente como está, "
+                        "preservando parágrafos, numerações e formatação. "
+                        "Retorne APENAS o texto extraído, sem comentários adicionais."
+                    ),
+                },
+            ],
+        }],
+    )
+    if on_custo:
+        from app.services.autos_ia.precos import calcular_custo_ocr_usd
+        on_custo(calcular_custo_ocr_usd(resp.usage.input_tokens, resp.usage.output_tokens))
+    return resp.content[0].text if resp.content else ""
+
+
+def _extrair_com_claude_ocr(
+    content: bytes,
+    on_custo: Callable[[float], None] | None = None,
+    ocr_pagina: Callable[[bytes, Callable[[float], None] | None], str] | None = None,
+) -> str:
+    """Último recurso: OCR de cada página do PDF, uma chamada por página — nunca
+    o documento inteiro numa chamada só (limita tempo/tamanho por chamada e
+    torna a falha granular: uma página que falha é pulada, as demais
+    preservam o texto). `on_custo(custo_usd)`, quando informado, recebe o
+    custo real de cada chamada — sem isso, o OCR é uma chamada de IA paga que
+    nenhum lugar do sistema contabiliza. `ocr_pagina(pagina_bytes, on_custo)`,
+    quando informado, substitui o OCR padrão (só Claude) por outra estratégia
+    — usado pelo fluxo do jus.br pra diluir custo entre provedores; ver
+    services/autos_ia/ocr_providers.py."""
+    from pypdf import PdfReader, PdfWriter
+
+    ocr_pagina = ocr_pagina or _ocr_pagina_claude
     paginas = PdfReader(io.BytesIO(content)).pages
     if len(paginas) > _OCR_MAX_PAGINAS:
         logger.warning("PDF com %d páginas — OCR limitado às primeiras %d", len(paginas), _OCR_MAX_PAGINAS)
@@ -69,44 +109,25 @@ def _extrair_com_claude_ocr(content: bytes, on_custo: Callable[[float], None] | 
             continue
 
         try:
-            resp = client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=8192,
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "document",
-                            "source": {"type": "base64", "media_type": "application/pdf", "data": base64.b64encode(pagina_bytes).decode()},
-                        },
-                        {
-                            "type": "text",
-                            "text": (
-                                "Extraia TODO o texto desta página exatamente como está, "
-                                "preservando parágrafos, numerações e formatação. "
-                                "Retorne APENAS o texto extraído, sem comentários adicionais."
-                            ),
-                        },
-                    ],
-                }],
-            )
+            texto_pagina = ocr_pagina(pagina_bytes, on_custo)
         except Exception as exc:
-            logger.warning("Claude OCR falhou na página %d (%s): %s", indice, exc.__class__.__name__, exc)
+            logger.warning("OCR falhou na página %d (%s): %s", indice, exc.__class__.__name__, exc)
             continue
-
-        if on_custo:
-            from app.services.autos_ia.precos import calcular_custo_ocr_usd
-            on_custo(calcular_custo_ocr_usd(resp.usage.input_tokens, resp.usage.output_tokens))
-        if resp.content:
-            textos.append(resp.content[0].text)
+        if texto_pagina:
+            textos.append(texto_pagina)
 
     return "\n\n".join(t.strip() for t in textos if t.strip())
 
 
-def extrair_texto_pdf(content: bytes, on_custo: Callable[[float], None] | None = None) -> str:
+def extrair_texto_pdf(
+    content: bytes,
+    on_custo: Callable[[float], None] | None = None,
+    ocr_pagina: Callable[[bytes, Callable[[float], None] | None], str] | None = None,
+) -> str:
     """Extrai texto de um PDF em 3 tentativas. Retorna string vazia se todas falharem.
     `on_custo(custo_usd)`, quando informado, recebe o custo real de uma eventual chamada
-    de OCR via IA (a única etapa paga desta cascata — pypdf/pdfminer são locais e grátis)."""
+    de OCR via IA (a única etapa paga desta cascata — pypdf/pdfminer são locais e grátis).
+    `ocr_pagina`: ver _extrair_com_claude_ocr."""
     texto = ""
     try:
         texto = _extrair_com_pypdf(content)
@@ -121,8 +142,8 @@ def extrair_texto_pdf(content: bytes, on_custo: Callable[[float], None] | None =
 
     if not texto.strip():
         try:
-            texto = _extrair_com_claude_ocr(content, on_custo=on_custo)
+            texto = _extrair_com_claude_ocr(content, on_custo=on_custo, ocr_pagina=ocr_pagina)
         except Exception as exc:
-            logger.warning("Claude OCR falhou: %s", exc)
+            logger.warning("OCR falhou: %s", exc)
 
     return remover_nul(texto.strip())

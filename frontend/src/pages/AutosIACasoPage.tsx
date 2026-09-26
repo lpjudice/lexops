@@ -557,18 +557,39 @@ function ModalConfirmarExclusao({
 }
 
 function SyncProgress({ caso }: { caso: Caso }) {
-  const agora = useNow(5000)
+  const agora = useNow(1000)
 
   const total = caso.sync_total_itens ?? 0
   const feito = caso.sync_itens_processados ?? 0
   const pct = total > 0 ? Math.min(100, Math.round((feito / total) * 100)) : 0
+  const inicioMs = caso.sync_iniciado_em ? new Date(caso.sync_iniciado_em).getTime() : null
+
+  // Marca quando "feito" mudou pela última vez — o ritmo médio real (do que já
+  // foi processado) dá a base pra estimar o progresso do documento ATUAL.
+  const ultimaMudancaRef = useRef({ feito, em: agora })
+  if (ultimaMudancaRef.current.feito !== feito) {
+    ultimaMudancaRef.current = { feito, em: agora }
+  }
 
   let eta = ''
-  if (caso.sync_iniciado_em && pct >= 3) {
-    const elapsedMs = agora - new Date(caso.sync_iniciado_em).getTime()
+  if (inicioMs && pct >= 3) {
+    const elapsedMs = agora - inicioMs
     const restanteMs = Math.max(0, elapsedMs / (pct / 100) - elapsedMs)
     const min = Math.round(restanteMs / 60000)
     eta = min < 1 ? '< 1 min restante' : `~${min} min restante`
+  }
+
+  // Barra secundária: sobe segundo a segundo com base no ritmo médio real —
+  // distingue "só demorando" (sobe, estabiliza perto de 95-97% e espera o
+  // próximo) de "travado de verdade" (fica parada ali por muito mais tempo
+  // que a média do que já foi processado até agora).
+  let pctDocumentoAtual: number | null = null
+  if (inicioMs && feito > 0 && feito < total) {
+    const ritmoMedioMs = (ultimaMudancaRef.current.em - inicioMs) / feito
+    if (ritmoMedioMs > 0) {
+      const decorridoDesdeUltimo = agora - ultimaMudancaRef.current.em
+      pctDocumentoAtual = Math.min(97, Math.round((decorridoDesdeUltimo / ritmoMedioMs) * 100))
+    }
   }
 
   return (
@@ -582,6 +603,16 @@ function SyncProgress({ caso }: { caso: Caso }) {
       <div className={styles.progressBar}>
         <div className={styles.progressFill} style={{ width: `${pct}%` }} />
       </div>
+      {pctDocumentoAtual != null && (
+        <>
+          <div style={{ fontSize: 10, color: 'var(--gray-mid)', marginTop: 5 }}>
+            Documento atual (estimado pelo ritmo médio)
+          </div>
+          <div className={styles.progressBarSecundaria}>
+            <div className={styles.progressFillSecundaria} style={{ width: `${pctDocumentoAtual}%` }} />
+          </div>
+        </>
+      )}
     </div>
   )
 }

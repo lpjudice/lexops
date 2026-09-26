@@ -104,8 +104,9 @@ def _extrair_texto(conteudo: bytes, nome_arquivo: str | None, on_custo=None) -> 
             logger.warning("Falha ao extrair texto de HTML: %s", exc)
             return ""
 
+    from app.services.autos_ia.ocr_providers import ocr_pagina_rotativo
     from app.services.pdf_extract import extrair_texto_pdf
-    return extrair_texto_pdf(conteudo, on_custo=on_custo)
+    return extrair_texto_pdf(conteudo, on_custo=on_custo, ocr_pagina=ocr_pagina_rotativo)
 
 
 def _contar_paginas(conteudo: bytes | None, nome_arquivo: str | None) -> int:
