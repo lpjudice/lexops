@@ -9,6 +9,7 @@ comprovantes...) sob a peça principal do grupo, e o mesmo passo de
 resumo/keywords/IDs mencionados usado no fluxo de upload manual.
 """
 import logging
+import time
 import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
@@ -49,6 +50,35 @@ def _commit_resiliente(db: Session) -> bool:
         except Exception:
             logger.exception("Rollback também falhou após commit informativo malsucedido")
         return False
+
+
+def _commit_com_retry(db: Session, tentativas: int = 2, espera_segundos: float = 1.5) -> None:
+    """Commit de dado real (texto extraído, peça criada) — ao contrário de
+    `_commit_resiliente`, nunca pode simplesmente desistir e seguir em frente
+    (perderia uma extração/resumo já pago). Uma sincronização real caiu
+    exatamente aqui esta madrugada: o OCR de um documento demorou mais de uma
+    hora (documento grande, várias páginas), terminou com sucesso, e no
+    commit final do texto extraído o Postgres do Fly já tinha derrubado a
+    conexão (`server closed the connection unexpectedly`) — sem retry, isso
+    propaga e derruba a sincronização inteira, jogando fora o texto que
+    acabou de ser extraído (o próximo retomar refaz o OCR do zero, pagando de
+    novo). Uma retentativa após rollback dá tempo do pool trocar a conexão
+    morta por uma nova (pool_pre_ping) antes de desistir de vez — se a
+    segunda tentativa também falhar, a conexão está mesmo fora do ar e deixa
+    a exceção subir (a rede de segurança do endpoint trata o resto)."""
+    for tentativa in range(tentativas):
+        try:
+            db.commit()
+            return
+        except Exception as exc:
+            db.rollback()
+            if tentativa == tentativas - 1:
+                raise
+            logger.warning(
+                "Commit falhou (tentativa %d/%d, conexão instável?), tentando de novo em %.1fs: %s",
+                tentativa + 1, tentativas, espera_segundos, exc,
+            )
+            time.sleep(espera_segundos)
 
 
 LIMIAR_CHARS_PARA_RESUMO_IA = 200
@@ -506,7 +536,7 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
             if membro is principal:
                 continue
             criadas.append(_criar_peca(db, caso, membro, peca_pai_id=peca_principal.id))
-        db.commit()
+        _commit_com_retry(db)
         grupo_atual = []
 
     def _status_leitura(msg: str, _idx=None, _total=len(pendentes)) -> None:
@@ -529,7 +559,7 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
                 texto = _extrair_texto(conteudo, andamento.arquivo_nome, on_custo=_custo_ocr, on_status=_status_ocr)
                 if texto:
                     andamento.texto_extraido = texto
-                    db.commit()
+                    _commit_com_retry(db)
         # Só é "leitura incompleta" quando HÁ arquivo mas nada saiu dele (download
         # falhou, ou pypdf/pdfminer/OCR falharam todos) — não quando o andamento
         # nunca teve arquivo pra começo de conversa.

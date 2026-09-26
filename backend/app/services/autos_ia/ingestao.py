@@ -3,6 +3,7 @@ extração de texto → segmentação em peças → resumo/keywords/IDs → refe
 """
 import logging
 import re
+import time
 import unicodedata
 import uuid
 from collections.abc import Callable
@@ -36,6 +37,26 @@ def _commit_resiliente(db: Session) -> bool:
         except Exception:
             logger.exception("Rollback também falhou após commit informativo malsucedido")
         return False
+
+
+def _commit_com_retry(db: Session, tentativas: int = 2, espera_segundos: float = 1.5) -> None:
+    """Commit de dado real (resumo/keywords já pagos à IA) — ver mesma função
+    em jusbr_import.py. Nunca desiste silenciosamente: uma retentativa após
+    rollback dá tempo do pool trocar uma conexão morta do Postgres do Fly por
+    uma nova antes de perder um resumo que já custou dinheiro pra gerar."""
+    for tentativa in range(tentativas):
+        try:
+            db.commit()
+            return
+        except Exception as exc:
+            db.rollback()
+            if tentativa == tentativas - 1:
+                raise
+            logger.warning(
+                "Commit falhou (tentativa %d/%d, conexão instável?), tentando de novo em %.1fs: %s",
+                tentativa + 1, tentativas, espera_segundos, exc,
+            )
+            time.sleep(espera_segundos)
 
 
 # Chamadas de resumo por peça são independentes entre si (só leem, não escrevem
@@ -163,7 +184,7 @@ def resumir_pecas_em_paralelo(
                 # com o tipo "documento" decidido no agrupamento (ver jusbr_import.py).
                 if peca.peca_pai_id is None:
                     peca.tipo = resultado.tipo
-                db.commit()
+                _commit_com_retry(db)
                 _persistir_referencias(db, peca, peca.ids_mencionados)
                 if on_custo:
                     on_custo(resultado.custo_usd)
