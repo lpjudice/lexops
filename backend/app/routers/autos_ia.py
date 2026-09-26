@@ -224,13 +224,27 @@ def retomar_documento_agora(documento_id: uuid.UUID, background_tasks: Backgroun
 
 # ── Sincronização com o processo vinculado (jus.br) ─────────────────────────
 
+def _carregar_sessao_jusbr() -> dict | None:
+    """Sessão do próprio lexops (colar token); se caiu, cai pra sessão do bot
+    do Telegram (id=2), que fica ativa por muito mais tempo (offline_access +
+    refresh proativo) — mesmo fallback que telegram_andamentos.py já usa ao
+    contrário."""
+    from app.services.consulta_processual.jusbr_session import load_session
+
+    session_data = load_session()
+    if session_data:
+        return session_data
+    from app.services.andamentos_auth import load_session as load_session_bot
+
+    return load_session_bot()
+
+
 def _executar_sync_em_background(caso_id: uuid.UUID) -> None:
     db = SessionLocal()
     try:
-        from app.services.consulta_processual.jusbr_session import load_session
         caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
         if caso:
-            sincronizar_caso_jusbr(db, caso, load_session())
+            sincronizar_caso_jusbr(db, caso, _carregar_sessao_jusbr())
     finally:
         db.close()
 
@@ -251,10 +265,9 @@ def sincronizar_agora(caso_id: uuid.UUID, background_tasks: BackgroundTasks, db:
 def _executar_atualizar_metadados_em_background(caso_id: uuid.UUID) -> None:
     db = SessionLocal()
     try:
-        from app.services.consulta_processual.jusbr_session import load_session
         caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
         if caso:
-            atualizar_metadados_jusbr(db, caso, load_session())
+            atualizar_metadados_jusbr(db, caso, _carregar_sessao_jusbr())
     finally:
         db.close()
 
@@ -457,6 +470,7 @@ def _montar_documento_drive(peca: AutosIAPeca, andamento: AndamentoProcesso | No
         resumo=peca.resumo,
         autor=peca.autor,
         data_peca=peca.data_peca,
+        protocolado_em=andamento.protocolado_em if andamento else None,
         status=peca.status,
         arquivo_nome=arquivo_nome,
         arquivo_drive_link=andamento.arquivo_drive_link if andamento else None,

@@ -43,6 +43,7 @@ PALAVRAS_ANEXO = [
     "ata de", "extrato", "comprovante de residência", "comprovante de residencia",
     "declaração de pobreza", "declaracao de pobreza", "carta de preposição", "carta de preposicao",
     "boleto", "darf", "custas processuais", "comprovante de pagamento",
+    "documento de comprovação", "documento de comprovacao",
 ]
 
 
@@ -253,8 +254,14 @@ def reagrupar_pecas_jusbr(db: Session, caso: AutosIACaso) -> int:
         eh_grupo_protocolo = bool(primeiro_andamento and primeiro_andamento.protocolado_em)
         if eh_grupo_protocolo:
             # Mesma hora exata de protocolo: o primeiro protocolado é a petição
-            # (regra combinada com o Lucas) — não depende de heurística de tipo.
-            principal = membros[0]
+            # (regra combinada com o Lucas) — não depende de heurística de tipo,
+            # exceto quando o próprio nome/descrição bate com um sinal de anexo
+            # explícito (procuração, comprovante, "Documento de Comprovação"...),
+            # caso em que nunca deve ser escolhido como principal do grupo.
+            principal = next(
+                (m for m in membros if (a := andamentos.get(m.andamento_id)) is None or not _eh_provavel_anexo(a)),
+                membros[0],
+            )
         else:
             # Fallback (sem hora de protocolo): usa a classificação real que a
             # IA já deu à peça (mais confiável que a palavra-chave usada na
@@ -414,15 +421,12 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
         nonlocal grupo_atual
         if not grupo_atual:
             return
-        if chave_atual is not None and chave_atual[0] == "protocolo":
-            # Grupo por hora exata de protocolo: confia na ordem de submissão —
-            # o primeiro documento protocolado na mesma transação é a petição,
-            # os demais são anexos dela (regra do próprio Lucas, mais confiável
-            # aqui que o heurístico de palavra-chave, que serve pro fallback
-            # por descrição).
-            principal = grupo_atual[0]
-        else:
-            principal = next((m for m in grupo_atual if not m["eh_anexo"]), grupo_atual[0])
+        # Confia na ordem de submissão dentro do grupo (por hora exata de
+        # protocolo, regra combinada com o Lucas, ou por data+descrição no
+        # fallback) — mas nunca escolhe como principal um membro cujo nome/
+        # descrição bate com um sinal de anexo explícito (procuração,
+        # comprovante, "Documento de Comprovação"...).
+        principal = next((m for m in grupo_atual if not m["eh_anexo"]), grupo_atual[0])
         peca_principal = _criar_peca(db, caso, principal, peca_pai_id=None)
         criadas.append(peca_principal)
         for membro in grupo_atual:

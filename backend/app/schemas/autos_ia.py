@@ -134,6 +134,7 @@ class DocumentoDriveAnexoOut(BaseModel):
     resumo: str | None
     autor: str | None
     data_peca: date | None
+    protocolado_em: datetime | None
     status: str
     arquivo_nome: str | None
     arquivo_drive_link: str | None

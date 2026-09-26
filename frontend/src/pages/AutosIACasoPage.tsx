@@ -32,6 +32,11 @@ function formatarData(d?: string | null) {
   return new Date(d).toLocaleDateString('pt-BR')
 }
 
+function formatarHora(d?: string | null) {
+  if (!d) return null
+  return new Date(d).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+}
+
 function formatarUsd(v: number) {
   return `US$ ${v.toFixed(v < 1 ? 3 : 2)}`
 }
@@ -761,45 +766,45 @@ function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | Document
 
   return (
     <div className={styles.docItem}>
-      <div
-        className={`${styles.docRow} ${ehPeticao ? styles.docRowPeticao : ''}`}
-        style={{ paddingLeft: nivel * 22 }}
-      >
-        {temAnexos ? (
-          <button
-            type="button"
-            className={styles.docChevron}
-            onClick={() => setAberto(!aberto)}
-            aria-expanded={aberto}
-            aria-label={aberto ? 'Recolher anexos' : 'Expandir anexos'}
-          >
-            {aberto ? '▾' : '▸'}
-          </button>
-        ) : (
-          <span className={styles.docChevronVazio} />
-        )}
-        <span className={styles.docData}>{doc.data_peca ? formatarData(doc.data_peca) : '—'}</span>
-        {doc.arquivo_drive_link ? (
-          <a
-            className={styles.docDriveIcone}
-            href={doc.arquivo_drive_link}
-            target="_blank"
-            rel="noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            title="Abrir no Drive"
-            aria-label="Abrir no Drive"
-          >
-            ↗
-          </a>
-        ) : (
-          <span className={styles.docDriveIcone} />
-        )}
-        <span className={`${styles.docNomeIndexado} ${ehPeticao ? styles.docNomeIndexadoPeticao : ''}`}>
-          {doc.nome_indexado || doc.titulo}
-        </span>
-        <span className={styles.tipoBadge}>{doc.tipo}</span>
-        {temAnexos && <span className={styles.docAnexosCount}>{anexos.length} anexo{anexos.length > 1 ? 's' : ''}</span>}
-        {nivel === 0 && (
+      <div className={ehPeticao ? styles.docBlocoPeticao : undefined}>
+        <div className={styles.docRow} style={{ paddingLeft: nivel * 22 }}>
+          {temAnexos ? (
+            <button
+              type="button"
+              className={styles.docChevron}
+              onClick={() => setAberto(!aberto)}
+              aria-expanded={aberto}
+              aria-label={aberto ? 'Recolher anexos' : 'Expandir anexos'}
+            >
+              {aberto ? '▾' : '▸'}
+            </button>
+          ) : (
+            <span className={styles.docChevronVazio} />
+          )}
+          <span className={styles.docData} title={doc.protocolado_em ? `Protocolado às ${formatarHora(doc.protocolado_em)}` : undefined}>
+            <span>{doc.data_peca ? formatarData(doc.data_peca) : '—'}</span>
+            {doc.protocolado_em && <span className={styles.docHora}>{formatarHora(doc.protocolado_em)}</span>}
+          </span>
+          {doc.arquivo_drive_link ? (
+            <a
+              className={styles.docDriveIcone}
+              href={doc.arquivo_drive_link}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              title="Abrir no Drive"
+              aria-label="Abrir no Drive"
+            >
+              ↗
+            </a>
+          ) : (
+            <span className={styles.docDriveIcone} />
+          )}
+          <span className={`${styles.docNomeIndexado} ${ehPeticao ? styles.docNomeIndexadoPeticao : ''}`}>
+            {doc.nome_indexado || doc.titulo}
+          </span>
+          <span className={styles.tipoBadge}>{doc.tipo}</span>
+          {temAnexos && <span className={styles.docAnexosCount}>{anexos.length} anexo{anexos.length > 1 ? 's' : ''}</span>}
           <button
             type="button"
             className={styles.docTogglePeticao}
@@ -809,11 +814,11 @@ function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | Document
           >
             {ehPeticao ? 'Desmarcar petição' : 'Marcar petição'}
           </button>
-        )}
-      </div>
-      <div className={styles.docRowSub} style={{ paddingLeft: nivel * 22 + 22 }}>
-        {doc.arquivo_nome && <span className={styles.docArquivoNome}>{doc.arquivo_nome}</span>}
-        {doc.resumo && <span className={styles.docResumo}>{doc.resumo}</span>}
+        </div>
+        <div className={styles.docRowSub} style={{ paddingLeft: nivel * 22 + 22 }}>
+          {doc.arquivo_nome && <span className={styles.docArquivoNome}>{doc.arquivo_nome}</span>}
+          {doc.resumo && <span className={styles.docResumo}>{doc.resumo}</span>}
+        </div>
       </div>
       {temAnexos && aberto && (
         <div className={styles.docAnexos}>
