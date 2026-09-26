@@ -472,6 +472,7 @@ def _montar_documento_drive(peca: AutosIAPeca, andamento: AndamentoProcesso | No
         autor=peca.autor,
         data_peca=peca.data_peca,
         protocolado_em=andamento.protocolado_em if andamento else None,
+        id_processual=peca.id_processual,
         status=peca.status,
         erro_mensagem=peca.erro_mensagem,
         arquivo_nome=arquivo_nome,

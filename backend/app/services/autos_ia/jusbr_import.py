@@ -28,6 +28,14 @@ logger = logging.getLogger(__name__)
 
 LIMIAR_CHARS_PARA_RESUMO_IA = 200
 
+# PDPJ registra a hora de juntada por DOCUMENTO — documentos de uma mesma
+# submissão (petição + anexos) tipicamente têm timestamps a poucos segundos
+# um do outro, não idênticos ao segundo. Agrupar só por igualdade exata fazia
+# petição e anexos ficarem cada um como peça própria, sem nenhum agrupamento.
+# Uma janela de tolerância a partir do primeiro (âncora) documento do grupo
+# resolve isso sem custo de IA nem depender de ordem perfeita.
+LIMIAR_JANELA_PROTOCOLO_SEGUNDOS = 180
+
 PALAVRAS_TIPO = {
     "peticao": ["petiç", "manifestaç", "impugnaç", "réplica", "replica", "alegaç"],
     "decisao": ["senten", "decis", "acórdão", "acordao"],
@@ -225,19 +233,33 @@ def reagrupar_pecas_jusbr(db: Session, caso: AutosIACaso) -> int:
             p.criado_em,
         )
 
-    def _chave(p: AutosIAPeca):
-        a = andamentos.get(p.andamento_id)
-        if a and a.protocolado_em:
-            return ("protocolo", a.protocolado_em)
-        return ("descricao", a.data_andamento if a else None, (a.descricao or "").strip() if a else "")
-
     pecas_ordenadas = sorted(pecas, key=_ordenar)
 
+    # Mesma janela de tolerância usada na importação (ver LIMIAR_JANELA_
+    # PROTOCOLO_SEGUNDOS): documentos de uma mesma submissão têm timestamps a
+    # poucos segundos um do outro, não necessariamente idênticos.
     grupos: list[list[AutosIAPeca]] = []
     grupo_atual: list[AutosIAPeca] = []
+    ancora_protocolo: datetime | None = None
+    ancora_dia = None
     chave_atual = None
     for p in pecas_ordenadas:
-        chave = _chave(p)
+        a = andamentos.get(p.andamento_id)
+        if a and a.protocolado_em:
+            continua_grupo_protocolo = (
+                ancora_protocolo is not None
+                and ancora_dia == a.data_andamento
+                and (a.protocolado_em - ancora_protocolo).total_seconds() <= LIMIAR_JANELA_PROTOCOLO_SEGUNDOS
+            )
+            if not continua_grupo_protocolo:
+                ancora_protocolo = a.protocolado_em
+                ancora_dia = a.data_andamento
+            chave = ("protocolo", ancora_protocolo, ancora_dia)
+        else:
+            ancora_protocolo = None
+            ancora_dia = None
+            chave = ("descricao", a.data_andamento if a else None, (a.descricao or "").strip() if a else "")
+
         if chave_atual is not None and chave != chave_atual:
             grupos.append(grupo_atual)
             grupo_atual = []
@@ -254,23 +276,19 @@ def reagrupar_pecas_jusbr(db: Session, caso: AutosIACaso) -> int:
                 reagrupadas += 1
             continue
 
-        primeiro_andamento = andamentos.get(membros[0].andamento_id)
-        eh_grupo_protocolo = bool(primeiro_andamento and primeiro_andamento.protocolado_em)
-        if eh_grupo_protocolo:
-            # Mesma hora exata de protocolo: o primeiro protocolado é a petição
-            # (regra combinada com o Lucas) — não depende de heurística de tipo,
-            # exceto quando o próprio nome/descrição bate com um sinal de anexo
-            # explícito (procuração, comprovante, "Documento de Comprovação"...),
-            # caso em que nunca deve ser escolhido como principal do grupo.
-            principal = next(
+        # Lógica processual, não só ordem de submissão: prefere como principal
+        # um membro já classificado como "peticao" de verdade — só cai pra
+        # "primeiro que não bate com sinal de anexo" quando nenhum membro
+        # classifica como petição (certidões/procurações não flagadas como
+        # anexo não podem "furar a fila" na frente da petição real do grupo).
+        principal = (
+            next((m for m in membros if m.tipo == "peticao"), None)
+            or next(
                 (m for m in membros if (a := andamentos.get(m.andamento_id)) is None or not _eh_provavel_anexo(a)),
-                membros[0],
+                None,
             )
-        else:
-            # Fallback (sem hora de protocolo): usa a classificação real que a
-            # IA já deu à peça (mais confiável que a palavra-chave usada na
-            # importação original) — prefere a primeira que não seja "documento".
-            principal = next((m for m in membros if m.tipo != "documento"), membros[0])
+            or membros[0]
+        )
 
         if principal.peca_pai_id is not None:
             principal.peca_pai_id = None
@@ -429,18 +447,25 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
     criadas: list[AutosIAPeca] = []
     grupo_atual: list[dict] = []
     chave_atual: tuple | None = None
+    ancora_protocolo: datetime | None = None
+    ancora_dia = None
     cancelado = False
 
     def _flush_grupo() -> None:
         nonlocal grupo_atual
         if not grupo_atual:
             return
-        # Confia na ordem de submissão dentro do grupo (por hora exata de
-        # protocolo, regra combinada com o Lucas, ou por data+descrição no
-        # fallback) — mas nunca escolhe como principal um membro cujo nome/
-        # descrição bate com um sinal de anexo explícito (procuração,
-        # comprovante, "Documento de Comprovação"...).
-        principal = next((m for m in grupo_atual if not m["eh_anexo"]), grupo_atual[0])
+        # Lógica processual, não só ordem de submissão: prefere como principal
+        # um membro cuja classificação seja "peticao" de verdade — só cai pra
+        # "primeiro que não bate com sinal de anexo" (procuração, comprovante,
+        # "Documento de Comprovação"...) quando nenhum membro classifica como
+        # petição (ex.: certidões e procurações não flagadas como anexo não
+        # podem "furar a fila" na frente da petição real do grupo).
+        principal = (
+            next((m for m in grupo_atual if m["tipo"] == "peticao"), None)
+            or next((m for m in grupo_atual if not m["eh_anexo"]), None)
+            or grupo_atual[0]
+        )
         peca_principal = _criar_peca(db, caso, principal, peca_pai_id=None)
         criadas.append(peca_principal)
         for membro in grupo_atual:
@@ -484,16 +509,28 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
             "pagina_inicio": pagina_inicio,
             "pagina_fim": pagina_inicio + paginas - 1,
         }
-        # Preferência pela hora exata de protocolo (PDPJ/jus.br) pra agrupar
-        # petição+anexos: documentos protocolados juntos, na mesma transação de
-        # juntada, tipicamente vêm com o mesmo timestamp — sem custo de IA e mais
-        # confiável que casar por data+descrição. Andamentos sem essa granularidade
-        # (DataJud, ou sincronizados antes deste campo existir) caem no critério
-        # antigo. Os dois nunca se misturam (chave marcada por tipo), então um
-        # grupo por protocolo nunca "absorve" um grupo por descrição por engano.
+        # Preferência pela hora de protocolo (PDPJ/jus.br) pra agrupar petição+
+        # anexos: documentos protocolados juntos, na mesma transação de juntada,
+        # tipicamente vêm com timestamps a poucos segundos um do outro — não
+        # necessariamente idênticos ao segundo — por isso usa uma janela de
+        # tolerância a partir do primeiro (âncora) documento do grupo, em vez de
+        # igualdade exata. Andamentos sem essa granularidade (DataJud, ou
+        # sincronizados antes deste campo existir) caem no critério antigo por
+        # data+descrição. Os dois nunca se misturam, então um grupo por
+        # protocolo nunca "absorve" um grupo por descrição por engano.
         if andamento.protocolado_em:
-            chave = ("protocolo", andamento.protocolado_em)
+            continua_grupo_protocolo = (
+                ancora_protocolo is not None
+                and ancora_dia == andamento.data_andamento
+                and (andamento.protocolado_em - ancora_protocolo).total_seconds() <= LIMIAR_JANELA_PROTOCOLO_SEGUNDOS
+            )
+            if not continua_grupo_protocolo:
+                ancora_protocolo = andamento.protocolado_em
+                ancora_dia = andamento.data_andamento
+            chave = ("protocolo", ancora_protocolo, ancora_dia)
         else:
+            ancora_protocolo = None
+            ancora_dia = None
             chave = ("descricao", andamento.data_andamento, (andamento.descricao or "").strip())
         # Andamentos vêm ordenados por data/hora de protocolo/criação, então itens
         # do mesmo grupo são sempre contíguos na lista — dá pra fechar (persistir)

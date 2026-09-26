@@ -860,6 +860,7 @@ function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | Document
         </div>
         <div className={styles.docRowSub} style={{ paddingLeft: nivel * 22 + 22 }}>
           {doc.titulo_customizado && <span className={styles.docNomeOriginal}>original: {nomeOriginal}</span>}
+          {doc.id_processual && <span className={styles.docIdProcessual}>ID: {doc.id_processual}</span>}
           {doc.arquivo_nome && <span className={styles.docArquivoNome}>{doc.arquivo_nome}</span>}
           {doc.resumo && <span className={styles.docResumo}>{doc.resumo}</span>}
           {doc.nota_usuario && <span className={styles.docNotaUsuario}>{doc.nota_usuario}</span>}

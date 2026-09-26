@@ -487,6 +487,13 @@
   font-family: monospace;
 }
 
+.docIdProcessual {
+  font-size: 10.5px;
+  color: var(--teal);
+  font-family: monospace;
+  font-weight: 600;
+}
+
 .docResumo {
   font-size: 11px;
   color: #52514e;

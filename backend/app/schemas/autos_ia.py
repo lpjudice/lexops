@@ -135,6 +135,7 @@ class DocumentoDriveAnexoOut(BaseModel):
     autor: str | None
     data_peca: date | None
     protocolado_em: datetime | None
+    id_processual: str | None
     status: str
     erro_mensagem: str | None
     arquivo_nome: str | None

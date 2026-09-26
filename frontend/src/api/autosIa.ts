@@ -118,6 +118,7 @@ export interface DocumentoDriveAnexo {
   autor?: string | null
   data_peca?: string | null
   protocolado_em?: string | null
+  id_processual?: string | null
   status: StatusPeca
   erro_mensagem?: string | null
   arquivo_nome?: string | null
