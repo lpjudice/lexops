@@ -59,7 +59,7 @@ def _persistir_referencias(db: Session, peca: AutosIAPeca, ids_mencionados: list
             caso_id=peca.caso_id,
             peca_origem_id=peca.id,
             peca_destino_id=destino.id if destino else None,
-            id_mencionado=id_mencionado,
+            id_mencionado=id_mencionado[:100],
         ))
     db.commit()
 
@@ -117,8 +117,13 @@ def resumir_pecas_em_paralelo(
             try:
                 resultado = futuro.result()
                 peca.resumo = resultado.resumo
-                peca.keywords = resultado.keywords
-                peca.ids_mencionados = resultado.ids_mencionados
+                # keywords/ids_mencionados são ARRAY(String(100)) no banco — sem
+                # truncar cada item, uma palavra-chave ou ID mais longo que o
+                # normal derruba o commit (StringDataRightTruncation) e deixa a
+                # sessão inteira em rollback pendente, quebrando em cascata todo
+                # commit seguinte na mesma leva até a sincronização inteira cair.
+                peca.keywords = [k[:100] for k in (resultado.keywords or [])]
+                peca.ids_mencionados = [i[:100] for i in (resultado.ids_mencionados or [])]
                 peca.custo_usd = resultado.custo_usd
                 peca.status = "resumida"
                 if not peca.autor and resultado.peticionante:
@@ -135,13 +140,18 @@ def resumir_pecas_em_paralelo(
                 if peca.peca_pai_id is None:
                     peca.tipo = resultado.tipo
                 db.commit()
-                _persistir_referencias(db, peca, resultado.ids_mencionados)
+                _persistir_referencias(db, peca, peca.ids_mencionados)
                 if on_custo:
                     on_custo(resultado.custo_usd)
             except Exception as exc:
                 logger.error("Falha ao resumir peça %s: %s", peca.id, exc)
+                # Um commit que falhou no flush deixa a sessão em rollback
+                # pendente — sem isso, o commit de erro abaixo falha também, e
+                # ISSO derruba a thread inteira (toda peça seguinte na mesma
+                # leva também falha, em cascata).
+                db.rollback()
                 peca.status = "erro"
-                peca.erro_mensagem = str(exc)
+                peca.erro_mensagem = str(exc)[:2000]
                 db.commit()
             feitas += 1
             if on_progresso:
@@ -189,6 +199,10 @@ def reclassificar_pecas_em_paralelo(
                     on_custo(resultado.custo_usd)
             except Exception as exc:
                 logger.error("Falha ao reclassificar peça %s: %s", peca.id, exc)
+                # Mesmo motivo de resumir_pecas_em_paralelo: sem isso, uma sessão
+                # que falhou no flush fica presa em rollback pendente e derruba
+                # em cascata todo commit seguinte na mesma leva.
+                db.rollback()
             feitas += 1
             if on_progresso:
                 on_progresso(feitas)
