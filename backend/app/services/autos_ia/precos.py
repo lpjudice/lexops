@@ -3,9 +3,12 @@ estimativa prévia (estimativa.py) quanto para o custo real calculado a partir
 do `usage` retornado em cada chamada. Ajustar aqui se o modelo mudar — é a
 única fonte dessas constantes no módulo.
 """
-# claude-opus-4-5 — segmentacao.py e resumo.py (resumo/classificação/keywords).
-PRECO_INPUT_POR_MTOK_USD = 5.0
-PRECO_OUTPUT_POR_MTOK_USD = 25.0
+# claude-sonnet-5 — segmentacao.py e resumo.py (resumo/classificação/keywords).
+# Era claude-opus-4-5 ($5/$25) até o custo real de sincronizar o Apex mostrar
+# que Opus pra esse volume de peças ficava caro demais — Sonnet é ~2.5x mais
+# barato nas duas pontas, a pedido do Lucas.
+PRECO_INPUT_POR_MTOK_USD = 2.0
+PRECO_OUTPUT_POR_MTOK_USD = 10.0
 
 # claude-haiku-4-5 — OCR de página escaneada (extracao.py, pdf_extract.py). Cai
 # num modelo bem mais barato, mas SEM rastrear teria custo invisível: um PDF

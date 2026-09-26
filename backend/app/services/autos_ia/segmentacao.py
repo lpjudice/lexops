@@ -121,7 +121,7 @@ def _chamar_llm(
     client = anthropic.Anthropic(timeout=90.0, max_retries=1)
     prompt = _montar_prompt(pagina_inicio_lote, pagina_fim_lote, buffer_pagina_inicio)
     resp = client.messages.create(
-        model="claude-opus-4-5",
+        model="claude-sonnet-5",
         max_tokens=8192,
         tools=[TOOL_SCHEMA],
         tool_choice={"type": "tool", "name": "registrar_segmentos"},

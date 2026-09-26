@@ -146,7 +146,7 @@ def reclassificar_peca(texto_md: str, titulo: str, tipo_atual: str) -> Reclassif
     )
 
     resp = client.messages.create(
-        model="claude-opus-4-5",
+        model="claude-sonnet-5",
         max_tokens=300,
         system=SYSTEM_PROMPT,
         tools=[TOOL_SCHEMA_RECLASSIFICACAO],
@@ -180,7 +180,7 @@ def resumir_peca(texto_md: str, titulo: str, tipo: str) -> ResumoPeca:
     )
 
     resp = client.messages.create(
-        model="claude-opus-4-5",
+        model="claude-sonnet-5",
         max_tokens=2048,
         system=SYSTEM_PROMPT,
         tools=[TOOL_SCHEMA],
