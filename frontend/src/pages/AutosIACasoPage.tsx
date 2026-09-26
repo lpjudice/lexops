@@ -5,6 +5,7 @@ import { autosIa, TIPOS_PECA } from '../api/autosIa'
 import type { Caso, Documento, DocumentoDrive, DocumentoDriveAnexo, GrafoAresta, GrafoNo, Peca, PecaDetalhe, TipoPeca } from '../api/autosIa'
 import ReferenciaHover from '../components/autosIa/ReferenciaHover'
 import GrafoTimeline from '../components/autosIa/GrafoTimeline'
+import Modal from '../components/Modal'
 import pageStyles from './Page.module.css'
 import styles from './AutosIACasoPage.module.css'
 
@@ -60,6 +61,7 @@ export default function AutosIACasoPage() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const [aba, setAba] = useState<Aba>('upload')
+  const [modalExcluir, setModalExcluir] = useState(false)
 
   const { data: caso } = useQuery({
     queryKey: ['autos-ia', 'caso', casoId],
@@ -281,15 +283,19 @@ export default function AutosIACasoPage() {
                 className={pageStyles.btnDanger}
                 disabled={deletarCaso.isPending || emProcessamento}
                 title={emProcessamento ? 'Cancele a sincronização em andamento antes de excluir' : undefined}
-                onClick={() => {
-                  if (window.confirm(`Excluir o caso "${caso.nome}"? Apaga todas as peças, o grafo e as perguntas já indexadas — não pode ser desfeito.`)) {
-                    deletarCaso.mutate()
-                  }
-                }}
+                onClick={() => setModalExcluir(true)}
               >
                 {deletarCaso.isPending ? 'Excluindo...' : 'Excluir caso'}
               </button>
             </div>
+          )}
+          {modalExcluir && (
+            <ModalConfirmarExclusao
+              nomeCaso={caso.nome}
+              isPending={deletarCaso.isPending}
+              onConfirmar={() => deletarCaso.mutate()}
+              onClose={() => setModalExcluir(false)}
+            />
           )}
           {caso?.processo_id && !emProcessamento && estimativaImportacao && estimativaImportacao.itens_pendentes > 0 && (
             <p style={{ fontSize: 12, color: 'var(--gray-mid)', marginTop: 6 }}>
@@ -510,6 +516,44 @@ function useNow(intervalMs: number) {
     return () => clearInterval(id)
   }, [intervalMs])
   return now
+}
+
+const CONFIRMACAO_EXCLUSAO = 'DELETAR'
+
+function ModalConfirmarExclusao({
+  nomeCaso, isPending, onConfirmar, onClose,
+}: { nomeCaso: string; isPending: boolean; onConfirmar: () => void; onClose: () => void }) {
+  const [texto, setTexto] = useState('')
+  const confirmado = texto.trim() === CONFIRMACAO_EXCLUSAO
+
+  return (
+    <Modal title="Excluir caso" onClose={onClose}>
+      <p style={{ fontSize: 13, lineHeight: 1.5, marginBottom: 12 }}>
+        Excluir <strong>"{nomeCaso}"</strong>? Apaga todas as peças, o grafo e as perguntas já
+        indexadas — todo o custo e tempo de leitura já gastos nesse caso se perdem, e não pode ser desfeito.
+      </p>
+      <p style={{ fontSize: 12.5, marginBottom: 6 }}>
+        Digite <strong>{CONFIRMACAO_EXCLUSAO}</strong> para confirmar:
+      </p>
+      <input
+        className={pageStyles.input}
+        value={texto}
+        onChange={(e) => setTexto(e.target.value)}
+        placeholder={CONFIRMACAO_EXCLUSAO}
+        autoFocus
+      />
+      <div style={{ display: 'flex', gap: 8, marginTop: 14, justifyContent: 'flex-end' }}>
+        <button className={pageStyles.btnSmall} onClick={onClose}>Cancelar</button>
+        <button
+          className={pageStyles.btnDanger}
+          disabled={!confirmado || isPending}
+          onClick={onConfirmar}
+        >
+          {isPending ? 'Excluindo...' : 'Excluir definitivamente'}
+        </button>
+      </div>
+    </Modal>
+  )
 }
 
 function SyncProgress({ caso }: { caso: Caso }) {
