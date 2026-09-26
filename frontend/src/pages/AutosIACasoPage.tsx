@@ -756,8 +756,10 @@ function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | Document
   const qc = useQueryClient()
   const anexos = 'anexos' in doc ? doc.anexos : []
   const [aberto, setAberto] = useState(false)
+  const [resumoAberto, setResumoAberto] = useState(false)
   const temAnexos = anexos.length > 0
   const ehPeticao = doc.tipo === 'peticao'
+  const temResumo = !!doc.resumo
 
   const marcarTipo = useMutation({
     mutationFn: (tipo: TipoPeca) => autosIa.atualizarTipoPeca(doc.id, tipo),
@@ -803,6 +805,18 @@ function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | Document
           <span className={`${styles.docNomeIndexado} ${ehPeticao ? styles.docNomeIndexadoPeticao : ''}`}>
             {doc.nome_indexado || doc.titulo}
           </span>
+          {ehPeticao && (
+            <button
+              type="button"
+              className={styles.docResumoBtn}
+              disabled={!temResumo}
+              onClick={() => setResumoAberto(!resumoAberto)}
+              aria-expanded={resumoAberto}
+              title={temResumo ? 'Ver resumo desta petição' : 'Ainda sem leitura a fundo desta petição'}
+            >
+              ?
+            </button>
+          )}
           <span className={styles.tipoBadge}>{doc.tipo}</span>
           {temAnexos && <span className={styles.docAnexosCount}>{anexos.length} anexo{anexos.length > 1 ? 's' : ''}</span>}
           <button
@@ -819,6 +833,11 @@ function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | Document
           {doc.arquivo_nome && <span className={styles.docArquivoNome}>{doc.arquivo_nome}</span>}
           {doc.resumo && <span className={styles.docResumo}>{doc.resumo}</span>}
         </div>
+        {resumoAberto && temResumo && (
+          <div className={styles.docResumoPopup} style={{ left: nivel * 22 + 22 }} role="dialog">
+            {doc.resumo}
+          </div>
+        )}
       </div>
       {temAnexos && aberto && (
         <div className={styles.docAnexos}>

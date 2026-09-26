@@ -364,10 +364,50 @@
 }
 
 .docBlocoPeticao {
+  position: relative;
   background: #eaf2fb;
   border-radius: 8px;
   margin: 2px -8px;
   padding: 4px 8px 6px;
+}
+
+.docResumoBtn {
+  background: none;
+  border: 1px solid #2a78d6;
+  color: #2a78d6;
+  border-radius: 999px;
+  width: 15px;
+  height: 15px;
+  line-height: 1;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 0;
+  flex-shrink: 0;
+  cursor: pointer;
+  font-family: 'Archivo', sans-serif;
+}
+
+.docResumoBtn:disabled {
+  border-color: var(--gray-border);
+  color: var(--gray-mid);
+  opacity: 0.5;
+  cursor: default;
+}
+
+.docResumoPopup {
+  position: absolute;
+  top: 100%;
+  z-index: 30;
+  width: 320px;
+  max-width: calc(100vw - 120px);
+  background: var(--dark);
+  color: #e5e7eb;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+  margin-top: 2px;
 }
 
 .docData {
