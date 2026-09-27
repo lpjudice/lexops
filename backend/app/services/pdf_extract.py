@@ -6,8 +6,38 @@ gestor jurídico (contexto do processo).
 import io
 import logging
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
 logger = logging.getLogger(__name__)
+
+# pypdf/pdfminer não têm timeout nativo — são bibliotecas só-CPU que podem
+# ficar minutos (ou pra sempre, na prática) num PDF malformado/patológico.
+# Reproduzido de verdade: uma sincronização travou 2x seguidas no MESMO
+# documento, sempre no mesmo ponto ("tentando pdfminer..."), sem nunca
+# lançar exceção nem voltar — o resto do sistema não tem como saber que
+# aquilo não vai terminar. `_com_timeout` roda a chamada numa thread separada
+# e desiste de esperar após N segundos (a chamada original pode continuar
+# rodando "no vazio" em segundo plano — não dá para matar à força uma thread
+# Python travada em CPU puro — mas o restante da sincronização não fica mais
+# refém dela; a próxima tentativa da cascata assume a partir daí).
+_TIMEOUT_PYPDF_SEGUNDOS = 30.0
+_TIMEOUT_PDFMINER_SEGUNDOS = 60.0
+
+
+def _com_timeout(fn, args: tuple, timeout_segundos: float):
+    # NÃO usar `with ThreadPoolExecutor(...)` aqui: o `__exit__` do context
+    # manager chama shutdown(wait=True), que bloqueia até a thread terminar —
+    # inclusive a que acabou de estourar o timeout. Isso anularia o timeout
+    # inteiro (a chamada voltaria a esperar pra sempre na saída do `with`).
+    executor = ThreadPoolExecutor(max_workers=1)
+    futuro = executor.submit(fn, *args)
+    try:
+        resultado = futuro.result(timeout=timeout_segundos)
+    except FuturesTimeoutError:
+        executor.shutdown(wait=False)
+        raise TimeoutError(f"{fn.__name__} não retornou em {timeout_segundos:.0f}s") from None
+    executor.shutdown(wait=False)
+    return resultado
 
 
 def remover_nul(texto: str) -> str:
@@ -172,17 +202,21 @@ def extrair_texto_pdf(
 
     texto = ""
     try:
-        texto = _extrair_com_pypdf(content)
+        texto = _com_timeout(_extrair_com_pypdf, (content,), _TIMEOUT_PYPDF_SEGUNDOS)
     except Exception as exc:
-        logger.warning("pypdf falhou: %s", exc)
+        logger.warning("pypdf falhou (%s): %s", exc.__class__.__name__, exc)
+        if on_status and isinstance(exc, TimeoutError):
+            on_status(f"pypdf não respondeu em {_TIMEOUT_PYPDF_SEGUNDOS:.0f}s — pulando para pdfminer...")
 
     if not texto.strip():
         if on_status:
             on_status("Sem texto nativo via pypdf — tentando pdfminer...")
         try:
-            texto = _extrair_com_pdfminer(content)
+            texto = _com_timeout(_extrair_com_pdfminer, (content,), _TIMEOUT_PDFMINER_SEGUNDOS)
         except Exception as exc:
-            logger.warning("pdfminer falhou: %s", exc)
+            logger.warning("pdfminer falhou (%s): %s", exc.__class__.__name__, exc)
+            if on_status and isinstance(exc, TimeoutError):
+                on_status(f"pdfminer não respondeu em {_TIMEOUT_PDFMINER_SEGUNDOS:.0f}s — indo para OCR...")
 
     if not texto.strip():
         try:
