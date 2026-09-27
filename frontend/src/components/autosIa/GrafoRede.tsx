@@ -1,0 +1,455 @@
+import { useEffect, useRef } from 'react'
+import * as d3 from 'd3'
+import { TIPOS_PECA } from '../../api/autosIa'
+import type { GrafoAresta, GrafoNo, TipoPeca } from '../../api/autosIa'
+import styles from './GrafoRede.module.css'
+
+// Paleta categórica validada (8 matizes, ordem fixa, segura para
+// daltonismo), mapeada 1:1 nos 8 tipos de peça — mesma paleta usada em
+// outras visualizações do Autos IA (ex.: painel de peças).
+const COR_POR_TIPO: Record<TipoPeca, string> = {
+  peticao: '#2a78d6',
+  decisao: '#eb6834',
+  despacho: '#1baf7a',
+  certidao: '#eda100',
+  oficio: '#e87ba4',
+  recurso: '#008300',
+  documento: '#4a3aa7',
+  outro: '#e34948',
+}
+const NOME_TIPO = Object.fromEntries(TIPOS_PECA.map((t) => [t.value, t.label])) as Record<TipoPeca, string>
+
+function formatarData(d?: string | null): string {
+  if (!d) return 'sem data'
+  // "AAAA-MM-DD" sem hora vira meia-noite UTC, que no fuso do Brasil (UTC-3)
+  // exibe o dia anterior — mesmo cuidado do resto do Autos IA.
+  const [ano, mes, dia] = d.split('T')[0].split('-').map(Number)
+  return new Date(ano, mes - 1, dia).toLocaleDateString('pt-BR')
+}
+
+function escapeHtml(s: string): string {
+  const div = document.createElement('div')
+  div.textContent = s
+  return div.innerHTML
+}
+
+interface NoInterno extends GrafoNo, d3.SimulationNodeDatum {
+  citacoes: number
+}
+interface LinkInterno extends d3.SimulationLinkDatum<NoInterno> {
+  id: string
+}
+
+interface Props {
+  nos: GrafoNo[]
+  arestas: GrafoAresta[]
+}
+
+/** Grafo de nós conectados: cada peça-mãe é um ponto, dimensionado por quantas
+ * vezes é citada, colorido por tipo. Clique isola a vizinhança e abre o painel
+ * de detalhe com os IDs mencionados (resolvidos e "não localizados"); "Fixar"
+ * trava a vizinhança atual pra navegar só entre aqueles documentos. Tudo é
+ * construído imperativamente com D3 dentro de `rootRef` — o layout de força e
+ * o zoom/pan não convivem bem com o ciclo de re-render do React. */
+export default function GrafoRede({ nos, arestas }: Props) {
+  const rootRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root) return
+
+    const nosRaiz: NoInterno[] = nos
+      .filter((n) => !n.peca_pai_id)
+      .map((n) => ({ ...n, citacoes: 0 }))
+    if (nosRaiz.length === 0) return
+
+    const byId = new Map<string, NoInterno>()
+    nosRaiz.forEach((n) => byId.set(n.id, n))
+
+    const idpIndex = new Map<string, string>()
+    nosRaiz.forEach((n) => { if (n.id_processual) idpIndex.set(n.id_processual, n.id) })
+
+    const mencoesPorOrigem = new Map<string, GrafoAresta[]>()
+    arestas.forEach((a) => {
+      if (!byId.has(a.peca_origem_id)) return
+      const lista = mencoesPorOrigem.get(a.peca_origem_id) ?? []
+      lista.push(a)
+      mencoesPorOrigem.set(a.peca_origem_id, lista)
+    })
+
+    const links: LinkInterno[] = arestas
+      .filter((a) => a.peca_destino_id && byId.has(a.peca_origem_id) && byId.has(a.peca_destino_id))
+      .map((a) => ({ id: a.id, source: a.peca_origem_id, target: a.peca_destino_id! }))
+    links.forEach((l) => {
+      const alvo = byId.get(l.target as string)
+      if (alvo) alvo.citacoes += 1
+    })
+
+    const citadaPorDestino = new Map<string, GrafoAresta[]>()
+    arestas.forEach((a) => {
+      if (!a.peca_destino_id || !byId.has(a.peca_destino_id) || !byId.has(a.peca_origem_id)) return
+      const lista = citadaPorDestino.get(a.peca_destino_id) ?? []
+      lista.push(a)
+      citadaPorDestino.set(a.peca_destino_id, lista)
+    })
+
+    const tiposPresentes = Array.from(new Set(nosRaiz.map((n) => n.tipo)))
+    let tiposAtivos = new Set(tiposPresentes)
+
+    // ---- monta a casca de DOM (sidebar, canvas, painel, tooltip) ----
+    root.innerHTML = `
+      <div class="${styles.wrap}">
+        <aside class="${styles.aside}">
+          <div>
+            <span class="${styles.fieldLabel}">Busca</span>
+            <input type="search" class="${styles.searchInput}" placeholder="Título, ID, autor..." autocomplete="off" />
+          </div>
+          <div class="${styles.statsGrid}">
+            <div class="${styles.stat}"><div class="${styles.statN}">${nosRaiz.length}</div><div class="${styles.statL}">peças</div></div>
+            <div class="${styles.stat}"><div class="${styles.statN}">${links.length}</div><div class="${styles.statL}">citações</div></div>
+          </div>
+          <div>
+            <span class="${styles.fieldLabel}">Tipos (clique filtra · "só" isola)</span>
+            <div class="${styles.legend}" data-role="legend"></div>
+          </div>
+          <details class="${styles.idxWrap}">
+            <summary>Índice de IDs</summary>
+            <div class="${styles.idIndex}" data-role="idindex"></div>
+          </details>
+          <div class="${styles.hint}">
+            <strong>Como ler:</strong> cada ponto é uma peça — o tamanho cresce com quantas vezes ela é
+            citada. As linhas mostram quem menciona quem. Clique num ponto pra ver o resumo e isolar suas
+            conexões; arraste o fundo pra mover, role pra dar zoom.
+          </div>
+        </aside>
+        <main class="${styles.canvasWrap}">
+          <svg class="${styles.graphSvg}"></svg>
+          <div class="${styles.zoomControls}">
+            <button type="button" class="${styles.zoomBtn}" data-role="zoomIn" aria-label="Mais zoom">+</button>
+            <button type="button" class="${styles.zoomBtn}" data-role="zoomOut" aria-label="Menos zoom">−</button>
+            <button type="button" class="${styles.zoomBtn}" data-role="zoomReset" aria-label="Resetar zoom">⤢</button>
+          </div>
+          <div class="${styles.panel}" data-role="panel">
+            <button type="button" class="${styles.panelClose}" data-role="panelClose" aria-label="Fechar">✕</button>
+            <span class="${styles.tipoPill}" data-role="pTipo"></span>
+            <h2 class="${styles.panelTitulo}" data-role="pTitulo"></h2>
+            <div class="${styles.panelMeta}" data-role="pMeta"></div>
+            <button type="button" class="${styles.fixBtn}" data-role="pFixar">📌 Fixar estas conexões</button>
+            <div class="${styles.relLabel}">IDs mencionados neste texto</div>
+            <div data-role="pIds"></div>
+            <div class="${styles.resumo}" data-role="pResumo"></div>
+            <div data-role="pMenciona"></div>
+            <div data-role="pCitada"></div>
+          </div>
+        </main>
+        <div class="${styles.tooltip}" data-role="tooltip"></div>
+      </div>
+    `
+
+    const q = <T extends Element>(sel: string) => root.querySelector<T>(sel)!
+    const legendEl = q<HTMLDivElement>('[data-role="legend"]')
+    const idIndexEl = q<HTMLDivElement>('[data-role="idindex"]')
+    const canvasWrap = q<HTMLDivElement>(`.${styles.canvasWrap}`)
+    const panel = q<HTMLDivElement>('[data-role="panel"]')
+    const tooltip = q<HTMLDivElement>('[data-role="tooltip"]')
+    const buscaInput = q<HTMLInputElement>(`.${styles.searchInput}`)
+
+    // ---- legenda + índice de IDs ----
+    tiposPresentes.forEach((tipo) => {
+      const count = nosRaiz.filter((n) => n.tipo === tipo).length
+      const row = document.createElement('div')
+      row.className = styles.legendRow
+      row.setAttribute('data-tipo', tipo)
+      row.innerHTML = `<span class="${styles.swatch}" style="background:${COR_POR_TIPO[tipo]}"></span>` +
+        `<span class="${styles.legendName}">${NOME_TIPO[tipo]}</span>` +
+        `<span class="${styles.legendRight}"><button type="button" class="${styles.onlyBtn}">só</button>` +
+        `<span class="${styles.legendCount}">${count}</span></span>`
+      row.addEventListener('click', () => {
+        if (tiposAtivos.has(tipo)) { tiposAtivos.delete(tipo); row.classList.add(styles.legendOff) }
+        else { tiposAtivos.add(tipo); row.classList.remove(styles.legendOff) }
+        if (fixado) { fixado = false; fixadoIds = null; atualizarBotaoFixar() }
+        aplicarFiltro()
+      })
+      row.querySelector('button')!.addEventListener('click', (ev) => {
+        ev.stopPropagation()
+        tiposAtivos = new Set([tipo])
+        legendEl.querySelectorAll<HTMLDivElement>(`.${styles.legendRow}`).forEach((r) => {
+          r.classList.toggle(styles.legendOff, r.getAttribute('data-tipo') !== tipo)
+        })
+        if (fixado) { fixado = false; fixadoIds = null; atualizarBotaoFixar() }
+        aplicarFiltro()
+      })
+      legendEl.appendChild(row)
+    })
+
+    let idxHtml = ''
+    tiposPresentes.forEach((tipo) => {
+      const itens = nosRaiz.filter((n) => n.tipo === tipo && n.id_processual)
+      if (itens.length === 0) return
+      idxHtml += `<div class="${styles.idxGroup}"><div class="${styles.idxGroupTitle}">` +
+        `<span class="${styles.swatch}" style="background:${COR_POR_TIPO[tipo]}"></span>${NOME_TIPO[tipo]} · ${itens.length}</div>`
+      itens.forEach((n) => {
+        idxHtml += `<div class="${styles.idxItem}" data-id="${n.id}">` +
+          `<span class="${styles.idxIid}">${escapeHtml(n.id_processual!)}</span>` +
+          `<span class="${styles.idxTitle}">${escapeHtml(n.titulo)}</span></div>`
+      })
+      idxHtml += '</div>'
+    })
+    idIndexEl.innerHTML = idxHtml || `<p class="${styles.relEmpty}">Nenhuma peça com ID processual neste caso.</p>`
+    idIndexEl.querySelectorAll<HTMLDivElement>(`.${styles.idxItem}`).forEach((el) => {
+      const n = byId.get(el.getAttribute('data-id')!)
+      if (!n) return
+      el.addEventListener('mousemove', (ev) => mostrarTooltip(ev, n))
+      el.addEventListener('mouseleave', esconderTooltip)
+      el.addEventListener('click', () => irPara(n.id))
+    })
+
+    // ---- SVG + força ----
+    const width = canvasWrap.clientWidth || 600
+    const height = canvasWrap.clientHeight || 460
+    const svg = d3.select(q<SVGSVGElement>('svg'))
+    const defs = svg.append('defs')
+    tiposPresentes.forEach((tipo) => {
+      defs.append('marker')
+        .attr('id', `arrow-${tipo}`)
+        .attr('viewBox', '0 -4 8 8')
+        .attr('refX', 7).attr('refY', 0)
+        .attr('markerWidth', 6).attr('markerHeight', 6)
+        .attr('orient', 'auto')
+        .append('path')
+        .attr('d', 'M0,-4L8,0L0,4')
+        .attr('fill', 'var(--gray-mid)')
+        .attr('opacity', 0.5)
+    })
+
+    const zoomLayer = svg.append('g')
+    const edgeLayer = zoomLayer.append('g')
+    const nodeLayer = zoomLayer.append('g')
+
+    const radius = d3.scaleSqrt()
+      .domain([0, d3.max(nosRaiz, (n) => n.citacoes) || 1])
+      .range([5, 15])
+
+    const sim = d3.forceSimulation<NoInterno>(nosRaiz)
+      .force('link', d3.forceLink<NoInterno, LinkInterno>(links).id((d) => d.id).distance(70).strength(0.35))
+      .force('charge', d3.forceManyBody().strength(-140))
+      .force('center', d3.forceCenter(width / 2, height / 2))
+      .force('collide', d3.forceCollide<NoInterno>().radius((d) => radius(d.citacoes) + 14))
+
+    const edgeSel = edgeLayer.selectAll('path').data(links).enter().append('path')
+      .attr('class', styles.edge)
+      .attr('marker-end', (d) => {
+        const alvo = typeof d.target === 'object' ? d.target : byId.get(d.target as string)
+        return `url(#arrow-${alvo?.tipo ?? 'outro'})`
+      })
+
+    const nodeSel = nodeLayer.selectAll('g').data(nosRaiz).enter().append('g')
+      .attr('class', styles.node)
+      .call(d3.drag<SVGGElement, NoInterno>()
+        .on('start', (event, d) => { if (!event.active) sim.alphaTarget(0.25).restart(); d.fx = d.x; d.fy = d.y })
+        .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y })
+        .on('end', (event, d) => { if (!event.active) sim.alphaTarget(0); d.fx = null; d.fy = null }))
+
+    nodeSel.append('circle')
+      .attr('r', (d) => radius(d.citacoes))
+      .attr('fill', (d) => COR_POR_TIPO[d.tipo])
+
+    nodeSel.append('text')
+      .attr('class', styles.nodeText)
+      .attr('dy', (d) => radius(d.citacoes) + 11)
+      .attr('text-anchor', 'middle')
+      .text((d) => (d.titulo.length > 26 ? d.titulo.slice(0, 26) + '…' : d.titulo))
+
+    function mostrarTooltip(event: MouseEvent, d: NoInterno) {
+      tooltip.style.left = `${event.clientX + 14}px`
+      tooltip.style.top = `${event.clientY + 10}px`
+      tooltip.style.opacity = '1'
+      const resumoTrecho = d.resumo ? `<div class="${styles.ttKw}">${escapeHtml(d.resumo.slice(0, 120))}${d.resumo.length > 120 ? '…' : ''}</div>` : ''
+      const kwTrecho = d.keywords && d.keywords.length ? `<div class="${styles.ttKw}">${d.keywords.map(escapeHtml).join(' · ')}</div>` : ''
+      tooltip.innerHTML = `<div class="${styles.ttTipo}" style="color:${COR_POR_TIPO[d.tipo]}">${NOME_TIPO[d.tipo]}${d.id_processual ? ' · ID ' + escapeHtml(d.id_processual) : ''}</div>` +
+        `<strong>${escapeHtml(d.titulo)}</strong><br>${formatarData(d.data_peca)}${d.autor ? ' · ' + escapeHtml(d.autor) : ''}` +
+        (d.citacoes ? `<br>citada ${d.citacoes}x` : '') + resumoTrecho + kwTrecho
+    }
+    function esconderTooltip() { tooltip.style.opacity = '0' }
+
+    nodeSel
+      .on('mousemove', (event, d) => mostrarTooltip(event, d))
+      .on('mouseleave', esconderTooltip)
+      .on('click', (_event, d) => irPara(d.id))
+
+    sim.on('tick', () => {
+      edgeSel.attr('d', (d) => {
+        const s = d.source as NoInterno, t = d.target as NoInterno
+        const dx = (t.x ?? 0) - (s.x ?? 0), dy = (t.y ?? 0) - (s.y ?? 0)
+        const dr = Math.sqrt(dx * dx + dy * dy) * 1.4
+        return `M${s.x},${s.y}A${dr},${dr} 0 0,1 ${t.x},${t.y}`
+      })
+      nodeSel.attr('transform', (d) => `translate(${d.x},${d.y})`)
+    })
+
+    const zoom = d3.zoom<SVGSVGElement, unknown>().scaleExtent([0.3, 4]).on('zoom', (event) => {
+      zoomLayer.attr('transform', event.transform)
+    })
+    svg.call(zoom)
+    q<HTMLButtonElement>('[data-role="zoomIn"]').addEventListener('click', () => svg.transition().call(zoom.scaleBy, 1.3))
+    q<HTMLButtonElement>('[data-role="zoomOut"]').addEventListener('click', () => svg.transition().call(zoom.scaleBy, 1 / 1.3))
+    q<HTMLButtonElement>('[data-role="zoomReset"]').addEventListener('click', () => svg.transition().call(zoom.transform, d3.zoomIdentity))
+
+    // ---- filtro (tipo/busca) + fixar ----
+    let fixado = false
+    let fixadoIds: Set<string> | null = null
+
+    function aplicarFiltro() {
+      const termo = buscaInput.value.trim().toLowerCase()
+      nodeSel.style('display', (d) => {
+        if (fixadoIds) return fixadoIds.has(d.id) ? null : 'none'
+        const passaTipo = tiposAtivos.has(d.tipo)
+        const passaBusca = !termo ||
+          d.titulo.toLowerCase().includes(termo) ||
+          (d.autor ?? '').toLowerCase().includes(termo) ||
+          (d.id_processual ?? '').includes(termo)
+        return passaTipo && passaBusca ? null : 'none'
+      })
+      edgeSel.style('display', (d) => {
+        const s = typeof d.source === 'object' ? d.source : byId.get(d.source as string)!
+        const t = typeof d.target === 'object' ? d.target : byId.get(d.target as string)!
+        if (fixadoIds) return fixadoIds.has(s.id) && fixadoIds.has(t.id) ? null : 'none'
+        return tiposAtivos.has(s.tipo) && tiposAtivos.has(t.tipo) ? null : 'none'
+      })
+    }
+    buscaInput.addEventListener('input', aplicarFiltro)
+
+    // ---- seleção / painel ----
+    let selecionadoId: string | null = null
+
+    function vizinhos(id: string): Set<string> {
+      const ids = new Set([id])
+      links.forEach((l) => {
+        const s = typeof l.source === 'object' ? l.source.id : l.source
+        const t = typeof l.target === 'object' ? l.target.id : l.target
+        if (s === id) ids.add(t as string)
+        if (t === id) ids.add(s as string)
+      })
+      return ids
+    }
+
+    function atualizarBotaoFixar() {
+      const btn = q<HTMLButtonElement>('[data-role="pFixar"]')
+      btn.textContent = fixado ? '📌 Desafixar (ver o grafo todo)' : '📌 Fixar estas conexões'
+      btn.classList.toggle(styles.fixBtnActive, fixado)
+    }
+    q<HTMLButtonElement>('[data-role="pFixar"]').addEventListener('click', () => {
+      if (!selecionadoId) return
+      if (fixado) { fixado = false; fixadoIds = null }
+      else { fixadoIds = vizinhos(selecionadoId); fixado = true }
+      atualizarBotaoFixar()
+      aplicarFiltro()
+    })
+
+    function irPara(id: string) {
+      const alvo = byId.get(id)
+      if (!alvo) return
+      tiposAtivos.add(alvo.tipo)
+      const row = legendEl.querySelector<HTMLDivElement>(`[data-tipo="${alvo.tipo}"]`)
+      if (row) row.classList.remove(styles.legendOff)
+      if (fixado && fixadoIds && !fixadoIds.has(id)) { fixado = false; fixadoIds = null; atualizarBotaoFixar() }
+      aplicarFiltro()
+      selecionar(id)
+    }
+
+    function chipsDeMencoes(d: NoInterno): string {
+      const mencoes = mencoesPorOrigem.get(d.id) ?? []
+      if (mencoes.length === 0) return `<div class="${styles.relEmpty}">Nenhum ID mencionado no texto desta peça.</div>`
+      return `<div class="${styles.chipWrap}">` + mencoes.map((a) => {
+        if (a.peca_destino_id && byId.has(a.peca_destino_id)) {
+          return `<span class="${styles.chip} ${styles.chipResolved}" data-goto="${a.peca_destino_id}" title="Clique para abrir">${escapeHtml(a.id_mencionado)}</span>`
+        }
+        return `<span class="${styles.chip} ${styles.chipUnresolved}" title="Citado no texto, mas não localizado no acervo">${escapeHtml(a.id_mencionado)} · não localizado</span>`
+      }).join('') + '</div>'
+    }
+
+    function selecionar(id: string) {
+      selecionadoId = id
+      const d = byId.get(id)
+      if (!d) return
+      const viz = vizinhos(id)
+      nodeSel.classed(styles.nodeDim, (n) => !viz.has(n.id))
+      nodeSel.classed(styles.nodeHi, (n) => n.id === id)
+      edgeSel.classed(styles.edgeDim, (l) => {
+        const s = typeof l.source === 'object' ? l.source.id : l.source
+        const t = typeof l.target === 'object' ? l.target.id : l.target
+        return !(s === id || t === id)
+      })
+      edgeSel.classed(styles.edgeHi, (l) => {
+        const s = typeof l.source === 'object' ? l.source.id : l.source
+        const t = typeof l.target === 'object' ? l.target.id : l.target
+        return s === id || t === id
+      })
+
+      q<HTMLSpanElement>('[data-role="pTipo"]').textContent = NOME_TIPO[d.tipo]
+      q<HTMLSpanElement>('[data-role="pTipo"]').style.background = COR_POR_TIPO[d.tipo]
+      q<HTMLHeadingElement>('[data-role="pTitulo"]').textContent = d.titulo
+      const paginas = d.pagina_inicio === d.pagina_fim ? `p. ${d.pagina_inicio}` : `p. ${d.pagina_inicio}–${d.pagina_fim}`
+      q<HTMLDivElement>('[data-role="pMeta"]').innerHTML =
+        `${formatarData(d.data_peca)}${d.autor ? ' · ' + escapeHtml(d.autor) : ''} · ${paginas} · ${d.citacoes}x citada` +
+        (d.id_processual ? ` <span class="${styles.ownId}">ID ${escapeHtml(d.id_processual)}</span>` : '')
+      q<HTMLDivElement>('[data-role="pIds"]').innerHTML = chipsDeMencoes(d)
+      q<HTMLDivElement>('[data-role="pResumo"]').textContent = d.resumo || 'Ainda sem resumo gerado.'
+      atualizarBotaoFixar()
+
+      const mencionaResolvidos = (mencoesPorOrigem.get(id) ?? [])
+        .filter((a) => a.peca_destino_id && byId.has(a.peca_destino_id))
+        .map((a) => byId.get(a.peca_destino_id!)!)
+      const mencionaHtml = `<div class="${styles.relLabel}">Menciona (resolvidos)</div>` + (
+        mencionaResolvidos.length
+          ? mencionaResolvidos.map((m) => `<button type="button" class="${styles.relItem}" data-goto="${m.id}"><span class="${styles.relTitle}">${escapeHtml(m.titulo)}</span><span class="${styles.relId}">${escapeHtml(m.id_processual ?? '')}</span></button>`).join('')
+          : `<div class="${styles.relEmpty}">Nenhuma menção identificada.</div>`
+      )
+      q<HTMLDivElement>('[data-role="pMenciona"]').innerHTML = mencionaHtml
+
+      const citadaPor = (citadaPorDestino.get(id) ?? []).map((a) => byId.get(a.peca_origem_id)).filter((n): n is NoInterno => !!n)
+      const citadaHtml = `<div class="${styles.relLabel}">Citada por</div>` + (
+        citadaPor.length
+          ? citadaPor.map((m) => `<button type="button" class="${styles.relItem}" data-goto="${m.id}"><span class="${styles.relTitle}">${escapeHtml(m.titulo)}</span><span class="${styles.relId}">${escapeHtml(m.id_processual ?? '')}</span></button>`).join('')
+          : `<div class="${styles.relEmpty}">Ainda não citada por outra peça.</div>`
+      )
+      q<HTMLDivElement>('[data-role="pCitada"]').innerHTML = citadaHtml
+
+      panel.querySelectorAll<HTMLElement>('[data-goto]').forEach((btn) => {
+        btn.addEventListener('click', () => irPara(btn.getAttribute('data-goto')!))
+      })
+
+      panel.classList.add(styles.panelOpen)
+    }
+
+    q<HTMLButtonElement>('[data-role="panelClose"]').addEventListener('click', () => {
+      panel.classList.remove(styles.panelOpen)
+      selecionadoId = null
+      fixado = false; fixadoIds = null
+      nodeSel.classed(styles.nodeDim, false).classed(styles.nodeHi, false)
+      edgeSel.classed(styles.edgeDim, false).classed(styles.edgeHi, false)
+      aplicarFiltro()
+    })
+
+    const resizeObserver = new ResizeObserver(() => {
+      const w = canvasWrap.clientWidth, h = canvasWrap.clientHeight
+      if (w <= 0 || h <= 0) return
+      sim.force('center', d3.forceCenter(w / 2, h / 2))
+      sim.alpha(0.3).restart()
+    })
+    resizeObserver.observe(canvasWrap)
+
+    return () => {
+      resizeObserver.disconnect()
+      sim.stop()
+      root.innerHTML = ''
+    }
+  }, [nos, arestas])
+
+  const temPecaRaiz = nos.some((n) => !n.peca_pai_id)
+  if (!temPecaRaiz) {
+    return <p className={styles.vazio}>Nenhuma peça indexada ainda.</p>
+  }
+
+  return <div ref={rootRef} />
+}
