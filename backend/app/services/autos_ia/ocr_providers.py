@@ -1,8 +1,14 @@
-"""OCR de página escaneada em rodízio entre provedores — pedido do Lucas pra
-diluir o custo entre APIs em vez de ficar só na mais cara. Cada página que
+"""OCR de página escaneada com fallback entre provedores — pedido do Lucas
+pra não pagar o preço da API mais cara sem necessidade. Cada página que
 chega aqui já passou por pypdf/pdfminer sem achar texto nativo (ver
-pdf_extract.py); tenta o próximo provedor da rodada e, se falhar, cai pro
-próximo na mesma chamada — só desiste da página se todos falharem.
+pdf_extract.py); tenta o provedor PRINCIPAL primeiro e só cai pro outro se
+o principal falhar — nunca alterna os dois à toa.
+
+Gemini 2.5 Flash Lite é o principal: ~10x mais barato que Claude Haiku nas
+duas pontas (ver PRECO_* abaixo, conferidos nas páginas oficiais de cada
+provedor) e qualidade equivalente pra OCR de texto simples. Claude Haiku
+fica só como fallback — usado quando o Gemini falha (rate limit do tier
+gratuito, erro transitório) ou não está configurado.
 
 GPT (OpenAI) fica de fora por enquanto: a versão do SDK já fixada no
 projeto (openai==1.30.1) é anterior à API de Responses/PDF, e testar às
@@ -10,7 +16,6 @@ cegas um provedor de OCR arriscava trocar "custo alto" por "silenciosamente
 sem OCR nenhum". Ver conversa com o Lucas antes de adicionar.
 """
 import base64
-import itertools
 import logging
 
 from app.config import settings
@@ -94,26 +99,28 @@ def _ocr_gemini(pagina_bytes: bytes) -> tuple[str, float]:
     return texto, custo
 
 
+# Ordem fixa: Gemini primeiro (~10x mais barato), Claude só como fallback.
+# Antes alternava 50/50 por página (itertools.count()) — o que jogava metade
+# do custo de OCR na API mais cara sem necessidade, já que o Gemini dá conta
+# da maioria das páginas sozinho.
 _PROVEDORES = [
-    ("claude", _ocr_claude),
     ("gemini", _ocr_gemini),
+    ("claude", _ocr_claude),
 ]
-_contador = itertools.count()
 
 
 _NOME_EXIBICAO = {"claude": "Claude", "gemini": "Gemini"}
 
 
 def ocr_pagina_rotativo(pagina_bytes: bytes, on_custo=None, on_status=None) -> str:
-    """Alterna o provedor a cada chamada (rodízio simples, não por custo) —
-    se o da vez falhar, tenta o outro antes de desistir da página.
+    """Tenta o Gemini (principal, mais barato) e só cai pro Claude se o
+    Gemini falhar — nunca alterna os dois à toa.
     `on_status(msg)`, quando informado, recebe uma frase curta a cada
     tentativa/troca de provedor — é o que aparece na tela como "OCR via
     Gemini...", "Gemini falhou, tentando Claude..." etc."""
-    indice_inicial = next(_contador) % len(_PROVEDORES)
     ultimo_erro: Exception | None = None
     for offset in range(len(_PROVEDORES)):
-        nome, fn = _PROVEDORES[(indice_inicial + offset) % len(_PROVEDORES)]
+        nome, fn = _PROVEDORES[offset]
         if on_status:
             on_status(f"OCR via {_NOME_EXIBICAO.get(nome, nome)}...")
         try:
@@ -121,8 +128,8 @@ def ocr_pagina_rotativo(pagina_bytes: bytes, on_custo=None, on_status=None) -> s
         except Exception as exc:
             ultimo_erro = exc
             logger.warning("OCR via %s falhou, tentando próximo provedor: %s", nome, exc)
-            proximo = _PROVEDORES[(indice_inicial + offset + 1) % len(_PROVEDORES)][0]
             if on_status and offset + 1 < len(_PROVEDORES):
+                proximo = _PROVEDORES[offset + 1][0]
                 on_status(f"{_NOME_EXIBICAO.get(nome, nome)} falhou, tentando {_NOME_EXIBICAO.get(proximo, proximo)}...")
             continue
         if on_custo and custo:
