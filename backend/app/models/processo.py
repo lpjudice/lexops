@@ -79,6 +79,10 @@ class Processo(Base):
 
     # Push diário do @jusbr_andamentos_bot — pode silenciar processo a processo.
     notificar_telegram: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    # Notificação de andamento ao CLIENTE via WhatsApp. Default False: exige
+    # opt-in explícito do cliente antes de mandar mensagem de negócio (Meta +
+    # LGPD) — diferente do Telegram, que é canal interno do escritório.
+    notificar_whatsapp: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

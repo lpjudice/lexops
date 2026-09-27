@@ -138,6 +138,16 @@ def _push_andamentos_telegram() -> None:
         logger.warning("Scheduler: push_andamentos_telegram falhou: %s", exc)
 
 
+def _push_andamentos_whatsapp() -> None:
+    """19h05 BRT — notifica clientes com novo andamento via WhatsApp (opt-in
+    por processo). No-op silencioso se WHATSAPP_ACCESS_TOKEN não configurado."""
+    try:
+        from app.services.andamentos_whatsapp_push import push_andamentos_whatsapp
+        push_andamentos_whatsapp()
+    except Exception as exc:
+        logger.warning("Scheduler: push_andamentos_whatsapp falhou: %s", exc)
+
+
 def _faxina_codex() -> None:
     """19h15 BRT — após o push, varre documentos recentes salvos com o erro do
     repositório PDPJ ("Codex") no lugar do binário, re-baixa os corretos e avisa
@@ -815,6 +825,14 @@ def start_scheduler() -> None:
         _push_andamentos_telegram,
         trigger=CronTrigger(hour=19, minute=0, timezone="America/Sao_Paulo"),
         id="push_andamentos_telegram",
+        replace_existing=True,
+    )
+    # Push de andamentos ao cliente via WhatsApp — 5 min após o push interno
+    # do Telegram, mesma janela de coleta (18h45).
+    scheduler.add_job(
+        _push_andamentos_whatsapp,
+        trigger=CronTrigger(hour=19, minute=5, timezone="America/Sao_Paulo"),
+        id="push_andamentos_whatsapp",
         replace_existing=True,
     )
     scheduler.add_job(

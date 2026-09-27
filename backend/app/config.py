@@ -65,6 +65,22 @@ class Settings(BaseSettings):
     # Vazio = usa o host pelo qual o painel foi acessado. Setar SÓ depois do DNS/cert prontos.
     cadastro_base_url: str = ""
 
+    # WhatsApp Business Platform (Meta Cloud API) — notificação de andamentos
+    # ao cliente + bot de dúvidas. Token e IDs vêm do Meta for Developers
+    # (App → WhatsApp → API Setup, ou Business Settings → System Users para
+    # o token permanente).
+    whatsapp_access_token: str = ""
+    whatsapp_phone_number_id: str = ""
+    whatsapp_business_account_id: str = ""  # WABA ID — gestão de templates
+    # Token arbitrário definido por você, usado na verificação do webhook (GET
+    # /whatsapp/webhook?hub.verify_token=...). Qualquer string forte serve.
+    whatsapp_webhook_verify_token: str = ""
+    # App Secret do app Meta — valida a assinatura X-Hub-Signature-256 do webhook.
+    whatsapp_app_secret: str = ""
+    whatsapp_api_version: str = "v21.0"
+    # Modelo Claude do bot de dúvidas via WhatsApp (barato: consulta objetiva).
+    whatsapp_claude_model: str = "claude-haiku-4-5"
+
     # NFS-e Nacional — e-CNPJ A1 (mTLS)
     nfse_cert_path: str = ""       # caminho local do .pfx (dev)
     nfse_cert_password: str = ""   # senha do .pfx
