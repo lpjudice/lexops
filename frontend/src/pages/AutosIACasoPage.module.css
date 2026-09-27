@@ -497,6 +497,38 @@
   padding-bottom: 8px;
 }
 
+.anexarPicker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 420px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: var(--gray-light);
+  border: 1px solid var(--gray-border);
+  border-radius: 10px;
+}
+
+.anexarPickerItem {
+  text-align: left;
+  font-size: 12px;
+  color: var(--dark);
+  background: #fff;
+  border: 1px solid var(--gray-border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-family: 'Archivo', sans-serif;
+}
+
+.anexarPickerItem:hover {
+  border-color: var(--teal);
+}
+
+.anexarPickerItem span {
+  color: var(--gray-mid);
+}
+
 .docArquivoNome {
   font-size: 10.5px;
   color: var(--gray-mid);
