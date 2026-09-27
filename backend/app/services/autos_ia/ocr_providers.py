@@ -4,11 +4,19 @@ chega aqui já passou por pypdf/pdfminer sem achar texto nativo (ver
 pdf_extract.py); tenta o provedor PRINCIPAL primeiro e só cai pro outro se
 o principal falhar — nunca alterna os dois à toa.
 
-Gemini 2.5 Flash Lite é o principal: ~10x mais barato que Claude Haiku nas
+Gemini 3.5 Flash Lite é o principal: ~3x mais barato que Claude Haiku nas
 duas pontas (ver PRECO_* abaixo, conferidos nas páginas oficiais de cada
 provedor) e qualidade equivalente pra OCR de texto simples. Claude Haiku
 fica só como fallback — usado quando o Gemini falha (rate limit do tier
 gratuito, erro transitório) ou não está configurado.
+
+NOTA (27/set): o modelo "gemini-2.5-flash-lite" usado antes foi
+descontinuado pro Google pra novos usuários da API key deste projeto —
+toda chamada vinha caindo com 404 e, na prática, 100% do OCR estava
+saindo pelo Claude (fallback) desde que essa rotação foi implementada,
+sem que nada quebrasse visivelmente (só um log de fallback por página).
+Trocado para "gemini-3.5-flash-lite", confirmado disponível via
+GET /v1beta/models com a API key real do projeto.
 
 GPT (OpenAI) fica de fora por enquanto: a versão do SDK já fixada no
 projeto (openai==1.30.1) é anterior à API de Responses/PDF, e testar às
@@ -25,8 +33,8 @@ logger = logging.getLogger(__name__)
 # Preços por MTok conferidos nas páginas oficiais de cada provedor.
 PRECO_CLAUDE_INPUT = 1.0
 PRECO_CLAUDE_OUTPUT = 5.0
-PRECO_GEMINI_INPUT = 0.10
-PRECO_GEMINI_OUTPUT = 0.40
+PRECO_GEMINI_INPUT = 0.30
+PRECO_GEMINI_OUTPUT = 2.50
 
 _PROMPT_OCR = (
     "Extraia TODO o texto desta página exatamente como está, preservando "
@@ -71,7 +79,7 @@ def _ocr_gemini(pagina_bytes: bytes) -> tuple[str, float]:
         raise RuntimeError("GOOGLE_AI_API_KEY não configurada")
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"gemini-2.5-flash-lite:generateContent?key={settings.google_ai_api_key}"
+        f"gemini-3.5-flash-lite:generateContent?key={settings.google_ai_api_key}"
     )
     payload = {
         "contents": [{
