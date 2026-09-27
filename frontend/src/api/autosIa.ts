@@ -1,7 +1,7 @@
 import api, { getToken } from './client'
 
 export type StatusCaso = 'ativo' | 'arquivado'
-export type StatusDocumento = 'pendente' | 'processando' | 'concluido' | 'erro'
+export type StatusDocumento = 'pendente' | 'processando' | 'concluido' | 'erro' | 'cancelado'
 export type StatusPeca = 'pendente_resumo' | 'resumida' | 'erro'
 export type StatusFaq = 'pendente' | 'respondida' | 'erro'
 export type TipoPeca =
@@ -18,7 +18,8 @@ export const TIPOS_PECA: { value: TipoPeca; label: string }[] = [
   { value: 'outro', label: 'Outro' },
 ]
 
-export type StatusSync = 'ok' | 'erro' | 'nenhum' | 'processando'
+export type StatusSync = 'ok' | 'erro' | 'nenhum' | 'processando' | 'cancelado'
+export type EtapaSync = 'lendo' | 'resumindo'
 
 export interface Caso {
   id: string
@@ -33,6 +34,12 @@ export interface Caso {
   ultima_sincronizacao_em?: string | null
   ultimo_sync_status?: StatusSync | null
   ultimo_sync_mensagem?: string | null
+  sync_etapa?: EtapaSync | null
+  sync_total_itens?: number | null
+  sync_itens_processados?: number | null
+  sync_iniciado_em?: string | null
+  sync_detalhe?: string | null
+  custo_usd_total: number
   criado_em: string
   atualizado_em: string
 }
@@ -45,6 +52,12 @@ export interface CasoResumo extends Caso {
 
 export interface EstimativaProcessamento {
   pecas_estimadas: number
+  custo_estimado_usd: number
+  tempo_estimado_minutos: number
+}
+
+export interface EstimativaImportacao {
+  itens_pendentes: number
   custo_estimado_usd: number
   tempo_estimado_minutos: number
 }
@@ -63,6 +76,7 @@ export interface Documento {
   etapa?: string | null
   paginas_processadas: number
   pecas_resumidas: number
+  custo_usd: number
   estimativa: EstimativaProcessamento
   criado_em: string
 }
@@ -89,11 +103,35 @@ export interface Peca {
   ids_mencionados?: string[] | null
   status: StatusPeca
   erro_mensagem?: string | null
+  custo_usd: number
   criado_em: string
 }
 
 export interface PecaDetalhe extends Peca {
   texto_md: string
+}
+
+export interface DocumentoDriveAnexo {
+  id: string
+  tipo: TipoPeca
+  titulo: string
+  resumo?: string | null
+  autor?: string | null
+  data_peca?: string | null
+  protocolado_em?: string | null
+  id_processual?: string | null
+  status: StatusPeca
+  erro_mensagem?: string | null
+  arquivo_nome?: string | null
+  arquivo_drive_link?: string | null
+  nome_indexado?: string | null
+  nota_usuario?: string | null
+  keywords_usuario?: string[] | null
+  titulo_customizado?: string | null
+}
+
+export interface DocumentoDrive extends DocumentoDriveAnexo {
+  anexos: DocumentoDriveAnexo[]
 }
 
 export interface GrafoNo {
@@ -107,6 +145,7 @@ export interface GrafoNo {
   keywords?: string[] | null
   pagina_inicio: number
   pagina_fim: number
+  peca_pai_id?: string | null
 }
 
 export interface GrafoAresta {
@@ -158,6 +197,33 @@ export const autosIa = {
   importarExistentes: (casoId: string) =>
     api.post<Caso>(`/autos-ia/casos/${casoId}/importar-existentes`).then((r) => r.data),
 
+  estimativaImportacao: (casoId: string) =>
+    api.get<EstimativaImportacao>(`/autos-ia/casos/${casoId}/estimativa-importacao`).then((r) => r.data),
+
+  cancelarSync: (casoId: string) =>
+    api.post<Caso>(`/autos-ia/casos/${casoId}/cancelar-sync`).then((r) => r.data),
+
+  pularDocumentoAtual: (casoId: string) =>
+    api.post<Caso>(`/autos-ia/casos/${casoId}/pular-documento-atual`).then((r) => r.data),
+
+  atualizarMetadados: (casoId: string) =>
+    api.post<Caso>(`/autos-ia/casos/${casoId}/atualizar-metadados`).then((r) => r.data),
+
+  reagrupar: (casoId: string) =>
+    api.post<Caso>(`/autos-ia/casos/${casoId}/reagrupar`).then((r) => r.data),
+
+  resumirPendentes: (casoId: string) =>
+    api.post<Caso>(`/autos-ia/casos/${casoId}/resumir-pendentes`).then((r) => r.data),
+
+  contarPendentesResumo: (casoId: string) =>
+    api.get<{ pendentes: number }>(`/autos-ia/casos/${casoId}/pecas-pendentes-resumo`).then((r) => r.data),
+
+  estimativaReclassificacao: (casoId: string) =>
+    api.get<EstimativaImportacao>(`/autos-ia/casos/${casoId}/estimativa-reclassificacao`).then((r) => r.data),
+
+  reclassificar: (casoId: string) =>
+    api.post<Caso>(`/autos-ia/casos/${casoId}/reclassificar`).then((r) => r.data),
+
   enviarBloco: (casoId: string, arquivo: File, paginaInicio: number | null, onProgress?: (pct: number) => void) => {
     const fd = new FormData()
     fd.append('arquivo', arquivo)
@@ -174,12 +240,34 @@ export const autosIa = {
   listarDocumentos: (casoId: string) =>
     api.get<Documento[]>(`/autos-ia/casos/${casoId}/documentos`).then((r) => r.data),
 
+  cancelarDocumento: (documentoId: string) =>
+    api.post<Documento>(`/autos-ia/documentos/${documentoId}/cancelar`).then((r) => r.data),
+
+  retomarDocumento: (documentoId: string) =>
+    api.post<Documento>(`/autos-ia/documentos/${documentoId}/retomar`).then((r) => r.data),
+
   listarPecas: (
     casoId: string,
-    params: { q?: string; tipo?: string; data_inicio?: string; data_fim?: string; incluir_anexos?: boolean },
+    params: {
+      q?: string; tipo?: string; data_inicio?: string; data_fim?: string; incluir_anexos?: boolean
+      offset?: number; limit?: number
+    },
   ) => api.get<Peca[]>(`/autos-ia/casos/${casoId}/pecas`, { params }).then((r) => r.data),
 
   obterPeca: (pecaId: string) => api.get<PecaDetalhe>(`/autos-ia/pecas/${pecaId}`).then((r) => r.data),
+
+  listarDocumentosDrive: (
+    casoId: string,
+    params: { q?: string; ordem?: 'asc' | 'desc'; offset?: number; limit?: number },
+  ) => api.get<DocumentoDrive[]>(`/autos-ia/casos/${casoId}/documentos-drive`, { params }).then((r) => r.data),
+
+  atualizarTipoPeca: (pecaId: string, tipo: TipoPeca) =>
+    api.patch<Peca>(`/autos-ia/pecas/${pecaId}/tipo`, { tipo }).then((r) => r.data),
+
+  atualizarAnotacaoPeca: (
+    pecaId: string,
+    data: { nota_usuario?: string | null; keywords_usuario?: string[] | null; titulo_customizado?: string | null },
+  ) => api.patch<Peca>(`/autos-ia/pecas/${pecaId}/anotacao`, data).then((r) => r.data),
 
   listarAnexos: (pecaId: string) => api.get<Peca[]>(`/autos-ia/pecas/${pecaId}/anexos`).then((r) => r.data),
 

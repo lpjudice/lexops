@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 
 import httpx
 
@@ -32,6 +32,10 @@ class Andamento:
     arquivo_url: str | None = None  # PDPJ hrefBinario (downloaded lazily by the orchestrator)
     documento_detectado: bool = False
     documento_id: str | None = None  # identificador estável e único do documento (anti-colisão de dedup)
+    # Data+hora do protocolo/juntada (quando a fonte informar com granularidade de
+    # horário, não só a data) — usado pelo Autos IA para agrupar petição+anexos
+    # pela hora de protocolo, sem custo de IA. None quando a fonte só dá a data.
+    data_hora_protocolo: datetime | None = None
 
 
 class BaseScraper:

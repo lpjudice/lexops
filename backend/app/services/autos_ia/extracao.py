@@ -11,6 +11,8 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from app.services.pdf_extract import remover_nul
+
 logger = logging.getLogger(__name__)
 
 LIMIAR_CHARS_TEXTO_NATIVO = 40
@@ -35,8 +37,9 @@ def _texto_pdfminer_pagina(content: bytes, indice: int) -> str:
     return texto.strip()
 
 
-def _ocr_claude_pagina(content: bytes, indice: int) -> str:
-    """Isola a página `indice` num PDF de 1 página e manda para o Claude ler via visão nativa."""
+def _ocr_claude_pagina(content: bytes, indice: int, on_custo: Callable[[float], None] | None = None) -> str:
+    """Isola a página `indice` num PDF de 1 página e manda para o Claude ler via visão nativa.
+    `on_custo(custo_usd)`, quando informado, recebe o custo real dessa chamada."""
     import base64
     import anthropic
     from pypdf import PdfReader, PdfWriter
@@ -48,7 +51,9 @@ def _ocr_claude_pagina(content: bytes, indice: int) -> str:
     writer.write(buf)
     pagina_bytes = buf.getvalue()
 
-    client = anthropic.Anthropic()
+    # Timeout curto e sem retries longos: uma página travada não pode prender a
+    # fila inteira de páginas do bloco (mesmo problema resolvido em pdf_extract.py).
+    client = anthropic.Anthropic(timeout=90.0, max_retries=1)
     resp = client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=4096,
@@ -75,6 +80,9 @@ def _ocr_claude_pagina(content: bytes, indice: int) -> str:
             ],
         }],
     )
+    if on_custo:
+        from app.services.autos_ia.precos import calcular_custo_ocr_usd
+        on_custo(calcular_custo_ocr_usd(resp.usage.input_tokens, resp.usage.output_tokens))
     return (resp.content[0].text if resp.content else "").strip()
 
 
@@ -82,11 +90,14 @@ def extrair_paginas(
     content: bytes,
     pagina_inicio_global: int,
     on_progresso: Callable[[int, int], None] | None = None,
+    on_custo: Callable[[float], None] | None = None,
 ) -> list[PaginaExtraida]:
     """Extrai o texto de cada página de `content`, numerando a partir de `pagina_inicio_global`.
 
     `on_progresso(paginas_feitas, total_paginas)`, quando informado, é chamado após cada página —
-    usado para atualizar o progresso exibido na tela durante blocos grandes."""
+    usado para atualizar o progresso exibido na tela durante blocos grandes.
+    `on_custo(custo_usd)`, quando informado, recebe o custo real de cada página que precisou de
+    OCR via IA (a única etapa paga desta cascata — pypdf/pdfminer são locais e grátis)."""
     try:
         textos_pypdf = _texto_pypdf_por_pagina(content)
     except Exception as exc:
@@ -116,14 +127,14 @@ def extrair_paginas(
 
         if len(texto) < LIMIAR_CHARS_TEXTO_NATIVO:
             try:
-                texto_ocr = _ocr_claude_pagina(content, indice)
+                texto_ocr = _ocr_claude_pagina(content, indice, on_custo=on_custo)
                 if len(texto_ocr) > len(texto):
                     texto = texto_ocr
                     ocr_usado = True
             except Exception as exc:
                 logger.warning("OCR Claude falhou na página %d: %s", numero_global, exc)
 
-        paginas.append(PaginaExtraida(numero_global=numero_global, texto=texto, ocr_usado=ocr_usado))
+        paginas.append(PaginaExtraida(numero_global=numero_global, texto=remover_nul(texto), ocr_usado=ocr_usado))
         if on_progresso:
             on_progresso(indice + 1, total_paginas)
 

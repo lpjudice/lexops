@@ -39,6 +39,12 @@ class CasoOut(BaseModel):
     ultima_sincronizacao_em: datetime | None
     ultimo_sync_status: str | None
     ultimo_sync_mensagem: str | None
+    sync_etapa: str | None
+    sync_total_itens: int | None
+    sync_itens_processados: int | None
+    sync_iniciado_em: datetime | None
+    sync_detalhe: str | None
+    custo_usd_total: float
     criado_em: datetime
     atualizado_em: datetime
 
@@ -64,6 +70,7 @@ class DocumentoOut(BaseModel):
     etapa: str | None
     paginas_processadas: int
     pecas_resumidas: int
+    custo_usd: float
     criado_em: datetime
 
     model_config = {"from_attributes": True}
@@ -101,6 +108,7 @@ class PecaOut(BaseModel):
     ids_mencionados: list[str] | None
     status: str
     erro_mensagem: str | None
+    custo_usd: float
     criado_em: datetime
     total_anexos: int = 0
 
@@ -114,6 +122,47 @@ class PecaOut(BaseModel):
 
 class PecaDetalheOut(PecaOut):
     texto_md: str
+
+
+class DocumentoDriveAnexoOut(BaseModel):
+    """Uma peça (ou anexo) na listagem compacta de Documentos — nome do arquivo
+    + link pro Drive, sem o texto/keywords completos (a lista pode ter
+    centenas de linhas, e essa tela é pra reconhecer documentos pelo nome/
+    resumo curto, não pra ler cada um)."""
+    id: uuid.UUID
+    tipo: str
+    titulo: str
+    resumo: str | None
+    autor: str | None
+    data_peca: date | None
+    protocolado_em: datetime | None
+    id_processual: str | None
+    status: str
+    erro_mensagem: str | None
+    arquivo_nome: str | None
+    arquivo_drive_link: str | None
+    nome_indexado: str | None
+    nota_usuario: str | None
+    keywords_usuario: list[str] | None
+    titulo_customizado: str | None
+
+    model_config = {"from_attributes": True}
+
+
+class DocumentoDriveOut(DocumentoDriveAnexoOut):
+    anexos: list[DocumentoDriveAnexoOut] = []
+
+
+class PecaTipoUpdate(BaseModel):
+    tipo: TipoPeca
+
+
+class PecaAnotacaoUpdate(BaseModel):
+    """Atualização parcial — só os campos enviados são alterados (permite
+    limpar um campo mandando null explicitamente, sem mexer nos outros)."""
+    nota_usuario: str | None = None
+    keywords_usuario: list[str] | None = None
+    titulo_customizado: str | None = None
 
 
 class GrafoNo(BaseModel):
@@ -140,6 +189,12 @@ class GrafoAresta(BaseModel):
 class GrafoOut(BaseModel):
     nos: list[GrafoNo]
     arestas: list[GrafoAresta]
+
+
+class EstimativaImportacaoOut(BaseModel):
+    itens_pendentes: int
+    custo_estimado_usd: float
+    tempo_estimado_minutos: float
 
 
 class FaqPerguntaCreate(BaseModel):

@@ -1,0 +1,149 @@
+"""OCR de página escaneada com fallback entre provedores — pedido do Lucas
+pra não pagar o preço da API mais cara sem necessidade. Cada página que
+chega aqui já passou por pypdf/pdfminer sem achar texto nativo (ver
+pdf_extract.py); tenta o provedor PRINCIPAL primeiro e só cai pro outro se
+o principal falhar — nunca alterna os dois à toa.
+
+Gemini 3.5 Flash Lite é o principal: ~3x mais barato que Claude Haiku nas
+duas pontas (ver PRECO_* abaixo, conferidos nas páginas oficiais de cada
+provedor) e qualidade equivalente pra OCR de texto simples. Claude Haiku
+fica só como fallback — usado quando o Gemini falha (rate limit do tier
+gratuito, erro transitório) ou não está configurado.
+
+NOTA (27/set): o modelo "gemini-2.5-flash-lite" usado antes foi
+descontinuado pro Google pra novos usuários da API key deste projeto —
+toda chamada vinha caindo com 404 e, na prática, 100% do OCR estava
+saindo pelo Claude (fallback) desde que essa rotação foi implementada,
+sem que nada quebrasse visivelmente (só um log de fallback por página).
+Trocado para "gemini-3.5-flash-lite", confirmado disponível via
+GET /v1beta/models com a API key real do projeto.
+
+GPT (OpenAI) fica de fora por enquanto: a versão do SDK já fixada no
+projeto (openai==1.30.1) é anterior à API de Responses/PDF, e testar às
+cegas um provedor de OCR arriscava trocar "custo alto" por "silenciosamente
+sem OCR nenhum". Ver conversa com o Lucas antes de adicionar.
+"""
+import base64
+import logging
+
+from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+# Preços por MTok conferidos nas páginas oficiais de cada provedor.
+PRECO_CLAUDE_INPUT = 1.0
+PRECO_CLAUDE_OUTPUT = 5.0
+PRECO_GEMINI_INPUT = 0.30
+PRECO_GEMINI_OUTPUT = 2.50
+
+_PROMPT_OCR = (
+    "Extraia TODO o texto desta página exatamente como está, preservando "
+    "parágrafos, numerações e formatação. Retorne APENAS o texto extraído, "
+    "sem comentários adicionais."
+)
+
+
+def _ocr_claude(pagina_bytes: bytes) -> tuple[str, float]:
+    import anthropic
+
+    client = anthropic.Anthropic(timeout=90.0, max_retries=1)
+    resp = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=8192,
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "document",
+                    "source": {
+                        "type": "base64", "media_type": "application/pdf",
+                        "data": base64.b64encode(pagina_bytes).decode(),
+                    },
+                },
+                {"type": "text", "text": _PROMPT_OCR},
+            ],
+        }],
+    )
+    texto = resp.content[0].text if resp.content else ""
+    custo = (
+        resp.usage.input_tokens / 1_000_000 * PRECO_CLAUDE_INPUT
+        + resp.usage.output_tokens / 1_000_000 * PRECO_CLAUDE_OUTPUT
+    )
+    return texto, custo
+
+
+def _ocr_gemini(pagina_bytes: bytes) -> tuple[str, float]:
+    import httpx
+
+    if not settings.google_ai_api_key:
+        raise RuntimeError("GOOGLE_AI_API_KEY não configurada")
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"gemini-3.5-flash-lite:generateContent?key={settings.google_ai_api_key}"
+    )
+    payload = {
+        "contents": [{
+            "role": "user",
+            "parts": [
+                {
+                    "inline_data": {
+                        "mime_type": "application/pdf",
+                        "data": base64.b64encode(pagina_bytes).decode(),
+                    },
+                },
+                {"text": _PROMPT_OCR},
+            ],
+        }],
+    }
+    resp = httpx.post(url, json=payload, timeout=90)
+    resp.raise_for_status()
+    data = resp.json()
+    texto = data["candidates"][0]["content"]["parts"][0]["text"]
+    uso = data.get("usageMetadata", {})
+    custo = (
+        uso.get("promptTokenCount", 0) / 1_000_000 * PRECO_GEMINI_INPUT
+        + uso.get("candidatesTokenCount", 0) / 1_000_000 * PRECO_GEMINI_OUTPUT
+    )
+    return texto, custo
+
+
+# Ordem fixa: Gemini primeiro (~10x mais barato), Claude só como fallback.
+# Antes alternava 50/50 por página (itertools.count()) — o que jogava metade
+# do custo de OCR na API mais cara sem necessidade, já que o Gemini dá conta
+# da maioria das páginas sozinho.
+_PROVEDORES = [
+    ("gemini", _ocr_gemini),
+    ("claude", _ocr_claude),
+]
+
+
+_NOME_EXIBICAO = {"claude": "Claude", "gemini": "Gemini"}
+
+
+def ocr_pagina_rotativo(pagina_bytes: bytes, on_custo=None, on_status=None) -> str:
+    """Tenta o Gemini (principal, mais barato) e só cai pro Claude se o
+    Gemini falhar — nunca alterna os dois à toa.
+    `on_status(msg)`, quando informado, recebe uma frase curta a cada
+    tentativa/troca de provedor — é o que aparece na tela como "OCR via
+    Gemini...", "Gemini falhou, tentando Claude..." etc."""
+    ultimo_erro: Exception | None = None
+    for offset in range(len(_PROVEDORES)):
+        nome, fn = _PROVEDORES[offset]
+        if on_status:
+            on_status(f"OCR via {_NOME_EXIBICAO.get(nome, nome)}...")
+        try:
+            texto, custo = fn(pagina_bytes)
+        except Exception as exc:
+            ultimo_erro = exc
+            logger.warning("OCR via %s falhou, tentando próximo provedor: %s", nome, exc)
+            if on_status and offset + 1 < len(_PROVEDORES):
+                proximo = _PROVEDORES[offset + 1][0]
+                on_status(f"{_NOME_EXIBICAO.get(nome, nome)} falhou, tentando {_NOME_EXIBICAO.get(proximo, proximo)}...")
+            continue
+        if on_custo and custo:
+            on_custo(custo)
+        return texto
+    if on_status:
+        on_status("OCR falhou em todos os provedores para esta página — pulada.")
+    logger.warning("OCR falhou em todos os provedores: %s", ultimo_erro)
+    return ""

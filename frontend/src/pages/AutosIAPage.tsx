@@ -21,6 +21,11 @@ export default function AutosIAPage() {
     queryFn: () => autosIa.listarCasos(),
   })
 
+  const deletar = useMutation({
+    mutationFn: (casoId: string) => autosIa.deletarCaso(casoId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'casos'] }),
+  })
+
   const criar = useMutation({
     mutationFn: () => autosIa.criarCaso({
       nome,
@@ -143,6 +148,7 @@ export default function AutosIAPage() {
                 <th>Peças</th>
                 <th>FAQ</th>
                 <th>Status</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -169,6 +175,20 @@ export default function AutosIAPage() {
                   <td>{c.total_perguntas_faq}</td>
                   <td>
                     <span className={`${styles.badge} ${styles[`status_${c.status}`]}`}>{c.status}</span>
+                  </td>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <button
+                      className={styles.btnDanger}
+                      disabled={deletar.isPending || c.ultimo_sync_status === 'processando'}
+                      title={c.ultimo_sync_status === 'processando' ? 'Cancele a sincronização em andamento antes de excluir' : undefined}
+                      onClick={() => {
+                        if (window.confirm(`Excluir o caso "${c.nome}"? Apaga todas as peças, o grafo e as perguntas já indexadas — não pode ser desfeito.`)) {
+                          deletar.mutate(c.id)
+                        }
+                      }}
+                    >
+                      Excluir
+                    </button>
                   </td>
                 </tr>
               ))}

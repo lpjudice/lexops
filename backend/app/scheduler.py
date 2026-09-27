@@ -84,7 +84,14 @@ def _sync_autos_ia_processos() -> None:
             if not casos:
                 return
 
+            # Sessão do próprio lexops (colar token); se caiu, usa a do bot do
+            # Telegram (id=2), que fica ativa por muito mais tempo (offline_access
+            # + refresh proativo a cada 6h) — evita que os 3 syncs/dia do Autos IA
+            # fiquem sem jus.br só porque a sessão colada expirou entre um e outro.
             session_data = load_session()
+            if not session_data:
+                from app.services.andamentos_auth import load_session as load_session_bot
+                session_data = load_session_bot()
             logger.info("Autos IA: sincronizando %d caso(s) vinculados a processo", len(casos))
             for caso in casos:
                 sincronizar_caso_jusbr(db, caso, session_data)

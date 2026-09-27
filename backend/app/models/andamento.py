@@ -28,6 +28,13 @@ class AndamentoProcesso(Base):
     arquivo_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     arquivo_drive_link: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     documento_id: Mapped[str | None] = mapped_column(String(500), nullable=True, index=True)
+    # Data+hora do protocolo/juntada do documento, quando a fonte informa com
+    # granularidade de horário (PDPJ/jus.br) — None em andamentos vindos só do
+    # DataJud (nível de movimento, sem hora por documento) ou sincronizados antes
+    # deste campo existir (backfill acontece no próximo "sincronizar agora").
+    # Usado pelo Autos IA pra agrupar petição+anexos pela hora de protocolo sem
+    # precisar de IA — ver services/autos_ia/jusbr_import.py.
+    protocolado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     hash_unico: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     # Texto extraído do PDF (arquivo_drive_link), cacheado na primeira leitura
     # pelo gestor jurídico — evita baixar/reprocessar o mesmo documento sempre.

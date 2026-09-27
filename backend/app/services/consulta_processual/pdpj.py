@@ -664,6 +664,9 @@ async def buscar_via_pdpj(
                 arquivo_url=_documento_url_from_href(doc.get("hrefBinario") or doc.get("hrefTexto")),
                 documento_detectado=True,
                 documento_id=_doc_identificador(doc),
+                data_hora_protocolo=_parse_dt(
+                    doc.get("dataHoraJuntada") or doc.get("dataHora") or mov.get("dataHora")
+                ),
             ))
 
     # 2) Documents that matched no movimento become their own rows (lossless).
@@ -680,6 +683,7 @@ async def buscar_via_pdpj(
             arquivo_url=_documento_url_from_href(doc.get("hrefBinario") or doc.get("hrefTexto")),
             documento_detectado=True,
             documento_id=_doc_identificador(doc),
+            data_hora_protocolo=_parse_dt(doc.get("dataHoraJuntada") or doc.get("dataHora")),
         ))
 
     return andamentos

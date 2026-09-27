@@ -1,17 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { autosIa, TIPOS_PECA } from '../api/autosIa'
-import type { Documento, GrafoAresta, GrafoNo, Peca, PecaDetalhe } from '../api/autosIa'
+import type { Caso, Documento, DocumentoDrive, DocumentoDriveAnexo, GrafoAresta, GrafoNo, Peca, PecaDetalhe, TipoPeca } from '../api/autosIa'
 import ReferenciaHover from '../components/autosIa/ReferenciaHover'
+import GrafoTimeline from '../components/autosIa/GrafoTimeline'
+import Modal from '../components/Modal'
 import pageStyles from './Page.module.css'
 import styles from './AutosIACasoPage.module.css'
 
-type Aba = 'upload' | 'pecas' | 'timeline' | 'grafo' | 'faq'
+type Aba = 'upload' | 'pecas' | 'documentos' | 'timeline' | 'grafo' | 'faq'
 
 const ABAS: { key: Aba; label: string }[] = [
   { key: 'upload', label: 'Upload & Blocos' },
   { key: 'pecas', label: 'Peças & Busca' },
+  { key: 'documentos', label: 'Documentos' },
   { key: 'timeline', label: 'Linha do Tempo' },
   { key: 'grafo', label: 'Grafo de Referências' },
   { key: 'faq', label: 'Perguntas' },
@@ -22,6 +25,7 @@ const STATUS_DOC_COR: Record<string, { bg: string; cor: string }> = {
   processando: { bg: '#dbeafe', cor: '#1d4ed8' },
   concluido: { bg: '#dcfce7', cor: '#15803d' },
   erro: { bg: '#fee2e2', cor: '#b91c1c' },
+  cancelado: { bg: '#f3f4f6', cor: 'var(--gray-mid)' },
 }
 
 function formatarData(d?: string | null) {
@@ -29,23 +33,76 @@ function formatarData(d?: string | null) {
   return new Date(d).toLocaleDateString('pt-BR')
 }
 
+function formatarHora(d?: string | null) {
+  if (!d) return null
+  return new Date(d).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+}
+
+function formatarUsd(v: number) {
+  return `US$ ${v.toFixed(v < 1 ? 3 : 2)}`
+}
+
 const STATUS_SYNC_LABEL: Record<string, string> = {
   ok: 'sincronizado',
   erro: 'falhou',
   nenhum: 'sem novidades',
   processando: 'sincronizando...',
+  cancelado: 'cancelado',
+}
+
+const ETAPA_SYNC_LABEL: Record<string, string> = {
+  lendo: 'Lendo documentos',
+  resumindo: 'Resumindo peças',
+  reclassificando: 'Reclassificando peças',
 }
 
 export default function AutosIACasoPage() {
   const { casoId } = useParams<{ casoId: string }>()
+  const navigate = useNavigate()
   const qc = useQueryClient()
   const [aba, setAba] = useState<Aba>('upload')
+  const [modalExcluir, setModalExcluir] = useState(false)
 
   const { data: caso } = useQuery({
     queryKey: ['autos-ia', 'caso', casoId],
     queryFn: () => autosIa.obterCaso(casoId!),
     enabled: !!casoId,
     refetchInterval: (query) => (query.state.data?.ultimo_sync_status === 'processando' ? 3000 : false),
+  })
+
+  const emProcessamento = caso?.ultimo_sync_status === 'processando'
+
+  // Enquanto uma sincronização roda, só o card de progresso (que tem sua
+  // própria query) se atualiza sozinho — as abas de Documentos/Peças/Grafo
+  // ficavam paradas na foto de quando a aba foi aberta, mesmo com peças
+  // novas sendo criadas no banco em tempo real. Sem isso, dava a impressão
+  // de sincronização travada mesmo quando ela estava avançando normalmente.
+  useEffect(() => {
+    if (!emProcessamento || !casoId) return
+    const id = setInterval(() => {
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'documentos-drive', casoId] })
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'pecas', casoId] })
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'grafo', casoId] })
+    }, 5000)
+    return () => clearInterval(id)
+  }, [emProcessamento, casoId, qc])
+
+  const { data: estimativaImportacao } = useQuery({
+    queryKey: ['autos-ia', 'estimativa-importacao', casoId],
+    queryFn: () => autosIa.estimativaImportacao(casoId!),
+    enabled: !!casoId && !!caso?.processo_id && !emProcessamento,
+  })
+
+  const { data: estimativaReclassificacao } = useQuery({
+    queryKey: ['autos-ia', 'estimativa-reclassificacao', casoId],
+    queryFn: () => autosIa.estimativaReclassificacao(casoId!),
+    enabled: !!casoId && !emProcessamento,
+  })
+
+  const { data: pendentesResumo } = useQuery({
+    queryKey: ['autos-ia', 'pendentes-resumo', casoId],
+    queryFn: () => autosIa.contarPendentesResumo(casoId!),
+    enabled: !!casoId && !emProcessamento,
   })
 
   const sincronizar = useMutation({
@@ -57,6 +114,69 @@ export default function AutosIACasoPage() {
     mutationFn: () => autosIa.importarExistentes(casoId!),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] }),
   })
+
+  const cancelarSync = useMutation({
+    mutationFn: () => autosIa.cancelarSync(casoId!),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] }),
+  })
+
+  const pularDocumentoAtual = useMutation({
+    mutationFn: () => autosIa.pularDocumentoAtual(casoId!),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] }),
+  })
+
+  const atualizarMetadados = useMutation({
+    mutationFn: () => autosIa.atualizarMetadados(casoId!),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] }),
+  })
+
+  const reagrupar = useMutation({
+    mutationFn: () => autosIa.reagrupar(casoId!),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] })
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'documentos-drive', casoId] })
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'grafo', casoId] })
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'pecas', casoId] })
+    },
+  })
+
+  const resumirPendentes = useMutation({
+    mutationFn: () => autosIa.resumirPendentes(casoId!),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] }),
+  })
+
+  const deletarCaso = useMutation({
+    mutationFn: () => autosIa.deletarCaso(casoId!),
+    onSuccess: () => navigate('/autos-ia'),
+  })
+
+  const reclassificar = useMutation({
+    mutationFn: () => autosIa.reclassificar(casoId!),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] }),
+  })
+
+  function confirmarReclassificar() {
+    const est = estimativaReclassificacao
+    if (!est || est.itens_pendentes === 0) {
+      window.alert('Nenhuma peça elegível para reclassificar (precisa já ter sido resumida).')
+      return
+    }
+    const aviso = `Reclassificar ${est.itens_pendentes} peça(s) já resumida(s) — atualiza tipo, `
+      + `peticionante e ID de referência pelo conteúdo real, sem gerar resumo de novo.\n\n`
+      + `Estimativa: ~${formatarUsd(est.custo_estimado_usd)} · ~${est.tempo_estimado_minutos} min.\n\nContinuar?`
+    if (!window.confirm(aviso)) return
+    reclassificar.mutate()
+  }
+
+  function confirmarEDisparar(acao: 'sincronizar' | 'importar') {
+    const est = estimativaImportacao
+    const aviso = est && est.itens_pendentes > 0
+      ? `${est.itens_pendentes} documento(s) pendente(s) · estimativa ~${formatarUsd(est.custo_estimado_usd)} · ~${est.tempo_estimado_minutos} min.\n\nContinuar?`
+      : 'Continuar?'
+    if (!window.confirm(aviso)) return
+    if (acao === 'sincronizar') sincronizar.mutate()
+    else importarExistentes.mutate()
+  }
 
   const { data: grafo } = useQuery({
     queryKey: ['autos-ia', 'grafo', casoId],
@@ -92,6 +212,9 @@ export default function AutosIACasoPage() {
             <div className={styles.headerMeta}>
               {caso.numero_processo && <span>Processo {caso.numero_processo}</span>}
               <span>{caso.total_paginas} páginas indexadas</span>
+              <span title="Custo real acumulado em chamadas de IA (segmentação + resumo) neste caso">
+                {formatarUsd(caso.custo_usd_total)} gastos
+              </span>
               <span className={`${pageStyles.badge} ${pageStyles[`status_${caso.status}`]}`}>{caso.status}</span>
               {caso.tem_peca_pendente_continuacao && (
                 <span className={styles.warningBuffer}>
@@ -105,27 +228,129 @@ export default function AutosIACasoPage() {
                     {caso.ultimo_sync_status && ` · última sync: ${STATUS_SYNC_LABEL[caso.ultimo_sync_status] ?? caso.ultimo_sync_status}`}
                     {caso.ultima_sincronizacao_em && ` (${new Date(caso.ultima_sincronizacao_em).toLocaleString('pt-BR')})`}
                   </span>
-                  <button
-                    className={pageStyles.btnSmall}
-                    disabled={sincronizar.isPending || caso.ultimo_sync_status === 'processando'}
-                    onClick={() => sincronizar.mutate()}
-                  >
-                    {caso.ultimo_sync_status === 'processando' ? 'Sincronizando...' : 'Sincronizar agora'}
-                  </button>
-                  <button
-                    className={pageStyles.btnSmall}
-                    disabled={importarExistentes.isPending || caso.ultimo_sync_status === 'processando'}
-                    onClick={() => importarExistentes.mutate()}
-                    title="Importa só os documentos já baixados pelo jus.br, sem consultar a rede"
-                  >
-                    Importar documentos existentes
-                  </button>
+                  {emProcessamento ? (
+                    <>
+                      <button
+                        className={pageStyles.btnSmall}
+                        disabled={pularDocumentoAtual.isPending}
+                        onClick={() => {
+                          if (window.confirm('Pular o documento que está sendo lido agora? A sincronização continua para o próximo — o link completo do Drive fica salvo pra reler depois.')) {
+                            pularDocumentoAtual.mutate()
+                          }
+                        }}
+                        title="Pula só o documento atual (útil se for muito grande) — a sincronização segue para o próximo"
+                      >
+                        {pularDocumentoAtual.isPending ? 'Pulando...' : 'Pular este documento'}
+                      </button>
+                      <button
+                        className={pageStyles.btnSmall}
+                        disabled={cancelarSync.isPending}
+                        onClick={() => {
+                          if (window.confirm('Cancelar a sincronização em andamento? As peças já lidas/resumidas até agora ficam salvas.')) {
+                            cancelarSync.mutate()
+                          }
+                        }}
+                      >
+                        {cancelarSync.isPending ? 'Cancelando...' : 'Cancelar'}
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        className={pageStyles.btnSmall}
+                        disabled={sincronizar.isPending}
+                        onClick={() => confirmarEDisparar('sincronizar')}
+                      >
+                        Sincronizar agora
+                      </button>
+                      <button
+                        className={pageStyles.btnSmall}
+                        disabled={importarExistentes.isPending}
+                        onClick={() => confirmarEDisparar('importar')}
+                        title="Importa só os documentos já baixados pelo jus.br, sem consultar a rede"
+                      >
+                        Importar documentos existentes
+                      </button>
+                      <button
+                        className={pageStyles.btnSmall}
+                        disabled={atualizarMetadados.isPending}
+                        onClick={() => {
+                          if (window.confirm('Consultar o jus.br só para atualizar metadados (ex.: hora de protocolo) dos andamentos já conhecidos? Não processa nenhuma peça nova — zero custo de IA.')) {
+                            atualizarMetadados.mutate()
+                          }
+                        }}
+                        title="Só atualiza dados como a hora de protocolo — não baixa nem processa peças novas"
+                      >
+                        {atualizarMetadados.isPending ? 'Atualizando...' : 'Atualizar metadados'}
+                      </button>
+                      <button
+                        className={pageStyles.btnSmall}
+                        disabled={reagrupar.isPending}
+                        onClick={() => {
+                          if (window.confirm('Reorganizar petição/anexo das peças já importadas, usando a hora de protocolo quando disponível? 100% local, sem IA nem rede.')) {
+                            reagrupar.mutate()
+                          }
+                        }}
+                        title="Reaplica o agrupamento petição/anexo nas peças já importadas — sem IA, sem rede"
+                      >
+                        {reagrupar.isPending ? 'Reagrupando...' : 'Reagrupar peças'}
+                      </button>
+                      {!!pendentesResumo?.pendentes && (
+                        <button
+                          className={pageStyles.btnSmall}
+                          disabled={resumirPendentes.isPending}
+                          onClick={() => {
+                            if (window.confirm(`Resumir ${pendentesResumo.pendentes} peça(s) já lida(s) mas ainda sem resumo — sem consultar o jus.br nem reler nenhum documento novo. Continuar?`)) {
+                              resumirPendentes.mutate()
+                            }
+                          }}
+                          title="Só resume o que já foi lido — sem ler documentos novos"
+                        >
+                          {resumirPendentes.isPending ? 'Resumindo...' : `Resumir pendentes (${pendentesResumo.pendentes})`}
+                        </button>
+                      )}
+                    </>
+                  )}
                 </>
               )}
+              {!emProcessamento && estimativaReclassificacao && estimativaReclassificacao.itens_pendentes > 0 && (
+                <button
+                  className={pageStyles.btnSmall}
+                  disabled={reclassificar.isPending}
+                  onClick={confirmarReclassificar}
+                  title="Atualiza tipo, peticionante e ID de referência das peças já resumidas, pelo conteúdo real — sem gerar resumo de novo"
+                >
+                  Reclassificar peças
+                </button>
+              )}
+              <button
+                className={pageStyles.btnDanger}
+                disabled={deletarCaso.isPending || emProcessamento}
+                title={emProcessamento ? 'Cancele a sincronização em andamento antes de excluir' : undefined}
+                onClick={() => setModalExcluir(true)}
+              >
+                {deletarCaso.isPending ? 'Excluindo...' : 'Excluir caso'}
+              </button>
             </div>
           )}
-          {caso?.ultimo_sync_status === 'processando' && caso.ultimo_sync_mensagem && (
-            <p style={{ fontSize: 12, color: '#1d4ed8', marginTop: 6 }}>{caso.ultimo_sync_mensagem}</p>
+          {caso && modalExcluir && (
+            <ModalConfirmarExclusao
+              nomeCaso={caso.nome}
+              isPending={deletarCaso.isPending}
+              onConfirmar={() => deletarCaso.mutate()}
+              onClose={() => setModalExcluir(false)}
+            />
+          )}
+          {caso?.processo_id && !emProcessamento && estimativaImportacao && estimativaImportacao.itens_pendentes > 0 && (
+            <p style={{ fontSize: 12, color: 'var(--gray-mid)', marginTop: 6 }}>
+              {estimativaImportacao.itens_pendentes} documento(s) do processo ainda não indexado(s) — projeção
+              ~{formatarUsd(estimativaImportacao.custo_estimado_usd)} · ~{estimativaImportacao.tempo_estimado_minutos} min
+              para importar tudo.
+            </p>
+          )}
+          {emProcessamento && <SyncProgress caso={caso!} />}
+          {caso?.ultimo_sync_status === 'cancelado' && caso.ultimo_sync_mensagem && (
+            <p style={{ fontSize: 12, color: '#a16207', marginTop: 6 }}>{caso.ultimo_sync_mensagem}</p>
           )}
           {caso?.ultimo_sync_status === 'erro' && caso.ultimo_sync_mensagem && (
             <p style={{ fontSize: 12, color: '#b91c1c', marginTop: 6 }}>
@@ -153,6 +378,7 @@ export default function AutosIACasoPage() {
       {aba === 'pecas' && (
         <AbaPecas casoId={casoId} arestasPorOrigem={arestasPorOrigem} nosPorId={nosPorId} />
       )}
+      {aba === 'documentos' && <AbaDocumentosDrive casoId={casoId} vinculadoAProcesso={!!caso?.processo_id} />}
       {aba === 'timeline' && (
         <AbaTimeline casoId={casoId} arestasPorOrigem={arestasPorOrigem} nosPorId={nosPorId} />
       )}
@@ -179,12 +405,26 @@ function AbaUpload({ casoId, totalPaginas, vinculadoAProcesso }: { casoId: strin
     },
   })
 
+  const invalidarDocumentos = () => {
+    qc.invalidateQueries({ queryKey: ['autos-ia', 'documentos', casoId] })
+    qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] })
+  }
+
+  const cancelarDocumento = useMutation({
+    mutationFn: (documentoId: string) => autosIa.cancelarDocumento(documentoId),
+    onSuccess: invalidarDocumentos,
+  })
+
+  const retomarDocumento = useMutation({
+    mutationFn: (documentoId: string) => autosIa.retomarDocumento(documentoId),
+    onSuccess: invalidarDocumentos,
+  })
+
   const enviar = useMutation({
     mutationFn: (arquivo: File) =>
       autosIa.enviarBloco(casoId, arquivo, paginaInicio ? Number(paginaInicio) : null, setProgresso),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['autos-ia', 'documentos', casoId] })
-      qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] })
+      invalidarDocumentos()
       setProgresso(null)
       setPaginaInicio('')
       if (inputRef.current) inputRef.current.value = ''
@@ -253,7 +493,9 @@ function AbaUpload({ casoId, totalPaginas, vinculadoAProcesso }: { casoId: strin
                 <th>Páginas</th>
                 <th>Estimativa</th>
                 <th>Progresso</th>
+                <th>Custo real</th>
                 <th>OCR</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -267,7 +509,32 @@ function AbaUpload({ casoId, totalPaginas, vinculadoAProcesso }: { casoId: strin
                   <td style={{ minWidth: 200 }}>
                     <ProgressoDocumento doc={d} />
                   </td>
+                  <td style={{ fontSize: 11.5, color: 'var(--gray-mid)' }}>{formatarUsd(d.custo_usd)}</td>
                   <td>{d.paginas_ocr}</td>
+                  <td>
+                    {d.status === 'processando' && (
+                      <button
+                        className={pageStyles.btnSmall}
+                        disabled={cancelarDocumento.isPending}
+                        onClick={() => {
+                          if (window.confirm('Cancelar o processamento deste bloco? As peças já resumidas ficam salvas.')) {
+                            cancelarDocumento.mutate(d.id)
+                          }
+                        }}
+                      >
+                        Cancelar
+                      </button>
+                    )}
+                    {(d.status === 'cancelado' || d.status === 'erro') && (
+                      <button
+                        className={pageStyles.btnSmall}
+                        disabled={retomarDocumento.isPending}
+                        onClick={() => retomarDocumento.mutate(d.id)}
+                      >
+                        Retomar
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -295,6 +562,110 @@ function useNow(intervalMs: number) {
   return now
 }
 
+const CONFIRMACAO_EXCLUSAO = 'DELETAR'
+
+function ModalConfirmarExclusao({
+  nomeCaso, isPending, onConfirmar, onClose,
+}: { nomeCaso: string; isPending: boolean; onConfirmar: () => void; onClose: () => void }) {
+  const [texto, setTexto] = useState('')
+  const confirmado = texto.trim() === CONFIRMACAO_EXCLUSAO
+
+  return (
+    <Modal title="Excluir caso" onClose={onClose}>
+      <p style={{ fontSize: 13, lineHeight: 1.5, marginBottom: 12 }}>
+        Excluir <strong>"{nomeCaso}"</strong>? Apaga todas as peças, o grafo e as perguntas já
+        indexadas — todo o custo e tempo de leitura já gastos nesse caso se perdem, e não pode ser desfeito.
+      </p>
+      <p style={{ fontSize: 12.5, marginBottom: 6 }}>
+        Digite <strong>{CONFIRMACAO_EXCLUSAO}</strong> para confirmar:
+      </p>
+      <input
+        className={pageStyles.input}
+        value={texto}
+        onChange={(e) => setTexto(e.target.value)}
+        placeholder={CONFIRMACAO_EXCLUSAO}
+        autoFocus
+      />
+      <div style={{ display: 'flex', gap: 8, marginTop: 14, justifyContent: 'flex-end' }}>
+        <button className={pageStyles.btnSmall} onClick={onClose}>Cancelar</button>
+        <button
+          className={pageStyles.btnDanger}
+          disabled={!confirmado || isPending}
+          onClick={onConfirmar}
+        >
+          {isPending ? 'Excluindo...' : 'Excluir definitivamente'}
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
+function SyncProgress({ caso }: { caso: Caso }) {
+  const agora = useNow(1000)
+
+  const total = caso.sync_total_itens ?? 0
+  const feito = caso.sync_itens_processados ?? 0
+  const pct = total > 0 ? Math.min(100, Math.round((feito / total) * 100)) : 0
+  const inicioMs = caso.sync_iniciado_em ? new Date(caso.sync_iniciado_em).getTime() : null
+
+  // Marca quando "feito" mudou pela última vez — o ritmo médio real (do que já
+  // foi processado) dá a base pra estimar o progresso do documento ATUAL.
+  const ultimaMudancaRef = useRef({ feito, em: agora })
+  if (ultimaMudancaRef.current.feito !== feito) {
+    ultimaMudancaRef.current = { feito, em: agora }
+  }
+
+  let eta = ''
+  if (inicioMs && pct >= 3) {
+    const elapsedMs = agora - inicioMs
+    const restanteMs = Math.max(0, elapsedMs / (pct / 100) - elapsedMs)
+    const min = Math.round(restanteMs / 60000)
+    eta = min < 1 ? '< 1 min restante' : `~${min} min restante`
+  }
+
+  // Barra secundária: sobe segundo a segundo com base no ritmo médio real —
+  // distingue "só demorando" (sobe, estabiliza perto de 95-97% e espera o
+  // próximo) de "travado de verdade" (fica parada ali por muito mais tempo
+  // que a média do que já foi processado até agora).
+  let pctDocumentoAtual: number | null = null
+  if (inicioMs && feito > 0 && feito < total) {
+    const ritmoMedioMs = (ultimaMudancaRef.current.em - inicioMs) / feito
+    if (ritmoMedioMs > 0) {
+      const decorridoDesdeUltimo = agora - ultimaMudancaRef.current.em
+      pctDocumentoAtual = Math.min(97, Math.round((decorridoDesdeUltimo / ritmoMedioMs) * 100))
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 8, maxWidth: 420 }}>
+      <div style={{ fontSize: 12, color: '#1d4ed8', marginBottom: 4 }}>
+        {ETAPA_SYNC_LABEL[caso.sync_etapa ?? ''] ?? 'Processando'}
+        {total > 0 && ` — ${feito}/${total}`}
+        {eta && ` · ${eta}`}
+        {` · ${formatarUsd(caso.custo_usd_total)} gastos até agora`}
+      </div>
+      <div className={styles.progressBar}>
+        <div className={styles.progressFill} style={{ width: `${pct}%` }} />
+      </div>
+      {caso.sync_detalhe && (
+        <div style={{ fontSize: 11, color: 'var(--gray-mid)', marginTop: 5, fontStyle: 'italic' }}>
+          {caso.sync_detalhe}
+        </div>
+      )}
+      {pctDocumentoAtual != null && (
+        <>
+          <div style={{ fontSize: 10, color: 'var(--gray-mid)', marginTop: 5 }}>
+            Documento atual (estimado pelo ritmo médio)
+          </div>
+          <div className={styles.progressBarSecundaria}>
+            <div className={styles.progressFillSecundaria} style={{ width: `${pctDocumentoAtual}%` }} />
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 function ProgressoDocumento({ doc }: { doc: Documento }) {
   const agora = useNow(5000)
 
@@ -315,6 +686,13 @@ function ProgressoDocumento({ doc }: { doc: Documento }) {
     return (
       <span className={pageStyles.badge} style={{ background: STATUS_DOC_COR.concluido.bg, color: STATUS_DOC_COR.concluido.cor }}>
         concluído — {doc.pecas_geradas} peça{doc.pecas_geradas !== 1 ? 's' : ''}
+      </span>
+    )
+  }
+  if (doc.status === 'cancelado') {
+    return (
+      <span className={pageStyles.badge} style={{ background: STATUS_DOC_COR.cancelado.bg, color: STATUS_DOC_COR.cancelado.cor }}>
+        cancelado — {doc.pecas_resumidas}/{doc.pecas_geradas || '?'} peça{doc.pecas_geradas !== 1 ? 's' : ''} resumida(s)
       </span>
     )
   }
@@ -426,21 +804,29 @@ function PecaCard({ peca, arestasPorOrigem, nosPorId }: { peca: Peca; arestasPor
   )
 }
 
+const TAMANHO_PAGINA_PECAS = 100
+
 function AbaPecas({ casoId, arestasPorOrigem, nosPorId }: { casoId: string; arestasPorOrigem: ArestasMap; nosPorId: NosMap }) {
   const [q, setQ] = useState('')
   const [tipo, setTipo] = useState('')
   const [dataInicio, setDataInicio] = useState('')
   const [dataFim, setDataFim] = useState('')
 
-  const { data: pecas = [], isLoading } = useQuery({
+  const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteQuery({
     queryKey: ['autos-ia', 'pecas', casoId, q, tipo, dataInicio, dataFim],
-    queryFn: () => autosIa.listarPecas(casoId, {
+    queryFn: ({ pageParam }) => autosIa.listarPecas(casoId, {
       q: q || undefined,
       tipo: tipo || undefined,
       data_inicio: dataInicio || undefined,
       data_fim: dataFim || undefined,
+      offset: pageParam,
+      limit: TAMANHO_PAGINA_PECAS,
     }),
+    initialPageParam: 0,
+    getNextPageParam: (ultimaPagina, todasPaginas) =>
+      ultimaPagina.length === TAMANHO_PAGINA_PECAS ? todasPaginas.length * TAMANHO_PAGINA_PECAS : undefined,
   })
+  const pecas = data?.pages.flat() ?? []
 
   return (
     <div>
@@ -448,7 +834,7 @@ function AbaPecas({ casoId, arestasPorOrigem, nosPorId }: { casoId: string; ares
         <div className={styles.campo}>
           <input
             className={pageStyles.input}
-            placeholder="Buscar por tema (ex.: prescrição, honorários...)"
+            placeholder="Buscar por tema, palavra-chave ou ID (ex.: prescrição, honorários, Evento 45...)"
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
@@ -481,9 +867,264 @@ function AbaPecas({ casoId, arestasPorOrigem, nosPorId }: { casoId: string; ares
       ) : pecas.length === 0 ? (
         <p className={pageStyles.empty}>Nenhuma peça encontrada.</p>
       ) : (
-        pecas.map((p) => (
-          <PecaCard key={p.id} peca={p} arestasPorOrigem={arestasPorOrigem} nosPorId={nosPorId} />
-        ))
+        <>
+          {pecas.map((p) => (
+            <PecaCard key={p.id} peca={p} arestasPorOrigem={arestasPorOrigem} nosPorId={nosPorId} />
+          ))}
+          {hasNextPage && (
+            <button
+              className={pageStyles.btnSmall}
+              style={{ display: 'block', margin: '16px auto' }}
+              disabled={isFetchingNextPage}
+              onClick={() => fetchNextPage()}
+            >
+              {isFetchingNextPage ? 'Carregando...' : `Carregar mais (${pecas.length} carregada(s))`}
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+// ── Documentos (listagem compacta + link pro Drive) ─────────────────────────
+
+const TAMANHO_PAGINA_DOCUMENTOS = 60
+
+function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | DocumentoDriveAnexo; nivel: number; casoId: string }) {
+  const qc = useQueryClient()
+  const anexos = 'anexos' in doc ? doc.anexos : []
+  const [aberto, setAberto] = useState(true)
+  const [resumoAberto, setResumoAberto] = useState(false)
+  const [editando, setEditando] = useState(false)
+  const [rascunhoTitulo, setRascunhoTitulo] = useState(doc.titulo_customizado ?? '')
+  const [rascunhoNota, setRascunhoNota] = useState(doc.nota_usuario ?? '')
+  const [rascunhoKeywords, setRascunhoKeywords] = useState((doc.keywords_usuario ?? []).join(', '))
+  const temAnexos = anexos.length > 0
+  const ehPeticao = doc.tipo === 'peticao'
+  const temResumo = !!doc.resumo
+  const nomeOriginal = doc.nome_indexado || doc.titulo
+
+  const marcarTipo = useMutation({
+    mutationFn: (tipo: TipoPeca) => autosIa.atualizarTipoPeca(doc.id, tipo),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'documentos-drive', casoId] }),
+  })
+
+  const salvarAnotacao = useMutation({
+    mutationFn: () => autosIa.atualizarAnotacaoPeca(doc.id, {
+      titulo_customizado: rascunhoTitulo.trim() || null,
+      nota_usuario: rascunhoNota.trim() || null,
+      keywords_usuario: rascunhoKeywords.trim()
+        ? rascunhoKeywords.split(',').map((k) => k.trim()).filter(Boolean)
+        : null,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'documentos-drive', casoId] })
+      setEditando(false)
+    },
+  })
+
+  return (
+    <div className={styles.docItem}>
+      <div className={ehPeticao ? styles.docBlocoPeticao : undefined}>
+        <div className={styles.docRow} style={{ paddingLeft: nivel * 22 }}>
+          {temAnexos ? (
+            <button
+              type="button"
+              className={styles.docChevron}
+              onClick={() => setAberto(!aberto)}
+              aria-expanded={aberto}
+              aria-label={aberto ? 'Recolher anexos' : 'Expandir anexos'}
+            >
+              {aberto ? '▾' : '▸'}
+            </button>
+          ) : (
+            <span className={styles.docChevronVazio} />
+          )}
+          <span className={styles.docData} title={doc.protocolado_em ? `Protocolado às ${formatarHora(doc.protocolado_em)}` : undefined}>
+            <span>{doc.data_peca ? formatarData(doc.data_peca) : '—'}</span>
+            {doc.protocolado_em && <span className={styles.docHora}>{formatarHora(doc.protocolado_em)}</span>}
+          </span>
+          {doc.arquivo_drive_link ? (
+            <a
+              className={styles.docDriveIcone}
+              href={doc.arquivo_drive_link}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              title="Abrir no Drive"
+              aria-label="Abrir no Drive"
+            >
+              ↗
+            </a>
+          ) : (
+            <span className={styles.docDriveIcone} />
+          )}
+          <span className={`${styles.docNomeIndexado} ${ehPeticao ? styles.docNomeIndexadoPeticao : ''}`}>
+            {doc.titulo_customizado || nomeOriginal}
+          </span>
+          <button
+            type="button"
+            className={styles.docEditarBtn}
+            onClick={() => setEditando(!editando)}
+            aria-expanded={editando}
+            title="Editar nome, nota e palavras-chave"
+          >
+            ✎
+          </button>
+          {ehPeticao && (
+            <button
+              type="button"
+              className={styles.docResumoBtn}
+              disabled={!temResumo}
+              onClick={() => setResumoAberto(!resumoAberto)}
+              aria-expanded={resumoAberto}
+              title={temResumo ? 'Ver resumo desta petição' : 'Ainda sem leitura a fundo desta petição'}
+            >
+              ?
+            </button>
+          )}
+          <span className={styles.tipoBadge}>{doc.tipo}</span>
+          {doc.erro_mensagem && <span className={styles.docAvisoLeitura} title={doc.erro_mensagem}>⚠</span>}
+          {temAnexos && <span className={styles.docAnexosCount}>{anexos.length} anexo{anexos.length > 1 ? 's' : ''}</span>}
+          <button
+            type="button"
+            className={styles.docTogglePeticao}
+            disabled={marcarTipo.isPending}
+            onClick={() => marcarTipo.mutate(ehPeticao ? 'documento' : 'peticao')}
+            title={ehPeticao ? 'Desmarcar como petição' : 'Marcar como petição'}
+          >
+            {ehPeticao ? 'Desmarcar petição' : 'Marcar petição'}
+          </button>
+        </div>
+        <div className={styles.docRowSub} style={{ paddingLeft: nivel * 22 + 22 }}>
+          {doc.titulo_customizado && <span className={styles.docNomeOriginal}>original: {nomeOriginal}</span>}
+          {doc.id_processual && <span className={styles.docIdProcessual}>ID: {doc.id_processual}</span>}
+          {doc.arquivo_nome && <span className={styles.docArquivoNome}>{doc.arquivo_nome}</span>}
+          {doc.resumo && <span className={styles.docResumo}>{doc.resumo}</span>}
+          {doc.nota_usuario && <span className={styles.docNotaUsuario}>{doc.nota_usuario}</span>}
+          {doc.keywords_usuario && doc.keywords_usuario.length > 0 && (
+            <span className={styles.docKeywordsUsuario}>
+              {doc.keywords_usuario.map((k) => <span key={k} className={styles.keywordChip}>{k}</span>)}
+            </span>
+          )}
+        </div>
+        {resumoAberto && temResumo && (
+          <div className={styles.docResumoPopup} style={{ left: nivel * 22 + 22 }} role="dialog">
+            {doc.resumo}
+          </div>
+        )}
+        {editando && (
+          <div className={styles.docEditarPainel} style={{ marginLeft: nivel * 22 + 22 }}>
+            <input
+              className={pageStyles.input}
+              placeholder={`Nome customizado (original: ${nomeOriginal})`}
+              value={rascunhoTitulo}
+              onChange={(e) => setRascunhoTitulo(e.target.value)}
+            />
+            <textarea
+              className={pageStyles.input}
+              placeholder="Minha nota sobre este andamento..."
+              rows={2}
+              value={rascunhoNota}
+              onChange={(e) => setRascunhoNota(e.target.value)}
+            />
+            <input
+              className={pageStyles.input}
+              placeholder="Palavras-chave, separadas por vírgula"
+              value={rascunhoKeywords}
+              onChange={(e) => setRascunhoKeywords(e.target.value)}
+            />
+            <div className={styles.docEditarAcoes}>
+              <button
+                type="button"
+                className={pageStyles.btnSmall}
+                disabled={salvarAnotacao.isPending}
+                onClick={() => salvarAnotacao.mutate()}
+              >
+                {salvarAnotacao.isPending ? 'Salvando...' : 'Salvar'}
+              </button>
+              <button type="button" className={styles.docTogglePeticao} onClick={() => setEditando(false)}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+      {temAnexos && aberto && (
+        <div className={styles.docAnexos}>
+          {anexos.map((a) => <LinhaDocumento key={a.id} doc={a} nivel={nivel + 1} casoId={casoId} />)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AbaDocumentosDrive({ casoId, vinculadoAProcesso }: { casoId: string; vinculadoAProcesso: boolean }) {
+  const [q, setQ] = useState('')
+  const [ordem, setOrdem] = useState<'asc' | 'desc'>('asc')
+
+  const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteQuery({
+    queryKey: ['autos-ia', 'documentos-drive', casoId, q, ordem],
+    queryFn: ({ pageParam }) => autosIa.listarDocumentosDrive(casoId, {
+      q: q || undefined, ordem, offset: pageParam, limit: TAMANHO_PAGINA_DOCUMENTOS,
+    }),
+    initialPageParam: 0,
+    getNextPageParam: (ultimaPagina, todasPaginas) =>
+      ultimaPagina.length === TAMANHO_PAGINA_DOCUMENTOS ? todasPaginas.length * TAMANHO_PAGINA_DOCUMENTOS : undefined,
+    enabled: vinculadoAProcesso,
+  })
+  const documentos = data?.pages.flat() ?? []
+
+  if (!vinculadoAProcesso) {
+    return (
+      <p className={pageStyles.empty}>
+        Esta aba só existe para casos vinculados a um processo (peças vindas do jus.br/Drive).
+      </p>
+    )
+  }
+
+  return (
+    <div>
+      <p className={styles.docLegenda}>
+        Uma linha por peça, com os anexos dela recolhidos por baixo — clique na seta pra abrir.
+        O nome em destaque vem do próprio nome do arquivo (sem IA); o resumo, quando já foi lido, aparece embaixo.
+      </p>
+      <div className={styles.filtrosRow} style={{ marginBottom: 12 }}>
+        <input
+          className={pageStyles.input}
+          placeholder="Buscar por nome, ID, nota ou palavra-chave..."
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        <button
+          type="button"
+          className={pageStyles.btnSmall}
+          onClick={() => setOrdem(ordem === 'desc' ? 'asc' : 'desc')}
+          title="Alternar ordem cronológica"
+        >
+          {ordem === 'desc' ? '↓ Mais novas primeiro' : '↑ Mais antigas primeiro'}
+        </button>
+      </div>
+
+      {isLoading ? (
+        <p className={pageStyles.empty}>Carregando...</p>
+      ) : documentos.length === 0 ? (
+        <p className={pageStyles.empty}>Nenhum documento encontrado.</p>
+      ) : (
+        <div className={styles.docLista}>
+          {documentos.map((d) => <LinhaDocumento key={d.id} doc={d} nivel={0} casoId={casoId} />)}
+          {hasNextPage && (
+            <button
+              className={pageStyles.btnSmall}
+              style={{ display: 'block', margin: '16px auto' }}
+              disabled={isFetchingNextPage}
+              onClick={() => fetchNextPage()}
+            >
+              {isFetchingNextPage ? 'Carregando...' : `Carregar mais (${documentos.length} carregado(s))`}
+            </button>
+          )}
+        </div>
       )}
     </div>
   )
@@ -492,13 +1133,19 @@ function AbaPecas({ casoId, arestasPorOrigem, nosPorId }: { casoId: string; ares
 // ── Timeline ─────────────────────────────────────────────────────────────
 
 function AbaTimeline({ casoId, arestasPorOrigem, nosPorId }: { casoId: string; arestasPorOrigem: ArestasMap; nosPorId: NosMap }) {
-  const { data: pecas = [], isLoading } = useQuery({
+  const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteQuery({
     queryKey: ['autos-ia', 'pecas', casoId, 'timeline'],
-    queryFn: () => autosIa.listarPecas(casoId, {}),
+    queryFn: ({ pageParam }) => autosIa.listarPecas(casoId, { offset: pageParam, limit: TAMANHO_PAGINA_PECAS }),
+    initialPageParam: 0,
+    getNextPageParam: (ultimaPagina, todasPaginas) =>
+      ultimaPagina.length === TAMANHO_PAGINA_PECAS ? todasPaginas.length * TAMANHO_PAGINA_PECAS : undefined,
   })
+  const pecas = data?.pages.flat() ?? []
 
   const grupos = useMemo(() => {
-    const comData = pecas.filter((p) => p.data_peca).sort((a, b) => (a.data_peca! < b.data_peca! ? -1 : 1))
+    // Mais recentes primeiro — é assim que um advogado revisita um processo: o que
+    // aconteceu por último é o que importa saber primeiro.
+    const comData = pecas.filter((p) => p.data_peca).sort((a, b) => (a.data_peca! > b.data_peca! ? -1 : 1))
     const semData = pecas.filter((p) => !p.data_peca)
     const mapa = new Map<string, Peca[]>()
     comData.forEach((p) => {
@@ -527,6 +1174,16 @@ function AbaTimeline({ casoId, arestasPorOrigem, nosPorId }: { casoId: string; a
           </div>
         </div>
       ))}
+      {hasNextPage && (
+        <button
+          className={pageStyles.btnSmall}
+          style={{ display: 'block', margin: '16px auto' }}
+          disabled={isFetchingNextPage}
+          onClick={() => fetchNextPage()}
+        >
+          {isFetchingNextPage ? 'Carregando...' : `Carregar mais antigas (${pecas.length} carregada(s))`}
+        </button>
+      )}
     </div>
   )
 }
@@ -539,74 +1196,10 @@ function AbaGrafo({ casoId }: { casoId: string }) {
     queryFn: () => autosIa.obterGrafo(casoId),
   })
 
-  const incomingCount = useMemo(() => {
-    const mapa = new Map<string, number>()
-    grafo?.arestas.forEach((a) => {
-      if (a.peca_destino_id) mapa.set(a.peca_destino_id, (mapa.get(a.peca_destino_id) ?? 0) + 1)
-    })
-    return mapa
-  }, [grafo])
-
-  const arestasPorOrigem = useMemo(() => {
-    const mapa = new Map<string, NonNullable<typeof grafo>['arestas']>()
-    grafo?.arestas.forEach((a) => {
-      const lista = mapa.get(a.peca_origem_id) ?? []
-      lista.push(a)
-      mapa.set(a.peca_origem_id, lista)
-    })
-    return mapa
-  }, [grafo])
-
-  const nosPorId = useMemo(() => {
-    const mapa = new Map<string, NonNullable<typeof grafo>['nos'][number]>()
-    grafo?.nos.forEach((n) => mapa.set(n.id, n))
-    return mapa
-  }, [grafo])
-
   if (isLoading) return <p className={pageStyles.empty}>Carregando...</p>
   if (!grafo || grafo.nos.length === 0) return <p className={pageStyles.empty}>Nenhuma peça indexada ainda.</p>
 
-  return (
-    <div>
-      <p style={{ fontSize: 12.5, color: 'var(--gray-mid)', marginBottom: 16 }}>
-        Passe o mouse sobre um ID mencionado para ver o resumo e as palavras-chave da peça
-        referenciada, sem precisar navegar até ela.
-      </p>
-      {grafo.nos.map((no) => {
-        const arestas = arestasPorOrigem.get(no.id) ?? []
-        const entrada = incomingCount.get(no.id) ?? 0
-        return (
-          <div key={no.id} className={styles.grafoNodeCard}>
-            <span className={styles.tipoBadge}>{no.tipo}</span>
-            <div className={styles.pecaTitulo}>{no.titulo}</div>
-            <div className={styles.pecaMeta}>
-              <span>págs. {no.pagina_inicio}-{no.pagina_fim}</span>
-              {no.id_processual && <span>ID {no.id_processual}</span>}
-              {no.data_peca && <span>{formatarData(no.data_peca)}</span>}
-              {entrada > 0 && (
-                <span className={styles.incomingBadge}>referenciada por {entrada} peça{entrada > 1 ? 's' : ''}</span>
-              )}
-            </div>
-            {no.resumo && <div className={styles.pecaResumo}>{no.resumo}</div>}
-            {arestas.length > 0 && (
-              <>
-                <div className={styles.grafoSecao}>Menciona</div>
-                <div className={styles.chipsRow}>
-                  {arestas.map((a) => (
-                    <ReferenciaHover
-                      key={a.id}
-                      idMencionado={a.id_mencionado}
-                      no={a.peca_destino_id ? nosPorId.get(a.peca_destino_id) : undefined}
-                    />
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        )
-      })}
-    </div>
-  )
+  return <GrafoTimeline nos={grafo.nos} arestas={grafo.arestas} />
 }
 
 // ── FAQ ──────────────────────────────────────────────────────────────────
