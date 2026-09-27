@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { GrafoAresta, GrafoNo, TipoPeca } from '../../api/autosIa'
+import ReferenciaHover from './ReferenciaHover'
 import styles from './GrafoTimeline.module.css'
 
 const ALTURA_LINHA = 52
@@ -201,16 +202,12 @@ export default function GrafoTimeline({ nos, arestas }: Props) {
                         {(mencionaPorOrigem.get(n.id) ?? []).map((a) => {
                           const alvo = a.peca_destino_id ? noPorId.get(a.peca_destino_id) : undefined
                           return (
-                            <button
+                            <ReferenciaHover
                               key={a.id}
-                              type="button"
-                              className={alvo ? styles.refChip : styles.refChipVazio}
-                              disabled={!alvo}
-                              onClick={() => alvo && setSelecionado(alvo.id)}
-                              title={alvo ? `Ir para: ${alvo.titulo}` : 'Peça ainda não identificada nos autos'}
-                            >
-                              {a.id_mencionado}
-                            </button>
+                              idMencionado={a.id_mencionado}
+                              no={alvo}
+                              onClickIrPara={alvo ? () => setSelecionado(alvo.id) : undefined}
+                            />
                           )
                         })}
                       </div>
