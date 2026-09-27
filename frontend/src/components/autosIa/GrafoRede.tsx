@@ -27,6 +27,12 @@ function formatarData(d?: string | null): string {
   return new Date(ano, mes - 1, dia).toLocaleDateString('pt-BR')
 }
 
+function parseDataLocal(d?: string | null): Date | null {
+  if (!d) return null
+  const [ano, mes, dia] = d.split('T')[0].split('-').map(Number)
+  return new Date(ano, mes - 1, dia)
+}
+
 function escapeHtml(s: string): string {
   const div = document.createElement('div')
   div.textContent = s
@@ -35,6 +41,7 @@ function escapeHtml(s: string): string {
 
 interface NoInterno extends GrafoNo, d3.SimulationNodeDatum {
   citacoes: number
+  dt: Date | null
 }
 interface LinkInterno extends d3.SimulationLinkDatum<NoInterno> {
   id: string
@@ -60,7 +67,7 @@ export default function GrafoRede({ nos, arestas }: Props) {
 
     const nosRaiz: NoInterno[] = nos
       .filter((n) => !n.peca_pai_id)
-      .map((n) => ({ ...n, citacoes: 0 }))
+      .map((n) => ({ ...n, citacoes: 0, dt: parseDataLocal(n.data_peca) }))
     if (nosRaiz.length === 0) return
 
     const byId = new Map<string, NoInterno>()
@@ -117,9 +124,11 @@ export default function GrafoRede({ nos, arestas }: Props) {
             <div class="${styles.idIndex}" data-role="idindex"></div>
           </details>
           <div class="${styles.hint}">
-            <strong>Como ler:</strong> cada ponto é uma peça — o tamanho cresce com quantas vezes ela é
-            citada. As linhas mostram quem menciona quem. Clique num ponto pra ver o resumo e isolar suas
-            conexões; arraste o fundo pra mover, role pra dar zoom.
+            <strong>Como ler:</strong> a posição horizontal segue a data (mais antiga à esquerda, eixo no
+            rodapé) — mesmo sem citação identificada, a ordem cronológica já mostra o que veio antes. O
+            tamanho do ponto cresce com quantas vezes a peça é citada; as linhas mostram quem menciona quem.
+            Clique num ponto pra ver o resumo e isolar suas conexões; arraste o fundo pra mover, role pra
+            dar zoom.
           </div>
         </aside>
         <main class="${styles.canvasWrap}">
@@ -223,6 +232,7 @@ export default function GrafoRede({ nos, arestas }: Props) {
     })
 
     const zoomLayer = svg.append('g')
+    const axisLayer = zoomLayer.append('g')
     const edgeLayer = zoomLayer.append('g')
     const nodeLayer = zoomLayer.append('g')
 
@@ -230,11 +240,41 @@ export default function GrafoRede({ nos, arestas }: Props) {
       .domain([0, d3.max(nosRaiz, (n) => n.citacoes) || 1])
       .range([5, 15])
 
+    // Eixo cronológico: puxa cada nó horizontalmente pra posição proporcional à
+    // data da peça (mais antiga à esquerda), respondendo ao pedido de dar uma
+    // sequência temporal legível ao grafo — sem isso ele é só nuvem de pontos
+    // sem noção de "o que veio antes de quê". Força moderada (não trava): o
+    // link/charge/collide ainda podem organizar verticalmente por citação.
+    const comData = nosRaiz.filter((n) => n.dt)
+    const temEixoTempo = comData.length >= 2
+    const AXIS_Y = height - 34
+    const xScale = temEixoTempo
+      ? d3.scaleTime()
+        .domain(d3.extent(comData, (n) => n.dt as Date) as [Date, Date])
+        .range([64, Math.max(64 + 40, width - 24)])
+        .nice()
+      : null
+
     const sim = d3.forceSimulation<NoInterno>(nosRaiz)
       .force('link', d3.forceLink<NoInterno, LinkInterno>(links).id((d) => d.id).distance(70).strength(0.35))
       .force('charge', d3.forceManyBody().strength(-140))
-      .force('center', d3.forceCenter(width / 2, height / 2))
       .force('collide', d3.forceCollide<NoInterno>().radius((d) => radius(d.citacoes) + 14))
+    if (xScale) {
+      sim
+        .force('x', d3.forceX<NoInterno>((d) => (d.dt ? xScale(d.dt) : width / 2)).strength(0.22))
+        .force('y', d3.forceY<NoInterno>(height / 2 - 14).strength(0.05))
+    } else {
+      sim.force('center', d3.forceCenter(width / 2, height / 2))
+    }
+
+    if (xScale) {
+      axisLayer.attr('class', styles.axisEixo).attr('transform', `translate(0,${AXIS_Y})`)
+      axisLayer.call(
+        d3.axisBottom(xScale)
+          .ticks(Math.min(8, comData.length))
+          .tickFormat((d) => (d as Date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })) as unknown as (sel: typeof axisLayer) => void,
+      )
+    }
 
     const edgeSel = edgeLayer.selectAll('path').data(links).enter().append('path')
       .attr('class', styles.edge)
@@ -434,7 +474,13 @@ export default function GrafoRede({ nos, arestas }: Props) {
     const resizeObserver = new ResizeObserver(() => {
       const w = canvasWrap.clientWidth, h = canvasWrap.clientHeight
       if (w <= 0 || h <= 0) return
-      sim.force('center', d3.forceCenter(w / 2, h / 2))
+      if (xScale) {
+        xScale.range([64, Math.max(64 + 40, w - 24)])
+        axisLayer.attr('transform', `translate(0,${h - 34})`)
+        sim.force('y', d3.forceY<NoInterno>(h / 2 - 14).strength(0.05))
+      } else {
+        sim.force('center', d3.forceCenter(w / 2, h / 2))
+      }
       sim.alpha(0.3).restart()
     })
     resizeObserver.observe(canvasWrap)

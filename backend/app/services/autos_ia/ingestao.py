@@ -283,10 +283,14 @@ def resumir_pecas_em_paralelo(
                 peca.status = "resumida"
                 if not peca.autor and resultado.peticionante:
                     peca.autor = resultado.peticionante[:255]
-                # id_proprio (o número pelo qual a peça se autorreferencia) é mais
-                # confiável que um ID interno do sistema de origem pra casar com
-                # menções de outras peças — sobrescreve quando a IA encontrar um.
-                if resultado.id_proprio:
+                # id_proprio (o número que a própria IA leu no texto) só preenche
+                # id_processual quando o jus.br não deu um documento_id confiável na
+                # criação da peça (ver jusbr_import._criar_peca) — ex.: peça de upload
+                # manual, sem andamento associado. Quando já existe um documento_id
+                # real, ele nunca é sobrescrito pelo palpite da IA: auditoria no Apex
+                # achou dezenas de casos em que a IA "achava" um número curto/local
+                # (tipo "107" ou "Evento 57") em vez do ID de verdade.
+                if resultado.id_proprio and not peca.id_processual:
                     peca.id_processual = resultado.id_proprio[:100]
                 # Peça-mãe (não é anexo de outra): confia na classificação da IA, que
                 # leu o texto inteiro — mais precisa que o rótulo bruto do tribunal ou
@@ -371,7 +375,7 @@ def reclassificar_pecas_em_paralelo(
                 resultado = futuro.result()
                 if not peca.autor and resultado.peticionante:
                     peca.autor = resultado.peticionante[:255]
-                if resultado.id_proprio:
+                if resultado.id_proprio and not peca.id_processual:
                     peca.id_processual = resultado.id_proprio[:100]
                 if peca.peca_pai_id is None:
                     peca.tipo = resultado.tipo

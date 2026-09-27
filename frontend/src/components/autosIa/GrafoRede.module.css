@@ -164,6 +164,15 @@
 .graphSvg { width: 100%; height: 100%; display: block; cursor: grab; }
 .graphSvg:active { cursor: grabbing; }
 
+.axisEixo { pointer-events: none; }
+.axisEixo :global(.domain) { stroke: var(--gray-border); }
+.axisEixo :global(.tick) line { stroke: var(--gray-border); }
+.axisEixo :global(.tick) text {
+  fill: var(--gray-mid);
+  font-family: 'Archivo', sans-serif;
+  font-size: 10px;
+}
+
 .edge { fill: none; stroke: var(--gray-mid); stroke-opacity: 0.28; }
 .edgeDim { stroke-opacity: 0.05; }
 .edgeHi { stroke: var(--teal); stroke-opacity: 0.85; stroke-width: 1.6px; }
