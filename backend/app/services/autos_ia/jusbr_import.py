@@ -157,7 +157,7 @@ def _eh_provavel_anexo(andamento: AndamentoProcesso) -> bool:
     return any(_normalizar(p) in base for p in PALAVRAS_ANEXO)
 
 
-def _obter_bytes(andamento: AndamentoProcesso) -> bytes | None:
+def _obter_bytes(andamento: AndamentoProcesso, on_status=None) -> bytes | None:
     if andamento.arquivo_path:
         try:
             caminho = Path(andamento.arquivo_path)
@@ -171,7 +171,7 @@ def _obter_bytes(andamento: AndamentoProcesso) -> bytes | None:
             from app.services.google_drive import baixar_arquivo_por_id, extrair_file_id
             file_id = extrair_file_id(andamento.arquivo_drive_link)
             if file_id:
-                return baixar_arquivo_por_id(file_id)
+                return baixar_arquivo_por_id(file_id, on_status=on_status)
         except Exception as exc:
             logger.warning("Falha ao baixar do Drive o andamento %s: %s", andamento.id, exc)
 
@@ -626,13 +626,13 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
         texto = andamento.texto_extraido
         tem_arquivo = bool(andamento.arquivo_path or andamento.arquivo_drive_link)
         if not texto:
-            conteudo = _obter_bytes(andamento)
+            def _status_ocr(msg: str, _i=indice, _n=len(pendentes)) -> None:
+                _status_leitura(msg, _i, _n)
+            conteudo = _obter_bytes(andamento, on_status=_status_ocr)
             if conteudo:
                 def _custo_ocr(valor: float, _caso=caso) -> None:
                     _caso.custo_usd_total = (_caso.custo_usd_total or 0) + valor
                     _commit_resiliente(db)
-                def _status_ocr(msg: str, _i=indice, _n=len(pendentes)) -> None:
-                    _status_leitura(msg, _i, _n)
                 texto = _extrair_texto(conteudo, andamento.arquivo_nome, on_custo=_custo_ocr, on_status=_status_ocr)
                 if texto:
                     andamento.texto_extraido = texto

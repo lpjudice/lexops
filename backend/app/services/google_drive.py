@@ -16,6 +16,7 @@ import os
 import re
 import threading
 import zlib
+from collections.abc import Callable
 
 import httpx
 from app.services.google_master_tokens import load_master_google_tokens, save_master_google_tokens
@@ -1069,22 +1070,39 @@ def extrair_file_id(drive_link: str) -> str | None:
     return match.group(1) if match else None
 
 
-def baixar_arquivo_por_id(file_id: str) -> bytes | None:
-    """Baixa o conteúdo bruto de um arquivo do Drive pelo ID (alt=media)."""
+def baixar_arquivo_por_id(file_id: str, on_status: Callable[[str], None] | None = None) -> bytes | None:
+    """Baixa o conteúdo bruto de um arquivo do Drive pelo ID (alt=media).
+    `on_status(msg)`, quando informado, recebe atualizações de progresso do
+    download (a cada ~1MB baixado) — sem isso, um arquivo grande (dezenas de
+    MB) fica sem NENHUM sinal de vida na tela até o download inteiro
+    terminar, indistinguível de uma trava real."""
     tokens = _load_tokens()
     if not tokens:
         return None
 
     def _do(tkns: dict) -> bytes:
         h = _auth_headers(tkns)
-        r = httpx.get(
-            f"{DRIVE_META}/files/{file_id}",
-            headers=h,
-            params={"alt": "media", "supportsAllDrives": True},
-            timeout=60,
-        )
-        r.raise_for_status()
-        return r.content
+        with httpx.stream(
+            "GET", f"{DRIVE_META}/files/{file_id}",
+            headers=h, params={"alt": "media", "supportsAllDrives": True}, timeout=60,
+        ) as r:
+            r.raise_for_status()
+            total_bytes = r.headers.get("content-length")
+            total_mb = int(total_bytes) / (1024 * 1024) if total_bytes else None
+            partes: list[bytes] = []
+            baixado = 0
+            proximo_aviso_mb = 1.0
+            for chunk in r.iter_bytes():
+                partes.append(chunk)
+                baixado += len(chunk)
+                baixado_mb = baixado / (1024 * 1024)
+                if on_status and baixado_mb >= proximo_aviso_mb:
+                    if total_mb:
+                        on_status(f"baixando... {baixado_mb:.1f}/{total_mb:.1f} MB")
+                    else:
+                        on_status(f"baixando... {baixado_mb:.1f} MB")
+                    proximo_aviso_mb = baixado_mb + 1.0
+            return b"".join(partes)
 
     try:
         return _do(tokens)
