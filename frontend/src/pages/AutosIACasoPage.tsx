@@ -30,7 +30,13 @@ const STATUS_DOC_COR: Record<string, { bg: string; cor: string }> = {
 
 function formatarData(d?: string | null) {
   if (!d) return null
-  return new Date(d).toLocaleDateString('pt-BR')
+  // `data_peca` chega como "AAAA-MM-DD" (date, sem hora) — `new Date(string)`
+  // nesse formato é interpretado como meia-noite em UTC pelo JS, e ao formatar
+  // no fuso local (Brasil, UTC-3) isso "volta" um dia (25/09 virava 24/09 na
+  // tela, mesmo com o dado certo no banco). Construir a data pelos componentes
+  // ano/mês/dia usa o construtor local do JS, sem essa conversão de fuso.
+  const [ano, mes, dia] = d.split('T')[0].split('-').map(Number)
+  return new Date(ano, mes - 1, dia).toLocaleDateString('pt-BR')
 }
 
 function formatarHora(d?: string | null) {

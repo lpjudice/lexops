@@ -21,7 +21,11 @@ const COR_POR_TIPO: Record<TipoPeca, string> = {
 
 function formatarData(d?: string | null): string {
   if (!d) return 'sem data'
-  return new Date(d).toLocaleDateString('pt-BR')
+  // Mesmo cuidado do formatarData em AutosIACasoPage.tsx: "AAAA-MM-DD" sem
+  // hora vira meia-noite UTC, que no fuso do Brasil (UTC-3) exibe o dia
+  // anterior. Construir pelos componentes ano/mês/dia evita essa conversão.
+  const [ano, mes, dia] = d.split('T')[0].split('-').map(Number)
+  return new Date(ano, mes - 1, dia).toLocaleDateString('pt-BR')
 }
 
 /** Primeiras 1-2 frases do resumo — o popup é pra identificar do que se trata
