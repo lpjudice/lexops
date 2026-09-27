@@ -44,4 +44,19 @@ until curl -sf http://127.0.0.1:8000/health > /dev/null 2>&1; do
 done
 
 echo "[START] API is ready. Starting nginx..."
-nginx -g 'daemon off;'
+nginx -g 'daemon off;' &
+NGINX_PID=$!
+
+# Watchdog: sem isso, se o uvicorn morrer DEPOIS do boot (ex.: OOM no meio
+# de uma sincronização pesada — reproduzido de verdade em 27/set) o nginx
+# ficava de pé pra sempre encaminhando pra um backend morto (connect()
+# failed, connection refused), e como o nginx em si nunca cai, a máquina
+# continuava "started"/saudável pro flyd — nunca reiniciava sozinha.
+while kill -0 "$UVICORN_PID" 2>/dev/null && kill -0 "$NGINX_PID" 2>/dev/null; do
+  sleep 2
+done
+if ! kill -0 "$UVICORN_PID" 2>/dev/null; then
+  echo "[START] ERRO: uvicorn morreu depois do boot (ver logs acima, ex. OOM) — derrubando nginx pra forçar reinício da máquina"
+  kill "$NGINX_PID" 2>/dev/null || true
+fi
+wait "$NGINX_PID"
