@@ -153,7 +153,23 @@ def extrair_texto_pdf(
     """Extrai texto de um PDF em 3 tentativas. Retorna string vazia se todas falharem.
     `on_custo(custo_usd)`, quando informado, recebe o custo real de uma eventual chamada
     de OCR via IA (a única etapa paga desta cascata — pypdf/pdfminer são locais e grátis).
-    `ocr_pagina`/`on_status`: ver _extrair_com_claude_ocr."""
+    `ocr_pagina`/`on_status`: ver _extrair_com_claude_ocr.
+
+    `on_status`, quando informado, também recebe uma mensagem ANTES de cada uma
+    das duas primeiras tentativas (nativas, sem IA) — sem isso, um PDF grande
+    ou malformado que trava o pypdf/pdfminer (acontece; nenhum dos dois tem
+    timeout, e pdfminer em especial pode ser bem lento em certos PDFs) ficava
+    sem nenhuma mensagem na tela até (se um dia) chegar no OCR — parecendo
+    travado num documento pequeno, sem informar sequer quantas páginas ele
+    tem nem em qual das 3 tentativas está."""
+    if on_status:
+        try:
+            from pypdf import PdfReader
+            n_paginas = len(PdfReader(io.BytesIO(content)).pages)
+            on_status(f"PDF com {n_paginas} página(s) — tentando extração nativa (pypdf)...")
+        except Exception:
+            on_status("Tentando extração nativa (pypdf)...")
+
     texto = ""
     try:
         texto = _extrair_com_pypdf(content)
@@ -161,6 +177,8 @@ def extrair_texto_pdf(
         logger.warning("pypdf falhou: %s", exc)
 
     if not texto.strip():
+        if on_status:
+            on_status("Sem texto nativo via pypdf — tentando pdfminer...")
         try:
             texto = _extrair_com_pdfminer(content)
         except Exception as exc:
