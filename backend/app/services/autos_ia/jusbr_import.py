@@ -145,6 +145,16 @@ def _normalizar(texto: str) -> str:
 
 
 def _classificar_tipo(andamento: AndamentoProcesso) -> str:
+    # Checa anexo ANTES de tentar bater com PALAVRAS_TIPO: a descrição do
+    # andamento no PDPJ é compartilhada por todo o lote de uma submissão
+    # (petição + seus anexos têm a MESMA "Juntada de Petição de X..."), então
+    # "petiç" bate igual em todo mundo — sem essa checagem, cada comprovante/
+    # procuração do lote também virava tipo="peticao" só por causa da
+    # descrição do lote, e um deles podia acabar virando o "principal" do
+    # grupo antes de qualquer correção (reproduzido de verdade no Apex: um
+    # "Documento de comprovação" venceu o "Pedido de Providências" real).
+    if _eh_provavel_anexo(andamento):
+        return "documento"
     base = _normalizar(f"{andamento.tipo or ''} {andamento.descricao or ''}")
     for tipo, palavras in PALAVRAS_TIPO.items():
         if any(_normalizar(p) in base for p in palavras):
@@ -311,6 +321,23 @@ def reagrupar_pecas_jusbr(db: Session, caso: AutosIACaso) -> int:
         .all()
     }
 
+    reagrupadas = 0
+
+    # Corrige o tipo ANTES de escolher o principal de cada grupo — não depois.
+    # A descrição do andamento no PDPJ é compartilhada por toda uma submissão
+    # (petição + anexos têm a MESMA "Juntada de Petição de X..."), então um
+    # "Documento de comprovação" podia vir com tipo="peticao" (herdado de
+    # _classificar_tipo na importação original, antes desta função existir)
+    # e, por estar mais cedo na ordem do grupo, virar o principal ANTES da
+    # correção abaixo ter chance de rebaixá-lo — a correção rodava depois,
+    # tarde demais pra mudar quem já tinha sido escolhido (reproduzido de
+    # verdade no Apex: um comprovante venceu a petição real do lote).
+    for p in pecas:
+        a = andamentos.get(p.andamento_id)
+        if a and p.tipo == "peticao" and _eh_provavel_anexo(a):
+            p.tipo = "documento"
+            reagrupadas += 1
+
     DATA_MAX = date(9999, 12, 31)
     DT_MAX = datetime(9999, 12, 31, tzinfo=timezone.utc)
 
@@ -357,7 +384,6 @@ def reagrupar_pecas_jusbr(db: Session, caso: AutosIACaso) -> int:
     if grupo_atual:
         grupos.append(grupo_atual)
 
-    reagrupadas = 0
     for membros in grupos:
         if len(membros) == 1:
             if membros[0].peca_pai_id is not None:
@@ -389,17 +415,12 @@ def reagrupar_pecas_jusbr(db: Session, caso: AutosIACaso) -> int:
                 m.peca_pai_id = principal.id
                 reagrupadas += 1
 
-    # Corrige o tipo mesmo fora de um grupo multi-membro (ex.: um "Documento de
-    # Comprovação" protocolado sozinho, sem petição junto no mesmo grupo) —
-    # esse sinal de nome/descrição é forte o bastante pra sobrepor uma
-    # classificação de IA anterior.
-    for p in pecas:
-        a = andamentos.get(p.andamento_id)
-        if a and p.tipo == "peticao" and _eh_provavel_anexo(a):
-            p.tipo = "documento"
-            reagrupadas += 1
-
     db.commit()
+    # Reaproveita o clique em "Reagrupar" pra também tentar resolver de novo
+    # as referências (menções a outros IDs) que ficaram sem peça de destino —
+    # útil sobretudo depois da correção do fix de formato "id. NNNNN" em
+    # _normalizar_id, que agora resolve referências que antes nunca batiam.
+    _resolver_referencias_pendentes(db, caso.id)
     return reagrupadas
 
 
