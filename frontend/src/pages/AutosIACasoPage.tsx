@@ -154,6 +154,10 @@ export default function AutosIACasoPage() {
   const deletarCaso = useMutation({
     mutationFn: () => autosIa.deletarCaso(casoId!),
     onSuccess: () => navigate('/autos-ia'),
+    onError: (e: any) => {
+      setModalExcluir(false)
+      alert(`Erro ao excluir: ${e?.response?.data?.detail || e?.message}`)
+    },
   })
 
   const reclassificar = useMutation({

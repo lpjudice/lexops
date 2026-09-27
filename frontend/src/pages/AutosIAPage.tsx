@@ -24,6 +24,7 @@ export default function AutosIAPage() {
   const deletar = useMutation({
     mutationFn: (casoId: string) => autosIa.deletarCaso(casoId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'casos'] }),
+    onError: (e: any) => alert(`Erro ao excluir: ${e?.response?.data?.detail || e?.message}`),
   })
 
   const criar = useMutation({

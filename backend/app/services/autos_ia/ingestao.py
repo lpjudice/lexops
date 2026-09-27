@@ -82,7 +82,7 @@ def _commit_com_retry(db: Session, tentativas: int = 2, espera_segundos: float =
 RESUMO_MAX_WORKERS = 5
 
 
-_ROTULO_ID = re.compile(r"^(id\.?|evento|protocolo)\s*n?\.?\s*(\d{6,})$", re.IGNORECASE)
+_ROTULO_ID = re.compile(r"^(id\.?|evento|num\.?|número|protocolo)\s*n?\.?\s*(\d{6,})$", re.IGNORECASE)
 
 
 def _normalizar_id(valor: str) -> str:
@@ -93,10 +93,14 @@ def _normalizar_id(valor: str) -> str:
     pela normalização abaixo — ela só tira símbolos/espaços, não palavras —
     então "id103876454" nunca batia com o alvo, guardado como "103876454"
     puro. Reproduzido de verdade no Apex: 99,5% das referências ficavam
-    permanentemente "não localizadas" mesmo com o alvo já indexado. Só o
-    rótulo id/evento/protocolo é tratado assim (número de 6+ dígitos) — um
-    "DOC. 2" ou "fls. 228" não é um ID de peça, é uma citação local/de
-    página, e não deve virar um match forçado com qualquer coisa."""
+    permanentemente "não localizadas" mesmo com o alvo já indexado. "Num."
+    (rótulo do próprio jus.br pro número do evento/documento, tão comum
+    quanto "Id.") ficou de fora dessa lista na primeira correção — auditoria
+    posterior no Apex achou dezenas de "Num. NNNNNNN" com alvo já indexado
+    ainda presos em "não localizado" só por causa disso. Só os rótulos
+    id/evento/num/número/protocolo são tratados assim (número de 6+
+    dígitos) — um "DOC. 2" ou "fls. 228" não é um ID de peça, é uma citação
+    local/de página, e não deve virar um match forçado com qualquer coisa."""
     texto = valor.strip()
     rotulo = _ROTULO_ID.match(texto)
     if rotulo:
