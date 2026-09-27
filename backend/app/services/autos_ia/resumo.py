@@ -192,13 +192,27 @@ def resumir_peca(texto_md: str, titulo: str, tipo: str) -> ResumoPeca:
         if bloco.type == "tool_use" and bloco.name == "registrar_resumo":
             dados = bloco.input
             tipo_ia = (dados.get("tipo") or "").strip()
+            # `palavras_chave`/`ids_mencionados` são declarados como array no
+            # schema da tool, mas o Claude ocasionalmente devolve uma STRING
+            # solta em vez de lista (reproduzido de verdade: "palavras_chave":
+            # "recupera" pra uma peça do Apex). Sem essa checagem, `for k in
+            # "recupera"` itera CADA LETRA — "r","e","c","u","p","e","r","a"
+            # viravam 8 chips de palavra-chave de uma letra só. Trata como
+            # lista vazia quando não é lista mesmo, em vez de confiar no tipo
+            # declarado no schema.
+            palavras_chave = dados.get("palavras_chave")
+            if not isinstance(palavras_chave, list):
+                palavras_chave = []
+            ids_mencionados_raw = dados.get("ids_mencionados")
+            if not isinstance(ids_mencionados_raw, list):
+                ids_mencionados_raw = []
             return ResumoPeca(
                 tipo=tipo_ia if tipo_ia in TIPOS_VALIDOS else tipo,
                 peticionante=(dados.get("peticionante") or "").strip() or None,
                 id_proprio=(dados.get("id_proprio") or "").strip() or None,
                 resumo=(dados.get("resumo") or "").strip(),
-                keywords=[k.strip().lower() for k in (dados.get("palavras_chave") or []) if k.strip()][:8],
-                ids_mencionados=[i.strip() for i in (dados.get("ids_mencionados") or []) if i.strip()],
+                keywords=[k.strip().lower() for k in palavras_chave if isinstance(k, str) and k.strip()][:8],
+                ids_mencionados=[i.strip() for i in ids_mencionados_raw if isinstance(i, str) and i.strip()],
                 custo_usd=custo_usd,
             )
     raise RuntimeError("Claude não devolveu resumo via tool_use")

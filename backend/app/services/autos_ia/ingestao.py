@@ -81,10 +81,26 @@ def _commit_com_retry(db: Session, tentativas: int = 2, espera_segundos: float =
 RESUMO_MAX_WORKERS = 5
 
 
+_ROTULO_ID = re.compile(r"^(id\.?|evento|protocolo)\s*n?\.?\s*(\d{6,})$", re.IGNORECASE)
+
+
 def _normalizar_id(valor: str) -> str:
     """Normaliza um ID/referência textual para comparação tolerante a formatação
-    (ex.: 'Evento 45', 'evento nº 045' e 'EVENTO-45' devem casar)."""
-    v = unicodedata.normalize("NFD", valor.lower())
+    (ex.: 'Evento 45', 'evento nº 045' e 'EVENTO-45' devem casar).
+
+    Um rótulo como "id." antes do número (ex.: "id. 103876454") não é removido
+    pela normalização abaixo — ela só tira símbolos/espaços, não palavras —
+    então "id103876454" nunca batia com o alvo, guardado como "103876454"
+    puro. Reproduzido de verdade no Apex: 99,5% das referências ficavam
+    permanentemente "não localizadas" mesmo com o alvo já indexado. Só o
+    rótulo id/evento/protocolo é tratado assim (número de 6+ dígitos) — um
+    "DOC. 2" ou "fls. 228" não é um ID de peça, é uma citação local/de
+    página, e não deve virar um match forçado com qualquer coisa."""
+    texto = valor.strip()
+    rotulo = _ROTULO_ID.match(texto)
+    if rotulo:
+        texto = rotulo.group(2)
+    v = unicodedata.normalize("NFD", texto.lower())
     v = "".join(c for c in v if unicodedata.category(c) != "Mn")
     return re.sub(r"[^a-z0-9]", "", v)
 
