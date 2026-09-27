@@ -107,13 +107,15 @@ def _ocr_gemini(pagina_bytes: bytes) -> tuple[str, float]:
     return texto, custo
 
 
-# Ordem fixa: Gemini primeiro (~10x mais barato), Claude só como fallback.
-# Antes alternava 50/50 por página (itertools.count()) — o que jogava metade
-# do custo de OCR na API mais cara sem necessidade, já que o Gemini dá conta
-# da maioria das páginas sozinho.
+# Ordem fixa: Claude primeiro, Gemini só como fallback — pedido do Lucas em
+# 27/set após o Gemini se mostrar instável em produção (erros de SSL/conexão
+# no meio do sync) bem na mesma hora em que o cota do Gemini estava perto de
+# acabar. Já tentamos o contrário (Gemini primeiro, mais barato) e voltamos:
+# ver histórico deste arquivo se quiser reativar depois de confirmar que o
+# Gemini estabilizou e a cota foi renovada.
 _PROVEDORES = [
-    ("gemini", _ocr_gemini),
     ("claude", _ocr_claude),
+    ("gemini", _ocr_gemini),
 ]
 
 
