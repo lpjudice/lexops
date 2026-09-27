@@ -157,7 +157,7 @@ def _eh_provavel_anexo(andamento: AndamentoProcesso) -> bool:
     return any(_normalizar(p) in base for p in PALAVRAS_ANEXO)
 
 
-def _obter_bytes(andamento: AndamentoProcesso, on_status=None) -> bytes | None:
+def _obter_bytes(andamento: AndamentoProcesso, on_status=None, deve_parar=None) -> bytes | None:
     if andamento.arquivo_path:
         try:
             caminho = Path(andamento.arquivo_path)
@@ -171,14 +171,16 @@ def _obter_bytes(andamento: AndamentoProcesso, on_status=None) -> bytes | None:
             from app.services.google_drive import baixar_arquivo_por_id, extrair_file_id
             file_id = extrair_file_id(andamento.arquivo_drive_link)
             if file_id:
-                return baixar_arquivo_por_id(file_id, on_status=on_status)
+                return baixar_arquivo_por_id(file_id, on_status=on_status, deve_parar=deve_parar)
         except Exception as exc:
             logger.warning("Falha ao baixar do Drive o andamento %s: %s", andamento.id, exc)
 
     return None
 
 
-def _extrair_texto(conteudo: bytes, nome_arquivo: str | None, on_custo=None, on_status=None) -> str:
+def _extrair_texto(
+    conteudo: bytes, nome_arquivo: str | None, on_custo=None, on_status=None, deve_parar=None,
+) -> str:
     if nome_arquivo and nome_arquivo.lower().endswith((".html", ".htm")):
         try:
             from bs4 import BeautifulSoup
@@ -189,7 +191,9 @@ def _extrair_texto(conteudo: bytes, nome_arquivo: str | None, on_custo=None, on_
 
     from app.services.autos_ia.ocr_providers import ocr_pagina_rotativo
     from app.services.pdf_extract import extrair_texto_pdf
-    return extrair_texto_pdf(conteudo, on_custo=on_custo, ocr_pagina=ocr_pagina_rotativo, on_status=on_status)
+    return extrair_texto_pdf(
+        conteudo, on_custo=on_custo, ocr_pagina=ocr_pagina_rotativo, on_status=on_status, deve_parar=deve_parar,
+    )
 
 
 def _contar_paginas(conteudo: bytes | None, nome_arquivo: str | None) -> int:
@@ -448,6 +452,27 @@ def _cancelar_sync_solicitado(db: Session, caso: AutosIACaso) -> bool:
     return caso.sync_cancelar
 
 
+def _criar_verificador_pular(db: Session, caso: AutosIACaso, intervalo_segundos: float = 1.0):
+    """Cria um `deve_parar()` para passar ao download/OCR do documento atual —
+    checa a flag `sync_pular_atual` (endpoint /pular-documento-atual), mas no
+    máximo 1x por `intervalo_segundos`: sem esse limite, chamar isso a cada
+    chunk de um download (podem ser dezenas por segundo) bateria no banco
+    demais vezes à toa, agravando exatamente o esgotamento de conexão que já
+    causou problema esta madrugada."""
+    ultimo_check = 0.0
+
+    def _deve_parar() -> bool:
+        nonlocal ultimo_check
+        agora = time.monotonic()
+        if agora - ultimo_check < intervalo_segundos:
+            return False
+        ultimo_check = agora
+        db.refresh(caso)
+        return caso.sync_pular_atual
+
+    return _deve_parar
+
+
 def _retomar_pecas_pendentes(db: Session, caso: AutosIACaso) -> int:
     """Retoma peças já criadas (desta caso, de uma execução anterior cancelada
     ou que falhou) que ainda não foram resumidas, antes de importar andamentos
@@ -628,19 +653,33 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
         if not texto:
             def _status_ocr(msg: str, _i=indice, _n=len(pendentes)) -> None:
                 _status_leitura(msg, _i, _n)
-            conteudo = _obter_bytes(andamento, on_status=_status_ocr)
+            _deve_pular_atual = _criar_verificador_pular(db, caso)
+            conteudo = _obter_bytes(andamento, on_status=_status_ocr, deve_parar=_deve_pular_atual)
             if conteudo:
                 def _custo_ocr(valor: float, _caso=caso) -> None:
                     _caso.custo_usd_total = (_caso.custo_usd_total or 0) + valor
                     _commit_resiliente(db)
-                texto = _extrair_texto(conteudo, andamento.arquivo_nome, on_custo=_custo_ocr, on_status=_status_ocr)
+                texto = _extrair_texto(
+                    conteudo, andamento.arquivo_nome, on_custo=_custo_ocr, on_status=_status_ocr,
+                    deve_parar=_deve_pular_atual,
+                )
                 if texto:
                     andamento.texto_extraido = texto
                     _commit_com_retry(db)
+        # Confere (sem throttle, uma vez por documento) se "pular este documento"
+        # foi pedido durante a leitura acima — consome a flag na hora pra não
+        # aplicar ao PRÓXIMO documento sem querer.
+        db.refresh(caso)
+        pulado_pelo_usuario = caso.sync_pular_atual
+        if pulado_pelo_usuario:
+            caso.sync_pular_atual = False
+            _commit_resiliente(db)
+
         # Só é "leitura incompleta" quando HÁ arquivo mas nada saiu dele (download
         # falhou, ou pypdf/pdfminer/OCR falharam todos) — não quando o andamento
-        # nunca teve arquivo pra começo de conversa.
-        leitura_incompleta = tem_arquivo and not texto
+        # nunca teve arquivo pra começo de conversa, nem quando foi pulado a
+        # pedido do usuário (essa tem sua própria mensagem, ver _criar_peca).
+        leitura_incompleta = tem_arquivo and not texto and not pulado_pelo_usuario
         if not texto:
             texto = remover_nul(andamento.descricao or "")
 
@@ -652,6 +691,7 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
             "andamento": andamento,
             "texto": texto,
             "leitura_incompleta": leitura_incompleta,
+            "pulado_pelo_usuario": pulado_pelo_usuario,
             "tipo": _classificar_tipo(andamento),
             "eh_anexo": _eh_provavel_anexo(andamento),
             "pagina_inicio": pagina_inicio,
@@ -793,6 +833,9 @@ def _criar_peca(db: Session, caso: AutosIACaso, item: dict, peca_pai_id) -> Auto
         texto_md=remover_nul(item["texto"]) or "(sem texto extraído)",
         status="pendente_resumo",
         erro_mensagem=(
+            "Leitura pulada a pedido do usuário — veja o arquivo completo no Drive; "
+            "clique para reler o documento inteiro depois."
+        ) if item.get("pulado_pelo_usuario") else (
             "Não foi possível ler o conteúdo do arquivo (download ou OCR falharam) — "
             "esta peça ficou só com a descrição do andamento, sem o texto do documento."
         ) if item.get("leitura_incompleta") else None,

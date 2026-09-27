@@ -458,6 +458,23 @@ def cancelar_sync(caso_id: uuid.UUID, db: Session = Depends(get_db)):
     return caso
 
 
+@router.post("/casos/{caso_id}/pular-documento-atual", response_model=CasoOut)
+def pular_documento_atual(caso_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Pula só o documento que está sendo lido/OCR'd agora — ao contrário de
+    cancelar-sync (para tudo), a sincronização continua para o próximo
+    documento. Útil pra um documento grande demais (centenas de páginas)
+    sem interromper o resto. A peça desse documento fica marcada como
+    "leitura pulada" (o link pro Drive continua lá pra ler depois manualmente
+    — ver POST /pecas/{id}/reler-completo)."""
+    caso = _get_caso(db, caso_id)
+    if caso.ultimo_sync_status != "processando":
+        raise HTTPException(status_code=422, detail="Não há sincronização em andamento.")
+    caso.sync_pular_atual = True
+    db.commit()
+    db.refresh(caso)
+    return caso
+
+
 @router.get("/casos/{caso_id}/estimativa-reclassificacao", response_model=EstimativaImportacaoOut)
 def estimar_reclassificacao_caso(caso_id: uuid.UUID, db: Session = Depends(get_db)):
     """Projeção de custo/tempo pra reclassificar (tipo/peticionante/ID próprio)

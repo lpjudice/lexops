@@ -120,6 +120,11 @@ export default function AutosIACasoPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] }),
   })
 
+  const pularDocumentoAtual = useMutation({
+    mutationFn: () => autosIa.pularDocumentoAtual(casoId!),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] }),
+  })
+
   const atualizarMetadados = useMutation({
     mutationFn: () => autosIa.atualizarMetadados(casoId!),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] }),
@@ -224,17 +229,31 @@ export default function AutosIACasoPage() {
                     {caso.ultima_sincronizacao_em && ` (${new Date(caso.ultima_sincronizacao_em).toLocaleString('pt-BR')})`}
                   </span>
                   {emProcessamento ? (
-                    <button
-                      className={pageStyles.btnSmall}
-                      disabled={cancelarSync.isPending}
-                      onClick={() => {
-                        if (window.confirm('Cancelar a sincronização em andamento? As peças já lidas/resumidas até agora ficam salvas.')) {
-                          cancelarSync.mutate()
-                        }
-                      }}
-                    >
-                      {cancelarSync.isPending ? 'Cancelando...' : 'Cancelar'}
-                    </button>
+                    <>
+                      <button
+                        className={pageStyles.btnSmall}
+                        disabled={pularDocumentoAtual.isPending}
+                        onClick={() => {
+                          if (window.confirm('Pular o documento que está sendo lido agora? A sincronização continua para o próximo — o link completo do Drive fica salvo pra reler depois.')) {
+                            pularDocumentoAtual.mutate()
+                          }
+                        }}
+                        title="Pula só o documento atual (útil se for muito grande) — a sincronização segue para o próximo"
+                      >
+                        {pularDocumentoAtual.isPending ? 'Pulando...' : 'Pular este documento'}
+                      </button>
+                      <button
+                        className={pageStyles.btnSmall}
+                        disabled={cancelarSync.isPending}
+                        onClick={() => {
+                          if (window.confirm('Cancelar a sincronização em andamento? As peças já lidas/resumidas até agora ficam salvas.')) {
+                            cancelarSync.mutate()
+                          }
+                        }}
+                      >
+                        {cancelarSync.isPending ? 'Cancelando...' : 'Cancelar'}
+                      </button>
+                    </>
                   ) : (
                     <>
                       <button

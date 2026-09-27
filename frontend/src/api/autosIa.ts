@@ -203,6 +203,9 @@ export const autosIa = {
   cancelarSync: (casoId: string) =>
     api.post<Caso>(`/autos-ia/casos/${casoId}/cancelar-sync`).then((r) => r.data),
 
+  pularDocumentoAtual: (casoId: string) =>
+    api.post<Caso>(`/autos-ia/casos/${casoId}/pular-documento-atual`).then((r) => r.data),
+
   atualizarMetadados: (casoId: string) =>
     api.post<Caso>(`/autos-ia/casos/${casoId}/atualizar-metadados`).then((r) => r.data),
 

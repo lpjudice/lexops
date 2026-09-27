@@ -69,6 +69,12 @@ class AutosIACaso(Base):
     # Marcado por um pedido de cancelamento (endpoint /cancelar-sync); a rotina em andamento
     # confere esta flag periodicamente e para de forma graciosa, preservando o que já foi lido.
     sync_cancelar: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Marcado por um pedido de "pular este documento" (endpoint /pular-documento-atual) —
+    # ao contrário de sync_cancelar (para a sincronização inteira), só aborta o documento
+    # ATUAL (download em andamento ou OCR em andamento), marca a peça como leitura pulada
+    # (mantendo o link pro Drive pra ler depois) e segue pro próximo. Consumida e resetada
+    # assim que o documento atual termina de processar, nunca fica "ligada" pros seguintes.
+    sync_pular_atual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # Custo real acumulado (USD) de todas as chamadas de IA já feitas para este caso —
     # upload manual e importação jus.br/Drive juntos. Atualizado em tempo real durante o

@@ -67,7 +67,12 @@ def _extrair_com_pdfminer(content: bytes) -> str:
 # granular: uma página que falha (timeout, erro da API) é pulada e as demais
 # preservam o texto já extraído, em vez de o documento inteiro virar nada.
 _OCR_TIMEOUT_SEGUNDOS = 90.0
-_OCR_MAX_PAGINAS = 200
+# Um documento de centenas de páginas (visto de verdade: 607) fazendo OCR
+# completo é caro e demorado sem necessidade — pedido do Lucas pra limitar a
+# leitura automática às primeiras páginas, preservando o link pro Drive pra
+# quem quiser o documento inteiro depois. Bem menor que o limite técnico
+# antigo (200): esse número é uma política de custo, não um limite técnico.
+_OCR_MAX_PAGINAS = 40
 
 
 def _ocr_pagina_claude(
@@ -116,6 +121,7 @@ def _extrair_com_claude_ocr(
     on_custo: Callable[[float], None] | None = None,
     ocr_pagina: Callable[..., str] | None = None,
     on_status: Callable[[str], None] | None = None,
+    deve_parar: Callable[[], bool] | None = None,
 ) -> str:
     """Último recurso: OCR de cada página do PDF, uma chamada por página — nunca
     o documento inteiro numa chamada só (limita tempo/tamanho por chamada e
@@ -129,13 +135,18 @@ def _extrair_com_claude_ocr(
     quando informado, recebe uma frase curta a cada página/tentativa — é o
     que dá visibilidade de "documento sendo dividido em N páginas", "OCR
     página X/N via Y", "Y falhou, tentando Z" em vez de só um contador
-    parado sem explicação."""
+    parado sem explicação. `deve_parar()`, quando informado e retornando
+    True, interrompe o OCR ANTES da próxima página (pedido de "pular este
+    documento" do usuário) — as páginas já OCR'das ficam, o resto não é
+    tentado."""
     from pypdf import PdfReader, PdfWriter
 
     ocr_pagina = ocr_pagina or _ocr_pagina_claude
     paginas = PdfReader(io.BytesIO(content)).pages
     if len(paginas) > _OCR_MAX_PAGINAS:
         logger.warning("PDF com %d páginas — OCR limitado às primeiras %d", len(paginas), _OCR_MAX_PAGINAS)
+        if on_status:
+            on_status(f"PDF com {len(paginas)} páginas — OCR limitado às primeiras {_OCR_MAX_PAGINAS} (link completo salvo)")
         paginas = paginas[:_OCR_MAX_PAGINAS]
 
     if on_status:
@@ -146,6 +157,12 @@ def _extrair_com_claude_ocr(
 
     textos: list[str] = []
     for indice, pagina in enumerate(paginas):
+        if deve_parar and deve_parar():
+            logger.info("OCR interrompido a pedido do usuário na página %d/%d", indice + 1, len(paginas))
+            if on_status:
+                on_status(f"Pulado a pedido do usuário na página {indice + 1}/{len(paginas)}")
+            break
+
         writer = PdfWriter()
         writer.add_page(pagina)
         buf = io.BytesIO()
@@ -179,11 +196,12 @@ def extrair_texto_pdf(
     on_custo: Callable[[float], None] | None = None,
     ocr_pagina: Callable[..., str] | None = None,
     on_status: Callable[[str], None] | None = None,
+    deve_parar: Callable[[], bool] | None = None,
 ) -> str:
     """Extrai texto de um PDF em 3 tentativas. Retorna string vazia se todas falharem.
     `on_custo(custo_usd)`, quando informado, recebe o custo real de uma eventual chamada
     de OCR via IA (a única etapa paga desta cascata — pypdf/pdfminer são locais e grátis).
-    `ocr_pagina`/`on_status`: ver _extrair_com_claude_ocr.
+    `ocr_pagina`/`on_status`/`deve_parar`: ver _extrair_com_claude_ocr.
 
     `on_status`, quando informado, também recebe uma mensagem ANTES de cada uma
     das duas primeiras tentativas (nativas, sem IA) — sem isso, um PDF grande
@@ -220,7 +238,9 @@ def extrair_texto_pdf(
 
     if not texto.strip():
         try:
-            texto = _extrair_com_claude_ocr(content, on_custo=on_custo, ocr_pagina=ocr_pagina, on_status=on_status)
+            texto = _extrair_com_claude_ocr(
+                content, on_custo=on_custo, ocr_pagina=ocr_pagina, on_status=on_status, deve_parar=deve_parar,
+            )
         except Exception as exc:
             logger.warning("OCR falhou: %s", exc)
 
