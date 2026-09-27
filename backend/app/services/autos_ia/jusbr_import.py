@@ -844,11 +844,15 @@ def _criar_peca(db: Session, caso: AutosIACaso, item: dict, peca_pai_id) -> Auto
         titulo=remover_nul((andamento.tipo or andamento.descricao or "Andamento sem título").strip())[:500],
         autor=None,
         data_peca=andamento.data_andamento,
-        # Não usa andamento.documento_id aqui: é um ID interno do jus.br, não o número
-        # (ex.: "Evento 45") que outras peças de fato citam no texto. O resumo (IA)
-        # preenche id_processual com o que a própria peça diz ser sua referência —
-        # ver ResumoPeca.id_proprio em services/autos_ia/resumo.py.
-        id_processual=None,
+        # andamento.documento_id É o número que outras peças citam no texto (ex.:
+        # "Id. 103876454", "Num. 103876454") — confirmado auditando o Apex: 158
+        # referências "não localizadas" eram exatamente isso, só que id_processual
+        # tinha ficado None (ou um número curto/local errado, tipo "107", vindo do
+        # palpite da IA abaixo) em vez do documento_id real já salvo no andamento.
+        # A IA (resumo) só sobrescreve isso se documento_id não existir — ver
+        # ResumoPeca.id_proprio em services/autos_ia/resumo.py e o guard em
+        # ingestao.py (resumir/reclassificar).
+        id_processual=(andamento.documento_id[:100] if andamento.documento_id else None),
         pagina_inicio=item["pagina_inicio"],
         pagina_fim=item["pagina_fim"],
         texto_md=remover_nul(item["texto"]) or "(sem texto extraído)",
