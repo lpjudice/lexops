@@ -39,7 +39,13 @@ def _commit_resiliente(db: Session) -> bool:
     cascata, derrubando a sincronização inteira em vez de só aquele item.
     Aqui, se o commit falhar, desfaz a transação e loga — a próxima operação
     real (criar/gravar uma peça) tenta de novo com uma conexão nova do pool
-    (pool_pre_ping), sem carregar uma sessão já quebrada."""
+    (pool_pre_ping), sem carregar uma sessão já quebrada. Best-effort mesmo:
+    se o PRÓPRIO rollback falhar (conexão realmente morta, não só a
+    transação), só loga e engole — esta função nunca pode lançar, porque
+    quem a chama (status/progresso/custo) não trata exceção nenhuma; deixar
+    a sessão quebrada por mais uma chamada informativa é aceitável, o
+    próximo commit de dado real (protegido por `_commit_com_retry`) que vai
+    detectar e estourar de forma visível se a conexão continuar morta."""
     try:
         db.commit()
         return True
@@ -63,15 +69,26 @@ def _commit_com_retry(db: Session, tentativas: int = 2, espera_segundos: float =
     propaga e derruba a sincronização inteira, jogando fora o texto que
     acabou de ser extraído (o próximo retomar refaz o OCR do zero, pagando de
     novo). Uma retentativa após rollback dá tempo do pool trocar a conexão
-    morta por uma nova (pool_pre_ping) antes de desistir de vez — se a
-    segunda tentativa também falhar, a conexão está mesmo fora do ar e deixa
-    a exceção subir (a rede de segurança do endpoint trata o resto)."""
+    morta por uma nova (pool_pre_ping) antes de desistir de vez.
+
+    Se o PRÓPRIO rollback falhar (não só o commit), a conexão está morta de
+    verdade (não é um soluço passageiro) — nesse caso desiste na hora, sem
+    gastar a(s) retentativa(s) restante(s) à toa: elas compartilhariam a
+    MESMA sessão quebrada e falhariam do mesmo jeito. Visto de verdade numa
+    sincronização real: sem isso, ~40 peças seguidas tentaram e falharam,
+    uma por uma, antes do erro finalmente estourar — falhar rápido aqui
+    chega no mesmo resultado (a rede de segurança do endpoint trata o
+    resto) sem desperdiçar esse tempo todo."""
     for tentativa in range(tentativas):
         try:
             db.commit()
             return
         except Exception as exc:
-            db.rollback()
+            try:
+                db.rollback()
+            except Exception:
+                logger.error("Rollback falhou após commit malsucedido — conexão morta, desistindo já")
+                raise
             if tentativa == tentativas - 1:
                 raise
             logger.warning(

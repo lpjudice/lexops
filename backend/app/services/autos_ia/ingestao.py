@@ -26,7 +26,11 @@ def _commit_resiliente(db: Session) -> bool:
     nunca a peça em si. Ver mesma função em jusbr_import.py: sem isso, uma
     conexão que cai no meio (o Postgres do Fly já fez isso mais de uma vez)
     deixa a sessão em rollback pendente e qualquer commit seguinte falha em
-    cascata, derrubando o lote inteiro em vez de só aquele item."""
+    cascata, derrubando o lote inteiro em vez de só aquele item. Best-effort
+    mesmo se o próprio rollback falhar: esta função nunca pode lançar, quem
+    a chama (progresso/custo) não trata exceção — o próximo commit de dado
+    real (`_commit_com_retry`) é quem detecta e estoura de forma visível se
+    a conexão continuar morta."""
     try:
         db.commit()
         return True
@@ -43,13 +47,25 @@ def _commit_com_retry(db: Session, tentativas: int = 2, espera_segundos: float =
     """Commit de dado real (resumo/keywords já pagos à IA) — ver mesma função
     em jusbr_import.py. Nunca desiste silenciosamente: uma retentativa após
     rollback dá tempo do pool trocar uma conexão morta do Postgres do Fly por
-    uma nova antes de perder um resumo que já custou dinheiro pra gerar."""
+    uma nova antes de perder um resumo que já custou dinheiro pra gerar.
+
+    Se o PRÓPRIO rollback falhar (não só o commit), a conexão está morta de
+    verdade — desiste na hora em vez de gastar a(s) retentativa(s)
+    restante(s) numa sessão que vai continuar quebrada. Visto de verdade
+    numa sincronização real: sem isso, ~40 peças seguidas tentaram e
+    falharam uma por uma antes do erro estourar — falhar rápido aqui chega
+    no mesmo resultado (a rede de segurança do endpoint trata o resto) sem
+    esse desperdício."""
     for tentativa in range(tentativas):
         try:
             db.commit()
             return
         except Exception as exc:
-            db.rollback()
+            try:
+                db.rollback()
+            except Exception:
+                logger.error("Rollback falhou após commit malsucedido — conexão morta, desistindo já")
+                raise
             if tentativa == tentativas - 1:
                 raise
             logger.warning(
@@ -195,16 +211,22 @@ def resumir_pecas_em_paralelo(
                 # Um commit que falhou no flush deixa a sessão em rollback
                 # pendente — sem isso, o commit de erro abaixo falha também, e
                 # ISSO derruba a thread inteira (toda peça seguinte na mesma
-                # leva também falha, em cascata). E se a conexão em si caiu
-                # (não só o commit desta peça), até o rollback/commit de
-                # recuperação pode falhar de novo — sem os try/except aqui
-                # dentro, ESSA segunda falha propagava e derrubava o lote
-                # inteiro (foi o que aconteceu numa sincronização real: um
-                # "server closed the connection unexpectedly" no meio do
-                # resumo interrompeu tudo em vez de só marcar aquela peça
-                # como erro e seguir para as próximas).
+                # leva também falha, em cascata).
                 try:
                     db.rollback()
+                except Exception:
+                    # Não é só o commit desta peça que falhou — o PRÓPRIO
+                    # rollback falhou, ou seja a conexão está morta de
+                    # verdade (não um soluço passageiro). Continuar tentando
+                    # as peças seguintes com essa mesma sessão quebrada só
+                    # repete o mesmo erro em cascata — visto de verdade numa
+                    # sincronização real, ~40 peças seguidas falharam assim
+                    # antes do erro finalmente estourar. Falha rápido em vez
+                    # disso: propaga pra fora do loop, a rede de segurança do
+                    # endpoint trata o resto.
+                    logger.error("Rollback falhou para a peça %s — conexão morta, desistindo do lote", peca.id)
+                    raise
+                try:
                     peca.status = "erro"
                     peca.erro_mensagem = str(exc)[:2000]
                     db.commit()
