@@ -545,6 +545,13 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
         _commit_resiliente(db)
 
     for indice, andamento in enumerate(pendentes, start=1):
+        # Sempre atualiza a mensagem de status ao iniciar o documento, mesmo
+        # quando ele não precisa de OCR — sem isso, um documento com texto
+        # nativo (a maioria) nunca chama _status_ocr, e a tela fica mostrando
+        # o número do ÚLTIMO documento que precisou de OCR (que pode já ter
+        # ficado várias dezenas de documentos para trás), dando a falsa
+        # impressão de estar travado num documento antigo.
+        _status_leitura(f"lendo {andamento.arquivo_nome or 'andamento sem arquivo'}...", indice, len(pendentes))
         conteudo = None
         texto = andamento.texto_extraido
         tem_arquivo = bool(andamento.arquivo_path or andamento.arquivo_drive_link)
