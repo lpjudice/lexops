@@ -9,8 +9,8 @@ Espelha app.services.andamentos_push (Telegram interno), mas:
     no `notificado` do Telegram).
 
 Template esperado no WhatsApp Manager (nome configurável abaixo), com 3
-variáveis de corpo: {{1}} nome do cliente, {{2}} número CNJ, {{3}} resumo do
-andamento mais recente.
+variáveis nomeadas de corpo: {{cliente_nome}}, {{numero_processo}},
+{{resumo_andamento}}.
 """
 from __future__ import annotations
 
@@ -96,7 +96,11 @@ def push_andamentos_whatsapp() -> dict:
             resultado = whatsapp_api.send_template_message(
                 to=cliente.whatsapp,
                 template_name=TEMPLATE_ANDAMENTO_NOVO,
-                parametros=[cliente.nome, p.numero_cnj, texto_resumo],
+                parametros={
+                    "cliente_nome": cliente.nome,
+                    "numero_processo": p.numero_cnj,
+                    "resumo_andamento": texto_resumo,
+                },
             )
             if not resultado or resultado.get("erro"):
                 erros += 1

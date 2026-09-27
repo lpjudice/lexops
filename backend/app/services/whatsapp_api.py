@@ -56,10 +56,12 @@ def send_template_message(
     to: str,
     template_name: str,
     language_code: str = "pt_BR",
-    parametros: list[str] | None = None,
+    parametros: dict[str, str] | None = None,
 ) -> dict | None:
     """Envia mensagem de template aprovado (categoria Utility/Marketing/Auth).
-    `parametros` preenche {{1}}, {{2}}... do corpo, na ordem."""
+    `parametros` preenche as variáveis nomeadas do corpo (ex.: {{cliente_nome}}) —
+    esta conta usa a experiência de templates com parâmetros nomeados da Meta,
+    não a posicional ({{1}}, {{2}})."""
     numero = normalizar_telefone(to)
     if not numero:
         return None
@@ -67,7 +69,10 @@ def send_template_message(
     if parametros:
         components.append({
             "type": "body",
-            "parameters": [{"type": "text", "text": p} for p in parametros],
+            "parameters": [
+                {"type": "text", "parameter_name": nome, "text": valor}
+                for nome, valor in parametros.items()
+            ],
         })
     payload: dict[str, Any] = {
         "messaging_product": "whatsapp",
