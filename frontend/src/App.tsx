@@ -41,6 +41,7 @@ import InformativosPage from './pages/InformativosPage'
 import InformativoAssinantesPage from './pages/InformativoAssinantesPage'
 import AutosIAPage from './pages/AutosIAPage'
 import AutosIACasoPage from './pages/AutosIACasoPage'
+import PrivacidadePage from './pages/PrivacidadePage'
 
 const queryClient = new QueryClient()
 
@@ -60,6 +61,7 @@ function AppRoutes() {
       <Route path="/cadastro" element={<CadastroPublicoPage />} />
       <Route path="/post/:id" element={<PostPublicoPage />} />
       <Route path="/cadastro/:token" element={<CadastroPublicoPage />} />
+      <Route path="/privacidade" element={<PrivacidadePage />} />
       <Route
         path="/"
         element={
