@@ -99,6 +99,12 @@ export default function AutosIACasoPage() {
     enabled: !!casoId && !emProcessamento,
   })
 
+  const { data: pendentesResumo } = useQuery({
+    queryKey: ['autos-ia', 'pendentes-resumo', casoId],
+    queryFn: () => autosIa.contarPendentesResumo(casoId!),
+    enabled: !!casoId && !emProcessamento,
+  })
+
   const sincronizar = useMutation({
     mutationFn: () => autosIa.sincronizarAgora(casoId!),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] }),
@@ -127,6 +133,11 @@ export default function AutosIACasoPage() {
       qc.invalidateQueries({ queryKey: ['autos-ia', 'grafo', casoId] })
       qc.invalidateQueries({ queryKey: ['autos-ia', 'pecas', casoId] })
     },
+  })
+
+  const resumirPendentes = useMutation({
+    mutationFn: () => autosIa.resumirPendentes(casoId!),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] }),
   })
 
   const deletarCaso = useMutation({
@@ -265,6 +276,20 @@ export default function AutosIACasoPage() {
                       >
                         {reagrupar.isPending ? 'Reagrupando...' : 'Reagrupar peças'}
                       </button>
+                      {!!pendentesResumo?.pendentes && (
+                        <button
+                          className={pageStyles.btnSmall}
+                          disabled={resumirPendentes.isPending}
+                          onClick={() => {
+                            if (window.confirm(`Resumir ${pendentesResumo.pendentes} peça(s) já lida(s) mas ainda sem resumo — sem consultar o jus.br nem reler nenhum documento novo. Continuar?`)) {
+                              resumirPendentes.mutate()
+                            }
+                          }}
+                          title="Só resume o que já foi lido — sem ler documentos novos"
+                        >
+                          {resumirPendentes.isPending ? 'Resumindo...' : `Resumir pendentes (${pendentesResumo.pendentes})`}
+                        </button>
+                      )}
                     </>
                   )}
                 </>

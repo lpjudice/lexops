@@ -209,6 +209,12 @@ export const autosIa = {
   reagrupar: (casoId: string) =>
     api.post<Caso>(`/autos-ia/casos/${casoId}/reagrupar`).then((r) => r.data),
 
+  resumirPendentes: (casoId: string) =>
+    api.post<Caso>(`/autos-ia/casos/${casoId}/resumir-pendentes`).then((r) => r.data),
+
+  contarPendentesResumo: (casoId: string) =>
+    api.get<{ pendentes: number }>(`/autos-ia/casos/${casoId}/pecas-pendentes-resumo`).then((r) => r.data),
+
   estimativaReclassificacao: (casoId: string) =>
     api.get<EstimativaImportacao>(`/autos-ia/casos/${casoId}/estimativa-reclassificacao`).then((r) => r.data),
 

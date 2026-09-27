@@ -91,6 +91,18 @@ LIMIAR_CHARS_PARA_RESUMO_IA = 200
 # resolve isso sem custo de IA nem depender de ordem perfeita.
 LIMIAR_JANELA_PROTOCOLO_SEGUNDOS = 180
 
+# Rede de segurança contra dados de origem patológicos: se muitos andamentos
+# seguidos caírem na mesma chave de agrupamento (ex.: um lote digitalizado
+# com data+descrição idênticas em dezenas de itens — visto de verdade no
+# Apex, uma sincronização inteira ficou "sem novidade" na tela porque um
+# grupo nunca fechava depois de 14/set, embora a leitura seguisse avançando
+# por trás), o grupo trava aberto indefinidamente — nenhuma peça é
+# persistida, e uma interrupção nesse meio tempo perde TODA a leitura desde
+# o último grupo que fechou de verdade. Força o fechamento a cada N itens
+# mesmo sem mudança de chave — nunca deveria disparar numa petição+anexos
+# real (que tem poucos membros), só nesse cenário patológico.
+LIMIAR_TAMANHO_MAXIMO_GRUPO = 20
+
 PALAVRAS_TIPO = {
     "peticao": ["petiç", "manifestaç", "impugnaç", "réplica", "replica", "alegaç"],
     "decisao": ["senten", "decis", "acórdão", "acordao"],
@@ -468,6 +480,47 @@ def _retomar_pecas_pendentes(db: Session, caso: AutosIACaso) -> int:
     return len(pendentes)
 
 
+def contar_pecas_pendentes_resumo(db: Session, caso: AutosIACaso) -> int:
+    """Quantas peças já lidas (texto extraído, já viraram peça) ainda esperam
+    o resumo por IA — o backlog que `resumir_pendentes_agora` processa sem
+    precisar reler nada. Pedido do Lucas pra ter visibilidade desse número
+    sem precisar esperar uma sincronização inteira de novos andamentos."""
+    return (
+        db.query(AutosIAPeca)
+        .filter(
+            AutosIAPeca.caso_id == caso.id,
+            AutosIAPeca.andamento_id.isnot(None),
+            AutosIAPeca.status.in_(["pendente_resumo", "erro"]),
+        )
+        .count()
+    )
+
+
+def resumir_pendentes_agora(db: Session, caso: AutosIACaso) -> int:
+    """Só resume o backlog de peças já lidas mas ainda não resumidas — sem
+    consultar jus.br/PDPJ nem ler nenhum andamento novo. Pedido do Lucas: uma
+    sincronização grande interrompida no meio da LEITURA pode deixar
+    centenas de peças já lidas esperando resumo (ver _retomar_pecas_
+    pendentes) — antes, só rodava automaticamente no início da PRÓXIMA
+    sincronização completa; isso deixa acionar só essa etapa, sem esperar
+    reler o resto dos documentos pendentes."""
+    caso.sync_cancelar = False
+    caso.sync_iniciado_em = datetime.now(timezone.utc)
+    db.commit()
+
+    total = _retomar_pecas_pendentes(db, caso)
+
+    caso.ultimo_sync_status = "cancelado" if _cancelar_sync_solicitado(db, caso) else "ok"
+    caso.ultimo_sync_mensagem = f"{total} peça(s) pendente(s) resumida(s)." if total else "Nenhuma peça pendente de resumo."
+    caso.sync_etapa = None
+    caso.sync_total_itens = None
+    caso.sync_itens_processados = None
+    caso.sync_detalhe = None
+    caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
+    db.commit()
+    return total
+
+
 def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
     """Importa como peças os andamentos do processo vinculado ainda não trazidos
     para este caso. Lê e cria as peças em grupos pequenos (streaming, não tudo
@@ -618,6 +671,14 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
             _flush_grupo()
         chave_atual = chave
         grupo_atual.append(item)
+        if len(grupo_atual) >= LIMIAR_TAMANHO_MAXIMO_GRUPO:
+            logger.warning(
+                "Grupo de agrupamento passou de %d itens sem fechar (andamento %s) — "
+                "forçando fechamento; provável dado de origem com data/descrição repetidas.",
+                LIMIAR_TAMANHO_MAXIMO_GRUPO, andamento.id,
+            )
+            _flush_grupo()
+            chave_atual = None
 
         caso.sync_itens_processados = indice
         _commit_resiliente(db)

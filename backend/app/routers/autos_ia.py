@@ -25,8 +25,8 @@ from app.services.autos_ia.busca import buscar_pecas
 from app.services.autos_ia.estimativa import estimar_importacao_existentes, estimar_reclassificacao
 from app.services.autos_ia.ingestao import processar_documento, reclassificar_caso, retomar_documento
 from app.services.autos_ia.jusbr_import import (
-    atualizar_metadados_jusbr, importar_apenas_existentes, listar_andamentos_pendentes,
-    reagrupar_pecas_jusbr, sincronizar_caso_jusbr,
+    atualizar_metadados_jusbr, contar_pecas_pendentes_resumo, importar_apenas_existentes,
+    listar_andamentos_pendentes, reagrupar_pecas_jusbr, resumir_pendentes_agora, sincronizar_caso_jusbr,
 )
 from app.services.autos_ia.nomes import derivar_nome_indexado
 from app.services.autos_ia.pdf_merge import montar_pdf_pecas
@@ -383,6 +383,43 @@ def importar_existentes_agora(caso_id: uuid.UUID, background_tasks: BackgroundTa
     db.refresh(caso)
     background_tasks.add_task(_executar_importacao_existentes_em_background, caso.id)
     return caso
+
+
+def _executar_resumir_pendentes_em_background(caso_id: uuid.UUID) -> None:
+    db = SessionLocal()
+    try:
+        caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
+        if caso:
+            resumir_pendentes_agora(db, caso)
+    except Exception as exc:
+        logger.exception("Autos IA: resumir-pendentes do caso %s travou de forma inesperada", caso_id)
+        _forcar_status_erro(caso_id, f"Interrompida por um erro inesperado: {exc}")
+    finally:
+        db.close()
+
+
+@router.post("/casos/{caso_id}/resumir-pendentes", response_model=CasoOut, status_code=status.HTTP_202_ACCEPTED)
+def resumir_pendentes_endpoint(caso_id: uuid.UUID, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Só resume o backlog de peças já lidas (texto extraído, já viraram peça)
+    mas ainda sem resumo por IA — sem consultar jus.br/PDPJ nem ler nenhum
+    andamento novo. Útil depois de uma sincronização grande interrompida no
+    meio da leitura, pra não esperar reler o resto dos documentos pendentes
+    só pra processar o que já foi lido."""
+    caso = _get_caso(db, caso_id)
+    if caso.ultimo_sync_status == "processando":
+        raise HTTPException(status_code=422, detail="Já há uma sincronização em andamento.")
+    caso.ultimo_sync_status = "processando"
+    caso.ultimo_sync_mensagem = None
+    db.commit()
+    db.refresh(caso)
+    background_tasks.add_task(_executar_resumir_pendentes_em_background, caso.id)
+    return caso
+
+
+@router.get("/casos/{caso_id}/pecas-pendentes-resumo")
+def contar_pendentes_resumo_endpoint(caso_id: uuid.UUID, db: Session = Depends(get_db)) -> dict:
+    caso = _get_caso(db, caso_id)
+    return {"pendentes": contar_pecas_pendentes_resumo(db, caso)}
 
 
 @router.get("/casos/{caso_id}/estimativa-importacao", response_model=EstimativaImportacaoOut)
