@@ -64,6 +64,23 @@ async def receber_webhook(request: Request, background_tasks: BackgroundTasks):
                         background_tasks.add_task(_processar_mensagem, telefone, texto, message_id)
                     elif telefone:
                         logger.info("whatsapp webhook: mensagem tipo=%s de %s sem tratamento ainda", msg.get("type"), telefone)
+                # Atualizações de status de entrega (sent/delivered/read/failed) das
+                # mensagens QUE NÓS enviamos — sem isso não dá pra saber se um envio
+                # (template ou push de andamento) realmente chegou ou falhou.
+                for st in valor.get("statuses", []):
+                    status_tipo = st.get("status")
+                    destinatario = st.get("recipient_id")
+                    erro = st.get("errors")
+                    if status_tipo == "failed" or erro:
+                        logger.warning(
+                            "whatsapp status: FALHA msg=%s destinatario=%s erro=%s",
+                            st.get("id"), destinatario, erro,
+                        )
+                    else:
+                        logger.info(
+                            "whatsapp status: msg=%s destinatario=%s status=%s",
+                            st.get("id"), destinatario, status_tipo,
+                        )
     except Exception:
         logger.exception("whatsapp webhook: erro processando payload")
 
