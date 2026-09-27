@@ -4,7 +4,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import { autosIa, TIPOS_PECA } from '../api/autosIa'
 import type { Caso, Documento, DocumentoDrive, DocumentoDriveAnexo, GrafoAresta, GrafoNo, Peca, PecaDetalhe, TipoPeca } from '../api/autosIa'
 import ReferenciaHover from '../components/autosIa/ReferenciaHover'
-import GrafoTimeline from '../components/autosIa/GrafoTimeline'
+import GrafoRede from '../components/autosIa/GrafoRede'
 import Modal from '../components/Modal'
 import pageStyles from './Page.module.css'
 import styles from './AutosIACasoPage.module.css'
@@ -1320,7 +1320,7 @@ function AbaGrafo({ casoId }: { casoId: string }) {
   if (isLoading) return <p className={pageStyles.empty}>Carregando...</p>
   if (!grafo || grafo.nos.length === 0) return <p className={pageStyles.empty}>Nenhuma peça indexada ainda.</p>
 
-  return <GrafoTimeline nos={grafo.nos} arestas={grafo.arestas} />
+  return <GrafoRede nos={grafo.nos} arestas={grafo.arestas} />
 }
 
 // ── FAQ ──────────────────────────────────────────────────────────────────
