@@ -13,6 +13,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from app.models.andamento import AndamentoProcesso
 from app.models.autos_ia import AutosIACaso, AutosIADocumento, AutosIAPeca, AutosIAReferencia
 from app.services.autos_ia.extracao import extrair_paginas
 from app.services.autos_ia.resumo import reclassificar_peca, resumir_peca
@@ -105,6 +106,63 @@ def _normalizar_id(valor: str) -> str:
     return re.sub(r"[^a-z0-9]", "", v)
 
 
+_PADRAO_FLS = re.compile(r"^fls?\.?\s*\d+", re.IGNORECASE)
+_PADRAO_CNJ = re.compile(r"^\d{7}-?\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}$")
+_PADRAO_DOC_N = re.compile(r"^doc\.?\s*0*(\d+)(?:\.\d+)?$", re.IGNORECASE)
+_PADRAO_ARQUIVO_DOC_N = re.compile(r"\(doc\.?\s*0*(\d+)\)", re.IGNORECASE)
+
+
+def _eh_citacao_nao_indexavel(texto: str) -> bool:
+    """Citações que por natureza nunca correspondem a uma peça indexada deste
+    caso: número de página ("fls. 228/232" — aponta um trecho DENTRO de um
+    documento já referenciado por outro ID, não um documento em si) e número
+    de processo no formato CNJ (aponta um PROCESSO inteiro — pode ser o
+    próprio processo deste caso ou outro processo qualquer, nunca uma peça
+    individual). Persistir essas como AutosIAReferencia só cria um chip
+    cinza "não localizado" pra sempre, sem propósito — pedido do Lucas pra
+    não ter ruído nas menções."""
+    limpo = texto.strip().replace(" ", "")
+    return bool(_PADRAO_FLS.match(texto.strip())) or bool(_PADRAO_CNJ.match(limpo))
+
+
+def _grupo_da_peca(db: Session, peca: AutosIAPeca) -> list[AutosIAPeca]:
+    """Peças do mesmo grupo petição+anexos de `peca` (a peça principal e
+    todos os anexos sob ela) — usado pra resolver menções locais tipo
+    "DOC. 5", que no jus.br não é um ID global, é só um trecho do nome do
+    arquivo dentro de UMA submissão específica; o mesmo "DOC. 5" em outra
+    submissão é outro documento completamente diferente."""
+    raiz_id = peca.peca_pai_id or peca.id
+    return (
+        db.query(AutosIAPeca)
+        .filter(AutosIAPeca.caso_id == peca.caso_id)
+        .filter((AutosIAPeca.id == raiz_id) | (AutosIAPeca.peca_pai_id == raiz_id))
+        .all()
+    )
+
+
+def _resolver_doc_n_local(db: Session, ref: AutosIAReferencia, peca_origem: AutosIAPeca) -> AutosIAPeca | None:
+    """Resolve uma menção "DOC. N" contra o nome de arquivo dos anexos do
+    MESMO grupo (petição + seus anexos) da peça que menciona — sem ID global,
+    a única forma de saber a qual documento "DOC. 5" se refere é olhar quem
+    são os anexos daquela submissão específica."""
+    m = _PADRAO_DOC_N.match(ref.id_mencionado.strip())
+    if not m:
+        return None
+    numero = m.group(1)
+    grupo = _grupo_da_peca(db, peca_origem)
+    andamento_ids = [p.andamento_id for p in grupo if p.andamento_id and p.id != peca_origem.id]
+    if not andamento_ids:
+        return None
+    andamentos = db.query(AndamentoProcesso).filter(AndamentoProcesso.id.in_(andamento_ids)).all()
+    for a in andamentos:
+        arq = _PADRAO_ARQUIVO_DOC_N.search(a.arquivo_nome or "")
+        if arq and arq.group(1).lstrip("0") == numero.lstrip("0"):
+            candidata = next((p for p in grupo if p.andamento_id == a.id), None)
+            if candidata:
+                return candidata
+    return None
+
+
 def _parse_data(valor: str | None) -> date | None:
     if not valor:
         return None
@@ -126,13 +184,20 @@ def _persistir_referencias(db: Session, peca: AutosIAPeca, ids_mencionados: list
     mapa_normalizado = {_normalizar_id(p.id_processual): p for p in outras_pecas if p.id_processual}
 
     for id_mencionado in ids_mencionados:
+        if _eh_citacao_nao_indexavel(id_mencionado):
+            continue
         destino = mapa_normalizado.get(_normalizar_id(id_mencionado))
-        db.add(AutosIAReferencia(
+        ref = AutosIAReferencia(
             caso_id=peca.caso_id,
             peca_origem_id=peca.id,
             peca_destino_id=destino.id if destino else None,
             id_mencionado=id_mencionado[:100],
-        ))
+        )
+        if not destino:
+            destino_local = _resolver_doc_n_local(db, ref, peca)
+            if destino_local:
+                ref.peca_destino_id = destino_local.id
+        db.add(ref)
     db.commit()
 
 
@@ -152,8 +217,17 @@ def _resolver_referencias_pendentes(db: Session, caso_id: uuid.UUID) -> None:
         .all()
     )
     mapa_normalizado = {_normalizar_id(p.id_processual): p for p in pecas_com_id if p.id_processual}
+    pecas_origem = {
+        p.id: p for p in db.query(AutosIAPeca)
+        .filter(AutosIAPeca.id.in_([r.peca_origem_id for r in pendentes]))
+        .all()
+    }
     for ref in pendentes:
         destino = mapa_normalizado.get(_normalizar_id(ref.id_mencionado))
+        if not destino:
+            origem = pecas_origem.get(ref.peca_origem_id)
+            if origem:
+                destino = _resolver_doc_n_local(db, ref, origem)
         if destino and destino.id != ref.peca_origem_id:
             ref.peca_destino_id = destino.id
     db.commit()
