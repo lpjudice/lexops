@@ -14,10 +14,18 @@ UVICORN_PID=$!
 
 echo "[START] Waiting for API to be ready (PID=$UVICORN_PID)..."
 TRIES=0
+# 180s, não 60s: reproduzido de verdade em 27/set que sob throttling de CPU
+# da VM (vCPU compartilhada, load average do próprio convidado baixo — não é
+# CPU-bound no app, é a VM sendo sub-alocada pelo host) o simples import do
+# app.main (FastAPI + SQLAlchemy + pypdf + anthropic + google clients + ...)
+# pode levar 45-55s sozinho. Com 60s de orçamento total, o boot batia bem na
+# borda e era matado quase sempre bem na hora de ficar pronto — queimando o
+# contador de restart da máquina (limite de 10) num loop que nunca deixava
+# nenhuma tentativa terminar.
 until curl -sf http://127.0.0.1:8000/health > /dev/null 2>&1; do
   TRIES=$((TRIES+1))
-  if [ $TRIES -ge 60 ]; then
-    echo "[START] ERROR: API did not start after 60s"
+  if [ $TRIES -ge 180 ]; then
+    echo "[START] ERROR: API did not start after 180s"
     # `wait $UVICORN_PID` aqui travava para sempre se o uvicorn tivesse
     # ficado pronto DEPOIS do timeout (ex: startup lento por instabilidade
     # do Postgres) — o processo continuava rodando de verdade, então `wait`
