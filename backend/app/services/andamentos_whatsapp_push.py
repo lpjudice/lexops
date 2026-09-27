@@ -8,8 +8,9 @@ Espelha app.services.andamentos_push (Telegram interno), mas:
   - marca AndamentoProcesso.notificado_whatsapp=True (flag própria, não mexe
     no `notificado` do Telegram).
 
-Template esperado no WhatsApp Manager (nome configurável abaixo), com 3
+Template esperado no WhatsApp Manager (nome configurável abaixo), com 4
 variáveis nomeadas de corpo: {{cliente_nome}}, {{numero_processo}},
+{{resumo_curto}} (= Processo.materia, rótulo "Resumo Curto" na tela),
 {{resumo_andamento}}.
 """
 from __future__ import annotations
@@ -99,6 +100,7 @@ def push_andamentos_whatsapp() -> dict:
                 parametros={
                     "cliente_nome": cliente.nome,
                     "numero_processo": p.numero_cnj,
+                    "resumo_curto": (p.materia or "").strip() or "—",
                     "resumo_andamento": texto_resumo,
                 },
             )
