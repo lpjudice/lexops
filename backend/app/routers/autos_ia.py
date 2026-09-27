@@ -715,6 +715,80 @@ def listar_anexos(peca_id: uuid.UUID, db: Session = Depends(get_db)):
     return _com_total_anexos(db, peca.caso_id, anexos)
 
 
+@router.post("/pecas/{peca_id}/tornar-principal", response_model=PecaOut)
+def tornar_principal(peca_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Promove uma peça hoje marcada como anexo a principal do seu grupo — o
+    antigo principal e os demais anexos passam a ser anexos DELA. Correção
+    manual pra quando o agrupamento automático (por hora de protocolo/tipo)
+    escolhe o membro errado como principal — pedido do Lucas depois de achar
+    mais um caso assim mesmo após o fix automático."""
+    peca = db.query(AutosIAPeca).filter(AutosIAPeca.id == peca_id).first()
+    if not peca:
+        raise HTTPException(status_code=404, detail="Peça não encontrada")
+    if peca.peca_pai_id is None:
+        return peca  # já é principal, nada a fazer
+    antigo_pai_id = peca.peca_pai_id
+    irmaos = (
+        db.query(AutosIAPeca)
+        .filter(AutosIAPeca.peca_pai_id == antigo_pai_id, AutosIAPeca.id != peca.id)
+        .all()
+    )
+    peca.peca_pai_id = None
+    db.flush()  # garante peca.id "livre" antes de outras linhas apontarem pra ele
+    antigo_pai = db.query(AutosIAPeca).filter(AutosIAPeca.id == antigo_pai_id).first()
+    if antigo_pai:
+        antigo_pai.peca_pai_id = peca.id
+    for irmao in irmaos:
+        irmao.peca_pai_id = peca.id
+    db.commit()
+    db.refresh(peca)
+    return peca
+
+
+@router.post("/pecas/{peca_id}/anexar-a/{peca_pai_id}", response_model=PecaOut)
+def anexar_a(peca_id: uuid.UUID, peca_pai_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Vincula manualmente `peca` como anexo de `peca_pai` — pra quando o
+    agrupamento automático nunca colocou as duas no mesmo grupo (datas/horas
+    de protocolo muito distantes, por exemplo). Só é permitido anexar a uma
+    peça que já seja principal (sem pai) — evita cadeias de 3+ níveis, que a
+    tela de Documentos não foi desenhada pra mostrar. Se `peca` já tinha seus
+    próprios anexos, eles são promovidos a anexos direto de `peca_pai`
+    também (achatado), em vez de ficarem órfãos."""
+    if peca_id == peca_pai_id:
+        raise HTTPException(status_code=422, detail="Uma peça não pode ser anexo dela mesma.")
+    peca = db.query(AutosIAPeca).filter(AutosIAPeca.id == peca_id).first()
+    peca_pai = db.query(AutosIAPeca).filter(AutosIAPeca.id == peca_pai_id).first()
+    if not peca or not peca_pai:
+        raise HTTPException(status_code=404, detail="Peça não encontrada")
+    if peca.caso_id != peca_pai.caso_id:
+        raise HTTPException(status_code=422, detail="As duas peças precisam ser do mesmo caso.")
+    if peca_pai.peca_pai_id is not None:
+        raise HTTPException(
+            status_code=422,
+            detail="Só é possível anexar a uma peça que já seja principal (sem pai).",
+        )
+    filhos_de_peca = db.query(AutosIAPeca).filter(AutosIAPeca.peca_pai_id == peca.id).all()
+    for filho in filhos_de_peca:
+        filho.peca_pai_id = peca_pai.id
+    peca.peca_pai_id = peca_pai.id
+    db.commit()
+    db.refresh(peca)
+    return peca
+
+
+@router.post("/pecas/{peca_id}/desvincular", response_model=PecaOut)
+def desvincular_peca(peca_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Desfaz o vínculo de anexo — a peça volta a ser principal (independente),
+    sem apagar nada. Contrapartida manual de anexar_a/tornar_principal."""
+    peca = db.query(AutosIAPeca).filter(AutosIAPeca.id == peca_id).first()
+    if not peca:
+        raise HTTPException(status_code=404, detail="Peça não encontrada")
+    peca.peca_pai_id = None
+    db.commit()
+    db.refresh(peca)
+    return peca
+
+
 @router.get("/casos/{caso_id}/pecas/download")
 def baixar_pecas_pdf(
     caso_id: uuid.UUID,

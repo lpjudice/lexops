@@ -897,12 +897,56 @@ function AbaPecas({ casoId, arestasPorOrigem, nosPorId }: { casoId: string; ares
 
 const TAMANHO_PAGINA_DOCUMENTOS = 60
 
+/** Busca rápida de outra peça-mãe do caso pra virar o "anexar a" manual —
+ * correção pro agrupamento automático não conseguir juntar duas peças que
+ * ficaram longe demais em hora de protocolo, ou não bater na classificação. */
+function AnexarAPicker({
+  casoId, pecaId, onConfirmar, onCancelar,
+}: { casoId: string; pecaId: string; onConfirmar: (alvoId: string) => void; onCancelar: () => void }) {
+  const [termo, setTermo] = useState('')
+  const { data, isFetching } = useQuery({
+    queryKey: ['autos-ia', 'documentos-drive', 'busca-anexar', casoId, termo],
+    queryFn: () => autosIa.listarDocumentosDrive(casoId, { q: termo, ordem: 'desc', limit: 8 }),
+    enabled: termo.trim().length >= 3,
+  })
+  const candidatos = (data ?? []).filter((d) => d.id !== pecaId)
+
+  return (
+    <div className={styles.anexarPicker}>
+      <input
+        className={pageStyles.input}
+        placeholder="Buscar peça pra anexar (mín. 3 letras)..."
+        value={termo}
+        onChange={(e) => setTermo(e.target.value)}
+        autoFocus
+      />
+      {isFetching && <p style={{ fontSize: 12, color: 'var(--gray-mid)' }}>Buscando...</p>}
+      {termo.trim().length >= 3 && !isFetching && candidatos.length === 0 && (
+        <p style={{ fontSize: 12, color: 'var(--gray-mid)' }}>Nenhuma peça encontrada.</p>
+      )}
+      {candidatos.map((c) => (
+        <button
+          key={c.id}
+          type="button"
+          className={styles.anexarPickerItem}
+          onClick={() => onConfirmar(c.id)}
+        >
+          <strong>{c.titulo_customizado || c.titulo}</strong>
+          {c.arquivo_nome && <span> — {c.arquivo_nome}</span>}
+        </button>
+      ))}
+      <button type="button" className={styles.docTogglePeticao} onClick={onCancelar}>Cancelar</button>
+    </div>
+  )
+}
+
 function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | DocumentoDriveAnexo; nivel: number; casoId: string }) {
   const qc = useQueryClient()
   const anexos = 'anexos' in doc ? doc.anexos : []
   const [aberto, setAberto] = useState(true)
   const [resumoAberto, setResumoAberto] = useState(false)
   const [editando, setEditando] = useState(false)
+  const [anexandoAberto, setAnexandoAberto] = useState(false)
   const [rascunhoTitulo, setRascunhoTitulo] = useState(doc.titulo_customizado ?? '')
   const [rascunhoNota, setRascunhoNota] = useState(doc.nota_usuario ?? '')
   const [rascunhoKeywords, setRascunhoKeywords] = useState((doc.keywords_usuario ?? []).join(', '))
@@ -910,10 +954,35 @@ function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | Document
   const ehPeticao = doc.tipo === 'peticao'
   const temResumo = !!doc.resumo
   const nomeOriginal = doc.nome_indexado || doc.titulo
+  const ehAnexo = nivel > 0
+
+  const invalidarDocumentos = () => {
+    qc.invalidateQueries({ queryKey: ['autos-ia', 'documentos-drive', casoId] })
+    qc.invalidateQueries({ queryKey: ['autos-ia', 'grafo', casoId] })
+    qc.invalidateQueries({ queryKey: ['autos-ia', 'pecas', casoId] })
+  }
 
   const marcarTipo = useMutation({
     mutationFn: (tipo: TipoPeca) => autosIa.atualizarTipoPeca(doc.id, tipo),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'documentos-drive', casoId] }),
+  })
+
+  const tornarPrincipal = useMutation({
+    mutationFn: () => autosIa.tornarPrincipal(doc.id),
+    onSuccess: invalidarDocumentos,
+  })
+
+  const desvincular = useMutation({
+    mutationFn: () => autosIa.desvincularPeca(doc.id),
+    onSuccess: invalidarDocumentos,
+  })
+
+  const anexarA = useMutation({
+    mutationFn: (alvoId: string) => autosIa.anexarA(doc.id, alvoId),
+    onSuccess: () => {
+      invalidarDocumentos()
+      setAnexandoAberto(false)
+    },
   })
 
   const salvarAnotacao = useMutation({
@@ -1002,7 +1071,49 @@ function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | Document
           >
             {ehPeticao ? 'Desmarcar petição' : 'Marcar petição'}
           </button>
+          {ehAnexo ? (
+            <>
+              <button
+                type="button"
+                className={styles.docTogglePeticao}
+                disabled={tornarPrincipal.isPending}
+                onClick={() => tornarPrincipal.mutate()}
+                title="Fazer desta peça o principal do grupo — o principal atual e os demais anexos passam a ficar embaixo dela"
+              >
+                Tornar principal
+              </button>
+              <button
+                type="button"
+                className={styles.docTogglePeticao}
+                disabled={desvincular.isPending}
+                onClick={() => desvincular.mutate()}
+                title="Desfazer o vínculo de anexo — volta a ser uma peça própria, independente"
+              >
+                Desvincular
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className={styles.docTogglePeticao}
+              onClick={() => setAnexandoAberto(!anexandoAberto)}
+              aria-expanded={anexandoAberto}
+              title="Vincular manualmente esta peça como anexo de outra — pro agrupamento automático não ter juntado as duas"
+            >
+              Anexar a...
+            </button>
+          )}
         </div>
+        {anexandoAberto && (
+          <div style={{ paddingLeft: nivel * 22 + 22, marginTop: 4 }}>
+            <AnexarAPicker
+              casoId={casoId}
+              pecaId={doc.id}
+              onConfirmar={(alvoId) => anexarA.mutate(alvoId)}
+              onCancelar={() => setAnexandoAberto(false)}
+            />
+          </div>
+        )}
         <div className={styles.docRowSub} style={{ paddingLeft: nivel * 22 + 22 }}>
           {doc.titulo_customizado && <span className={styles.docNomeOriginal}>original: {nomeOriginal}</span>}
           {doc.id_processual && <span className={styles.docIdProcessual}>ID: {doc.id_processual}</span>}

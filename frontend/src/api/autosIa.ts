@@ -271,6 +271,15 @@ export const autosIa = {
 
   listarAnexos: (pecaId: string) => api.get<Peca[]>(`/autos-ia/pecas/${pecaId}/anexos`).then((r) => r.data),
 
+  tornarPrincipal: (pecaId: string) =>
+    api.post<Peca>(`/autos-ia/pecas/${pecaId}/tornar-principal`).then((r) => r.data),
+
+  anexarA: (pecaId: string, pecaPaiId: string) =>
+    api.post<Peca>(`/autos-ia/pecas/${pecaId}/anexar-a/${pecaPaiId}`).then((r) => r.data),
+
+  desvincularPeca: (pecaId: string) =>
+    api.post<Peca>(`/autos-ia/pecas/${pecaId}/desvincular`).then((r) => r.data),
+
   urlDownloadPecas: (casoId: string, opts: { apenasPrincipais?: boolean; tipo?: string } = {}) => {
     const params = new URLSearchParams()
     params.set('apenas_principais', String(opts.apenasPrincipais ?? true))
