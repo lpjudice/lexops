@@ -13,6 +13,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from app.database import SessionLocal
 from app.models.andamento import AndamentoProcesso
 from app.models.autos_ia import AutosIACaso, AutosIADocumento, AutosIAPeca, AutosIAReferencia
 from app.services.autos_ia.extracao import extrair_paginas
@@ -489,24 +490,39 @@ def reclassificar_caso(db: Session, caso: AutosIACaso) -> int:
             f"Cancelado: {caso.sync_itens_processados or 0}/{len(pecas)} peça(s) reclassificada(s)."
             if cancelado else f"{len(pecas)} peça(s) reclassificada(s)."
         )
-    except Exception as exc:
-        logger.warning("Autos IA: erro ao reclassificar caso %s: %s", caso.id, exc)
-        # Mesmo cuidado usado no resto do módulo: sem rollback, o commit do
-        # finally falha em cascata com PendingRollbackError.
-        try:
-            db.rollback()
-        except Exception:
-            logger.error("Rollback falhou ao reclassificar caso %s — conexão morta", caso.id)
-        caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso.id).first() or caso
-        caso.ultimo_sync_status = "erro"
-        caso.ultimo_sync_mensagem = str(exc)[:2000]
-    finally:
         caso.sync_etapa = None
         caso.sync_total_itens = None
         caso.sync_itens_processados = None
         caso.sync_detalhe = None
         caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
         db.commit()
+    except Exception as exc:
+        logger.warning("Autos IA: erro ao reclassificar caso %s: %s", caso.id, exc)
+        # A sessão original pode ficar irrecuperável mesmo após um
+        # rollback() bem-sucedido (já reproduzido ao vivo em sincronizar_
+        # caso_jusbr: a query seguinte na MESMA sessão falhava de novo com
+        # PendingRollbackError) — grava o erro sempre numa sessão nova, mesmo
+        # padrão de _forcar_status_erro/_gravar_status_sync.
+        try:
+            db.rollback()
+        except Exception:
+            logger.error("Rollback falhou ao reclassificar caso %s — conexão morta", caso.id)
+        db_erro = SessionLocal()
+        try:
+            caso_erro = db_erro.query(AutosIACaso).filter(AutosIACaso.id == caso.id).first()
+            if caso_erro:
+                caso_erro.ultimo_sync_status = "erro"
+                caso_erro.ultimo_sync_mensagem = str(exc)[:2000]
+                caso_erro.sync_etapa = None
+                caso_erro.sync_total_itens = None
+                caso_erro.sync_itens_processados = None
+                caso_erro.sync_detalhe = None
+                caso_erro.ultima_sincronizacao_em = datetime.now(timezone.utc)
+                db_erro.commit()
+        except Exception:
+            logger.exception("Também falhou ao gravar erro da reclassificação do caso %s numa sessão nova", caso.id)
+        finally:
+            db_erro.close()
     return len(pecas)
 
 

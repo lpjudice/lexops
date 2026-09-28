@@ -331,29 +331,18 @@ def _executar_reagrupar_em_background(caso_id: uuid.UUID) -> None:
     try:
         caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
         if caso:
-            try:
-                total = reagrupar_pecas_jusbr(db, caso)
-                caso.ultimo_sync_status = "ok"
-                caso.ultimo_sync_mensagem = f"{total} peça(s) reagrupada(s) (petição/anexo)."
-            except Exception as exc:
-                # Sem rollback aqui, o commit do finally falha em cascata com
-                # PendingRollbackError quando a falha acima deixa a transação
-                # em estado de erro (mesmo cuidado usado no resto do módulo).
-                try:
-                    db.rollback()
-                except Exception:
-                    logger.error("Rollback falhou ao reagrupar caso %s — conexão morta", caso_id)
-                caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first() or caso
-                caso.ultimo_sync_status = "erro"
-                caso.ultimo_sync_mensagem = str(exc)[:2000]
-            finally:
-                caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
-                db.commit()
+            total = reagrupar_pecas_jusbr(db, caso)
+            caso.ultimo_sync_status = "ok"
+            caso.ultimo_sync_mensagem = f"{total} peça(s) reagrupada(s) (petição/anexo)."
+            caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
+            db.commit()
     except Exception as exc:
-        # Rede de segurança: se a própria busca do caso falhar (ex.: pool de
-        # conexões esgotado antes de sequer começar), sem isso o caso ficava
-        # preso em "processando" pra sempre — só um redeploy desemperrava.
-        # Mesmo padrão de _executar_sync_em_background/_forcar_status_erro.
+        # Nunca tenta recuperar e reaproveitar `db` aqui: já reproduzimos ao
+        # vivo um caso em que db.rollback() "funcionava" (sem lançar) e a
+        # query seguinte na MESMA sessão falhava de novo com
+        # PendingRollbackError — a conexão pode ficar irrecuperável de
+        # verdade, não só com a transação abortada. _forcar_status_erro
+        # sempre abre uma sessão nova, comprovadamente confiável.
         logger.exception("Autos IA: reagrupar do caso %s travou de forma inesperada", caso_id)
         _forcar_status_erro(caso_id, f"Interrompida por um erro inesperado: {exc}")
     finally:
@@ -381,27 +370,16 @@ def _executar_recalcular_ids_em_background(caso_id: uuid.UUID) -> None:
     try:
         caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
         if caso:
-            try:
-                atualizadas, reconectadas = recalcular_ids_processuais(db, caso)
-                caso.ultimo_sync_status = "ok"
-                caso.ultimo_sync_mensagem = (
-                    f"{atualizadas} peça(s) com ID corrigido, {reconectadas} referência(s) reconectada(s)."
-                )
-            except Exception as exc:
-                # Mesmo cuidado do reagrupar logo acima: sem rollback, o
-                # commit do finally falha em cascata com PendingRollbackError.
-                try:
-                    db.rollback()
-                except Exception:
-                    logger.error("Rollback falhou ao recalcular IDs do caso %s — conexão morta", caso_id)
-                caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first() or caso
-                caso.ultimo_sync_status = "erro"
-                caso.ultimo_sync_mensagem = str(exc)[:2000]
-            finally:
-                caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
-                db.commit()
+            atualizadas, reconectadas = recalcular_ids_processuais(db, caso)
+            caso.ultimo_sync_status = "ok"
+            caso.ultimo_sync_mensagem = (
+                f"{atualizadas} peça(s) com ID corrigido, {reconectadas} referência(s) reconectada(s)."
+            )
+            caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
+            db.commit()
     except Exception as exc:
-        # Mesma rede de segurança do reagrupar logo acima.
+        # Mesmo cuidado do reagrupar logo acima: nunca tenta recuperar `db`
+        # depois de uma falha — _forcar_status_erro abre sessão nova.
         logger.exception("Autos IA: recalcular-ids do caso %s travou de forma inesperada", caso_id)
         _forcar_status_erro(caso_id, f"Interrompida por um erro inesperado: {exc}")
     finally:
