@@ -301,6 +301,36 @@
   border-radius: 5px;
   padding: 1px 6px;
 }
+.avisoLeitura {
+  display: none;
+  font-size: 11.5px;
+  color: #a16207;
+  background: #fef9c3;
+  border-radius: 8px;
+  padding: 6px 9px;
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+.relerBtn {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  justify-content: center;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 10px;
+  border-radius: 9px;
+  border: 1px solid #a16207;
+  background: #fef9c3;
+  color: #a16207;
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+.relerBtn:hover { opacity: 0.85; }
+.relerBtn:disabled { opacity: 0.6; cursor: default; }
+
 .fixBtn {
   display: inline-flex;
   align-items: center;
@@ -350,6 +380,14 @@
 .relItem:hover { border-color: var(--teal); }
 .relTitle { flex: 1; }
 .relId { font-size: 10px; color: var(--gray-mid); flex-shrink: 0; }
+.miniDrive {
+  color: var(--teal);
+  text-decoration: none;
+  font-weight: 700;
+  flex-shrink: 0;
+  padding: 0 2px;
+}
+.miniDrive:hover { text-decoration: underline; }
 .relEmpty { font-size: 12px; color: var(--gray-mid); font-style: italic; }
 
 .chipWrap { display: flex; flex-wrap: wrap; margin-bottom: 4px; }

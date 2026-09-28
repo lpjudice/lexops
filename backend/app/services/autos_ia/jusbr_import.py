@@ -544,6 +544,52 @@ def reler_peca(db: Session, peca: AutosIAPeca) -> None:
     _persistir_referencias(db, peca, peca.ids_mencionados)
 
 
+def reler_pecas_pendentes(db: Session, caso: AutosIACaso) -> tuple[int, int]:
+    """Roda reler_peca em TODAS as peças deste caso que ficaram com
+    erro_mensagem (falha de leitura) — inclui as que já viraram "resumida" com
+    um resumo genérico (o resumo da IA não falha, só fica pobre, então
+    status sozinho não identifica essas — só erro_mensagem, que a rotina de
+    resumo normal nunca limpa). Sequencial, uma peça de cada vez (rede + IA
+    por peça) — pedido do Lucas pra não sobrecarregar o sistema de novo como
+    uma sincronização paralela faria. Retorna (relidas com sucesso, falharam
+    de novo)."""
+    pendentes = (
+        db.query(AutosIAPeca)
+        .filter(
+            AutosIAPeca.caso_id == caso.id,
+            AutosIAPeca.andamento_id.isnot(None),
+            AutosIAPeca.erro_mensagem.isnot(None),
+        )
+        .all()
+    )
+    if not pendentes:
+        return 0, 0
+
+    caso.sync_etapa = "resumindo"
+    caso.sync_total_itens = len(pendentes)
+    caso.sync_itens_processados = 0
+    db.commit()
+
+    sucesso = 0
+    falha = 0
+    for i, peca in enumerate(pendentes, start=1):
+        if _cancelar_sync_solicitado(db, caso):
+            break
+        try:
+            reler_peca(db, peca)
+            sucesso += 1
+        except Exception as exc:
+            logger.warning("Falha ao reler peça %s em lote: %s", peca.id, exc)
+            peca.erro_mensagem = str(exc)[:2000]
+            db.commit()
+            falha += 1
+        caso.sync_itens_processados = i
+        _commit_resiliente(db)
+
+    _resolver_referencias_pendentes(db, caso.id)
+    return sucesso, falha
+
+
 def importar_apenas_existentes(db: Session, caso: AutosIACaso) -> None:
     """Só importa os andamentos/documentos que o jus.br JÁ baixou pro processo
     vinculado — sem chamar DataJud/jus.br ao vivo. Usado no backfill inicial

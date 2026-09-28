@@ -8,7 +8,7 @@ from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import DateTime, cast, func, or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, get_db
@@ -27,7 +27,7 @@ from app.services.autos_ia.ingestao import processar_documento, reclassificar_ca
 from app.services.autos_ia.jusbr_import import (
     atualizar_metadados_jusbr, contar_pecas_pendentes_resumo, importar_apenas_existentes,
     listar_andamentos_pendentes, reagrupar_pecas_jusbr, recalcular_ids_processuais, reler_peca,
-    resumir_pendentes_agora, sincronizar_caso_jusbr,
+    reler_pecas_pendentes, resumir_pendentes_agora, sincronizar_caso_jusbr,
 )
 from app.services.autos_ia.nomes import derivar_nome_indexado
 from app.services.autos_ia.pdf_merge import montar_pdf_pecas
@@ -457,6 +457,48 @@ def resumir_pendentes_endpoint(caso_id: uuid.UUID, background_tasks: BackgroundT
     return caso
 
 
+def _executar_reler_pendentes_em_background(caso_id: uuid.UUID) -> None:
+    from datetime import datetime, timezone
+    db = SessionLocal()
+    try:
+        caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
+        if caso:
+            sucesso, falha = reler_pecas_pendentes(db, caso)
+            caso.ultimo_sync_status = "cancelado" if caso.sync_cancelar else "ok"
+            caso.ultimo_sync_mensagem = (
+                f"{sucesso} peça(s) relida(s) com sucesso" + (f", {falha} falharam de novo." if falha else ".")
+                if (sucesso or falha) else "Nenhuma peça com falha de leitura pendente."
+            )
+            caso.sync_etapa = None
+            caso.sync_total_itens = None
+            caso.sync_itens_processados = None
+            caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
+            db.commit()
+    except Exception as exc:
+        logger.exception("Autos IA: reler-pendentes do caso %s travou de forma inesperada", caso_id)
+        _forcar_status_erro(caso_id, f"Interrompida por um erro inesperado: {exc}")
+    finally:
+        db.close()
+
+
+@router.post("/casos/{caso_id}/reler-pendentes", response_model=CasoOut, status_code=status.HTTP_202_ACCEPTED)
+def reler_pendentes_endpoint(caso_id: uuid.UUID, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Reler (baixar de novo do Drive + resumir de novo) TODAS as peças deste
+    caso que ficaram com falha de leitura registrada — inclui as que já
+    viraram "resumida" com um resumo genérico (a IA não falhou, só recebeu
+    pouco texto pra trabalhar). Sequencial, uma peça de cada vez, pra não
+    sobrecarregar rede/IA de uma vez só."""
+    caso = _get_caso(db, caso_id)
+    if caso.ultimo_sync_status == "processando":
+        raise HTTPException(status_code=422, detail="Já há uma sincronização em andamento.")
+    caso.ultimo_sync_status = "processando"
+    caso.ultimo_sync_mensagem = None
+    db.commit()
+    db.refresh(caso)
+    background_tasks.add_task(_executar_reler_pendentes_em_background, caso.id)
+    return caso
+
+
 @router.get("/casos/{caso_id}/pecas-pendentes-resumo")
 def contar_pendentes_resumo_endpoint(caso_id: uuid.UUID, db: Session = Depends(get_db)) -> dict:
     caso = _get_caso(db, caso_id)
@@ -634,19 +676,22 @@ def listar_documentos_drive(
     """Listagem compacta das peças/documentos vindos do jus.br/Drive, uma linha
     por peça-mãe com seus anexos aninhados — pra identificar cada arquivo pelo
     nome (derivado do próprio nome do arquivo, sem IA) e abrir direto no Drive,
-    sem precisar ler o resumo de cada um. Ordena por uma chave única de data/
-    hora (protocolado_em quando existe, senão meia-noite de data_andamento) —
-    ordenar por data_andamento e protocolado_em como colunas SEPARADAS (cada
-    uma com seu próprio nulls_last) fazia andamentos sem hora de protocolo
-    "pular" pro fim do dia mesmo quando vieram antes na realidade, o que
-    intercalava documento(s) e a petição deles fora de ordem."""
+    sem precisar ler o resumo de cada um.
+
+    Ordena por dia (data_andamento) e, dentro do dia, pela hora real de
+    protocolo (protocolado_em) quando ela existe — é o que de fato distingue
+    petição/decisão dos documentos que vieram junto na mesma hora — com
+    pagina_inicio como desempate final entre itens da mesma hora (ou sem
+    hora nenhuma). O cuidado é só no que falta hora de protocolo: em vez de
+    cair pra meia-noite do dia (que empurrava o item pro INÍCIO do dia mesmo
+    sendo, pela página, um dos ÚLTIMOS daquele lote — reproduzido de verdade
+    no Apex: os 3 últimos andamentos de 25/09, sem hora registrada, apareciam
+    antes de itens com página bem menor do mesmo dia), ele fica no fim do dia
+    em ordem crescente (e, simetricamente, no topo em ordem decrescente) —
+    geralmente são mesmo andamentos administrativos que fecham o dia
+    (disponibilização no DJ, decurso de prazo etc.), não o contrário."""
     _get_caso(db, caso_id)
     limit = max(1, min(limit, 200))
-
-    chave_ordem = func.coalesce(
-        AndamentoProcesso.protocolado_em,
-        cast(AndamentoProcesso.data_andamento, DateTime(timezone=True)),
-    )
 
     base = (
         db.query(AutosIAPeca)
@@ -668,9 +713,26 @@ def listar_documentos_drive(
             AndamentoProcesso.arquivo_nome.ilike(termo),
         ))
     if ordem == "asc":
-        base = base.order_by(chave_ordem.asc().nulls_last(), AutosIAPeca.pagina_inicio.asc())
+        base = base.order_by(
+            AndamentoProcesso.data_andamento.asc().nulls_last(),
+            AndamentoProcesso.protocolado_em.asc().nulls_last(),
+            AutosIAPeca.pagina_inicio.asc(),
+        )
     else:
-        base = base.order_by(chave_ordem.desc().nulls_last(), AutosIAPeca.pagina_inicio.desc())
+        base = base.order_by(
+            AndamentoProcesso.data_andamento.desc().nulls_last(),
+            AndamentoProcesso.protocolado_em.desc().nulls_first(),
+            # pagina_inicio SEMPRE crescente, mesmo aqui: ele só desempata
+            # principais de mesmo dia+hora (mesmo lote de submissão) — a
+            # ordem decrescente é dos LOTES entre si (o mais recente primeiro),
+            # nunca de "quem" veio primeiro DENTRO do mesmo lote. Invertido
+            # aqui mostraria documento antes da petição que o originou sempre
+            # que os dois batessem no mesmo timestamp — exatamente o efeito
+            # que não é desejado (petição 13/doc 14/doc 15 tem que aparecer
+            # nessa ordem, nunca 15-14-13, mesmo com o lote 10-11-12 vindo
+            # depois por inteiro).
+            AutosIAPeca.pagina_inicio.asc(),
+        )
     principais = base.offset(max(0, offset)).limit(limit).all()
 
     anexos: list[AutosIAPeca] = []
