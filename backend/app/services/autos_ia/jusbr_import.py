@@ -252,8 +252,19 @@ def sincronizar_caso_jusbr(db: Session, caso: AutosIACaso, session_data: dict | 
             caso.ultimo_sync_mensagem = f"{novas} peça(s) nova(s) importada(s)."
     except Exception as exc:
         logger.warning("Autos IA: erro ao sincronizar caso %s: %s", caso.id, exc)
+        # A falha acima pode ter deixado a transação em estado de erro no
+        # Postgres — sem rollback aqui, o db.commit() do finally (que grava
+        # o status "erro" pro usuário ver) falha em cascata com
+        # PendingRollbackError, e é ESSA mensagem confusa que aparecia na
+        # tela em vez do erro real. Mesmo cuidado já usado em
+        # resumir_pecas_em_paralelo/reler_pecas_pendentes.
+        try:
+            db.rollback()
+        except Exception:
+            logger.error("Rollback falhou ao sincronizar caso %s — conexão morta", caso.id)
+        caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso.id).first() or caso
         caso.ultimo_sync_status = "erro"
-        caso.ultimo_sync_mensagem = str(exc)
+        caso.ultimo_sync_mensagem = str(exc)[:2000]
     finally:
         caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
         db.commit()
@@ -292,8 +303,15 @@ def atualizar_metadados_jusbr(db: Session, caso: AutosIACaso, session_data: dict
         )
     except Exception as exc:
         logger.warning("Autos IA: erro ao atualizar metadados do caso %s: %s", caso.id, exc)
+        # Mesmo cuidado de sincronizar_caso_jusbr logo acima: sem rollback, o
+        # commit do finally falha em cascata com PendingRollbackError.
+        try:
+            db.rollback()
+        except Exception:
+            logger.error("Rollback falhou ao atualizar metadados do caso %s — conexão morta", caso.id)
+        caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso.id).first() or caso
         caso.ultimo_sync_status = "erro"
-        caso.ultimo_sync_mensagem = str(exc)
+        caso.ultimo_sync_mensagem = str(exc)[:2000]
     finally:
         caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
         db.commit()
@@ -627,8 +645,16 @@ def importar_apenas_existentes(db: Session, caso: AutosIACaso) -> None:
             caso.ultimo_sync_mensagem = f"{novas} peça(s) importada(s) a partir dos documentos já baixados."
     except Exception as exc:
         logger.warning("Autos IA: erro ao importar existentes do caso %s: %s", caso.id, exc)
+        # Mesmo cuidado de sincronizar_caso_jusbr/atualizar_metadados_jusbr:
+        # sem rollback, o commit do finally falha em cascata com
+        # PendingRollbackError.
+        try:
+            db.rollback()
+        except Exception:
+            logger.error("Rollback falhou ao importar existentes do caso %s — conexão morta", caso.id)
+        caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso.id).first() or caso
         caso.ultimo_sync_status = "erro"
-        caso.ultimo_sync_mensagem = str(exc)
+        caso.ultimo_sync_mensagem = str(exc)[:2000]
     finally:
         caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
         db.commit()

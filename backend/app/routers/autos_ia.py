@@ -336,8 +336,16 @@ def _executar_reagrupar_em_background(caso_id: uuid.UUID) -> None:
                 caso.ultimo_sync_status = "ok"
                 caso.ultimo_sync_mensagem = f"{total} peça(s) reagrupada(s) (petição/anexo)."
             except Exception as exc:
+                # Sem rollback aqui, o commit do finally falha em cascata com
+                # PendingRollbackError quando a falha acima deixa a transação
+                # em estado de erro (mesmo cuidado usado no resto do módulo).
+                try:
+                    db.rollback()
+                except Exception:
+                    logger.error("Rollback falhou ao reagrupar caso %s — conexão morta", caso_id)
+                caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first() or caso
                 caso.ultimo_sync_status = "erro"
-                caso.ultimo_sync_mensagem = str(exc)
+                caso.ultimo_sync_mensagem = str(exc)[:2000]
             finally:
                 caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
                 db.commit()
@@ -373,8 +381,15 @@ def _executar_recalcular_ids_em_background(caso_id: uuid.UUID) -> None:
                     f"{atualizadas} peça(s) com ID corrigido, {reconectadas} referência(s) reconectada(s)."
                 )
             except Exception as exc:
+                # Mesmo cuidado do reagrupar logo acima: sem rollback, o
+                # commit do finally falha em cascata com PendingRollbackError.
+                try:
+                    db.rollback()
+                except Exception:
+                    logger.error("Rollback falhou ao recalcular IDs do caso %s — conexão morta", caso_id)
+                caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first() or caso
                 caso.ultimo_sync_status = "erro"
-                caso.ultimo_sync_mensagem = str(exc)
+                caso.ultimo_sync_mensagem = str(exc)[:2000]
             finally:
                 caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
                 db.commit()
