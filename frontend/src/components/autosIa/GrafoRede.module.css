@@ -226,7 +226,7 @@
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.25);
   opacity: 0;
   transition: opacity 0.1s;
-  z-index: 50;
+  z-index: 8;
 }
 .ttTipo {
   font-size: 9.5px;
