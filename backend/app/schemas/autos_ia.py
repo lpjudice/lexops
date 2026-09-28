@@ -177,6 +177,7 @@ class GrafoNo(BaseModel):
     pagina_inicio: int
     pagina_fim: int
     peca_pai_id: uuid.UUID | None = None
+    arquivo_drive_link: str | None = None
 
 
 class GrafoAresta(BaseModel):

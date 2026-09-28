@@ -116,17 +116,41 @@ _PADRAO_DOC_N = re.compile(r"^doc\.?\s*0*(\d+)(?:\.\d+)?$", re.IGNORECASE)
 _PADRAO_ARQUIVO_DOC_N = re.compile(r"\(doc\.?\s*0*(\d+)\)", re.IGNORECASE)
 
 
+_ID_MINIMO_DIGITOS = 6
+
+
 def _eh_citacao_nao_indexavel(texto: str) -> bool:
     """Citações que por natureza nunca correspondem a uma peça indexada deste
     caso: número de página ("fls. 228/232" — aponta um trecho DENTRO de um
-    documento já referenciado por outro ID, não um documento em si) e número
-    de processo no formato CNJ (aponta um PROCESSO inteiro — pode ser o
-    próprio processo deste caso ou outro processo qualquer, nunca uma peça
-    individual). Persistir essas como AutosIAReferencia só cria um chip
-    cinza "não localizado" pra sempre, sem propósito — pedido do Lucas pra
-    não ter ruído nas menções."""
-    limpo = texto.strip().replace(" ", "")
-    return bool(_PADRAO_FLS.match(texto.strip())) or bool(_PADRAO_CNJ.match(limpo))
+    documento já referenciado por outro ID, não um documento em si), número de
+    processo no formato CNJ, e qualquer outra citação que não seja um ID de
+    peça de verdade — jurisprudência (REsp, AREsp, Súmula, Informativo...),
+    pareceres/decisões referidos por data ("Parecer do MP de 10/09/2026"),
+    ou um número curto/local (2-3 dígitos) que não é o ID global do jus.br.
+
+    A regra central: no PJE (nosso foco agora), um ID de peça É SEMPRE um
+    número puro de 6+ dígitos (com ou sem rótulo "Id./Num./Evento/Protocolo"
+    na frente — removido por _normalizar_id antes de chegar aqui). Qualquer
+    citação cujo texto, depois de normalizado, sobre com UMA LETRA SEQUER
+    (ex.: "REsp nº 2.164.771/SP", "CC nº 147.927/SP", "Súmula 417 STF") não é
+    um ID de peça — é jurisprudência, número de processo ou texto livre, e
+    não tem pra que virar um chip cinza "não localizado" pra sempre.
+    "DOC. N" é a exceção: não é um ID global, mas resolve localmente contra
+    os anexos do mesmo grupo (ver _resolver_doc_n_local) — precisa continuar
+    indexável mesmo não sendo um número puro. Pedido do Lucas pra não ter
+    ruído nas menções."""
+    bruto = texto.strip()
+    if _PADRAO_FLS.match(bruto):
+        return True
+    if _PADRAO_CNJ.match(bruto.replace(" ", "")):
+        return True
+    if _PADRAO_DOC_N.match(bruto):
+        return False
+    # Regra geral (cobre CNJ com rótulo na frente, jurisprudência, texto livre
+    # etc. sem precisar de um padrão específico pra cada formato): um ID de
+    # peça de verdade normaliza pra dígitos puros — sobrou letra, não é ID.
+    normalizado = _normalizar_id(bruto)
+    return not (normalizado.isdigit() and len(normalizado) >= _ID_MINIMO_DIGITOS)
 
 
 def _grupo_da_peca(db: Session, peca: AutosIAPeca) -> list[AutosIAPeca]:

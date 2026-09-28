@@ -226,7 +226,7 @@
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.25);
   opacity: 0;
   transition: opacity 0.1s;
-  z-index: 50;
+  z-index: 8;
 }
 .ttTipo {
   font-size: 9.5px;
@@ -262,6 +262,18 @@
   font-size: 14px;
 }
 .panelClose:hover { color: var(--dark); }
+.driveLink {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--teal);
+  text-decoration: none;
+  margin-left: 6px;
+}
+.driveLink:hover { text-decoration: underline; }
+
 .tipoPill {
   display: inline-block;
   font-size: 10px;

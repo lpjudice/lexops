@@ -141,6 +141,7 @@ export default function GrafoRede({ nos, arestas }: Props) {
           <div class="${styles.panel}" data-role="panel">
             <button type="button" class="${styles.panelClose}" data-role="panelClose" aria-label="Fechar">✕</button>
             <span class="${styles.tipoPill}" data-role="pTipo"></span>
+            <a class="${styles.driveLink}" data-role="pDrive" href="#" target="_blank" rel="noreferrer" title="Abrir no Drive" aria-label="Abrir no Drive">↗</a>
             <h2 class="${styles.panelTitulo}" data-role="pTitulo"></h2>
             <div class="${styles.panelMeta}" data-role="pMeta"></div>
             <button type="button" class="${styles.fixBtn}" data-role="pFixar">📌 Fixar estas conexões</button>
@@ -300,9 +301,17 @@ export default function GrafoRede({ nos, arestas }: Props) {
       .attr('text-anchor', 'middle')
       .text((d) => (d.titulo.length > 26 ? d.titulo.slice(0, 26) + '…' : d.titulo))
 
+    const TOOLTIP_LARGURA = 260
     function mostrarTooltip(event: MouseEvent, d: NoInterno) {
-      tooltip.style.left = `${event.clientX + 14}px`
-      tooltip.style.top = `${event.clientY + 10}px`
+      // Não sobrepõe o painel de detalhe (aberto ou não): a régua da direita
+      // é o painel quando aberto, senão a própria janela — sem isso o
+      // tooltip ficava por cima do painel, com fundo escuro, tapando o
+      // resumo real que o clique já tinha aberto ali.
+      const panelAberto = panel.classList.contains(styles.panelOpen)
+      const limiteDireita = (panelAberto ? panel.getBoundingClientRect().left : window.innerWidth) - 12
+      const esquerda = Math.min(event.clientX + 14, limiteDireita - TOOLTIP_LARGURA)
+      tooltip.style.left = `${Math.max(8, esquerda)}px`
+      tooltip.style.top = `${Math.min(event.clientY + 10, window.innerHeight - 130)}px`
       tooltip.style.opacity = '1'
       const resumoTrecho = d.resumo ? `<div class="${styles.ttKw}">${escapeHtml(d.resumo.slice(0, 120))}${d.resumo.length > 120 ? '…' : ''}</div>` : ''
       const kwTrecho = d.keywords && d.keywords.length ? `<div class="${styles.ttKw}">${d.keywords.map(escapeHtml).join(' · ')}</div>` : ''
@@ -315,7 +324,7 @@ export default function GrafoRede({ nos, arestas }: Props) {
     nodeSel
       .on('mousemove', (event, d) => mostrarTooltip(event, d))
       .on('mouseleave', esconderTooltip)
-      .on('click', (_event, d) => irPara(d.id))
+      .on('click', (_event, d) => { esconderTooltip(); irPara(d.id) })
 
     sim.on('tick', () => {
       edgeSel.attr('d', (d) => {
@@ -409,6 +418,7 @@ export default function GrafoRede({ nos, arestas }: Props) {
     }
 
     function selecionar(id: string) {
+      esconderTooltip()
       selecionadoId = id
       const d = byId.get(id)
       if (!d) return
@@ -428,6 +438,9 @@ export default function GrafoRede({ nos, arestas }: Props) {
 
       q<HTMLSpanElement>('[data-role="pTipo"]').textContent = NOME_TIPO[d.tipo]
       q<HTMLSpanElement>('[data-role="pTipo"]').style.background = COR_POR_TIPO[d.tipo]
+      const linkDrive = q<HTMLAnchorElement>('[data-role="pDrive"]')
+      linkDrive.style.display = d.arquivo_drive_link ? 'inline-flex' : 'none'
+      if (d.arquivo_drive_link) linkDrive.href = d.arquivo_drive_link
       q<HTMLHeadingElement>('[data-role="pTitulo"]').textContent = d.titulo
       const paginas = d.pagina_inicio === d.pagina_fim ? `p. ${d.pagina_inicio}` : `p. ${d.pagina_inicio}–${d.pagina_fim}`
       q<HTMLDivElement>('[data-role="pMeta"]').innerHTML =

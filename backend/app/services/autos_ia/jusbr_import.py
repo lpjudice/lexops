@@ -19,10 +19,13 @@ from sqlalchemy.orm import Session
 from app.models.andamento import AndamentoProcesso
 from app.models.autos_ia import AutosIACaso, AutosIAPeca, AutosIAReferencia
 from app.services.autos_ia.ingestao import (
+    _eh_citacao_nao_indexavel,
+    _normalizar_id,
     _persistir_referencias,
     _resolver_referencias_pendentes,
     resumir_pecas_em_paralelo,
 )
+from app.services.autos_ia.resumo import resumir_peca
 from app.services.autos_ia.segmentacao import TIPOS_VALIDOS
 from app.services.pdf_extract import remover_nul
 
@@ -432,34 +435,113 @@ def recalcular_ids_processuais(db: Session, caso: AutosIACaso) -> tuple[int, int
     reatribui isso e desfaria uma reorganização manual feita pelo usuário).
     Corrige tanto peças sem id_processual quanto as que ficaram com um número
     curto/local errado (ex.: "107", "Evento 57") vindo do palpite da IA antes
-    dessa fonte existir. Retorna (peças atualizadas, referências reconectadas)."""
+    dessa fonte existir — e quando não há documento_id disponível pra corrigir
+    (andamento sem essa informação), LIMPA um id_processual que não pareça um
+    ID de peça de verdade (mesma regra de _eh_citacao_nao_indexavel: só dígitos
+    puros de 6+ conta), pra não deixar lixo tipo "107" na tela como se fosse um
+    ID válido. Por fim, apaga referências já persistidas que continuam sem
+    destino E não são mais indexáveis pela regra atual (jurisprudência,
+    número de processo, texto livre) — ruído que uma versão antiga desta
+    função persistiu antes do filtro existir. Retorna (peças atualizadas,
+    referências reconectadas)."""
     antes_nao_localizadas = (
         db.query(AutosIAReferencia)
         .filter(AutosIAReferencia.caso_id == caso.id, AutosIAReferencia.peca_destino_id.is_(None))
         .count()
     )
 
-    pecas_com_andamento = (
-        db.query(AutosIAPeca, AndamentoProcesso.documento_id)
-        .join(AndamentoProcesso, AutosIAPeca.andamento_id == AndamentoProcesso.id)
-        .filter(AutosIAPeca.caso_id == caso.id, AndamentoProcesso.documento_id.isnot(None))
+    pecas = (
+        db.query(AutosIAPeca)
+        .filter(AutosIAPeca.caso_id == caso.id, AutosIAPeca.andamento_id.isnot(None))
         .all()
     )
+    andamentos = {
+        a.id: a for a in db.query(AndamentoProcesso)
+        .filter(AndamentoProcesso.id.in_([p.andamento_id for p in pecas]))
+        .all()
+    }
     atualizadas = 0
-    for peca, documento_id in pecas_com_andamento:
-        novo = documento_id[:100]
-        if peca.id_processual != novo:
-            peca.id_processual = novo
-            atualizadas += 1
+    for peca in pecas:
+        andamento = andamentos.get(peca.andamento_id)
+        documento_id = andamento.documento_id[:100] if andamento and andamento.documento_id else None
+        if documento_id:
+            if peca.id_processual != documento_id:
+                peca.id_processual = documento_id
+                atualizadas += 1
+        elif peca.id_processual:
+            normalizado = _normalizar_id(peca.id_processual)
+            if not (normalizado.isdigit() and len(normalizado) >= 6):
+                peca.id_processual = None
+                atualizadas += 1
     db.commit()
 
     _resolver_referencias_pendentes(db, caso.id)
+
+    pendentes = (
+        db.query(AutosIAReferencia)
+        .filter(AutosIAReferencia.caso_id == caso.id, AutosIAReferencia.peca_destino_id.is_(None))
+        .all()
+    )
+    for ref in pendentes:
+        if _eh_citacao_nao_indexavel(ref.id_mencionado):
+            db.delete(ref)
+    db.commit()
+
     depois_nao_localizadas = (
         db.query(AutosIAReferencia)
         .filter(AutosIAReferencia.caso_id == caso.id, AutosIAReferencia.peca_destino_id.is_(None))
         .count()
     )
     return atualizadas, antes_nao_localizadas - depois_nao_localizadas
+
+
+def reler_peca(db: Session, peca: AutosIAPeca) -> None:
+    """Rebaixa e reprocessa UMA peça específica que falhou (ou ficou
+    incompleta) na leitura original — baixa de novo do Drive (já com o fix de
+    Google Doc/Planilha/Apresentação nativos, ver google_drive.
+    baixar_arquivo_por_id) e roda a IA de resumo só nela. Sempre uma peça de
+    cada vez: nunca reprocessa o caso inteiro, só o que pontualmente falhou —
+    pedido do Lucas pra poder corrigir leituras ruins sem sobrecarregar o
+    sistema de novo."""
+    if not peca.andamento_id:
+        raise ValueError("Esta peça não veio do jus.br — releitura ainda não é suportada para uploads manuais.")
+    andamento = db.query(AndamentoProcesso).filter(AndamentoProcesso.id == peca.andamento_id).first()
+    if not andamento:
+        raise ValueError("Andamento de origem não encontrado.")
+
+    conteudo = _obter_bytes(andamento)
+    if not conteudo:
+        raise ValueError("Não foi possível baixar o arquivo do Drive novamente.")
+    texto = _extrair_texto(conteudo, andamento.arquivo_nome)
+    if not texto or not texto.strip():
+        raise ValueError("O arquivo foi baixado, mas não foi possível extrair texto dele.")
+    peca.texto_md = remover_nul(texto)
+
+    resultado = resumir_peca(peca.texto_md, peca.titulo, peca.tipo)
+    peca.resumo = resultado.resumo
+    peca.keywords = [k[:100] for k in (resultado.keywords or [])]
+    peca.ids_mencionados = [i[:100] for i in (resultado.ids_mencionados or [])]
+    peca.custo_usd = (peca.custo_usd or 0) + resultado.custo_usd
+    peca.status = "resumida"
+    peca.erro_mensagem = None
+    if not peca.autor and resultado.peticionante:
+        peca.autor = resultado.peticionante[:255]
+    if resultado.id_proprio and not peca.id_processual:
+        peca.id_processual = resultado.id_proprio[:100]
+    if peca.peca_pai_id is None:
+        peca.tipo = resultado.tipo
+
+    caso = db.query(AutosIACaso).filter(AutosIACaso.id == peca.caso_id).first()
+    if caso:
+        caso.custo_usd_total = (caso.custo_usd_total or 0) + resultado.custo_usd
+    db.commit()
+
+    # Apaga as referências antigas desta peça antes de persistir as novas —
+    # senão uma releitura duplicava toda menção que já tinha sido salva na
+    # primeira leitura (mesma origem, texto novo, IDs mencionados diferentes).
+    db.query(AutosIAReferencia).filter(AutosIAReferencia.peca_origem_id == peca.id).delete()
+    db.commit()
+    _persistir_referencias(db, peca, peca.ids_mencionados)
 
 
 def importar_apenas_existentes(db: Session, caso: AutosIACaso) -> None:

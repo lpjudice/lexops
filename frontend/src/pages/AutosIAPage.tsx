@@ -2,8 +2,12 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { autosIa } from '../api/autosIa'
+import type { CasoResumo } from '../api/autosIa'
 import ProcessoCombobox from '../components/autosIa/ProcessoCombobox'
+import Modal from '../components/Modal'
 import styles from './Page.module.css'
+
+const CONFIRMACAO_EXCLUSAO = 'DELETAR'
 
 export default function AutosIAPage() {
   const navigate = useNavigate()
@@ -15,6 +19,7 @@ export default function AutosIAPage() {
   const [processoId, setProcessoId] = useState('')
   const [syncAtivo, setSyncAtivo] = useState(false)
   const [importarExistentes, setImportarExistentes] = useState(true)
+  const [casoParaExcluir, setCasoParaExcluir] = useState<CasoResumo | null>(null)
 
   const { data: casos = [], isLoading } = useQuery({
     queryKey: ['autos-ia', 'casos'],
@@ -23,8 +28,14 @@ export default function AutosIAPage() {
 
   const deletar = useMutation({
     mutationFn: (casoId: string) => autosIa.deletarCaso(casoId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'casos'] }),
-    onError: (e: any) => alert(`Erro ao excluir: ${e?.response?.data?.detail || e?.message}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'casos'] })
+      setCasoParaExcluir(null)
+    },
+    onError: (e: any) => {
+      setCasoParaExcluir(null)
+      alert(`Erro ao excluir: ${e?.response?.data?.detail || e?.message}`)
+    },
   })
 
   const criar = useMutation({
@@ -182,11 +193,7 @@ export default function AutosIAPage() {
                       className={styles.btnDanger}
                       disabled={deletar.isPending || c.ultimo_sync_status === 'processando'}
                       title={c.ultimo_sync_status === 'processando' ? 'Cancele a sincronização em andamento antes de excluir' : undefined}
-                      onClick={() => {
-                        if (window.confirm(`Excluir o caso "${c.nome}"? Apaga todas as peças, o grafo e as perguntas já indexadas — não pode ser desfeito.`)) {
-                          deletar.mutate(c.id)
-                        }
-                      }}
+                      onClick={() => setCasoParaExcluir(c)}
                     >
                       Excluir
                     </button>
@@ -197,6 +204,51 @@ export default function AutosIAPage() {
           </table>
         </div>
       )}
+
+      {casoParaExcluir && (
+        <ModalConfirmarExclusao
+          nomeCaso={casoParaExcluir.nome}
+          isPending={deletar.isPending}
+          onConfirmar={() => deletar.mutate(casoParaExcluir.id)}
+          onClose={() => setCasoParaExcluir(null)}
+        />
+      )}
     </div>
+  )
+}
+
+function ModalConfirmarExclusao({
+  nomeCaso, isPending, onConfirmar, onClose,
+}: { nomeCaso: string; isPending: boolean; onConfirmar: () => void; onClose: () => void }) {
+  const [texto, setTexto] = useState('')
+  const confirmado = texto.trim() === CONFIRMACAO_EXCLUSAO
+
+  return (
+    <Modal title="Excluir caso" onClose={onClose}>
+      <p style={{ fontSize: 13, lineHeight: 1.5, marginBottom: 12 }}>
+        Excluir <strong>"{nomeCaso}"</strong>? Apaga todas as peças, o grafo e as perguntas já
+        indexadas — todo o custo e tempo de leitura já gastos nesse caso se perdem, e não pode ser desfeito.
+      </p>
+      <p style={{ fontSize: 12.5, marginBottom: 6 }}>
+        Digite <strong>{CONFIRMACAO_EXCLUSAO}</strong> para confirmar:
+      </p>
+      <input
+        className={styles.input}
+        value={texto}
+        onChange={(e) => setTexto(e.target.value)}
+        placeholder={CONFIRMACAO_EXCLUSAO}
+        autoFocus
+      />
+      <div style={{ display: 'flex', gap: 8, marginTop: 14, justifyContent: 'flex-end' }}>
+        <button className={styles.btnSmall} onClick={onClose}>Cancelar</button>
+        <button
+          className={styles.btnDanger}
+          disabled={!confirmado || isPending}
+          onClick={onConfirmar}
+        >
+          {isPending ? 'Excluindo...' : 'Excluir definitivamente'}
+        </button>
+      </div>
+    </Modal>
   )
 }

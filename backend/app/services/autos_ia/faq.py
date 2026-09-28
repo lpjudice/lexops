@@ -1,5 +1,16 @@
-"""Respostas pré-mapeadas: cada pergunta é respondida com base nos resumos das peças
-mais relevantes (busca por tema), citando expressamente as peças usadas como fonte."""
+"""Respostas pré-mapeadas: cada pergunta é respondida com base no TEXTO INTEGRAL das
+peças mais relevantes (busca por tema, full-text sobre título/resumo/texto/palavras-chave —
+ver busca.py), citando expressamente as peças usadas como fonte.
+
+Antes disso, o contexto mandado pra IA responder era só o RESUMO de cada peça — a busca
+(que olha o texto inteiro) até achava a peça certa, mas qualquer detalhe que o resumo (uma
+compressão) tivesse deixado de fora — um nome de parte específico, por exemplo — ficava
+invisível pra IA de resposta, mesmo estando bem ali no documento original. Reproduzido de
+verdade no Apex: pergunta pelo pedido de um peticionário específico achou a peça certa (via
+busca) mas respondeu "não encontrado" porque o nome não estava no resumo dela. Texto
+integral custa mais tokens/tempo por pergunta — LIMITE_PECAS_CONTEXTO foi reduzido de 15
+pra 8 pra compensar, e cada peça é truncada a um teto generoso (ver _TETO_CHARS_POR_PECA)
+contra o caso patológico de uma peça de centenas de páginas."""
 import logging
 
 from sqlalchemy.orm import Session
@@ -9,13 +20,14 @@ from app.services.autos_ia.busca import buscar_pecas
 
 logger = logging.getLogger(__name__)
 
-LIMITE_PECAS_CONTEXTO = 15
+LIMITE_PECAS_CONTEXTO = 8
+_TETO_CHARS_POR_PECA = 40_000
 
 SYSTEM_PROMPT = (
     "Você é um assistente jurídico que responde perguntas sobre um processo judicial com base "
-    "EXCLUSIVAMENTE nos resumos de peças fornecidos como contexto. Se o contexto não for suficiente "
-    "para responder com segurança, diga isso claramente em vez de especular. Sempre que citar um fato, "
-    "mencione a peça de origem (título e páginas)."
+    "EXCLUSIVAMENTE no texto integral das peças fornecidas como contexto. Se o contexto não for "
+    "suficiente para responder com segurança, diga isso claramente em vez de especular. Sempre que "
+    "citar um fato, mencione a peça de origem (título e páginas)."
 )
 
 
@@ -27,7 +39,8 @@ def _montar_contexto(pecas: list[AutosIAPeca]) -> str:
             cabecalho += f" — {p.data_peca.isoformat()}"
         if p.id_processual:
             cabecalho += f" — ID {p.id_processual}"
-        blocos.append(f"{cabecalho}\n{p.resumo or '(sem resumo ainda)'}")
+        texto = (p.texto_md or p.resumo or "(sem texto disponível)")[:_TETO_CHARS_POR_PECA]
+        blocos.append(f"{cabecalho}\n{texto}")
     return "\n\n".join(blocos)
 
 
@@ -52,10 +65,10 @@ def responder_pergunta(db: Session, pergunta_obj: AutosIAPerguntaFaq) -> None:
             db, pergunta_obj.caso_id, query=pergunta_obj.pergunta,
             incluir_anexos=True, limite=LIMITE_PECAS_CONTEXTO,
         )
-        pecas = [p for p in pecas if p.resumo]
+        pecas = [p for p in pecas if p.texto_md and p.texto_md.strip()]
         if not pecas:
             pergunta_obj.resposta = (
-                "Ainda não há peças resumidas relacionadas a essa pergunta neste caso."
+                "Ainda não há peças lidas relacionadas a essa pergunta neste caso."
             )
             pergunta_obj.pecas_relacionadas = []
         else:
