@@ -1076,31 +1076,61 @@ class DownloadPulado(Exception):
     warning nem tentar o refresh de token/retry."""
 
 
+# Google Doc/Planilha/Apresentação nativos (criados pelo próprio Drive, não um
+# upload de PDF/HTML) não têm bytes crus pra baixar — "alt=media" sempre falha
+# nesses (Google recusa com 403). Precisam do endpoint de export, cada um só
+# aceita um conjunto próprio de formatos de saída; texto/HTML é o que interessa
+# aqui (a peça já sabe extrair texto de HTML — ver _extrair_texto). Reproduzido
+# de verdade no Apex: decisões cujo link do Drive é um Google Doc nativo
+# (".../document/d/.../edit") ficavam com "download falhou", texto_extraido
+# vazio, e a peça caía pro fallback de só a descrição genérica do andamento —
+# indistinguível de um documento que de fato não tem conteúdo.
+_GOOGLE_NATIVE_EXPORT_MIME = {
+    "application/vnd.google-apps.document": "text/html",
+    "application/vnd.google-apps.spreadsheet": "text/csv",
+    "application/vnd.google-apps.presentation": "text/plain",
+}
+
+
 def baixar_arquivo_por_id(
     file_id: str,
     on_status: Callable[[str], None] | None = None,
     deve_parar: Callable[[], bool] | None = None,
 ) -> bytes | None:
-    """Baixa o conteúdo bruto de um arquivo do Drive pelo ID (alt=media).
-    `on_status(msg)`, quando informado, recebe atualizações de progresso do
-    download (a cada ~1MB baixado, com % quando o tamanho total é conhecido)
-    — sem isso, um arquivo grande (dezenas de MB) fica sem NENHUM sinal de
-    vida na tela até o download inteiro terminar, indistinguível de uma
-    trava real. `deve_parar()`, quando informado e retornando True,
-    interrompe o download no meio (pedido de "pular este documento") —
-    retorna None nesse caso (um PDF truncado no meio dos bytes não é um
-    arquivo válido, então não há proveito em devolver o que foi baixado até
-    ali)."""
+    """Baixa o conteúdo bruto de um arquivo do Drive pelo ID (alt=media, ou
+    export quando é um Google Doc/Planilha/Apresentação nativo — ver
+    _GOOGLE_NATIVE_EXPORT_MIME). `on_status(msg)`, quando informado, recebe
+    atualizações de progresso do download (a cada ~1MB baixado, com % quando o
+    tamanho total é conhecido) — sem isso, um arquivo grande (dezenas de MB)
+    fica sem NENHUM sinal de vida na tela até o download inteiro terminar,
+    indistinguível de uma trava real. `deve_parar()`, quando informado e
+    retornando True, interrompe o download no meio (pedido de "pular este
+    documento") — retorna None nesse caso (um PDF truncado no meio dos bytes
+    não é um arquivo válido, então não há proveito em devolver o que foi
+    baixado até ali)."""
     tokens = _load_tokens()
     if not tokens:
         return None
 
+    def _mime_tipo(tkns: dict) -> str | None:
+        h = _auth_headers(tkns)
+        r = httpx.get(
+            f"{DRIVE_META}/files/{file_id}",
+            headers=h, params={"fields": "mimeType", "supportsAllDrives": True}, timeout=30,
+        )
+        r.raise_for_status()
+        return r.json().get("mimeType")
+
     def _do(tkns: dict) -> bytes:
         h = _auth_headers(tkns)
-        with httpx.stream(
-            "GET", f"{DRIVE_META}/files/{file_id}",
-            headers=h, params={"alt": "media", "supportsAllDrives": True}, timeout=60,
-        ) as r:
+        try:
+            mime = _mime_tipo(tkns)
+        except Exception:
+            mime = None
+        export_mime = _GOOGLE_NATIVE_EXPORT_MIME.get(mime or "")
+        url = f"{DRIVE_META}/files/{file_id}/export" if export_mime else f"{DRIVE_META}/files/{file_id}"
+        params = {"mimeType": export_mime, "supportsAllDrives": True} if export_mime else {"alt": "media", "supportsAllDrives": True}
+        with httpx.stream("GET", url, headers=h, params=params, timeout=60) as r:
             r.raise_for_status()
             total_bytes = r.headers.get("content-length")
             total_mb = int(total_bytes) / (1024 * 1024) if total_bytes else None
