@@ -1009,6 +1009,19 @@ function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | Document
     },
   })
 
+  const reler = useMutation({
+    mutationFn: () => autosIa.relerPeca(doc.id),
+    onSuccess: () => {
+      // A releitura roda em segundo plano (download + IA) — sem polling
+      // dedicado pra essa única peça, o "Relendo..." nunca saía da tela
+      // sozinho. Não é elegante, mas cobre o caso comum (poucos segundos).
+      invalidarDocumentos()
+      setTimeout(invalidarDocumentos, 5000)
+      setTimeout(invalidarDocumentos, 12000)
+    },
+    onError: (e: any) => alert(`Erro ao reler: ${e?.response?.data?.detail || e?.message}`),
+  })
+
   const salvarAnotacao = useMutation({
     mutationFn: () => autosIa.atualizarAnotacaoPeca(doc.id, {
       titulo_customizado: rascunhoTitulo.trim() || null,
@@ -1085,6 +1098,17 @@ function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | Document
           )}
           <span className={styles.tipoBadge}>{doc.tipo}</span>
           {doc.erro_mensagem && <span className={styles.docAvisoLeitura} title={doc.erro_mensagem}>⚠</span>}
+          {doc.erro_mensagem && (
+            <button
+              type="button"
+              className={styles.docTogglePeticao}
+              disabled={reler.isPending || doc.status === 'pendente_resumo'}
+              onClick={() => reler.mutate()}
+              title="Baixa o arquivo de novo do Drive e gera um resumo novo — só esta peça"
+            >
+              {reler.isPending || doc.status === 'pendente_resumo' ? 'Relendo...' : 'Reler documento'}
+            </button>
+          )}
           {temAnexos && <span className={styles.docAnexosCount}>{anexos.length} anexo{anexos.length > 1 ? 's' : ''}</span>}
           <button
             type="button"

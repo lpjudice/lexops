@@ -25,6 +25,7 @@ from app.services.autos_ia.ingestao import (
     _resolver_referencias_pendentes,
     resumir_pecas_em_paralelo,
 )
+from app.services.autos_ia.resumo import resumir_peca
 from app.services.autos_ia.segmentacao import TIPOS_VALIDOS
 from app.services.pdf_extract import remover_nul
 
@@ -492,6 +493,55 @@ def recalcular_ids_processuais(db: Session, caso: AutosIACaso) -> tuple[int, int
         .count()
     )
     return atualizadas, antes_nao_localizadas - depois_nao_localizadas
+
+
+def reler_peca(db: Session, peca: AutosIAPeca) -> None:
+    """Rebaixa e reprocessa UMA peça específica que falhou (ou ficou
+    incompleta) na leitura original — baixa de novo do Drive (já com o fix de
+    Google Doc/Planilha/Apresentação nativos, ver google_drive.
+    baixar_arquivo_por_id) e roda a IA de resumo só nela. Sempre uma peça de
+    cada vez: nunca reprocessa o caso inteiro, só o que pontualmente falhou —
+    pedido do Lucas pra poder corrigir leituras ruins sem sobrecarregar o
+    sistema de novo."""
+    if not peca.andamento_id:
+        raise ValueError("Esta peça não veio do jus.br — releitura ainda não é suportada para uploads manuais.")
+    andamento = db.query(AndamentoProcesso).filter(AndamentoProcesso.id == peca.andamento_id).first()
+    if not andamento:
+        raise ValueError("Andamento de origem não encontrado.")
+
+    conteudo = _obter_bytes(andamento)
+    if not conteudo:
+        raise ValueError("Não foi possível baixar o arquivo do Drive novamente.")
+    texto = _extrair_texto(conteudo, andamento.arquivo_nome)
+    if not texto or not texto.strip():
+        raise ValueError("O arquivo foi baixado, mas não foi possível extrair texto dele.")
+    peca.texto_md = remover_nul(texto)
+
+    resultado = resumir_peca(peca.texto_md, peca.titulo, peca.tipo)
+    peca.resumo = resultado.resumo
+    peca.keywords = [k[:100] for k in (resultado.keywords or [])]
+    peca.ids_mencionados = [i[:100] for i in (resultado.ids_mencionados or [])]
+    peca.custo_usd = (peca.custo_usd or 0) + resultado.custo_usd
+    peca.status = "resumida"
+    peca.erro_mensagem = None
+    if not peca.autor and resultado.peticionante:
+        peca.autor = resultado.peticionante[:255]
+    if resultado.id_proprio and not peca.id_processual:
+        peca.id_processual = resultado.id_proprio[:100]
+    if peca.peca_pai_id is None:
+        peca.tipo = resultado.tipo
+
+    caso = db.query(AutosIACaso).filter(AutosIACaso.id == peca.caso_id).first()
+    if caso:
+        caso.custo_usd_total = (caso.custo_usd_total or 0) + resultado.custo_usd
+    db.commit()
+
+    # Apaga as referências antigas desta peça antes de persistir as novas —
+    # senão uma releitura duplicava toda menção que já tinha sido salva na
+    # primeira leitura (mesma origem, texto novo, IDs mencionados diferentes).
+    db.query(AutosIAReferencia).filter(AutosIAReferencia.peca_origem_id == peca.id).delete()
+    db.commit()
+    _persistir_referencias(db, peca, peca.ids_mencionados)
 
 
 def importar_apenas_existentes(db: Session, caso: AutosIACaso) -> None:
