@@ -57,6 +57,8 @@ const STATUS_SYNC_LABEL: Record<string, string> = {
 }
 
 const ETAPA_SYNC_LABEL: Record<string, string> = {
+  consultando: 'Consultando jus.br/DataJud',
+  baixando: 'Baixando documentos do jus.br',
   lendo: 'Lendo documentos',
   resumindo: 'Resumindo peças',
   reclassificando: 'Reclassificando peças',

@@ -1,3 +1,14 @@
+import logging
+
+# O nível padrão do Python é WARNING — sem isso, todo logger.info(...) do
+# nosso código (progresso de sincronização, retentativas após queda do banco
+# etc.) é descartado e nunca aparece em `flyctl logs`. INFO só no pacote
+# `app`: bibliotecas continuam em WARNING — o httpx em INFO loga a URL
+# completa de cada requisição, e algumas levam chave na query string
+# (Gemini `?key=`, Clicksign `?access_token=`), que iria parar no log.
+logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logging.getLogger("app").setLevel(logging.INFO)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
