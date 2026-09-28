@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import * as d3 from 'd3'
-import { TIPOS_PECA } from '../../api/autosIa'
+import { autosIa, TIPOS_PECA } from '../../api/autosIa'
 import type { GrafoAresta, GrafoNo, TipoPeca } from '../../api/autosIa'
 import styles from './GrafoRede.module.css'
 
@@ -50,6 +50,11 @@ interface LinkInterno extends d3.SimulationLinkDatum<NoInterno> {
 interface Props {
   nos: GrafoNo[]
   arestas: GrafoAresta[]
+  /** Chamado depois de disparar uma releitura — o pai invalida as queries
+   * (grafo/documentos) pra os dados atualizados aparecerem. Guardado em ref
+   * (não é dependência do efeito): identidade nova a cada render do pai não
+   * pode derrubar e reconstruir o grafo inteiro à toa. */
+  onRelido?: () => void
 }
 
 /** Grafo de nós conectados: cada peça-mãe é um ponto, dimensionado por quantas
@@ -58,8 +63,10 @@ interface Props {
  * trava a vizinhança atual pra navegar só entre aqueles documentos. Tudo é
  * construído imperativamente com D3 dentro de `rootRef` — o layout de força e
  * o zoom/pan não convivem bem com o ciclo de re-render do React. */
-export default function GrafoRede({ nos, arestas }: Props) {
+export default function GrafoRede({ nos, arestas, onRelido }: Props) {
   const rootRef = useRef<HTMLDivElement>(null)
+  const onRelidoRef = useRef(onRelido)
+  useEffect(() => { onRelidoRef.current = onRelido }, [onRelido])
 
   useEffect(() => {
     const root = rootRef.current
@@ -144,6 +151,8 @@ export default function GrafoRede({ nos, arestas }: Props) {
             <a class="${styles.driveLink}" data-role="pDrive" href="#" target="_blank" rel="noreferrer" title="Abrir no Drive" aria-label="Abrir no Drive">↗</a>
             <h2 class="${styles.panelTitulo}" data-role="pTitulo"></h2>
             <div class="${styles.panelMeta}" data-role="pMeta"></div>
+            <div class="${styles.avisoLeitura}" data-role="pAviso"></div>
+            <button type="button" class="${styles.relerBtn}" data-role="pReler">↻ Reler documento</button>
             <button type="button" class="${styles.fixBtn}" data-role="pFixar">📌 Fixar estas conexões</button>
             <div class="${styles.relLabel}">IDs mencionados neste texto</div>
             <div data-role="pIds"></div>
@@ -395,6 +404,22 @@ export default function GrafoRede({ nos, arestas }: Props) {
       aplicarFiltro()
     })
 
+    q<HTMLButtonElement>('[data-role="pReler"]').addEventListener('click', async (event) => {
+      if (!selecionadoId) return
+      const btn = event.currentTarget as HTMLButtonElement
+      btn.disabled = true
+      btn.textContent = 'Relendo...'
+      try {
+        await autosIa.relerPeca(selecionadoId)
+        onRelidoRef.current?.()
+      } catch (err: unknown) {
+        const detalhe = (err as { response?: { data?: { detail?: string } }; message?: string })
+        alert(`Erro ao reler: ${detalhe?.response?.data?.detail || detalhe?.message}`)
+        btn.disabled = false
+        btn.textContent = '↻ Reler documento'
+      }
+    })
+
     function irPara(id: string) {
       const alvo = byId.get(id)
       if (!alvo) return
@@ -406,15 +431,34 @@ export default function GrafoRede({ nos, arestas }: Props) {
       selecionar(id)
     }
 
+    // Pequena setinha de Drive reaproveitada em qualquer lugar que referencia
+    // outra peça (chip de ID mencionado, "Menciona"/"Citada por") — abre o
+    // documento direto, sem precisar navegar até lá primeiro. `stopPropagation`
+    // via classe própria (ver wiring abaixo) pra não disparar a navegação do
+    // item inteiro junto.
+    function driveIconHtml(no: NoInterno): string {
+      if (!no.arquivo_drive_link) return ''
+      return `<a class="${styles.miniDrive}" href="${escapeHtml(no.arquivo_drive_link)}" target="_blank" rel="noreferrer" title="Abrir no Drive" aria-label="Abrir no Drive">↗</a>`
+    }
+
     function chipsDeMencoes(d: NoInterno): string {
       const mencoes = mencoesPorOrigem.get(d.id) ?? []
       if (mencoes.length === 0) return `<div class="${styles.relEmpty}">Nenhum ID mencionado no texto desta peça.</div>`
       return `<div class="${styles.chipWrap}">` + mencoes.map((a) => {
         if (a.peca_destino_id && byId.has(a.peca_destino_id)) {
-          return `<span class="${styles.chip} ${styles.chipResolved}" data-goto="${a.peca_destino_id}" title="Clique para abrir">${escapeHtml(a.id_mencionado)}</span>`
+          const alvo = byId.get(a.peca_destino_id)!
+          return `<span class="${styles.chip} ${styles.chipResolved}" data-goto="${a.peca_destino_id}" title="Clique para abrir">${escapeHtml(a.id_mencionado)}${driveIconHtml(alvo)}</span>`
         }
         return `<span class="${styles.chip} ${styles.chipUnresolved}" title="Citado no texto, mas não localizado no acervo">${escapeHtml(a.id_mencionado)} · não localizado</span>`
       }).join('') + '</div>'
+    }
+
+    function relItemHtml(m: NoInterno): string {
+      return `<div class="${styles.relItem}" data-goto="${m.id}">` +
+        `<span class="${styles.relTitle}">${escapeHtml(m.titulo)}</span>` +
+        `<span class="${styles.relId}">${escapeHtml(m.id_processual ?? '')}</span>` +
+        driveIconHtml(m) +
+        '</div>'
     }
 
     function selecionar(id: string) {
@@ -448,6 +492,14 @@ export default function GrafoRede({ nos, arestas }: Props) {
         (d.id_processual ? ` <span class="${styles.ownId}">ID ${escapeHtml(d.id_processual)}</span>` : '')
       q<HTMLDivElement>('[data-role="pIds"]').innerHTML = chipsDeMencoes(d)
       q<HTMLDivElement>('[data-role="pResumo"]').textContent = d.resumo || 'Ainda sem resumo gerado.'
+      const naoLida = d.status !== 'resumida' || !!d.erro_mensagem
+      const avisoEl = q<HTMLDivElement>('[data-role="pAviso"]')
+      avisoEl.style.display = naoLida ? 'block' : 'none'
+      avisoEl.textContent = d.erro_mensagem ? `⚠ ${d.erro_mensagem}` : (naoLida ? '⚠ Ainda não lida/resumida.' : '')
+      const btnReler = q<HTMLButtonElement>('[data-role="pReler"]')
+      btnReler.style.display = naoLida ? 'inline-flex' : 'none'
+      btnReler.disabled = false
+      btnReler.textContent = '↻ Reler documento'
       atualizarBotaoFixar()
 
       const mencionaResolvidos = (mencoesPorOrigem.get(id) ?? [])
@@ -455,7 +507,7 @@ export default function GrafoRede({ nos, arestas }: Props) {
         .map((a) => byId.get(a.peca_destino_id!)!)
       const mencionaHtml = `<div class="${styles.relLabel}">Menciona (resolvidos)</div>` + (
         mencionaResolvidos.length
-          ? mencionaResolvidos.map((m) => `<button type="button" class="${styles.relItem}" data-goto="${m.id}"><span class="${styles.relTitle}">${escapeHtml(m.titulo)}</span><span class="${styles.relId}">${escapeHtml(m.id_processual ?? '')}</span></button>`).join('')
+          ? mencionaResolvidos.map(relItemHtml).join('')
           : `<div class="${styles.relEmpty}">Nenhuma menção identificada.</div>`
       )
       q<HTMLDivElement>('[data-role="pMenciona"]').innerHTML = mencionaHtml
@@ -463,10 +515,14 @@ export default function GrafoRede({ nos, arestas }: Props) {
       const citadaPor = (citadaPorDestino.get(id) ?? []).map((a) => byId.get(a.peca_origem_id)).filter((n): n is NoInterno => !!n)
       const citadaHtml = `<div class="${styles.relLabel}">Citada por</div>` + (
         citadaPor.length
-          ? citadaPor.map((m) => `<button type="button" class="${styles.relItem}" data-goto="${m.id}"><span class="${styles.relTitle}">${escapeHtml(m.titulo)}</span><span class="${styles.relId}">${escapeHtml(m.id_processual ?? '')}</span></button>`).join('')
+          ? citadaPor.map(relItemHtml).join('')
           : `<div class="${styles.relEmpty}">Ainda não citada por outra peça.</div>`
       )
       q<HTMLDivElement>('[data-role="pCitada"]').innerHTML = citadaHtml
+
+      panel.querySelectorAll<HTMLAnchorElement>(`.${styles.miniDrive}`).forEach((a) => {
+        a.addEventListener('click', (ev) => ev.stopPropagation())
+      })
 
       panel.querySelectorAll<HTMLElement>('[data-goto]').forEach((btn) => {
         btn.addEventListener('click', () => irPara(btn.getAttribute('data-goto')!))
