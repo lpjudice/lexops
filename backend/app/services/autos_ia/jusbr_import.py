@@ -684,19 +684,31 @@ def _gravar_status_sync(caso_id, status: str, mensagem: str) -> None:
     consulta seguinte na mesma sessão falha de novo com PendingRollbackError
     (reproduzido ao vivo: rollback() não lançou exceção, mas a query logo
     depois lançou). Mesmo padrão já comprovado em
-    app/routers/autos_ia.py::_forcar_status_erro."""
-    db_status = SessionLocal()
-    try:
-        caso = db_status.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
-        if caso:
-            caso.ultimo_sync_status = status
-            caso.ultimo_sync_mensagem = mensagem[:2000]
-            caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
-            db_status.commit()
-    except Exception:
-        logger.exception("Falha ao gravar status de sincronização do caso %s (banco indisponível?)", caso_id)
-    finally:
-        db_status.close()
+    app/routers/autos_ia.py::_forcar_status_erro. Tenta até 3x com espera
+    curta: também já reproduzido ao vivo uma janela em que até a sessão
+    NOVA falhou de cara (Postgres recusando conexão nova, não só uma
+    conexão velha morta) — mas essas janelas observadas até agora duraram
+    só alguns segundos."""
+    for tentativa in range(3):
+        if tentativa:
+            time.sleep(1.5 * tentativa)
+        db_status = SessionLocal()
+        try:
+            caso = db_status.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
+            if caso:
+                caso.ultimo_sync_status = status
+                caso.ultimo_sync_mensagem = mensagem[:2000]
+                caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
+                db_status.commit()
+            return
+        except Exception:
+            logger.warning(
+                "Falha ao gravar status de sincronização do caso %s na tentativa %d/3 (banco indisponível?)",
+                caso_id, tentativa + 1,
+            )
+        finally:
+            db_status.close()
+    logger.error("Não foi possível gravar status de sincronização do caso %s em 3 tentativas — banco indisponível", caso_id)
 
 
 def _cancelar_sync_solicitado(db: Session, caso: AutosIACaso) -> bool:
