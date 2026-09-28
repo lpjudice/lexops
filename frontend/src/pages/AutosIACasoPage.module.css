@@ -607,3 +607,29 @@
 .docAnexos {
   padding-bottom: 4px;
 }
+
+/* Tela estreita (celular): a barra de abas tinha overflow-x horizontal sem
+   nenhuma pista visual de que havia mais abas — "Linha do Tempo", "Grafo de
+   Referências" e "Perguntas" ficavam fora da tela, pareciam simplesmente não
+   existir. A linha de cada documento (chevron + data + link do Drive + nome
+   + botões + selos) também não quebrava linha — o conteúdo do lado direito
+   era cortado pela borda da tela. Ambos viram flex-wrap aqui: descobríveis
+   e legíveis, ao custo de mais altura vertical. */
+@media (max-width: 640px) {
+  .tabs {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+
+  .docRow {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+
+  .docNomeIndexado {
+    flex-basis: 100%;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+}
