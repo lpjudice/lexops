@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { isAxiosError } from 'axios'
 import { useAuth } from '../contexts/AuthContext'
 import styles from './LoginPage.module.css'
 
@@ -18,8 +19,17 @@ export default function LoginPage() {
     try {
       await login(email.trim(), senha)
       navigate('/dashboard', { replace: true })
-    } catch {
-      setErro('Email ou senha incorretos.')
+    } catch (err) {
+      // 401 é credencial errada de verdade; qualquer outro erro (timeout,
+      // 500, sem resposta) é o backend/banco com problema — mostrar "senha
+      // incorreta" nesse caso engana quem está tentando entrar (já
+      // aconteceu: o banco ficou indisponível por alguns minutos e a tela
+      // só dizia "senha incorreta", escondendo o problema real).
+      if (isAxiosError(err) && err.response?.status === 401) {
+        setErro('Email ou senha incorretos.')
+      } else {
+        setErro('Não foi possível conectar ao servidor. Tente novamente em instantes.')
+      }
     } finally {
       setLoading(false)
     }
