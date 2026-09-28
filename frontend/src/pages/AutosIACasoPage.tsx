@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { autosIa, TIPOS_PECA } from '../api/autosIa'
-import type { Caso, Documento, DocumentoDrive, DocumentoDriveAnexo, GrafoAresta, GrafoNo, Peca, PecaDetalhe, TipoPeca } from '../api/autosIa'
+import type { Caso, Documento, DocumentoDrive, DocumentoDriveAnexo, FaqPergunta, GrafoAresta, GrafoNo, Peca, PecaDetalhe, TipoPeca } from '../api/autosIa'
 import ReferenciaHover from '../components/autosIa/ReferenciaHover'
 import GrafoRede from '../components/autosIa/GrafoRede'
 import Modal from '../components/Modal'
@@ -156,6 +156,11 @@ export default function AutosIACasoPage() {
 
   const resumirPendentes = useMutation({
     mutationFn: () => autosIa.resumirPendentes(casoId!),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] }),
+  })
+
+  const relerPendentes = useMutation({
+    mutationFn: () => autosIa.relerPendentes(casoId!),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] }),
   })
 
@@ -339,6 +344,18 @@ export default function AutosIACasoPage() {
                           {resumirPendentes.isPending ? 'Resumindo...' : `Resumir pendentes (${pendentesResumo.pendentes})`}
                         </button>
                       )}
+                      <button
+                        className={pageStyles.btnSmall}
+                        disabled={relerPendentes.isPending}
+                        onClick={() => {
+                          if (window.confirm('Reler (baixar de novo do Drive + resumir de novo) TODAS as peças com falha de leitura registrada neste caso — inclui as que já viraram "resumida" mas com resumo genérico, porque a leitura original não trouxe o texto de verdade? Uma peça de cada vez, para não sobrecarregar. Pode levar alguns minutos.')) {
+                            relerPendentes.mutate()
+                          }
+                        }}
+                        title='Baixa de novo do Drive + resume de novo TODAS as peças com falha de leitura registrada — uma de cada vez'
+                      >
+                        {relerPendentes.isPending ? 'Relendo pendentes...' : 'Reler pendentes'}
+                      </button>
                     </>
                   )}
                 </>
@@ -1356,6 +1373,7 @@ function AbaTimeline({ casoId, arestasPorOrigem, nosPorId }: { casoId: string; a
 // ── Grafo ────────────────────────────────────────────────────────────────
 
 function AbaGrafo({ casoId }: { casoId: string }) {
+  const qc = useQueryClient()
   const { data: grafo, isLoading } = useQuery({
     queryKey: ['autos-ia', 'grafo', casoId],
     queryFn: () => autosIa.obterGrafo(casoId),
@@ -1364,7 +1382,21 @@ function AbaGrafo({ casoId }: { casoId: string }) {
   if (isLoading) return <p className={pageStyles.empty}>Carregando...</p>
   if (!grafo || grafo.nos.length === 0) return <p className={pageStyles.empty}>Nenhuma peça indexada ainda.</p>
 
-  return <GrafoRede nos={grafo.nos} arestas={grafo.arestas} />
+  const onRelido = () => {
+    // Releitura roda em segundo plano — sem polling dedicado a essa peça,
+    // agenda mais duas invalidações pra pegar o resultado sem precisar
+    // a pessoa recarregar a página manualmente (mesmo padrão da aba Documentos).
+    const invalidar = () => {
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'grafo', casoId] })
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'documentos-drive', casoId] })
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'pecas', casoId] })
+    }
+    invalidar()
+    setTimeout(invalidar, 5000)
+    setTimeout(invalidar, 12000)
+  }
+
+  return <GrafoRede nos={grafo.nos} arestas={grafo.arestas} onRelido={onRelido} />
 }
 
 // ── FAQ ──────────────────────────────────────────────────────────────────
@@ -1417,31 +1449,62 @@ function AbaFaq({ casoId, nosPorId }: { casoId: string; nosPorId: NosMap }) {
         <p className={pageStyles.empty}>Nenhuma pergunta ainda.</p>
       ) : (
         perguntas.map((f) => (
-          <div key={f.id} className={styles.faqCard}>
-            <div className={styles.faqPergunta}>{f.pergunta}</div>
-            {f.status === 'pendente' && <p style={{ fontSize: 12.5, color: '#a16207' }}>Gerando resposta...</p>}
-            {f.status === 'erro' && <p style={{ fontSize: 12.5, color: '#b91c1c' }}>Erro: {f.erro_mensagem}</p>}
-            {f.resposta && <div className={styles.faqResposta}>{f.resposta}</div>}
-            {f.pecas_relacionadas && f.pecas_relacionadas.length > 0 && (
-              <div className={styles.faqFontes}>
-                {f.pecas_relacionadas.map((id) => {
-                  const no = nosPorId.get(id)
-                  return no ? (
-                    <span key={id} className={styles.keywordChip}>{no.titulo}</span>
-                  ) : null
-                })}
-              </div>
-            )}
-            <div className={styles.faqActions}>
-              <button className={pageStyles.btnSmall} onClick={() => reprocessar.mutate(f.id)}>
-                Regerar resposta
-              </button>
-              <button className={pageStyles.btnDanger} onClick={() => deletar.mutate(f.id)}>
-                Remover
-              </button>
-            </div>
-          </div>
+          <FaqCard
+            key={f.id}
+            pergunta={f}
+            nosPorId={nosPorId}
+            onReprocessar={() => reprocessar.mutate(f.id)}
+            onDeletar={() => deletar.mutate(f.id)}
+          />
         ))
+      )}
+    </div>
+  )
+}
+
+function FaqCard({
+  pergunta: f, nosPorId, onReprocessar, onDeletar,
+}: { pergunta: FaqPergunta; nosPorId: NosMap; onReprocessar: () => void; onDeletar: () => void }) {
+  const [aberto, setAberto] = useState(true)
+
+  return (
+    <div className={styles.faqCard}>
+      <button
+        type="button"
+        className={styles.faqPerguntaBtn}
+        onClick={() => setAberto(!aberto)}
+        aria-expanded={aberto}
+      >
+        <span className={styles.faqPergunta}>{f.pergunta}</span>
+        <span className={styles.faqToggle}>
+          {f.custo_usd > 0 && <span className={styles.faqCusto}>{formatarUsd(f.custo_usd)}</span>}
+          {aberto ? '▾ Retrair' : '▸ Expandir'}
+        </span>
+      </button>
+      {aberto && (
+        <>
+          {f.status === 'pendente' && <p style={{ fontSize: 12.5, color: '#a16207' }}>Gerando resposta...</p>}
+          {f.status === 'erro' && <p style={{ fontSize: 12.5, color: '#b91c1c' }}>Erro: {f.erro_mensagem}</p>}
+          {f.resposta && <div className={styles.faqResposta}>{f.resposta}</div>}
+          {f.pecas_relacionadas && f.pecas_relacionadas.length > 0 && (
+            <div className={styles.faqFontes}>
+              {f.pecas_relacionadas.map((id) => {
+                const no = nosPorId.get(id)
+                return no ? (
+                  <span key={id} className={styles.keywordChip}>{no.titulo}</span>
+                ) : null
+              })}
+            </div>
+          )}
+          <div className={styles.faqActions}>
+            <button className={pageStyles.btnSmall} onClick={onReprocessar}>
+              Regerar resposta
+            </button>
+            <button className={pageStyles.btnDanger} onClick={onDeletar}>
+              Remover
+            </button>
+          </div>
+        </>
       )}
     </div>
   )
