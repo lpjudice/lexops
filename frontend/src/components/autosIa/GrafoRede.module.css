@@ -262,6 +262,18 @@
   font-size: 14px;
 }
 .panelClose:hover { color: var(--dark); }
+.driveLink {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--teal);
+  text-decoration: none;
+  margin-left: 6px;
+}
+.driveLink:hover { text-decoration: underline; }
+
 .tipoPill {
   display: inline-block;
   font-size: 10px;

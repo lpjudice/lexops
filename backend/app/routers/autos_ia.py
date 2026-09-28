@@ -26,8 +26,8 @@ from app.services.autos_ia.estimativa import estimar_importacao_existentes, esti
 from app.services.autos_ia.ingestao import processar_documento, reclassificar_caso, retomar_documento
 from app.services.autos_ia.jusbr_import import (
     atualizar_metadados_jusbr, contar_pecas_pendentes_resumo, importar_apenas_existentes,
-    listar_andamentos_pendentes, reagrupar_pecas_jusbr, recalcular_ids_processuais, resumir_pendentes_agora,
-    sincronizar_caso_jusbr,
+    listar_andamentos_pendentes, reagrupar_pecas_jusbr, recalcular_ids_processuais, reler_peca,
+    resumir_pendentes_agora, sincronizar_caso_jusbr,
 )
 from app.services.autos_ia.nomes import derivar_nome_indexado
 from app.services.autos_ia.pdf_merge import montar_pdf_pecas
@@ -830,6 +830,40 @@ def desvincular_peca(peca_id: uuid.UUID, db: Session = Depends(get_db)):
     return peca
 
 
+def _executar_reler_peca_em_background(peca_id: uuid.UUID) -> None:
+    db = SessionLocal()
+    try:
+        peca = db.query(AutosIAPeca).filter(AutosIAPeca.id == peca_id).first()
+        if not peca:
+            return
+        try:
+            reler_peca(db, peca)
+        except Exception as exc:
+            peca.status = "erro"
+            peca.erro_mensagem = str(exc)[:2000]
+            db.commit()
+    finally:
+        db.close()
+
+
+@router.post("/pecas/{peca_id}/reler", response_model=PecaOut, status_code=status.HTTP_202_ACCEPTED)
+def reler_peca_agora(peca_id: uuid.UUID, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Rebaixa e reprocessa só esta peça (Drive + IA) — pra quando a leitura
+    original falhou ou ficou incompleta. Nunca mexe em outras peças, nem
+    reprocessa o caso inteiro."""
+    peca = db.query(AutosIAPeca).filter(AutosIAPeca.id == peca_id).first()
+    if not peca:
+        raise HTTPException(status_code=404, detail="Peça não encontrada")
+    if not peca.andamento_id:
+        raise HTTPException(status_code=422, detail="Releitura só é suportada para peças importadas do jus.br.")
+    peca.status = "pendente_resumo"
+    peca.erro_mensagem = None
+    db.commit()
+    db.refresh(peca)
+    background_tasks.add_task(_executar_reler_peca_em_background, peca.id)
+    return peca
+
+
 @router.get("/casos/{caso_id}/pecas/download")
 def baixar_pecas_pdf(
     caso_id: uuid.UUID,
@@ -856,8 +890,20 @@ def obter_grafo(caso_id: uuid.UUID, db: Session = Depends(get_db)):
     _get_caso(db, caso_id)
     pecas = db.query(AutosIAPeca).filter(AutosIAPeca.caso_id == caso_id).all()
     referencias = db.query(AutosIAReferencia).filter(AutosIAReferencia.caso_id == caso_id).all()
+    andamento_ids = [p.andamento_id for p in pecas if p.andamento_id]
+    links_drive = dict(
+        db.query(AndamentoProcesso.id, AndamentoProcesso.arquivo_drive_link)
+        .filter(AndamentoProcesso.id.in_(andamento_ids))
+        .all()
+    ) if andamento_ids else {}
+
+    nos = []
+    for p in pecas:
+        no = GrafoNo.model_validate(p, from_attributes=True)
+        no.arquivo_drive_link = links_drive.get(p.andamento_id)
+        nos.append(no)
     return GrafoOut(
-        nos=[GrafoNo.model_validate(p, from_attributes=True) for p in pecas],
+        nos=nos,
         arestas=[GrafoAresta.model_validate(r, from_attributes=True) for r in referencias],
     )
 

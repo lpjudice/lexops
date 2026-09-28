@@ -141,6 +141,7 @@ export default function GrafoRede({ nos, arestas }: Props) {
           <div class="${styles.panel}" data-role="panel">
             <button type="button" class="${styles.panelClose}" data-role="panelClose" aria-label="Fechar">✕</button>
             <span class="${styles.tipoPill}" data-role="pTipo"></span>
+            <a class="${styles.driveLink}" data-role="pDrive" href="#" target="_blank" rel="noreferrer" title="Abrir no Drive" aria-label="Abrir no Drive">↗</a>
             <h2 class="${styles.panelTitulo}" data-role="pTitulo"></h2>
             <div class="${styles.panelMeta}" data-role="pMeta"></div>
             <button type="button" class="${styles.fixBtn}" data-role="pFixar">📌 Fixar estas conexões</button>
@@ -437,6 +438,9 @@ export default function GrafoRede({ nos, arestas }: Props) {
 
       q<HTMLSpanElement>('[data-role="pTipo"]').textContent = NOME_TIPO[d.tipo]
       q<HTMLSpanElement>('[data-role="pTipo"]').style.background = COR_POR_TIPO[d.tipo]
+      const linkDrive = q<HTMLAnchorElement>('[data-role="pDrive"]')
+      linkDrive.style.display = d.arquivo_drive_link ? 'inline-flex' : 'none'
+      if (d.arquivo_drive_link) linkDrive.href = d.arquivo_drive_link
       q<HTMLHeadingElement>('[data-role="pTitulo"]').textContent = d.titulo
       const paginas = d.pagina_inicio === d.pagina_fim ? `p. ${d.pagina_inicio}` : `p. ${d.pagina_inicio}–${d.pagina_fim}`
       q<HTMLDivElement>('[data-role="pMeta"]').innerHTML =

@@ -146,6 +146,7 @@ export interface GrafoNo {
   pagina_inicio: number
   pagina_fim: number
   peca_pai_id?: string | null
+  arquivo_drive_link?: string | null
 }
 
 export interface GrafoAresta {
@@ -282,6 +283,9 @@ export const autosIa = {
 
   desvincularPeca: (pecaId: string) =>
     api.post<Peca>(`/autos-ia/pecas/${pecaId}/desvincular`).then((r) => r.data),
+
+  relerPeca: (pecaId: string) =>
+    api.post<Peca>(`/autos-ia/pecas/${pecaId}/reler`).then((r) => r.data),
 
   urlDownloadPecas: (casoId: string, opts: { apenasPrincipais?: boolean; tipo?: string } = {}) => {
     const params = new URLSearchParams()
