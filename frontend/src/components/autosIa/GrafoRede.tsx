@@ -457,6 +457,13 @@ export default function GrafoRede({ nos, arestas }: Props) {
 
       panel.querySelectorAll<HTMLElement>('[data-goto]').forEach((btn) => {
         btn.addEventListener('click', () => irPara(btn.getAttribute('data-goto')!))
+        // Passar o mouse já mostra o resumo do documento referenciado — pra
+        // conferir do que se trata sem perder o contexto de onde se estava.
+        const alvo = byId.get(btn.getAttribute('data-goto')!)
+        if (alvo) {
+          btn.addEventListener('mousemove', (ev) => mostrarTooltip(ev as MouseEvent, alvo))
+          btn.addEventListener('mouseleave', esconderTooltip)
+        }
       })
 
       panel.classList.add(styles.panelOpen)
