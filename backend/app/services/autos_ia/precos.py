@@ -17,6 +17,12 @@ PRECO_OUTPUT_POR_MTOK_USD = 10.0
 PRECO_HAIKU_INPUT_POR_MTOK_USD = 1.0
 PRECO_HAIKU_OUTPUT_POR_MTOK_USD = 5.0
 
+# claude-opus-4-5 — faq.py (perguntas sobre o processo, contexto com texto
+# integral das peças). Mais caro que sonnet, mas roda só quando a pessoa
+# pergunta algo, não em toda peça do processo como resumo/segmentação.
+PRECO_OPUS_INPUT_POR_MTOK_USD = 5.0
+PRECO_OPUS_OUTPUT_POR_MTOK_USD = 25.0
+
 
 def calcular_custo_usd(input_tokens: int, output_tokens: int) -> float:
     return (
@@ -29,4 +35,11 @@ def calcular_custo_ocr_usd(input_tokens: int, output_tokens: int) -> float:
     return (
         input_tokens / 1_000_000 * PRECO_HAIKU_INPUT_POR_MTOK_USD
         + output_tokens / 1_000_000 * PRECO_HAIKU_OUTPUT_POR_MTOK_USD
+    )
+
+
+def calcular_custo_faq_usd(input_tokens: int, output_tokens: int) -> float:
+    return (
+        input_tokens / 1_000_000 * PRECO_OPUS_INPUT_POR_MTOK_USD
+        + output_tokens / 1_000_000 * PRECO_OPUS_OUTPUT_POR_MTOK_USD
     )

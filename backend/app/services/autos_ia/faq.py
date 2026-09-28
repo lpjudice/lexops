@@ -15,8 +15,9 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from app.models.autos_ia import AutosIAPerguntaFaq, AutosIAPeca
+from app.models.autos_ia import AutosIACaso, AutosIAPerguntaFaq, AutosIAPeca
 from app.services.autos_ia.busca import buscar_pecas
+from app.services.autos_ia.precos import calcular_custo_faq_usd
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ def _montar_contexto(pecas: list[AutosIAPeca]) -> str:
     return "\n\n".join(blocos)
 
 
-def _chamar_llm(pergunta: str, contexto: str) -> str:
+def _chamar_llm(pergunta: str, contexto: str) -> tuple[str, float]:
     import anthropic
     client = anthropic.Anthropic()
     resp = client.messages.create(
@@ -53,10 +54,12 @@ def _chamar_llm(pergunta: str, contexto: str) -> str:
         system=SYSTEM_PROMPT,
         messages=[{
             "role": "user",
-            "content": f"Pergunta: {pergunta}\n\nResumos de peças do processo:\n\n{contexto}",
+            "content": f"Pergunta: {pergunta}\n\nTexto integral das peças do processo:\n\n{contexto}",
         }],
     )
-    return resp.content[0].text.strip() if resp.content else ""
+    texto = resp.content[0].text.strip() if resp.content else ""
+    custo = calcular_custo_faq_usd(resp.usage.input_tokens, resp.usage.output_tokens)
+    return texto, custo
 
 
 def responder_pergunta(db: Session, pergunta_obj: AutosIAPerguntaFaq) -> None:
@@ -73,8 +76,12 @@ def responder_pergunta(db: Session, pergunta_obj: AutosIAPerguntaFaq) -> None:
             pergunta_obj.pecas_relacionadas = []
         else:
             contexto = _montar_contexto(pecas)
-            pergunta_obj.resposta = _chamar_llm(pergunta_obj.pergunta, contexto)
+            pergunta_obj.resposta, custo = _chamar_llm(pergunta_obj.pergunta, contexto)
             pergunta_obj.pecas_relacionadas = [str(p.id) for p in pecas]
+            pergunta_obj.custo_usd = custo
+            caso = db.query(AutosIACaso).filter(AutosIACaso.id == pergunta_obj.caso_id).first()
+            if caso:
+                caso.custo_usd_total = (caso.custo_usd_total or 0) + custo
         pergunta_obj.status = "respondida"
         pergunta_obj.erro_mensagem = None
     except Exception as exc:
