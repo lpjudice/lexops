@@ -146,6 +146,14 @@ export default function AutosIACasoPage() {
     },
   })
 
+  const recalcularIds = useMutation({
+    mutationFn: () => autosIa.recalcularIds(casoId!),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] })
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'grafo', casoId] })
+    },
+  })
+
   const resumirPendentes = useMutation({
     mutationFn: () => autosIa.resumirPendentes(casoId!),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] }),
@@ -304,6 +312,18 @@ export default function AutosIACasoPage() {
                         title="Reaplica o agrupamento petição/anexo nas peças já importadas — sem IA, sem rede"
                       >
                         {reagrupar.isPending ? 'Reagrupando...' : 'Reagrupar peças'}
+                      </button>
+                      <button
+                        className={pageStyles.btnSmall}
+                        disabled={recalcularIds.isPending}
+                        onClick={() => {
+                          if (window.confirm('Corrigir o ID processual das peças já importadas usando o dado que o jus.br já entrega pronto, e reconectar referências que dependiam disso? 100% local, sem IA nem rede — não mexe em petição principal/anexos.')) {
+                            recalcularIds.mutate()
+                          }
+                        }}
+                        title="Corrige id_processual pelo documento_id real do jus.br e reconecta referências — sem IA, sem rede, sem mexer em principal/anexos"
+                      >
+                        {recalcularIds.isPending ? 'Recalculando...' : 'Recalcular IDs'}
                       </button>
                       {!!pendentesResumo?.pendentes && (
                         <button

@@ -212,6 +212,9 @@ export const autosIa = {
   reagrupar: (casoId: string) =>
     api.post<Caso>(`/autos-ia/casos/${casoId}/reagrupar`).then((r) => r.data),
 
+  recalcularIds: (casoId: string) =>
+    api.post<Caso>(`/autos-ia/casos/${casoId}/recalcular-ids`).then((r) => r.data),
+
   resumirPendentes: (casoId: string) =>
     api.post<Caso>(`/autos-ia/casos/${casoId}/resumir-pendentes`).then((r) => r.data),
 
