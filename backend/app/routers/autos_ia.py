@@ -2,6 +2,7 @@
 ao restante do gestor. Cada Caso é um processo independente; os PDFs são
 enviados em blocos de páginas, segmentados em peças e resumidos por IA."""
 import logging
+import time
 import uuid
 from pathlib import Path
 from typing import Literal
@@ -250,22 +251,35 @@ def _forcar_status_erro(caso_id: uuid.UUID, mensagem: str) -> None:
     no meio do processo), sem isso o caso ficava preso em "processando" pra
     sempre — só um redeploy (que reseta tudo no /health de novo) desemperrava.
     Abre uma sessão NOVA de propósito: a sessão original pode ser a própria
-    quebrada."""
-    db = SessionLocal()
-    try:
-        caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
-        if caso:
-            caso.ultimo_sync_status = "erro"
-            caso.ultimo_sync_mensagem = mensagem[:500]
-            caso.sync_etapa = None
-            caso.sync_total_itens = None
-            caso.sync_itens_processados = None
-            caso.sync_detalhe = None
-            db.commit()
-    except Exception:
-        logger.exception("Autos IA: falha ao registrar erro do caso %s (banco indisponível?)", caso_id)
-    finally:
-        db.close()
+    quebrada. Tenta até 3x com espera curta: reproduzido ao vivo um caso em
+    que até essa sessão nova falhou de cara (Postgres recusando conexão
+    nova, não só uma conexão velha morta) — mas essas janelas de
+    indisponibilidade total observadas até agora duraram só alguns
+    segundos, então uma segunda/terceira tentativa tem boa chance de
+    conseguir gravar o status em vez de deixar o caso preso."""
+    for tentativa in range(3):
+        if tentativa:
+            time.sleep(1.5 * tentativa)
+        db = SessionLocal()
+        try:
+            caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
+            if caso:
+                caso.ultimo_sync_status = "erro"
+                caso.ultimo_sync_mensagem = mensagem[:500]
+                caso.sync_etapa = None
+                caso.sync_total_itens = None
+                caso.sync_itens_processados = None
+                caso.sync_detalhe = None
+                db.commit()
+            return
+        except Exception:
+            logger.warning(
+                "Autos IA: falha ao registrar erro do caso %s na tentativa %d/3 (banco indisponível?)",
+                caso_id, tentativa + 1,
+            )
+        finally:
+            db.close()
+    logger.error("Autos IA: não foi possível registrar erro do caso %s em 3 tentativas — banco indisponível", caso_id)
 
 
 def _executar_sync_em_background(caso_id: uuid.UUID) -> None:

@@ -507,22 +507,34 @@ def reclassificar_caso(db: Session, caso: AutosIACaso) -> int:
             db.rollback()
         except Exception:
             logger.error("Rollback falhou ao reclassificar caso %s — conexão morta", caso.id)
-        db_erro = SessionLocal()
-        try:
-            caso_erro = db_erro.query(AutosIACaso).filter(AutosIACaso.id == caso.id).first()
-            if caso_erro:
-                caso_erro.ultimo_sync_status = "erro"
-                caso_erro.ultimo_sync_mensagem = str(exc)[:2000]
-                caso_erro.sync_etapa = None
-                caso_erro.sync_total_itens = None
-                caso_erro.sync_itens_processados = None
-                caso_erro.sync_detalhe = None
-                caso_erro.ultima_sincronizacao_em = datetime.now(timezone.utc)
-                db_erro.commit()
-        except Exception:
-            logger.exception("Também falhou ao gravar erro da reclassificação do caso %s numa sessão nova", caso.id)
-        finally:
-            db_erro.close()
+        # Tenta até 3x com espera curta: já reproduzido ao vivo uma janela
+        # em que até uma sessão NOVA falha de cara (Postgres recusando
+        # conexão nova) — mas essas janelas duraram só alguns segundos.
+        for tentativa in range(3):
+            if tentativa:
+                time.sleep(1.5 * tentativa)
+            db_erro = SessionLocal()
+            try:
+                caso_erro = db_erro.query(AutosIACaso).filter(AutosIACaso.id == caso.id).first()
+                if caso_erro:
+                    caso_erro.ultimo_sync_status = "erro"
+                    caso_erro.ultimo_sync_mensagem = str(exc)[:2000]
+                    caso_erro.sync_etapa = None
+                    caso_erro.sync_total_itens = None
+                    caso_erro.sync_itens_processados = None
+                    caso_erro.sync_detalhe = None
+                    caso_erro.ultima_sincronizacao_em = datetime.now(timezone.utc)
+                    db_erro.commit()
+                break
+            except Exception:
+                logger.warning(
+                    "Também falhou ao gravar erro da reclassificação do caso %s na tentativa %d/3",
+                    caso.id, tentativa + 1,
+                )
+            finally:
+                db_erro.close()
+        else:
+            logger.error("Não foi possível gravar erro da reclassificação do caso %s em 3 tentativas", caso.id)
     return len(pecas)
 
 
