@@ -451,33 +451,62 @@ def reclassificar_caso(db: Session, caso: AutosIACaso) -> int:
     caso.sync_iniciado_em = datetime.now(timezone.utc)
     db.commit()
 
+    # _progresso/_custo usam commit "melhor esforço": uma queda transitória de
+    # conexão do Postgres aqui não pode propagar e abortar a reclassificação
+    # inteira por causa só de uma atualização de progresso.
     def _progresso(feitas: int) -> None:
         caso.sync_itens_processados = feitas
-        db.commit()
+        try:
+            db.commit()
+        except Exception:
+            logger.warning("Falha ao gravar progresso da reclassificação do caso %s (conexão instável?)", caso.id)
+            try:
+                db.rollback()
+            except Exception:
+                pass
 
     def _custo(valor: float) -> None:
         caso.custo_usd_total = (caso.custo_usd_total or 0) + valor
-        db.commit()
+        try:
+            db.commit()
+        except Exception:
+            logger.warning("Falha ao gravar custo da reclassificação do caso %s (conexão instável?)", caso.id)
+            try:
+                db.rollback()
+            except Exception:
+                pass
 
     def _cancelar() -> bool:
         db.refresh(caso)
         return caso.sync_cancelar
 
-    reclassificar_pecas_em_paralelo(db, pecas, on_progresso=_progresso, on_custo=_custo, deve_cancelar=_cancelar)
-
-    db.refresh(caso)
-    cancelado = caso.sync_cancelar
-    caso.ultimo_sync_status = "cancelado" if cancelado else "ok"
-    caso.ultimo_sync_mensagem = (
-        f"Cancelado: {caso.sync_itens_processados or 0}/{len(pecas)} peça(s) reclassificada(s)."
-        if cancelado else f"{len(pecas)} peça(s) reclassificada(s)."
-    )
-    caso.sync_etapa = None
-    caso.sync_total_itens = None
-    caso.sync_itens_processados = None
-    caso.sync_detalhe = None
-    caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
-    db.commit()
+    try:
+        reclassificar_pecas_em_paralelo(db, pecas, on_progresso=_progresso, on_custo=_custo, deve_cancelar=_cancelar)
+        db.refresh(caso)
+        cancelado = caso.sync_cancelar
+        caso.ultimo_sync_status = "cancelado" if cancelado else "ok"
+        caso.ultimo_sync_mensagem = (
+            f"Cancelado: {caso.sync_itens_processados or 0}/{len(pecas)} peça(s) reclassificada(s)."
+            if cancelado else f"{len(pecas)} peça(s) reclassificada(s)."
+        )
+    except Exception as exc:
+        logger.warning("Autos IA: erro ao reclassificar caso %s: %s", caso.id, exc)
+        # Mesmo cuidado usado no resto do módulo: sem rollback, o commit do
+        # finally falha em cascata com PendingRollbackError.
+        try:
+            db.rollback()
+        except Exception:
+            logger.error("Rollback falhou ao reclassificar caso %s — conexão morta", caso.id)
+        caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso.id).first() or caso
+        caso.ultimo_sync_status = "erro"
+        caso.ultimo_sync_mensagem = str(exc)[:2000]
+    finally:
+        caso.sync_etapa = None
+        caso.sync_total_itens = None
+        caso.sync_itens_processados = None
+        caso.sync_detalhe = None
+        caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
+        db.commit()
     return len(pecas)
 
 
