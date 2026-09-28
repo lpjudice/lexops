@@ -849,6 +849,29 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
         caso.sync_detalhe = f"{prefixo}{msg}"[:500]
         _commit_resiliente(db)
 
+    # Instrumentação temporária (não muda nenhum comportamento): registra
+    # quantas conexões do pool estão em uso ao longo de uma importação
+    # grande. O sistema já travou duas vezes com "server closed the
+    # connection unexpectedly"/pool esgotado durante um "importar existentes"
+    # rodando — sem esse dado, qualquer correção na sessão desta função seria
+    # palpite (e essa função tem agrupamento de peça-mãe/anexo demais pra
+    # arriscar refatorar às cegas). Ver histórico do caso pra remover depois
+    # de confirmado o ponto exato.
+    ultimo_log_pool = 0.0
+
+    def _log_pool_status(motivo: str, forcar: bool = False) -> None:
+        nonlocal ultimo_log_pool
+        agora = time.monotonic()
+        if not forcar and agora - ultimo_log_pool < 15.0:
+            return
+        ultimo_log_pool = agora
+        try:
+            logger.info("[pool] %s (caso %s): %s", motivo, caso.id, db.get_bind().pool.status())
+        except Exception:
+            logger.exception("[pool] falha ao ler status do pool (%s)", motivo)
+
+    _log_pool_status("início da importação", forcar=True)
+
     for indice, andamento in enumerate(pendentes, start=1):
         # Sempre atualiza a mensagem de status ao iniciar o documento, mesmo
         # quando ele não precisa de OCR — sem isso, um documento com texto
@@ -861,6 +884,7 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
         texto = andamento.texto_extraido
         tem_arquivo = bool(andamento.arquivo_path or andamento.arquivo_drive_link)
         if not texto:
+            _log_pool_status(f"antes de baixar/OCR doc {indice}/{len(pendentes)}")
             def _status_ocr(msg: str, _i=indice, _n=len(pendentes)) -> None:
                 _status_leitura(msg, _i, _n)
             _deve_pular_atual = _criar_verificador_pular(db, caso)
@@ -876,6 +900,7 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
                 if texto:
                     andamento.texto_extraido = texto
                     _commit_com_retry(db)
+            _log_pool_status(f"depois de baixar/OCR doc {indice}/{len(pendentes)}")
         # Confere (sem throttle, uma vez por documento) se "pular este documento"
         # foi pedido durante a leitura acima — consome a flag na hora pra não
         # aplicar ao PRÓXIMO documento sem querer.
@@ -981,6 +1006,7 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
     caso.sync_total_itens = len(pecas_para_ia)
     caso.sync_itens_processados = 0
     db.commit()
+    _log_pool_status("início do resumo por IA (após ler todos os documentos)", forcar=True)
 
     def _progresso_resumo(feitas: int) -> None:
         caso.sync_itens_processados = feitas
