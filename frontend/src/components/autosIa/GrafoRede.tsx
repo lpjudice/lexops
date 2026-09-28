@@ -80,20 +80,39 @@ export default function GrafoRede({ nos, arestas, onRelido }: Props) {
     const byId = new Map<string, NoInterno>()
     nosRaiz.forEach((n) => byId.set(n.id, n))
 
-    const idpIndex = new Map<string, string>()
-    nosRaiz.forEach((n) => { if (n.id_processual) idpIndex.set(n.id_processual, n.id) })
+    // Anexos (peca_pai_id preenchido) não viram ponto próprio no grafo — ficam
+    // "dentro" da peça-mãe. Mas uma referência pode mirar direto no ID de um
+    // anexo (ex.: uma decisão citando o "Id. 104282427" de um documento
+    // anexado a uma peça), e o backend já resolveu isso certinho em
+    // peca_destino_id. Sem este passo, `byId.has(destino)` dava falso pra
+    // qualquer anexo e a menção caía como "não localizado" mesmo já
+    // resolvida — foi o que o Lucas flagrou com a ID 104282427. Resolve
+    // sempre pro nó-raiz visível (a própria peça-mãe) antes de checar/contar.
+    const paiPorId = new Map<string, string | null | undefined>()
+    nos.forEach((n) => paiPorId.set(n.id, n.peca_pai_id))
+    function resolverRaiz(id: string): string {
+      let atual = id
+      const visitados = new Set<string>()
+      while (paiPorId.get(atual) && !visitados.has(atual)) {
+        visitados.add(atual)
+        atual = paiPorId.get(atual)!
+      }
+      return atual
+    }
 
     const mencoesPorOrigem = new Map<string, GrafoAresta[]>()
     arestas.forEach((a) => {
-      if (!byId.has(a.peca_origem_id)) return
-      const lista = mencoesPorOrigem.get(a.peca_origem_id) ?? []
+      const origem = resolverRaiz(a.peca_origem_id)
+      if (!byId.has(origem)) return
+      const lista = mencoesPorOrigem.get(origem) ?? []
       lista.push(a)
-      mencoesPorOrigem.set(a.peca_origem_id, lista)
+      mencoesPorOrigem.set(origem, lista)
     })
 
     const links: LinkInterno[] = arestas
-      .filter((a) => a.peca_destino_id && byId.has(a.peca_origem_id) && byId.has(a.peca_destino_id))
-      .map((a) => ({ id: a.id, source: a.peca_origem_id, target: a.peca_destino_id! }))
+      .filter((a) => a.peca_destino_id)
+      .map((a) => ({ id: a.id, source: resolverRaiz(a.peca_origem_id), target: resolverRaiz(a.peca_destino_id!) }))
+      .filter((l) => byId.has(l.source as string) && byId.has(l.target as string) && l.source !== l.target)
     links.forEach((l) => {
       const alvo = byId.get(l.target as string)
       if (alvo) alvo.citacoes += 1
@@ -101,10 +120,13 @@ export default function GrafoRede({ nos, arestas, onRelido }: Props) {
 
     const citadaPorDestino = new Map<string, GrafoAresta[]>()
     arestas.forEach((a) => {
-      if (!a.peca_destino_id || !byId.has(a.peca_destino_id) || !byId.has(a.peca_origem_id)) return
-      const lista = citadaPorDestino.get(a.peca_destino_id) ?? []
+      if (!a.peca_destino_id) return
+      const destino = resolverRaiz(a.peca_destino_id)
+      const origem = resolverRaiz(a.peca_origem_id)
+      if (!byId.has(destino) || !byId.has(origem) || destino === origem) return
+      const lista = citadaPorDestino.get(destino) ?? []
       lista.push(a)
-      citadaPorDestino.set(a.peca_destino_id, lista)
+      citadaPorDestino.set(destino, lista)
     })
 
     const tiposPresentes = Array.from(new Set(nosRaiz.map((n) => n.tipo)))
@@ -214,6 +236,23 @@ export default function GrafoRede({ nos, arestas, onRelido }: Props) {
       })
       idxHtml += '</div>'
     })
+    // Anexos (documentos dentro de uma peça-mãe) não têm ponto próprio no
+    // grafo, mas podem ser citados pelo ID deles — sem entrar aqui também no
+    // índice, o ID simplesmente "sumia" da busca mesmo já tendo leitura.
+    // Clique navega pra peça-mãe, que é quem aparece visualmente.
+    const anexosComId = nos.filter((n) => n.peca_pai_id && n.id_processual)
+    if (anexosComId.length > 0) {
+      idxHtml += `<div class="${styles.idxGroup}"><div class="${styles.idxGroupTitle}">` +
+        `<span class="${styles.swatch}" style="background:${COR_POR_TIPO.documento}"></span>Anexos · ${anexosComId.length}</div>`
+      anexosComId.forEach((n) => {
+        const raizId = resolverRaiz(n.id)
+        const pai = byId.get(raizId)
+        idxHtml += `<div class="${styles.idxItem}" data-id="${raizId}">` +
+          `<span class="${styles.idxIid}">${escapeHtml(n.id_processual!)}</span>` +
+          `<span class="${styles.idxTitle}">${escapeHtml(n.titulo)}${pai ? ' · anexo de ' + escapeHtml(pai.titulo) : ''}</span></div>`
+      })
+      idxHtml += '</div>'
+    }
     idIndexEl.innerHTML = idxHtml || `<p class="${styles.relEmpty}">Nenhuma peça com ID processual neste caso.</p>`
     idIndexEl.querySelectorAll<HTMLDivElement>(`.${styles.idxItem}`).forEach((el) => {
       const n = byId.get(el.getAttribute('data-id')!)
@@ -445,9 +484,10 @@ export default function GrafoRede({ nos, arestas, onRelido }: Props) {
       const mencoes = mencoesPorOrigem.get(d.id) ?? []
       if (mencoes.length === 0) return `<div class="${styles.relEmpty}">Nenhum ID mencionado no texto desta peça.</div>`
       return `<div class="${styles.chipWrap}">` + mencoes.map((a) => {
-        if (a.peca_destino_id && byId.has(a.peca_destino_id)) {
-          const alvo = byId.get(a.peca_destino_id)!
-          return `<span class="${styles.chip} ${styles.chipResolved}" data-goto="${a.peca_destino_id}" title="Clique para abrir">${escapeHtml(a.id_mencionado)}${driveIconHtml(alvo)}</span>`
+        const destino = a.peca_destino_id ? resolverRaiz(a.peca_destino_id) : null
+        if (destino && byId.has(destino)) {
+          const alvo = byId.get(destino)!
+          return `<span class="${styles.chip} ${styles.chipResolved}" data-goto="${destino}" title="Clique para abrir">${escapeHtml(a.id_mencionado)}${driveIconHtml(alvo)}</span>`
         }
         return `<span class="${styles.chip} ${styles.chipUnresolved}" title="Citado no texto, mas não localizado no acervo">${escapeHtml(a.id_mencionado)} · não localizado</span>`
       }).join('') + '</div>'
@@ -503,8 +543,8 @@ export default function GrafoRede({ nos, arestas, onRelido }: Props) {
       atualizarBotaoFixar()
 
       const mencionaResolvidos = (mencoesPorOrigem.get(id) ?? [])
-        .filter((a) => a.peca_destino_id && byId.has(a.peca_destino_id))
-        .map((a) => byId.get(a.peca_destino_id!)!)
+        .map((a) => a.peca_destino_id ? byId.get(resolverRaiz(a.peca_destino_id)) : undefined)
+        .filter((n): n is NoInterno => !!n)
       const mencionaHtml = `<div class="${styles.relLabel}">Menciona (resolvidos)</div>` + (
         mencionaResolvidos.length
           ? mencionaResolvidos.map(relItemHtml).join('')
