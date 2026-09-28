@@ -19,7 +19,7 @@ export const TIPOS_PECA: { value: TipoPeca; label: string }[] = [
 ]
 
 export type StatusSync = 'ok' | 'erro' | 'nenhum' | 'processando' | 'cancelado'
-export type EtapaSync = 'lendo' | 'resumindo'
+export type EtapaSync = 'consultando' | 'baixando' | 'lendo' | 'resumindo' | 'reclassificando'
 
 export interface Caso {
   id: string

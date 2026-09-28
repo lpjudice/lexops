@@ -14,6 +14,8 @@ import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError, OperationalError, PendingRollbackError
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
@@ -225,46 +227,61 @@ def sincronizar_caso_jusbr(db: Session, caso: AutosIACaso, session_data: dict | 
     """Sincroniza o Processo vinculado (DataJud + jus.br, reaproveitando as
     rotinas já existentes do orquestrador) e importa os andamentos novos como
     peças. Usada tanto pelo job agendado (3x/dia) quanto pelo botão de
-    "sincronizar agora" na tela do caso."""
+    "sincronizar agora" na tela do caso. Nunca lança — ver
+    _executar_com_retentativa."""
+    import asyncio
+
     from app.models.processo import Processo
     from app.services.consulta_processual.orchestrator import (
         sincronizar_processo,
         sincronizar_processo_jusbr,
     )
 
-    processo = db.query(Processo).filter(Processo.id == caso.processo_id).first()
-    if not processo:
-        caso.ultimo_sync_status = "erro"
-        caso.ultimo_sync_mensagem = "Processo vinculado não encontrado."
-        caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
-        db.commit()
-        return
+    # Lido uma única vez, antes de qualquer commit: depois de um commit todo
+    # atributo do objeto expira, e relê-lo numa sessão com a conexão caída
+    # lança PendingRollbackError — era o `caso.id` no log do except antigo
+    # que fazia a tela mostrar "Can't reconnect until invalid transaction is
+    # rolled back" em vez do erro real (reproduzido com pg_terminate_backend).
+    caso_id = caso.id
+    progresso = _criar_callback_progresso_jusbr(caso_id)
 
-    try:
-        import asyncio
+    def _etapa(db: Session, tentativa: int) -> None:
+        caso_atual = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
+        if not caso_atual:
+            return
+        if tentativa == 1:
+            # Um Cancelar de uma execução anterior não pode interromper esta.
+            caso_atual.sync_cancelar = False
+            db.commit()
+        processo = db.query(Processo).filter(Processo.id == caso_atual.processo_id).first()
+        if not processo:
+            _gravar_status_sync(caso_id, "erro", "Processo vinculado não encontrado.")
+            return
+
+        progresso({"stage": "consultando", "message": "Consultando o DataJud..."})
         asyncio.run(sincronizar_processo(processo, db))
         if session_data:
-            asyncio.run(sincronizar_processo_jusbr(processo, db, session_data=session_data))
-        novas = importar_andamentos_pendentes(db, caso)
-        db.refresh(caso)
-        if caso.ultimo_sync_status != "cancelado":
-            caso.ultimo_sync_status = "ok"
-            caso.ultimo_sync_mensagem = f"{novas} peça(s) nova(s) importada(s)."
-        caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
+            asyncio.run(
+                sincronizar_processo_jusbr(processo, db, session_data=session_data, progress_callback=progresso)
+            )
+        # importar_andamentos_pendentes zera sync_cancelar ao começar — um
+        # Cancelar clicado durante a consulta ao jus.br tem que ser honrado
+        # antes disso, senão virava "ok" no fim.
+        if _cancelamento_pedido(caso_id):
+            raise SincronizacaoCancelada()
+        novas = importar_andamentos_pendentes(db, caso_atual)
+        db.refresh(caso_atual)
+        if caso_atual.ultimo_sync_status != "cancelado":
+            caso_atual.ultimo_sync_status = "ok"
+            caso_atual.ultimo_sync_mensagem = f"{novas} peça(s) nova(s) importada(s)."
+        caso_atual.sync_etapa = None
+        caso_atual.sync_total_itens = None
+        caso_atual.sync_itens_processados = None
+        caso_atual.sync_detalhe = None
+        caso_atual.ultima_sincronizacao_em = datetime.now(timezone.utc)
         db.commit()
-    except Exception as exc:
-        logger.warning("Autos IA: erro ao sincronizar caso %s: %s", caso.id, exc)
-        # Best-effort: limpa a sessão original (importa pro job agendado, que
-        # reusa `db` num loop de vários casos — ver scheduler.py). Mas NUNCA
-        # confia nela pra gravar o erro: já reproduzimos ao vivo um caso em
-        # que db.rollback() "funcionava" (sem lançar) e a query seguinte na
-        # MESMA sessão falhava de novo com PendingRollbackError — conexão
-        # irrecuperável, não só transação abortada.
-        try:
-            db.rollback()
-        except Exception:
-            logger.error("Rollback falhou ao sincronizar caso %s — conexão morta", caso.id)
-        _gravar_status_sync(caso.id, "erro", str(exc))
+
+    _executar_com_retentativa(db, caso_id, "sincronização", _etapa)
 
 
 def atualizar_metadados_jusbr(db: Session, caso: AutosIACaso, session_data: dict | None) -> None:
@@ -273,43 +290,45 @@ def atualizar_metadados_jusbr(db: Session, caso: AutosIACaso, session_data: dict
     novos como pendentes — sem processar nenhum em peça. Zero custo de IA: é só
     a consulta em si (rede) e o backfill/cadastro no banco. Útil pra testar o
     agrupamento por hora de protocolo (ver reagrupar_pecas_jusbr) sem forçar o
-    processamento de um backlog grande de documentos pendentes de uma vez."""
+    processamento de um backlog grande de documentos pendentes de uma vez.
+    Nunca lança — ver _executar_com_retentativa."""
+    import asyncio
+
     from app.models.processo import Processo
     from app.services.consulta_processual.orchestrator import sincronizar_processo_jusbr
 
-    processo = db.query(Processo).filter(Processo.id == caso.processo_id).first()
-    if not processo:
-        caso.ultimo_sync_status = "erro"
-        caso.ultimo_sync_mensagem = "Processo vinculado não encontrado."
-        caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
-        db.commit()
-        return
-    if not session_data:
-        caso.ultimo_sync_status = "erro"
-        caso.ultimo_sync_mensagem = "Sessão do jus.br não encontrada — cole o token novamente."
-        caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
-        db.commit()
-        return
+    caso_id = caso.id  # ver sincronizar_caso_jusbr
+    progresso = _criar_callback_progresso_jusbr(caso_id)
 
-    try:
-        import asyncio
-        asyncio.run(sincronizar_processo_jusbr(processo, db, session_data=session_data))
-        caso.ultimo_sync_status = "ok"
-        caso.ultimo_sync_mensagem = (
+    def _etapa(db: Session, tentativa: int) -> None:
+        caso_atual = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
+        if not caso_atual:
+            return
+        if tentativa == 1:
+            caso_atual.sync_cancelar = False
+            db.commit()
+        processo = db.query(Processo).filter(Processo.id == caso_atual.processo_id).first()
+        if not processo:
+            _gravar_status_sync(caso_id, "erro", "Processo vinculado não encontrado.")
+            return
+        if not session_data:
+            _gravar_status_sync(caso_id, "erro", "Sessão do jus.br não encontrada — cole o token novamente.")
+            return
+
+        asyncio.run(sincronizar_processo_jusbr(processo, db, session_data=session_data, progress_callback=progresso))
+        db.refresh(caso_atual)
+        caso_atual.ultimo_sync_status = "ok"
+        caso_atual.ultimo_sync_mensagem = (
             "Metadados atualizados (hora de protocolo etc.) — nenhuma peça nova foi processada."
         )
-        caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
+        caso_atual.sync_etapa = None
+        caso_atual.sync_total_itens = None
+        caso_atual.sync_itens_processados = None
+        caso_atual.sync_detalhe = None
+        caso_atual.ultima_sincronizacao_em = datetime.now(timezone.utc)
         db.commit()
-    except Exception as exc:
-        logger.warning("Autos IA: erro ao atualizar metadados do caso %s: %s", caso.id, exc)
-        # Mesmo cuidado de sincronizar_caso_jusbr logo acima: a sessão
-        # original pode estar irrecuperável mesmo após rollback() bem-
-        # sucedido — grava o erro sempre numa sessão nova.
-        try:
-            db.rollback()
-        except Exception:
-            logger.error("Rollback falhou ao atualizar metadados do caso %s — conexão morta", caso.id)
-        _gravar_status_sync(caso.id, "erro", str(exc))
+
+    _executar_com_retentativa(db, caso_id, "atualização de metadados", _etapa)
 
 
 def reagrupar_pecas_jusbr(db: Session, caso: AutosIACaso) -> int:
@@ -578,27 +597,24 @@ def reler_pecas_pendentes(db: Session, caso: AutosIACaso) -> tuple[int, int]:
     )
     if not pendentes:
         return 0, 0
+    # IDs antes do commit abaixo — depois dele os objetos expiram e cada
+    # `peca.id` viraria um SELECT extra na sessão do lote.
+    pendentes_ids = [p.id for p in pendentes]
 
     caso.sync_etapa = "resumindo"
-    caso.sync_total_itens = len(pendentes)
+    caso.sync_total_itens = len(pendentes_ids)
     caso.sync_itens_processados = 0
     db.commit()
 
     sucesso = 0
     falha = 0
-    for i, peca in enumerate(pendentes, start=1):
+    for i, peca_id in enumerate(pendentes_ids, start=1):
         if _cancelar_sync_solicitado(db, caso):
             break
-        peca_id = peca.id
-        # Sessão dedicada por item, em vez de reusar `db` pro lote inteiro:
-        # reler_peca pode ficar bastante tempo numa chamada externa (Drive
-        # ou IA), segurando a conexão do Postgres o tempo todo. Com uma
-        # sessão só pra todo o lote, essa conexão ficava presa pela duração
-        # do backlog inteiro — combinado com outras abas abertas, isso
-        # esgotava o pool de conexões e derrubava até o login (mesmo
-        # sintoma já documentado em app/database.py). Sessão por item limita
-        # o pior caso a UM item, e uma conexão morta aqui não derruba o
-        # resto do lote: a próxima iteração já abre uma sessão nova.
+        # Sessão dedicada por item: uma queda de conexão do banco no meio de
+        # uma peça (download do Drive + IA podem levar um bom tempo) só
+        # derruba aquela peça — que fica com erro_mensagem e continua na
+        # lista de pendentes pra próxima releitura — e não o lote inteiro.
         db_item = SessionLocal()
         try:
             peca_item = db_item.query(AutosIAPeca).filter(AutosIAPeca.id == peca_id).first()
@@ -631,25 +647,24 @@ def importar_apenas_existentes(db: Session, caso: AutosIACaso) -> None:
     vinculado — sem chamar DataJud/jus.br ao vivo. Usado no backfill inicial
     (ex.: caso com centenas de documentos já baixados por outra rotina) e no
     botão "Importar documentos existentes", quando não faz sentido esperar uma
-    sincronização de rede só pra reler o que já está salvo."""
-    try:
-        novas = importar_andamentos_pendentes(db, caso)
-        db.refresh(caso)
-        if caso.ultimo_sync_status != "cancelado":
-            caso.ultimo_sync_status = "ok"
-            caso.ultimo_sync_mensagem = f"{novas} peça(s) importada(s) a partir dos documentos já baixados."
-        caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
+    sincronização de rede só pra reler o que já está salvo. Nunca lança — ver
+    _executar_com_retentativa (uma retentativa só reprocessa o que ainda está
+    pendente: o que já virou peça/resumo fica salvo)."""
+    caso_id = caso.id  # ver sincronizar_caso_jusbr
+
+    def _etapa(db: Session, tentativa: int) -> None:
+        caso_atual = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
+        if not caso_atual:
+            return
+        novas = importar_andamentos_pendentes(db, caso_atual)
+        db.refresh(caso_atual)
+        if caso_atual.ultimo_sync_status != "cancelado":
+            caso_atual.ultimo_sync_status = "ok"
+            caso_atual.ultimo_sync_mensagem = f"{novas} peça(s) importada(s) a partir dos documentos já baixados."
+        caso_atual.ultima_sincronizacao_em = datetime.now(timezone.utc)
         db.commit()
-    except Exception as exc:
-        logger.warning("Autos IA: erro ao importar existentes do caso %s: %s", caso.id, exc)
-        # Mesmo cuidado de sincronizar_caso_jusbr/atualizar_metadados_jusbr:
-        # a sessão original pode estar irrecuperável mesmo após rollback()
-        # bem-sucedido — grava o erro sempre numa sessão nova.
-        try:
-            db.rollback()
-        except Exception:
-            logger.error("Rollback falhou ao importar existentes do caso %s — conexão morta", caso.id)
-        _gravar_status_sync(caso.id, "erro", str(exc))
+
+    _executar_com_retentativa(db, caso_id, "importação", _etapa)
 
 
 def listar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> list[AndamentoProcesso]:
@@ -675,40 +690,212 @@ def listar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> list[Andament
     ).all()
 
 
-def _gravar_status_sync(caso_id, status: str, mensagem: str) -> None:
-    """Grava o resultado final (ok/erro/cancelado) de uma sincronização numa
-    sessão SEMPRE NOVA — nunca reaproveitando a sessão que rodou a
-    sincronização. Na prática, depois de uma OperationalError vinda de uma
-    chamada externa (jus.br/DataJud), a sessão original pode ficar
-    IRRECUPERÁVEL mesmo depois de um `db.rollback()` bem-sucedido — a
-    consulta seguinte na mesma sessão falha de novo com PendingRollbackError
-    (reproduzido ao vivo: rollback() não lançou exceção, mas a query logo
-    depois lançou). Mesmo padrão já comprovado em
-    app/routers/autos_ia.py::_forcar_status_erro. Tenta até 3x com espera
-    curta: também já reproduzido ao vivo uma janela em que até a sessão
-    NOVA falhou de cara (Postgres recusando conexão nova, não só uma
-    conexão velha morta) — mas essas janelas observadas até agora duraram
-    só alguns segundos."""
-    for tentativa in range(3):
+# ── Resiliência a queda de conexão com o banco ─────────────────────────────
+#
+# O Postgres de produção derruba conexões em rajadas de alguns segundos
+# ("server closed the connection unexpectedly") — confirmado em 28/set: um
+# crash-recovery do próprio Postgres às 05:15 (processos auxiliares
+# reiniciados) e várias rajadas à tarde vindas do proxy. Uma sincronização
+# longa que pega uma dessas rajadas não pode simplesmente morrer: as rotinas
+# abaixo fazem rollback, esperam e tentam de novo (o que já foi importado
+# fica salvo e é pulado na tentativa seguinte).
+
+_TENTATIVAS_SYNC = 3
+_ESPERA_ENTRE_TENTATIVAS_SEGUNDOS = 10
+_CAMPOS_PROGRESSO_LIMPOS = {
+    AutosIACaso.sync_etapa: None,
+    AutosIACaso.sync_total_itens: None,
+    AutosIACaso.sync_itens_processados: None,
+    AutosIACaso.sync_detalhe: None,
+}
+
+
+class SincronizacaoCancelada(Exception):
+    """O usuário clicou em Cancelar no meio da consulta ao jus.br. Levantada
+    pelo callback de progresso entre um documento e outro — o orquestrador já
+    persiste cada andamento assim que baixa, então a próxima sincronização
+    retoma de onde parou."""
+
+
+def _eh_falha_de_conexao(exc: BaseException) -> bool:
+    """True se a falha (ou algo na cadeia de causas dela) é o banco derrubando
+    a conexão — transitório, vale tentar de novo. Erro de dado (constraint,
+    valor inválido) fica de fora: repetir daria o mesmo erro."""
+    vistos: set[int] = set()
+    atual: BaseException | None = exc
+    while atual is not None and id(atual) not in vistos:
+        vistos.add(id(atual))
+        if isinstance(atual, OperationalError):
+            return True
+        if isinstance(atual, DBAPIError) and atual.connection_invalidated:
+            return True
+        if isinstance(atual, PendingRollbackError) and (
+            "OperationalError" in str(atual) or "reconnect" in str(atual)
+        ):
+            return True
+        atual = atual.__cause__ or atual.__context__
+    return False
+
+
+def _mensagem_de_falha(exc: BaseException, tentativas: int) -> str:
+    if _eh_falha_de_conexao(exc):
+        return (
+            f"A conexão com o banco de dados caiu durante o processo ({tentativas} tentativa(s)) — "
+            "instabilidade temporária do servidor. O que já foi importado ficou salvo; "
+            "tente de novo em alguns instantes."
+        )
+    return str(exc)[:2000]
+
+
+def _rollback_seguro(db: Session) -> None:
+    try:
+        db.rollback()
+    except Exception:
+        logger.warning("Autos IA: rollback falhou (conexão já morta) — o pool descarta a conexão")
+
+
+def _atualizar_caso_em_sessao_nova(caso_id, campos: dict, tentativas: int = 1) -> bool:
+    """Grava campos do caso numa sessão própria e curta — nunca na sessão de
+    quem chamou, que pode estar no meio da transação do orquestrador do
+    jus.br ou recém-quebrada por uma queda de conexão. lock_timeout curto: se
+    a linha estiver travada por outra transação, desiste em vez de esperar
+    pra sempre (a gravação é de progresso/status, nunca dado da peça)."""
+    for tentativa in range(tentativas):
         if tentativa:
             time.sleep(1.5 * tentativa)
-        db_status = SessionLocal()
+        sessao = SessionLocal()
         try:
-            caso = db_status.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
-            if caso:
-                caso.ultimo_sync_status = status
-                caso.ultimo_sync_mensagem = mensagem[:2000]
-                caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
-                db_status.commit()
-            return
-        except Exception:
+            sessao.execute(text("SET LOCAL lock_timeout = '3s'"))
+            sessao.query(AutosIACaso).filter(AutosIACaso.id == caso_id).update(campos, synchronize_session=False)
+            sessao.commit()
+            return True
+        except Exception as exc:
             logger.warning(
-                "Falha ao gravar status de sincronização do caso %s na tentativa %d/3 (banco indisponível?)",
-                caso_id, tentativa + 1,
+                "Autos IA: falha ao atualizar o caso %s (tentativa %d/%d): %s", caso_id, tentativa + 1, tentativas, exc
             )
+            _rollback_seguro(sessao)
         finally:
-            db_status.close()
-    logger.error("Não foi possível gravar status de sincronização do caso %s em 3 tentativas — banco indisponível", caso_id)
+            sessao.close()
+    return False
+
+
+def _gravar_status_sync(caso_id, status: str, mensagem: str) -> None:
+    """Status final de uma rotina de sincronização, em sessão nova e com 3
+    tentativas. Também limpa o progresso — senão a tela ficava mostrando a
+    etapa/documento de uma execução que já terminou."""
+    campos = {
+        AutosIACaso.ultimo_sync_status: status,
+        AutosIACaso.ultimo_sync_mensagem: mensagem,
+        AutosIACaso.ultima_sincronizacao_em: datetime.now(timezone.utc),
+        **_CAMPOS_PROGRESSO_LIMPOS,
+    }
+    if not _atualizar_caso_em_sessao_nova(caso_id, campos, tentativas=3):
+        logger.error("Autos IA: não foi possível gravar o status final do caso %s — banco indisponível", caso_id)
+
+
+def _cancelamento_pedido(caso_id) -> bool:
+    """Lê a flag de Cancelar numa sessão nova (a do chamador pode estar no
+    meio de uma transação ou quebrada). Na dúvida (banco fora), não cancela."""
+    sessao = SessionLocal()
+    try:
+        return bool(
+            sessao.query(AutosIACaso.sync_cancelar).filter(AutosIACaso.id == caso_id).scalar()
+        )
+    except Exception:
+        _rollback_seguro(sessao)
+        return False
+    finally:
+        sessao.close()
+
+
+def _finalizar_cancelado(caso_id, nome: str) -> None:
+    logger.info("Autos IA: %s do caso %s cancelada pelo usuário", nome, caso_id)
+    _atualizar_caso_em_sessao_nova(
+        caso_id,
+        {
+            AutosIACaso.ultimo_sync_status: "cancelado",
+            AutosIACaso.ultimo_sync_mensagem: "Cancelado pelo usuário.",
+            AutosIACaso.ultima_sincronizacao_em: datetime.now(timezone.utc),
+            **_CAMPOS_PROGRESSO_LIMPOS,
+        },
+        tentativas=3,
+    )
+
+
+def _executar_com_retentativa(db: Session, caso_id, nome: str, etapa) -> None:
+    """Roda `etapa(db, tentativa)` — que faz o trabalho inteiro e grava ela
+    mesma o status de sucesso — tentando de novo quando o banco derruba a
+    conexão no meio. Nunca lança: termina sempre com o caso em ok, erro ou
+    cancelado (a sessão `db` fica utilizável depois — o job agendado reusa a
+    mesma sessão pro próximo caso)."""
+    for tentativa in range(1, _TENTATIVAS_SYNC + 1):
+        try:
+            etapa(db, tentativa)
+            return
+        except SincronizacaoCancelada:
+            _rollback_seguro(db)
+            _finalizar_cancelado(caso_id, nome)
+            return
+        except Exception as exc:
+            # Rollback ANTES de qualquer outra coisa: tocar em qualquer
+            # atributo de objeto da sessão antes disso (até um `caso.id` num
+            # log) dispara um SELECT na transação quebrada e vira
+            # PendingRollbackError — era esse o erro que aparecia na tela.
+            _rollback_seguro(db)
+            if _cancelamento_pedido(caso_id):
+                _finalizar_cancelado(caso_id, nome)
+                return
+            conexao = _eh_falha_de_conexao(exc)
+            if conexao and tentativa < _TENTATIVAS_SYNC:
+                espera = _ESPERA_ENTRE_TENTATIVAS_SEGUNDOS * tentativa
+                logger.warning(
+                    "Autos IA: %s do caso %s — conexão com o banco caiu (tentativa %d/%d), "
+                    "nova tentativa em %ds: %s", nome, caso_id, tentativa, _TENTATIVAS_SYNC, espera, exc,
+                )
+                _atualizar_caso_em_sessao_nova(caso_id, {
+                    AutosIACaso.sync_detalhe: (
+                        f"Conexão com o banco caiu — tentando de novo em {espera}s "
+                        f"(tentativa {tentativa + 1}/{_TENTATIVAS_SYNC})..."
+                    ),
+                })
+                time.sleep(espera)
+                continue
+            if conexao:
+                logger.warning("Autos IA: %s do caso %s falhou após %d tentativas: %s", nome, caso_id, tentativa, exc)
+            else:
+                logger.exception("Autos IA: %s do caso %s falhou", nome, caso_id)
+            _gravar_status_sync(caso_id, "erro", _mensagem_de_falha(exc, tentativa))
+            return
+
+
+def _criar_callback_progresso_jusbr(caso_id):
+    """Espelha no caso o progresso que o orquestrador do jus.br já emite
+    ("Enviando documento 3/10: x.pdf") — antes ninguém passava esse callback e
+    a tela ficava só em "Processando" durante toda a consulta, sem dar pra
+    saber se estava andando. Grava no máximo 1x a cada 2s (fora mudança de
+    etapa) e aproveita pra checar o Cancelar entre um documento e outro."""
+    ultimo = {"em": 0.0, "etapa": None}
+
+    def _callback(payload: dict) -> None:
+        etapa = "consultando" if payload.get("stage") == "consultando" else "baixando"
+        agora = time.monotonic()
+        nova_etapa = etapa != ultimo["etapa"]
+        if not nova_etapa and agora - ultimo["em"] < 2.0:
+            return
+        ultimo["em"], ultimo["etapa"] = agora, etapa
+        campos = {
+            AutosIACaso.sync_etapa: etapa,
+            AutosIACaso.sync_total_itens: payload.get("total") or None,
+            AutosIACaso.sync_itens_processados: payload.get("processed") or 0,
+            AutosIACaso.sync_detalhe: (payload.get("message") or "")[:500] or None,
+        }
+        if nova_etapa:
+            campos[AutosIACaso.sync_iniciado_em] = datetime.now(timezone.utc)
+        _atualizar_caso_em_sessao_nova(caso_id, campos)
+        if _cancelamento_pedido(caso_id):
+            raise SincronizacaoCancelada()
+
+    return _callback
 
 
 def _cancelar_sync_solicitado(db: Session, caso: AutosIACaso) -> bool:

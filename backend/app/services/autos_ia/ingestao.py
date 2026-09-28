@@ -428,10 +428,15 @@ def reclassificar_caso(db: Session, caso: AutosIACaso) -> int:
     keywords. Retorna quantas peças foram reclassificadas."""
     from datetime import datetime, timezone
 
+    # Lido antes de qualquer commit: depois dele o objeto expira e reler
+    # `caso.id` numa sessão com a conexão caída (ex.: no log do except, antes
+    # do rollback) lança PendingRollbackError e esconde o erro real.
+    caso_id = caso.id
+
     pecas = (
         db.query(AutosIAPeca)
         .filter(
-            AutosIAPeca.caso_id == caso.id,
+            AutosIAPeca.caso_id == caso_id,
             AutosIAPeca.peca_pai_id.is_(None),
             AutosIAPeca.status == "resumida",
         )
@@ -460,7 +465,7 @@ def reclassificar_caso(db: Session, caso: AutosIACaso) -> int:
         try:
             db.commit()
         except Exception:
-            logger.warning("Falha ao gravar progresso da reclassificação do caso %s (conexão instável?)", caso.id)
+            logger.warning("Falha ao gravar progresso da reclassificação do caso %s (conexão instável?)", caso_id)
             try:
                 db.rollback()
             except Exception:
@@ -471,7 +476,7 @@ def reclassificar_caso(db: Session, caso: AutosIACaso) -> int:
         try:
             db.commit()
         except Exception:
-            logger.warning("Falha ao gravar custo da reclassificação do caso %s (conexão instável?)", caso.id)
+            logger.warning("Falha ao gravar custo da reclassificação do caso %s (conexão instável?)", caso_id)
             try:
                 db.rollback()
             except Exception:
@@ -497,16 +502,14 @@ def reclassificar_caso(db: Session, caso: AutosIACaso) -> int:
         caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
         db.commit()
     except Exception as exc:
-        logger.warning("Autos IA: erro ao reclassificar caso %s: %s", caso.id, exc)
-        # A sessão original pode ficar irrecuperável mesmo após um
-        # rollback() bem-sucedido (já reproduzido ao vivo em sincronizar_
-        # caso_jusbr: a query seguinte na MESMA sessão falhava de novo com
-        # PendingRollbackError) — grava o erro sempre numa sessão nova, mesmo
-        # padrão de _forcar_status_erro/_gravar_status_sync.
+        logger.warning("Autos IA: erro ao reclassificar caso %s: %s", caso_id, exc)
+        # Grava o erro numa sessão nova, mesmo padrão de _gravar_status_sync
+        # (jusbr_import.py) — sem retentativa aqui: repetir a reclassificação
+        # pagaria de novo a IA de todas as peças.
         try:
             db.rollback()
         except Exception:
-            logger.error("Rollback falhou ao reclassificar caso %s — conexão morta", caso.id)
+            logger.error("Rollback falhou ao reclassificar caso %s — conexão morta", caso_id)
         # Tenta até 3x com espera curta: já reproduzido ao vivo uma janela
         # em que até uma sessão NOVA falha de cara (Postgres recusando
         # conexão nova) — mas essas janelas duraram só alguns segundos.
@@ -515,7 +518,7 @@ def reclassificar_caso(db: Session, caso: AutosIACaso) -> int:
                 time.sleep(1.5 * tentativa)
             db_erro = SessionLocal()
             try:
-                caso_erro = db_erro.query(AutosIACaso).filter(AutosIACaso.id == caso.id).first()
+                caso_erro = db_erro.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
                 if caso_erro:
                     caso_erro.ultimo_sync_status = "erro"
                     caso_erro.ultimo_sync_mensagem = str(exc)[:2000]
@@ -529,12 +532,12 @@ def reclassificar_caso(db: Session, caso: AutosIACaso) -> int:
             except Exception:
                 logger.warning(
                     "Também falhou ao gravar erro da reclassificação do caso %s na tentativa %d/3",
-                    caso.id, tentativa + 1,
+                    caso_id, tentativa + 1,
                 )
             finally:
                 db_erro.close()
         else:
-            logger.error("Não foi possível gravar erro da reclassificação do caso %s em 3 tentativas", caso.id)
+            logger.error("Não foi possível gravar erro da reclassificação do caso %s em 3 tentativas", caso_id)
     return len(pecas)
 
 
