@@ -336,11 +336,26 @@ def _executar_reagrupar_em_background(caso_id: uuid.UUID) -> None:
                 caso.ultimo_sync_status = "ok"
                 caso.ultimo_sync_mensagem = f"{total} peça(s) reagrupada(s) (petição/anexo)."
             except Exception as exc:
+                # Sem rollback aqui, o commit do finally falha em cascata com
+                # PendingRollbackError quando a falha acima deixa a transação
+                # em estado de erro (mesmo cuidado usado no resto do módulo).
+                try:
+                    db.rollback()
+                except Exception:
+                    logger.error("Rollback falhou ao reagrupar caso %s — conexão morta", caso_id)
+                caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first() or caso
                 caso.ultimo_sync_status = "erro"
-                caso.ultimo_sync_mensagem = str(exc)
+                caso.ultimo_sync_mensagem = str(exc)[:2000]
             finally:
                 caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
                 db.commit()
+    except Exception as exc:
+        # Rede de segurança: se a própria busca do caso falhar (ex.: pool de
+        # conexões esgotado antes de sequer começar), sem isso o caso ficava
+        # preso em "processando" pra sempre — só um redeploy desemperrava.
+        # Mesmo padrão de _executar_sync_em_background/_forcar_status_erro.
+        logger.exception("Autos IA: reagrupar do caso %s travou de forma inesperada", caso_id)
+        _forcar_status_erro(caso_id, f"Interrompida por um erro inesperado: {exc}")
     finally:
         db.close()
 
@@ -373,11 +388,22 @@ def _executar_recalcular_ids_em_background(caso_id: uuid.UUID) -> None:
                     f"{atualizadas} peça(s) com ID corrigido, {reconectadas} referência(s) reconectada(s)."
                 )
             except Exception as exc:
+                # Mesmo cuidado do reagrupar logo acima: sem rollback, o
+                # commit do finally falha em cascata com PendingRollbackError.
+                try:
+                    db.rollback()
+                except Exception:
+                    logger.error("Rollback falhou ao recalcular IDs do caso %s — conexão morta", caso_id)
+                caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first() or caso
                 caso.ultimo_sync_status = "erro"
-                caso.ultimo_sync_mensagem = str(exc)
+                caso.ultimo_sync_mensagem = str(exc)[:2000]
             finally:
                 caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
                 db.commit()
+    except Exception as exc:
+        # Mesma rede de segurança do reagrupar logo acima.
+        logger.exception("Autos IA: recalcular-ids do caso %s travou de forma inesperada", caso_id)
+        _forcar_status_erro(caso_id, f"Interrompida por um erro inesperado: {exc}")
     finally:
         db.close()
 
@@ -406,6 +432,13 @@ def _executar_importacao_existentes_em_background(caso_id: uuid.UUID) -> None:
         caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
         if caso:
             importar_apenas_existentes(db, caso)
+    except Exception as exc:
+        # Rede de segurança: importar_apenas_existentes já trata falha e
+        # rollback internamente, mas se mesmo assim algo escapar (ex.: a
+        # própria busca do caso falhar), sem isso o caso ficava preso em
+        # "processando" pra sempre. Mesmo padrão do resto do módulo.
+        logger.exception("Autos IA: importar-existentes do caso %s travou de forma inesperada", caso_id)
+        _forcar_status_erro(caso_id, f"Interrompida por um erro inesperado: {exc}")
     finally:
         db.close()
 
@@ -578,6 +611,13 @@ def _executar_reclassificacao_em_background(caso_id: uuid.UUID) -> None:
         caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
         if caso:
             reclassificar_caso(db, caso)
+    except Exception as exc:
+        # Rede de segurança: reclassificar_caso já trata falha e rollback
+        # internamente, mas se mesmo assim algo escapar, sem isso o caso
+        # ficava preso em "processando" pra sempre. Mesmo padrão do resto do
+        # módulo (ver _executar_sync_em_background).
+        logger.exception("Autos IA: reclassificar do caso %s travou de forma inesperada", caso_id)
+        _forcar_status_erro(caso_id, f"Interrompida por um erro inesperado: {exc}")
     finally:
         db.close()
 
