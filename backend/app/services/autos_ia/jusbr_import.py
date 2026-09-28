@@ -580,8 +580,27 @@ def reler_pecas_pendentes(db: Session, caso: AutosIACaso) -> tuple[int, int]:
             sucesso += 1
         except Exception as exc:
             logger.warning("Falha ao reler peça %s em lote: %s", peca.id, exc)
-            peca.erro_mensagem = str(exc)[:2000]
-            db.commit()
+            # Uma falha no meio de reler_peca (download, extração, chamada de
+            # IA ou commit) pode deixar a transação em estado de erro no
+            # Postgres — sem rollback, QUALQUER query seguinte nessa mesma
+            # sessão (incluindo o commit do erro logo abaixo, e o resto do
+            # lote inteiro) falha com "current transaction is aborted",
+            # derrubando o lote inteiro por causa de UMA peça. Mesmo cuidado
+            # já usado em resumir_pecas_em_paralelo.
+            try:
+                db.rollback()
+            except Exception:
+                logger.error("Rollback falhou pra peça %s — conexão morta, desistindo do lote", peca.id)
+                raise
+            try:
+                peca.erro_mensagem = str(exc)[:2000]
+                db.commit()
+            except Exception:
+                logger.exception("Falha ao gravar erro da peça %s (conexão instável?) — segue pra próxima", peca.id)
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
             falha += 1
         caso.sync_itens_processados = i
         _commit_resiliente(db)
