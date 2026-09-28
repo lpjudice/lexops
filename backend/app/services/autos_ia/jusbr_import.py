@@ -16,6 +16,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from app.database import SessionLocal
 from app.models.andamento import AndamentoProcesso
 from app.models.autos_ia import AutosIACaso, AutosIAPeca, AutosIAReferencia
 from app.services.autos_ia.ingestao import (
@@ -575,33 +576,36 @@ def reler_pecas_pendentes(db: Session, caso: AutosIACaso) -> tuple[int, int]:
     for i, peca in enumerate(pendentes, start=1):
         if _cancelar_sync_solicitado(db, caso):
             break
+        peca_id = peca.id
+        # Sessão dedicada por item, em vez de reusar `db` pro lote inteiro:
+        # reler_peca pode ficar bastante tempo numa chamada externa (Drive
+        # ou IA), segurando a conexão do Postgres o tempo todo. Com uma
+        # sessão só pra todo o lote, essa conexão ficava presa pela duração
+        # do backlog inteiro — combinado com outras abas abertas, isso
+        # esgotava o pool de conexões e derrubava até o login (mesmo
+        # sintoma já documentado em app/database.py). Sessão por item limita
+        # o pior caso a UM item, e uma conexão morta aqui não derruba o
+        # resto do lote: a próxima iteração já abre uma sessão nova.
+        db_item = SessionLocal()
         try:
-            reler_peca(db, peca)
+            peca_item = db_item.query(AutosIAPeca).filter(AutosIAPeca.id == peca_id).first()
+            if peca_item is None:
+                continue
+            reler_peca(db_item, peca_item)
             sucesso += 1
         except Exception as exc:
-            logger.warning("Falha ao reler peça %s em lote: %s", peca.id, exc)
-            # Uma falha no meio de reler_peca (download, extração, chamada de
-            # IA ou commit) pode deixar a transação em estado de erro no
-            # Postgres — sem rollback, QUALQUER query seguinte nessa mesma
-            # sessão (incluindo o commit do erro logo abaixo, e o resto do
-            # lote inteiro) falha com "current transaction is aborted",
-            # derrubando o lote inteiro por causa de UMA peça. Mesmo cuidado
-            # já usado em resumir_pecas_em_paralelo.
+            logger.warning("Falha ao reler peça %s em lote: %s", peca_id, exc)
             try:
-                db.rollback()
+                db_item.rollback()
+                peca_item = db_item.query(AutosIAPeca).filter(AutosIAPeca.id == peca_id).first()
+                if peca_item is not None:
+                    peca_item.erro_mensagem = str(exc)[:2000]
+                    db_item.commit()
             except Exception:
-                logger.error("Rollback falhou pra peça %s — conexão morta, desistindo do lote", peca.id)
-                raise
-            try:
-                peca.erro_mensagem = str(exc)[:2000]
-                db.commit()
-            except Exception:
-                logger.exception("Falha ao gravar erro da peça %s (conexão instável?) — segue pra próxima", peca.id)
-                try:
-                    db.rollback()
-                except Exception:
-                    pass
+                logger.exception("Falha ao gravar erro da peça %s (conexão instável?) — segue pra próxima", peca_id)
             falha += 1
+        finally:
+            db_item.close()
         caso.sync_itens_processados = i
         _commit_resiliente(db)
 
