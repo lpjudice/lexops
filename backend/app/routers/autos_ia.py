@@ -722,7 +722,16 @@ def listar_documentos_drive(
         base = base.order_by(
             AndamentoProcesso.data_andamento.desc().nulls_last(),
             AndamentoProcesso.protocolado_em.desc().nulls_first(),
-            AutosIAPeca.pagina_inicio.desc(),
+            # pagina_inicio SEMPRE crescente, mesmo aqui: ele só desempata
+            # principais de mesmo dia+hora (mesmo lote de submissão) — a
+            # ordem decrescente é dos LOTES entre si (o mais recente primeiro),
+            # nunca de "quem" veio primeiro DENTRO do mesmo lote. Invertido
+            # aqui mostraria documento antes da petição que o originou sempre
+            # que os dois batessem no mesmo timestamp — exatamente o efeito
+            # que não é desejado (petição 13/doc 14/doc 15 tem que aparecer
+            # nessa ordem, nunca 15-14-13, mesmo com o lote 10-11-12 vindo
+            # depois por inteiro).
+            AutosIAPeca.pagina_inicio.asc(),
         )
     principais = base.offset(max(0, offset)).limit(limit).all()
 
