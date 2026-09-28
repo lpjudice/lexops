@@ -26,7 +26,8 @@ from app.services.autos_ia.estimativa import estimar_importacao_existentes, esti
 from app.services.autos_ia.ingestao import processar_documento, reclassificar_caso, retomar_documento
 from app.services.autos_ia.jusbr_import import (
     atualizar_metadados_jusbr, contar_pecas_pendentes_resumo, importar_apenas_existentes,
-    listar_andamentos_pendentes, reagrupar_pecas_jusbr, resumir_pendentes_agora, sincronizar_caso_jusbr,
+    listar_andamentos_pendentes, reagrupar_pecas_jusbr, recalcular_ids_processuais, resumir_pendentes_agora,
+    sincronizar_caso_jusbr,
 )
 from app.services.autos_ia.nomes import derivar_nome_indexado
 from app.services.autos_ia.pdf_merge import montar_pdf_pecas
@@ -356,6 +357,46 @@ def reagrupar_agora(caso_id: uuid.UUID, background_tasks: BackgroundTasks, db: S
     db.commit()
     db.refresh(caso)
     background_tasks.add_task(_executar_reagrupar_em_background, caso.id)
+    return caso
+
+
+def _executar_recalcular_ids_em_background(caso_id: uuid.UUID) -> None:
+    from datetime import datetime, timezone
+    db = SessionLocal()
+    try:
+        caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
+        if caso:
+            try:
+                atualizadas, reconectadas = recalcular_ids_processuais(db, caso)
+                caso.ultimo_sync_status = "ok"
+                caso.ultimo_sync_mensagem = (
+                    f"{atualizadas} peça(s) com ID corrigido, {reconectadas} referência(s) reconectada(s)."
+                )
+            except Exception as exc:
+                caso.ultimo_sync_status = "erro"
+                caso.ultimo_sync_mensagem = str(exc)
+            finally:
+                caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
+                db.commit()
+    finally:
+        db.close()
+
+
+@router.post("/casos/{caso_id}/recalcular-ids", response_model=CasoOut, status_code=status.HTTP_202_ACCEPTED)
+def recalcular_ids_agora(caso_id: uuid.UUID, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Corrige id_processual das peças já importadas usando o documento_id que o
+    jus.br já entrega pronto no andamento, e reconecta referências que dependiam
+    disso — 100% local, sem IA nem rede, e sem mexer em peca_pai_id/tipo (ao
+    contrário de /reagrupar, isso preserva qualquer reorganização manual feita
+    pelo usuário via tornar-principal/anexar-a/desvincular)."""
+    caso = _get_caso(db, caso_id)
+    if caso.ultimo_sync_status == "processando":
+        raise HTTPException(status_code=422, detail="Já há uma sincronização/reagrupamento em andamento.")
+    caso.ultimo_sync_status = "processando"
+    caso.ultimo_sync_mensagem = None
+    db.commit()
+    db.refresh(caso)
+    background_tasks.add_task(_executar_recalcular_ids_em_background, caso.id)
     return caso
 
 

@@ -17,7 +17,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.models.andamento import AndamentoProcesso
-from app.models.autos_ia import AutosIACaso, AutosIAPeca
+from app.models.autos_ia import AutosIACaso, AutosIAPeca, AutosIAReferencia
 from app.services.autos_ia.ingestao import (
     _persistir_referencias,
     _resolver_referencias_pendentes,
@@ -422,6 +422,44 @@ def reagrupar_pecas_jusbr(db: Session, caso: AutosIACaso) -> int:
     # _normalizar_id, que agora resolve referências que antes nunca batiam.
     _resolver_referencias_pendentes(db, caso.id)
     return reagrupadas
+
+
+def recalcular_ids_processuais(db: Session, caso: AutosIACaso) -> tuple[int, int]:
+    """Backfill de id_processual pras peças já importadas deste caso, puxando
+    o documento_id que o jus.br já entrega pronto no andamento (a mesma fonte
+    usada em _criar_peca pra peças novas) — sem chamar IA, sem reler nada, sem
+    mexer em peca_pai_id/tipo (ao contrário de reagrupar_pecas_jusbr, que
+    reatribui isso e desfaria uma reorganização manual feita pelo usuário).
+    Corrige tanto peças sem id_processual quanto as que ficaram com um número
+    curto/local errado (ex.: "107", "Evento 57") vindo do palpite da IA antes
+    dessa fonte existir. Retorna (peças atualizadas, referências reconectadas)."""
+    antes_nao_localizadas = (
+        db.query(AutosIAReferencia)
+        .filter(AutosIAReferencia.caso_id == caso.id, AutosIAReferencia.peca_destino_id.is_(None))
+        .count()
+    )
+
+    pecas_com_andamento = (
+        db.query(AutosIAPeca, AndamentoProcesso.documento_id)
+        .join(AndamentoProcesso, AutosIAPeca.andamento_id == AndamentoProcesso.id)
+        .filter(AutosIAPeca.caso_id == caso.id, AndamentoProcesso.documento_id.isnot(None))
+        .all()
+    )
+    atualizadas = 0
+    for peca, documento_id in pecas_com_andamento:
+        novo = documento_id[:100]
+        if peca.id_processual != novo:
+            peca.id_processual = novo
+            atualizadas += 1
+    db.commit()
+
+    _resolver_referencias_pendentes(db, caso.id)
+    depois_nao_localizadas = (
+        db.query(AutosIAReferencia)
+        .filter(AutosIAReferencia.caso_id == caso.id, AutosIAReferencia.peca_destino_id.is_(None))
+        .count()
+    )
+    return atualizadas, antes_nao_localizadas - depois_nao_localizadas
 
 
 def importar_apenas_existentes(db: Session, caso: AutosIACaso) -> None:
