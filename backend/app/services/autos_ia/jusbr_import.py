@@ -19,6 +19,8 @@ from sqlalchemy.orm import Session
 from app.models.andamento import AndamentoProcesso
 from app.models.autos_ia import AutosIACaso, AutosIAPeca, AutosIAReferencia
 from app.services.autos_ia.ingestao import (
+    _eh_citacao_nao_indexavel,
+    _normalizar_id,
     _persistir_referencias,
     _resolver_referencias_pendentes,
     resumir_pecas_em_paralelo,
@@ -432,28 +434,58 @@ def recalcular_ids_processuais(db: Session, caso: AutosIACaso) -> tuple[int, int
     reatribui isso e desfaria uma reorganização manual feita pelo usuário).
     Corrige tanto peças sem id_processual quanto as que ficaram com um número
     curto/local errado (ex.: "107", "Evento 57") vindo do palpite da IA antes
-    dessa fonte existir. Retorna (peças atualizadas, referências reconectadas)."""
+    dessa fonte existir — e quando não há documento_id disponível pra corrigir
+    (andamento sem essa informação), LIMPA um id_processual que não pareça um
+    ID de peça de verdade (mesma regra de _eh_citacao_nao_indexavel: só dígitos
+    puros de 6+ conta), pra não deixar lixo tipo "107" na tela como se fosse um
+    ID válido. Por fim, apaga referências já persistidas que continuam sem
+    destino E não são mais indexáveis pela regra atual (jurisprudência,
+    número de processo, texto livre) — ruído que uma versão antiga desta
+    função persistiu antes do filtro existir. Retorna (peças atualizadas,
+    referências reconectadas)."""
     antes_nao_localizadas = (
         db.query(AutosIAReferencia)
         .filter(AutosIAReferencia.caso_id == caso.id, AutosIAReferencia.peca_destino_id.is_(None))
         .count()
     )
 
-    pecas_com_andamento = (
-        db.query(AutosIAPeca, AndamentoProcesso.documento_id)
-        .join(AndamentoProcesso, AutosIAPeca.andamento_id == AndamentoProcesso.id)
-        .filter(AutosIAPeca.caso_id == caso.id, AndamentoProcesso.documento_id.isnot(None))
+    pecas = (
+        db.query(AutosIAPeca)
+        .filter(AutosIAPeca.caso_id == caso.id, AutosIAPeca.andamento_id.isnot(None))
         .all()
     )
+    andamentos = {
+        a.id: a for a in db.query(AndamentoProcesso)
+        .filter(AndamentoProcesso.id.in_([p.andamento_id for p in pecas]))
+        .all()
+    }
     atualizadas = 0
-    for peca, documento_id in pecas_com_andamento:
-        novo = documento_id[:100]
-        if peca.id_processual != novo:
-            peca.id_processual = novo
-            atualizadas += 1
+    for peca in pecas:
+        andamento = andamentos.get(peca.andamento_id)
+        documento_id = andamento.documento_id[:100] if andamento and andamento.documento_id else None
+        if documento_id:
+            if peca.id_processual != documento_id:
+                peca.id_processual = documento_id
+                atualizadas += 1
+        elif peca.id_processual:
+            normalizado = _normalizar_id(peca.id_processual)
+            if not (normalizado.isdigit() and len(normalizado) >= 6):
+                peca.id_processual = None
+                atualizadas += 1
     db.commit()
 
     _resolver_referencias_pendentes(db, caso.id)
+
+    pendentes = (
+        db.query(AutosIAReferencia)
+        .filter(AutosIAReferencia.caso_id == caso.id, AutosIAReferencia.peca_destino_id.is_(None))
+        .all()
+    )
+    for ref in pendentes:
+        if _eh_citacao_nao_indexavel(ref.id_mencionado):
+            db.delete(ref)
+    db.commit()
+
     depois_nao_localizadas = (
         db.query(AutosIAReferencia)
         .filter(AutosIAReferencia.caso_id == caso.id, AutosIAReferencia.peca_destino_id.is_(None))
