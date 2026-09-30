@@ -14,15 +14,21 @@ import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError, OperationalError, PendingRollbackError
 from sqlalchemy.orm import Session
 
+from app.database import SessionLocal
 from app.models.andamento import AndamentoProcesso
-from app.models.autos_ia import AutosIACaso, AutosIAPeca
+from app.models.autos_ia import AutosIACaso, AutosIAPeca, AutosIAReferencia
 from app.services.autos_ia.ingestao import (
+    _eh_citacao_nao_indexavel,
+    _normalizar_id,
     _persistir_referencias,
     _resolver_referencias_pendentes,
     resumir_pecas_em_paralelo,
 )
+from app.services.autos_ia.resumo import resumir_peca
 from app.services.autos_ia.segmentacao import TIPOS_VALIDOS
 from app.services.pdf_extract import remover_nul
 
@@ -221,38 +227,61 @@ def sincronizar_caso_jusbr(db: Session, caso: AutosIACaso, session_data: dict | 
     """Sincroniza o Processo vinculado (DataJud + jus.br, reaproveitando as
     rotinas já existentes do orquestrador) e importa os andamentos novos como
     peças. Usada tanto pelo job agendado (3x/dia) quanto pelo botão de
-    "sincronizar agora" na tela do caso."""
+    "sincronizar agora" na tela do caso. Nunca lança — ver
+    _executar_com_retentativa."""
+    import asyncio
+
     from app.models.processo import Processo
     from app.services.consulta_processual.orchestrator import (
         sincronizar_processo,
         sincronizar_processo_jusbr,
     )
 
-    processo = db.query(Processo).filter(Processo.id == caso.processo_id).first()
-    if not processo:
-        caso.ultimo_sync_status = "erro"
-        caso.ultimo_sync_mensagem = "Processo vinculado não encontrado."
-        caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
-        db.commit()
-        return
+    # Lido uma única vez, antes de qualquer commit: depois de um commit todo
+    # atributo do objeto expira, e relê-lo numa sessão com a conexão caída
+    # lança PendingRollbackError — era o `caso.id` no log do except antigo
+    # que fazia a tela mostrar "Can't reconnect until invalid transaction is
+    # rolled back" em vez do erro real (reproduzido com pg_terminate_backend).
+    caso_id = caso.id
+    progresso = _criar_callback_progresso_jusbr(caso_id)
 
-    try:
-        import asyncio
+    def _etapa(db: Session, tentativa: int) -> None:
+        caso_atual = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
+        if not caso_atual:
+            return
+        if tentativa == 1:
+            # Um Cancelar de uma execução anterior não pode interromper esta.
+            caso_atual.sync_cancelar = False
+            db.commit()
+        processo = db.query(Processo).filter(Processo.id == caso_atual.processo_id).first()
+        if not processo:
+            _gravar_status_sync(caso_id, "erro", "Processo vinculado não encontrado.")
+            return
+
+        progresso({"stage": "consultando", "message": "Consultando o DataJud..."})
         asyncio.run(sincronizar_processo(processo, db))
         if session_data:
-            asyncio.run(sincronizar_processo_jusbr(processo, db, session_data=session_data))
-        novas = importar_andamentos_pendentes(db, caso)
-        db.refresh(caso)
-        if caso.ultimo_sync_status != "cancelado":
-            caso.ultimo_sync_status = "ok"
-            caso.ultimo_sync_mensagem = f"{novas} peça(s) nova(s) importada(s)."
-    except Exception as exc:
-        logger.warning("Autos IA: erro ao sincronizar caso %s: %s", caso.id, exc)
-        caso.ultimo_sync_status = "erro"
-        caso.ultimo_sync_mensagem = str(exc)
-    finally:
-        caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
+            asyncio.run(
+                sincronizar_processo_jusbr(processo, db, session_data=session_data, progress_callback=progresso)
+            )
+        # importar_andamentos_pendentes zera sync_cancelar ao começar — um
+        # Cancelar clicado durante a consulta ao jus.br tem que ser honrado
+        # antes disso, senão virava "ok" no fim.
+        if _cancelamento_pedido(caso_id):
+            raise SincronizacaoCancelada()
+        novas = importar_andamentos_pendentes(db, caso_atual)
+        db.refresh(caso_atual)
+        if caso_atual.ultimo_sync_status != "cancelado":
+            caso_atual.ultimo_sync_status = "ok"
+            caso_atual.ultimo_sync_mensagem = f"{novas} peça(s) nova(s) importada(s)."
+        caso_atual.sync_etapa = None
+        caso_atual.sync_total_itens = None
+        caso_atual.sync_itens_processados = None
+        caso_atual.sync_detalhe = None
+        caso_atual.ultima_sincronizacao_em = datetime.now(timezone.utc)
         db.commit()
+
+    _executar_com_retentativa(db, caso_id, "sincronização", _etapa)
 
 
 def atualizar_metadados_jusbr(db: Session, caso: AutosIACaso, session_data: dict | None) -> None:
@@ -261,38 +290,45 @@ def atualizar_metadados_jusbr(db: Session, caso: AutosIACaso, session_data: dict
     novos como pendentes — sem processar nenhum em peça. Zero custo de IA: é só
     a consulta em si (rede) e o backfill/cadastro no banco. Útil pra testar o
     agrupamento por hora de protocolo (ver reagrupar_pecas_jusbr) sem forçar o
-    processamento de um backlog grande de documentos pendentes de uma vez."""
+    processamento de um backlog grande de documentos pendentes de uma vez.
+    Nunca lança — ver _executar_com_retentativa."""
+    import asyncio
+
     from app.models.processo import Processo
     from app.services.consulta_processual.orchestrator import sincronizar_processo_jusbr
 
-    processo = db.query(Processo).filter(Processo.id == caso.processo_id).first()
-    if not processo:
-        caso.ultimo_sync_status = "erro"
-        caso.ultimo_sync_mensagem = "Processo vinculado não encontrado."
-        caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
-        db.commit()
-        return
-    if not session_data:
-        caso.ultimo_sync_status = "erro"
-        caso.ultimo_sync_mensagem = "Sessão do jus.br não encontrada — cole o token novamente."
-        caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
-        db.commit()
-        return
+    caso_id = caso.id  # ver sincronizar_caso_jusbr
+    progresso = _criar_callback_progresso_jusbr(caso_id)
 
-    try:
-        import asyncio
-        asyncio.run(sincronizar_processo_jusbr(processo, db, session_data=session_data))
-        caso.ultimo_sync_status = "ok"
-        caso.ultimo_sync_mensagem = (
+    def _etapa(db: Session, tentativa: int) -> None:
+        caso_atual = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
+        if not caso_atual:
+            return
+        if tentativa == 1:
+            caso_atual.sync_cancelar = False
+            db.commit()
+        processo = db.query(Processo).filter(Processo.id == caso_atual.processo_id).first()
+        if not processo:
+            _gravar_status_sync(caso_id, "erro", "Processo vinculado não encontrado.")
+            return
+        if not session_data:
+            _gravar_status_sync(caso_id, "erro", "Sessão do jus.br não encontrada — cole o token novamente.")
+            return
+
+        asyncio.run(sincronizar_processo_jusbr(processo, db, session_data=session_data, progress_callback=progresso))
+        db.refresh(caso_atual)
+        caso_atual.ultimo_sync_status = "ok"
+        caso_atual.ultimo_sync_mensagem = (
             "Metadados atualizados (hora de protocolo etc.) — nenhuma peça nova foi processada."
         )
-    except Exception as exc:
-        logger.warning("Autos IA: erro ao atualizar metadados do caso %s: %s", caso.id, exc)
-        caso.ultimo_sync_status = "erro"
-        caso.ultimo_sync_mensagem = str(exc)
-    finally:
-        caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
+        caso_atual.sync_etapa = None
+        caso_atual.sync_total_itens = None
+        caso_atual.sync_itens_processados = None
+        caso_atual.sync_detalhe = None
+        caso_atual.ultima_sincronizacao_em = datetime.now(timezone.utc)
         db.commit()
+
+    _executar_com_retentativa(db, caso_id, "atualização de metadados", _etapa)
 
 
 def reagrupar_pecas_jusbr(db: Session, caso: AutosIACaso) -> int:
@@ -424,25 +460,211 @@ def reagrupar_pecas_jusbr(db: Session, caso: AutosIACaso) -> int:
     return reagrupadas
 
 
+def recalcular_ids_processuais(db: Session, caso: AutosIACaso) -> tuple[int, int]:
+    """Backfill de id_processual pras peças já importadas deste caso, puxando
+    o documento_id que o jus.br já entrega pronto no andamento (a mesma fonte
+    usada em _criar_peca pra peças novas) — sem chamar IA, sem reler nada, sem
+    mexer em peca_pai_id/tipo (ao contrário de reagrupar_pecas_jusbr, que
+    reatribui isso e desfaria uma reorganização manual feita pelo usuário).
+    Corrige tanto peças sem id_processual quanto as que ficaram com um número
+    curto/local errado (ex.: "107", "Evento 57") vindo do palpite da IA antes
+    dessa fonte existir — e quando não há documento_id disponível pra corrigir
+    (andamento sem essa informação), LIMPA um id_processual que não pareça um
+    ID de peça de verdade (mesma regra de _eh_citacao_nao_indexavel: só dígitos
+    puros de 6+ conta), pra não deixar lixo tipo "107" na tela como se fosse um
+    ID válido. Por fim, apaga referências já persistidas que continuam sem
+    destino E não são mais indexáveis pela regra atual (jurisprudência,
+    número de processo, texto livre) — ruído que uma versão antiga desta
+    função persistiu antes do filtro existir. Retorna (peças atualizadas,
+    referências reconectadas)."""
+    antes_nao_localizadas = (
+        db.query(AutosIAReferencia)
+        .filter(AutosIAReferencia.caso_id == caso.id, AutosIAReferencia.peca_destino_id.is_(None))
+        .count()
+    )
+
+    pecas = (
+        db.query(AutosIAPeca)
+        .filter(AutosIAPeca.caso_id == caso.id, AutosIAPeca.andamento_id.isnot(None))
+        .all()
+    )
+    andamentos = {
+        a.id: a for a in db.query(AndamentoProcesso)
+        .filter(AndamentoProcesso.id.in_([p.andamento_id for p in pecas]))
+        .all()
+    }
+    atualizadas = 0
+    for peca in pecas:
+        andamento = andamentos.get(peca.andamento_id)
+        documento_id = andamento.documento_id[:100] if andamento and andamento.documento_id else None
+        if documento_id:
+            if peca.id_processual != documento_id:
+                peca.id_processual = documento_id
+                atualizadas += 1
+        elif peca.id_processual:
+            normalizado = _normalizar_id(peca.id_processual)
+            if not (normalizado.isdigit() and len(normalizado) >= 6):
+                peca.id_processual = None
+                atualizadas += 1
+    db.commit()
+
+    _resolver_referencias_pendentes(db, caso.id)
+
+    pendentes = (
+        db.query(AutosIAReferencia)
+        .filter(AutosIAReferencia.caso_id == caso.id, AutosIAReferencia.peca_destino_id.is_(None))
+        .all()
+    )
+    for ref in pendentes:
+        if _eh_citacao_nao_indexavel(ref.id_mencionado):
+            db.delete(ref)
+    db.commit()
+
+    depois_nao_localizadas = (
+        db.query(AutosIAReferencia)
+        .filter(AutosIAReferencia.caso_id == caso.id, AutosIAReferencia.peca_destino_id.is_(None))
+        .count()
+    )
+    return atualizadas, antes_nao_localizadas - depois_nao_localizadas
+
+
+def reler_peca(db: Session, peca: AutosIAPeca) -> None:
+    """Rebaixa e reprocessa UMA peça específica que falhou (ou ficou
+    incompleta) na leitura original — baixa de novo do Drive (já com o fix de
+    Google Doc/Planilha/Apresentação nativos, ver google_drive.
+    baixar_arquivo_por_id) e roda a IA de resumo só nela. Sempre uma peça de
+    cada vez: nunca reprocessa o caso inteiro, só o que pontualmente falhou —
+    pedido do Lucas pra poder corrigir leituras ruins sem sobrecarregar o
+    sistema de novo."""
+    if not peca.andamento_id:
+        raise ValueError("Esta peça não veio do jus.br — releitura ainda não é suportada para uploads manuais.")
+    andamento = db.query(AndamentoProcesso).filter(AndamentoProcesso.id == peca.andamento_id).first()
+    if not andamento:
+        raise ValueError("Andamento de origem não encontrado.")
+
+    conteudo = _obter_bytes(andamento)
+    if not conteudo:
+        raise ValueError("Não foi possível baixar o arquivo do Drive novamente.")
+    texto = _extrair_texto(conteudo, andamento.arquivo_nome)
+    if not texto or not texto.strip():
+        raise ValueError("O arquivo foi baixado, mas não foi possível extrair texto dele.")
+    peca.texto_md = remover_nul(texto)
+
+    resultado = resumir_peca(peca.texto_md, peca.titulo, peca.tipo)
+    peca.resumo = resultado.resumo
+    peca.keywords = [k[:100] for k in (resultado.keywords or [])]
+    peca.ids_mencionados = [i[:100] for i in (resultado.ids_mencionados or [])]
+    peca.custo_usd = (peca.custo_usd or 0) + resultado.custo_usd
+    peca.status = "resumida"
+    peca.erro_mensagem = None
+    if not peca.autor and resultado.peticionante:
+        peca.autor = resultado.peticionante[:255]
+    if resultado.id_proprio and not peca.id_processual:
+        peca.id_processual = resultado.id_proprio[:100]
+    if peca.peca_pai_id is None:
+        peca.tipo = resultado.tipo
+
+    caso = db.query(AutosIACaso).filter(AutosIACaso.id == peca.caso_id).first()
+    if caso:
+        caso.custo_usd_total = (caso.custo_usd_total or 0) + resultado.custo_usd
+    db.commit()
+
+    # Apaga as referências antigas desta peça antes de persistir as novas —
+    # senão uma releitura duplicava toda menção que já tinha sido salva na
+    # primeira leitura (mesma origem, texto novo, IDs mencionados diferentes).
+    db.query(AutosIAReferencia).filter(AutosIAReferencia.peca_origem_id == peca.id).delete()
+    db.commit()
+    _persistir_referencias(db, peca, peca.ids_mencionados)
+
+
+def reler_pecas_pendentes(db: Session, caso: AutosIACaso) -> tuple[int, int]:
+    """Roda reler_peca em TODAS as peças deste caso que ficaram com
+    erro_mensagem (falha de leitura) — inclui as que já viraram "resumida" com
+    um resumo genérico (o resumo da IA não falha, só fica pobre, então
+    status sozinho não identifica essas — só erro_mensagem, que a rotina de
+    resumo normal nunca limpa). Sequencial, uma peça de cada vez (rede + IA
+    por peça) — pedido do Lucas pra não sobrecarregar o sistema de novo como
+    uma sincronização paralela faria. Retorna (relidas com sucesso, falharam
+    de novo)."""
+    pendentes = (
+        db.query(AutosIAPeca)
+        .filter(
+            AutosIAPeca.caso_id == caso.id,
+            AutosIAPeca.andamento_id.isnot(None),
+            AutosIAPeca.erro_mensagem.isnot(None),
+        )
+        .all()
+    )
+    if not pendentes:
+        return 0, 0
+    # IDs antes do commit abaixo — depois dele os objetos expiram e cada
+    # `peca.id` viraria um SELECT extra na sessão do lote.
+    pendentes_ids = [p.id for p in pendentes]
+
+    caso.sync_etapa = "resumindo"
+    caso.sync_total_itens = len(pendentes_ids)
+    caso.sync_itens_processados = 0
+    db.commit()
+
+    sucesso = 0
+    falha = 0
+    for i, peca_id in enumerate(pendentes_ids, start=1):
+        if _cancelar_sync_solicitado(db, caso):
+            break
+        # Sessão dedicada por item: uma queda de conexão do banco no meio de
+        # uma peça (download do Drive + IA podem levar um bom tempo) só
+        # derruba aquela peça — que fica com erro_mensagem e continua na
+        # lista de pendentes pra próxima releitura — e não o lote inteiro.
+        db_item = SessionLocal()
+        try:
+            peca_item = db_item.query(AutosIAPeca).filter(AutosIAPeca.id == peca_id).first()
+            if peca_item is None:
+                continue
+            reler_peca(db_item, peca_item)
+            sucesso += 1
+        except Exception as exc:
+            logger.warning("Falha ao reler peça %s em lote: %s", peca_id, exc)
+            try:
+                db_item.rollback()
+                peca_item = db_item.query(AutosIAPeca).filter(AutosIAPeca.id == peca_id).first()
+                if peca_item is not None:
+                    peca_item.erro_mensagem = str(exc)[:2000]
+                    db_item.commit()
+            except Exception:
+                logger.exception("Falha ao gravar erro da peça %s (conexão instável?) — segue pra próxima", peca_id)
+            falha += 1
+        finally:
+            db_item.close()
+        caso.sync_itens_processados = i
+        _commit_resiliente(db)
+
+    _resolver_referencias_pendentes(db, caso.id)
+    return sucesso, falha
+
+
 def importar_apenas_existentes(db: Session, caso: AutosIACaso) -> None:
     """Só importa os andamentos/documentos que o jus.br JÁ baixou pro processo
     vinculado — sem chamar DataJud/jus.br ao vivo. Usado no backfill inicial
     (ex.: caso com centenas de documentos já baixados por outra rotina) e no
     botão "Importar documentos existentes", quando não faz sentido esperar uma
-    sincronização de rede só pra reler o que já está salvo."""
-    try:
-        novas = importar_andamentos_pendentes(db, caso)
-        db.refresh(caso)
-        if caso.ultimo_sync_status != "cancelado":
-            caso.ultimo_sync_status = "ok"
-            caso.ultimo_sync_mensagem = f"{novas} peça(s) importada(s) a partir dos documentos já baixados."
-    except Exception as exc:
-        logger.warning("Autos IA: erro ao importar existentes do caso %s: %s", caso.id, exc)
-        caso.ultimo_sync_status = "erro"
-        caso.ultimo_sync_mensagem = str(exc)
-    finally:
-        caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
+    sincronização de rede só pra reler o que já está salvo. Nunca lança — ver
+    _executar_com_retentativa (uma retentativa só reprocessa o que ainda está
+    pendente: o que já virou peça/resumo fica salvo)."""
+    caso_id = caso.id  # ver sincronizar_caso_jusbr
+
+    def _etapa(db: Session, tentativa: int) -> None:
+        caso_atual = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
+        if not caso_atual:
+            return
+        novas = importar_andamentos_pendentes(db, caso_atual)
+        db.refresh(caso_atual)
+        if caso_atual.ultimo_sync_status != "cancelado":
+            caso_atual.ultimo_sync_status = "ok"
+            caso_atual.ultimo_sync_mensagem = f"{novas} peça(s) importada(s) a partir dos documentos já baixados."
+        caso_atual.ultima_sincronizacao_em = datetime.now(timezone.utc)
         db.commit()
+
+    _executar_com_retentativa(db, caso_id, "importação", _etapa)
 
 
 def listar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> list[AndamentoProcesso]:
@@ -466,6 +688,308 @@ def listar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> list[Andament
         AndamentoProcesso.protocolado_em.asc().nulls_last(),
         AndamentoProcesso.created_at.asc(),
     ).all()
+
+
+# ── Resiliência a queda de conexão com o banco ─────────────────────────────
+#
+# O Postgres de produção derruba conexões em rajadas de alguns segundos
+# ("server closed the connection unexpectedly") — confirmado em 28/set: um
+# crash-recovery do próprio Postgres às 05:15 (processos auxiliares
+# reiniciados) e várias rajadas à tarde vindas do proxy. Uma sincronização
+# longa que pega uma dessas rajadas não pode simplesmente morrer: as rotinas
+# abaixo fazem rollback, esperam e tentam de novo (o que já foi importado
+# fica salvo e é pulado na tentativa seguinte).
+
+_TENTATIVAS_SYNC = 3
+_ESPERA_ENTRE_TENTATIVAS_SEGUNDOS = 10
+_CAMPOS_PROGRESSO_LIMPOS = {
+    AutosIACaso.sync_etapa: None,
+    AutosIACaso.sync_total_itens: None,
+    AutosIACaso.sync_itens_processados: None,
+    AutosIACaso.sync_detalhe: None,
+}
+
+
+class SincronizacaoCancelada(Exception):
+    """O usuário clicou em Cancelar no meio da consulta ao jus.br. Levantada
+    pelo callback de progresso entre um documento e outro — o orquestrador já
+    persiste cada andamento assim que baixa, então a próxima sincronização
+    retoma de onde parou."""
+
+
+def _eh_falha_de_conexao(exc: BaseException) -> bool:
+    """True se a falha (ou algo na cadeia de causas dela) é o banco derrubando
+    a conexão — transitório, vale tentar de novo. Erro de dado (constraint,
+    valor inválido) fica de fora: repetir daria o mesmo erro."""
+    vistos: set[int] = set()
+    atual: BaseException | None = exc
+    while atual is not None and id(atual) not in vistos:
+        vistos.add(id(atual))
+        if isinstance(atual, OperationalError):
+            return True
+        if isinstance(atual, DBAPIError) and atual.connection_invalidated:
+            return True
+        if isinstance(atual, PendingRollbackError) and (
+            "OperationalError" in str(atual) or "reconnect" in str(atual)
+        ):
+            return True
+        atual = atual.__cause__ or atual.__context__
+    return False
+
+
+def _mensagem_de_falha(exc: BaseException, tentativas: int) -> str:
+    if _eh_falha_de_conexao(exc):
+        return (
+            f"A conexão com o banco de dados caiu durante o processo ({tentativas} tentativa(s)) — "
+            "instabilidade temporária do servidor. O que já foi importado ficou salvo; "
+            "tente de novo em alguns instantes."
+        )
+    return str(exc)[:2000]
+
+
+def _rollback_seguro(db: Session) -> None:
+    try:
+        db.rollback()
+    except Exception:
+        logger.warning("Autos IA: rollback falhou (conexão já morta) — o pool descarta a conexão")
+
+
+def _atualizar_caso_em_sessao_nova(caso_id, campos: dict, tentativas: int = 1) -> bool:
+    """Grava campos do caso numa sessão própria e curta — nunca na sessão de
+    quem chamou, que pode estar no meio da transação do orquestrador do
+    jus.br ou recém-quebrada por uma queda de conexão. lock_timeout curto: se
+    a linha estiver travada por outra transação, desiste em vez de esperar
+    pra sempre (a gravação é de progresso/status, nunca dado da peça)."""
+    for tentativa in range(tentativas):
+        if tentativa:
+            time.sleep(1.5 * tentativa)
+        sessao = SessionLocal()
+        try:
+            sessao.execute(text("SET LOCAL lock_timeout = '3s'"))
+            sessao.query(AutosIACaso).filter(AutosIACaso.id == caso_id).update(campos, synchronize_session=False)
+            sessao.commit()
+            return True
+        except Exception as exc:
+            logger.warning(
+                "Autos IA: falha ao atualizar o caso %s (tentativa %d/%d): %s", caso_id, tentativa + 1, tentativas, exc
+            )
+            _rollback_seguro(sessao)
+        finally:
+            sessao.close()
+    return False
+
+
+def _gravar_status_sync(caso_id, status: str, mensagem: str) -> None:
+    """Status final de uma rotina de sincronização, em sessão nova e com 3
+    tentativas. Também limpa o progresso — senão a tela ficava mostrando a
+    etapa/documento de uma execução que já terminou."""
+    campos = {
+        AutosIACaso.ultimo_sync_status: status,
+        AutosIACaso.ultimo_sync_mensagem: mensagem,
+        AutosIACaso.ultima_sincronizacao_em: datetime.now(timezone.utc),
+        **_CAMPOS_PROGRESSO_LIMPOS,
+    }
+    # 6 tentativas (~20s de espera acumulada): depois que o Postgres reinicia os
+    # próprios processos (crash recovery), ele leva algumas dezenas de segundos
+    # pra voltar a aceitar conexão — 3 tentativas em 4s eram poucas e deixavam o
+    # caso preso em "processando" pra sempre.
+    if not _atualizar_caso_em_sessao_nova(caso_id, campos, tentativas=6):
+        logger.error("Autos IA: não foi possível gravar o status final do caso %s — banco indisponível", caso_id)
+
+
+def _cancelamento_pedido(caso_id) -> bool:
+    """Lê a flag de Cancelar numa sessão nova (a do chamador pode estar no
+    meio de uma transação ou quebrada). Na dúvida (banco fora), não cancela."""
+    sessao = SessionLocal()
+    try:
+        return bool(
+            sessao.query(AutosIACaso.sync_cancelar).filter(AutosIACaso.id == caso_id).scalar()
+        )
+    except Exception:
+        _rollback_seguro(sessao)
+        return False
+    finally:
+        sessao.close()
+
+
+def _finalizar_cancelado(caso_id, nome: str) -> None:
+    logger.info("Autos IA: %s do caso %s cancelada pelo usuário", nome, caso_id)
+    _atualizar_caso_em_sessao_nova(
+        caso_id,
+        {
+            AutosIACaso.ultimo_sync_status: "cancelado",
+            AutosIACaso.ultimo_sync_mensagem: "Cancelado pelo usuário.",
+            AutosIACaso.ultima_sincronizacao_em: datetime.now(timezone.utc),
+            **_CAMPOS_PROGRESSO_LIMPOS,
+        },
+        tentativas=3,
+    )
+
+
+def _garantir_status_final(caso_id, nome: str) -> None:
+    """Última garantia: se a rotina terminou (por qualquer caminho, inclusive
+    exceção que não é `Exception`) e o caso continua "processando", grava erro.
+    Sem isso a tela ficava em "processando" pra sempre e só o botão Cancelar
+    destravava — reproduzido em produção: a thread da sincronização sumiu com
+    o caso em 368/871 e nada registrou o resultado."""
+    for tentativa in range(6):
+        if tentativa:
+            time.sleep(5)
+        sessao = SessionLocal()
+        try:
+            status = sessao.query(AutosIACaso.ultimo_sync_status).filter(AutosIACaso.id == caso_id).scalar()
+        except Exception:
+            _rollback_seguro(sessao)
+            continue
+        finally:
+            sessao.close()
+        if status == "processando":
+            logger.error("Autos IA: %s do caso %s terminou sem registrar o resultado — gravando erro", nome, caso_id)
+            _gravar_status_sync(
+                caso_id, "erro",
+                f"A {nome} terminou sem concluir (causa registrada no log do servidor). "
+                "O que já foi importado ficou salvo; tente de novo.",
+            )
+        return
+
+
+def reconciliar_sincronizacoes_interrompidas() -> int:
+    """Chamada uma vez ao iniciar o servidor: um reinício (deploy, queda da
+    máquina) mata as tarefas em segundo plano sem que elas gravem o resultado,
+    deixando o caso em "processando" pra sempre. Como há um único processo, no
+    início nenhuma sincronização pode estar de fato em andamento."""
+    for tentativa in range(6):
+        if tentativa:
+            time.sleep(5)
+        sessao = SessionLocal()
+        try:
+            n = (
+                sessao.query(AutosIACaso)
+                .filter(AutosIACaso.ultimo_sync_status == "processando")
+                .update(
+                    {
+                        AutosIACaso.ultimo_sync_status: "erro",
+                        AutosIACaso.ultimo_sync_mensagem: (
+                            "Interrompida porque o servidor foi reiniciado durante o processamento. "
+                            "O que já foi importado ficou salvo; clique em sincronizar de novo."
+                        ),
+                        **_CAMPOS_PROGRESSO_LIMPOS,
+                    },
+                    synchronize_session=False,
+                )
+            )
+            sessao.commit()
+            if n:
+                logger.warning("Autos IA: %d caso(s) preso(s) em 'processando' após reinício — marcados como erro", n)
+            return n
+        except Exception as exc:
+            logger.warning("Autos IA: reconciliação no startup falhou (tentativa %d/6): %s", tentativa + 1, exc)
+            _rollback_seguro(sessao)
+        finally:
+            sessao.close()
+    return 0
+
+
+def _executar_com_retentativa(db: Session, caso_id, nome: str, etapa) -> None:
+    """Roda `etapa(db, tentativa)` — que faz o trabalho inteiro e grava ela
+    mesma o status de sucesso — tentando de novo quando o banco derruba a
+    conexão no meio. Nunca lança: termina sempre com o caso em ok, erro ou
+    cancelado (a sessão `db` fica utilizável depois — o job agendado reusa a
+    mesma sessão pro próximo caso)."""
+    try:
+        _rodar_tentativas(db, caso_id, nome, etapa)
+    finally:
+        _garantir_status_final(caso_id, nome)
+
+
+def _rodar_tentativas(db: Session, caso_id, nome: str, etapa) -> None:
+    for tentativa in range(1, _TENTATIVAS_SYNC + 1):
+        inicio = time.monotonic()
+        logger.info("Autos IA: %s do caso %s — tentativa %d/%d iniciada", nome, caso_id, tentativa, _TENTATIVAS_SYNC)
+        try:
+            etapa(db, tentativa)
+            logger.info("Autos IA: %s do caso %s concluída em %.0fs", nome, caso_id, time.monotonic() - inicio)
+            return
+        except SincronizacaoCancelada:
+            _rollback_seguro(db)
+            _finalizar_cancelado(caso_id, nome)
+            return
+        except Exception as exc:
+            # Rollback ANTES de qualquer outra coisa: tocar em qualquer
+            # atributo de objeto da sessão antes disso (até um `caso.id` num
+            # log) dispara um SELECT na transação quebrada e vira
+            # PendingRollbackError — era esse o erro que aparecia na tela.
+            _rollback_seguro(db)
+            if _cancelamento_pedido(caso_id):
+                _finalizar_cancelado(caso_id, nome)
+                return
+            conexao = _eh_falha_de_conexao(exc)
+            if conexao and tentativa < _TENTATIVAS_SYNC:
+                espera = _ESPERA_ENTRE_TENTATIVAS_SEGUNDOS * tentativa
+                logger.warning(
+                    "Autos IA: %s do caso %s — conexão com o banco caiu (tentativa %d/%d), "
+                    "nova tentativa em %ds: %s", nome, caso_id, tentativa, _TENTATIVAS_SYNC, espera, exc,
+                )
+                _atualizar_caso_em_sessao_nova(caso_id, {
+                    AutosIACaso.sync_detalhe: (
+                        f"Conexão com o banco caiu — tentando de novo em {espera}s "
+                        f"(tentativa {tentativa + 1}/{_TENTATIVAS_SYNC})..."
+                    ),
+                })
+                time.sleep(espera)
+                continue
+            if conexao:
+                logger.warning("Autos IA: %s do caso %s falhou após %d tentativas: %s", nome, caso_id, tentativa, exc)
+            else:
+                logger.exception("Autos IA: %s do caso %s falhou", nome, caso_id)
+            _gravar_status_sync(caso_id, "erro", _mensagem_de_falha(exc, tentativa))
+            return
+
+
+def _criar_callback_progresso_jusbr(caso_id):
+    """Espelha no caso o progresso que o orquestrador do jus.br já emite —
+    antes ninguém passava esse callback e a tela ficava só em "Processando"
+    durante toda a consulta, sem dar pra saber se estava andando. Grava no
+    máximo 1x a cada 2s (fora mudança de etapa) e aproveita pra checar o
+    Cancelar entre um documento e outro.
+
+    Distingue "conferindo" de "baixando": o orquestrador percorre TODOS os
+    andamentos do processo a cada sincronização e só baixa os que ainda não
+    têm arquivo salvo — a maioria só é conferida (rápido, sem rede). Chamar
+    tudo de "baixando" fazia parecer que os 871 documentos estavam sendo
+    baixados de novo."""
+    ultimo = {"em": 0.0, "etapa": None, "contando": False}
+
+    def _callback(payload: dict) -> None:
+        mensagem = payload.get("message") or ""
+        if payload.get("stage") == "consultando":
+            etapa = "consultando"
+        elif mensagem.startswith("Enviando documento"):
+            etapa = "baixando"
+        else:
+            etapa = "conferindo"
+            mensagem = f"Conferindo andamentos já sincronizados (sem baixar de novo) — {mensagem}"
+        agora = time.monotonic()
+        nova_etapa = etapa != ultimo["etapa"]
+        if not nova_etapa and agora - ultimo["em"] < 2.0:
+            return
+        ultimo["em"], ultimo["etapa"] = agora, etapa
+        campos = {
+            AutosIACaso.sync_etapa: etapa,
+            AutosIACaso.sync_total_itens: payload.get("total") or None,
+            AutosIACaso.sync_itens_processados: payload.get("processed") or 0,
+            AutosIACaso.sync_detalhe: mensagem[:500] or None,
+        }
+        # O ETA da tela parte de sync_iniciado_em: marca uma vez, quando a
+        # contagem de documentos começa (não a cada troca conferindo/baixando).
+        if etapa != "consultando" and not ultimo["contando"]:
+            ultimo["contando"] = True
+            campos[AutosIACaso.sync_iniciado_em] = datetime.now(timezone.utc)
+        _atualizar_caso_em_sessao_nova(caso_id, campos)
+        if _cancelamento_pedido(caso_id):
+            raise SincronizacaoCancelada()
+
+    return _callback
 
 
 def _cancelar_sync_solicitado(db: Session, caso: AutosIACaso) -> bool:
@@ -660,6 +1184,29 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
         caso.sync_detalhe = f"{prefixo}{msg}"[:500]
         _commit_resiliente(db)
 
+    # Instrumentação temporária (não muda nenhum comportamento): registra
+    # quantas conexões do pool estão em uso ao longo de uma importação
+    # grande. O sistema já travou duas vezes com "server closed the
+    # connection unexpectedly"/pool esgotado durante um "importar existentes"
+    # rodando — sem esse dado, qualquer correção na sessão desta função seria
+    # palpite (e essa função tem agrupamento de peça-mãe/anexo demais pra
+    # arriscar refatorar às cegas). Ver histórico do caso pra remover depois
+    # de confirmado o ponto exato.
+    ultimo_log_pool = 0.0
+
+    def _log_pool_status(motivo: str, forcar: bool = False) -> None:
+        nonlocal ultimo_log_pool
+        agora = time.monotonic()
+        if not forcar and agora - ultimo_log_pool < 15.0:
+            return
+        ultimo_log_pool = agora
+        try:
+            logger.info("[pool] %s (caso %s): %s", motivo, caso.id, db.get_bind().pool.status())
+        except Exception:
+            logger.exception("[pool] falha ao ler status do pool (%s)", motivo)
+
+    _log_pool_status("início da importação", forcar=True)
+
     for indice, andamento in enumerate(pendentes, start=1):
         # Sempre atualiza a mensagem de status ao iniciar o documento, mesmo
         # quando ele não precisa de OCR — sem isso, um documento com texto
@@ -672,6 +1219,7 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
         texto = andamento.texto_extraido
         tem_arquivo = bool(andamento.arquivo_path or andamento.arquivo_drive_link)
         if not texto:
+            _log_pool_status(f"antes de baixar/OCR doc {indice}/{len(pendentes)}")
             def _status_ocr(msg: str, _i=indice, _n=len(pendentes)) -> None:
                 _status_leitura(msg, _i, _n)
             _deve_pular_atual = _criar_verificador_pular(db, caso)
@@ -687,6 +1235,7 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
                 if texto:
                     andamento.texto_extraido = texto
                     _commit_com_retry(db)
+            _log_pool_status(f"depois de baixar/OCR doc {indice}/{len(pendentes)}")
         # Confere (sem throttle, uma vez por documento) se "pular este documento"
         # foi pedido durante a leitura acima — consome a flag na hora pra não
         # aplicar ao PRÓXIMO documento sem querer.
@@ -792,6 +1341,7 @@ def importar_andamentos_pendentes(db: Session, caso: AutosIACaso) -> int:
     caso.sync_total_itens = len(pecas_para_ia)
     caso.sync_itens_processados = 0
     db.commit()
+    _log_pool_status("início do resumo por IA (após ler todos os documentos)", forcar=True)
 
     def _progresso_resumo(feitas: int) -> None:
         caso.sync_itens_processados = feitas
@@ -844,11 +1394,15 @@ def _criar_peca(db: Session, caso: AutosIACaso, item: dict, peca_pai_id) -> Auto
         titulo=remover_nul((andamento.tipo or andamento.descricao or "Andamento sem título").strip())[:500],
         autor=None,
         data_peca=andamento.data_andamento,
-        # Não usa andamento.documento_id aqui: é um ID interno do jus.br, não o número
-        # (ex.: "Evento 45") que outras peças de fato citam no texto. O resumo (IA)
-        # preenche id_processual com o que a própria peça diz ser sua referência —
-        # ver ResumoPeca.id_proprio em services/autos_ia/resumo.py.
-        id_processual=None,
+        # andamento.documento_id É o número que outras peças citam no texto (ex.:
+        # "Id. 103876454", "Num. 103876454") — confirmado auditando o Apex: 158
+        # referências "não localizadas" eram exatamente isso, só que id_processual
+        # tinha ficado None (ou um número curto/local errado, tipo "107", vindo do
+        # palpite da IA abaixo) em vez do documento_id real já salvo no andamento.
+        # A IA (resumo) só sobrescreve isso se documento_id não existir — ver
+        # ResumoPeca.id_proprio em services/autos_ia/resumo.py e o guard em
+        # ingestao.py (resumir/reclassificar).
+        id_processual=(andamento.documento_id[:100] if andamento.documento_id else None),
         pagina_inicio=item["pagina_inicio"],
         pagina_fim=item["pagina_fim"],
         texto_md=remover_nul(item["texto"]) or "(sem texto extraído)",

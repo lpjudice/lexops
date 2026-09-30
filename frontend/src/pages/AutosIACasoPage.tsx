@@ -2,11 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { autosIa, TIPOS_PECA } from '../api/autosIa'
-import type { Caso, Documento, DocumentoDrive, DocumentoDriveAnexo, GrafoAresta, GrafoNo, Peca, PecaDetalhe, TipoPeca } from '../api/autosIa'
+import type { Caso, Documento, DocumentoDrive, DocumentoDriveAnexo, FaqPergunta, GrafoAresta, GrafoNo, Peca, PecaDetalhe, TipoPeca } from '../api/autosIa'
 import ReferenciaHover from '../components/autosIa/ReferenciaHover'
-import GrafoTimeline from '../components/autosIa/GrafoTimeline'
+import GrafoRede from '../components/autosIa/GrafoRede'
 import Modal from '../components/Modal'
 import pageStyles from './Page.module.css'
+import { useColapsaveis } from '../utils/colapsaveis'
 import styles from './AutosIACasoPage.module.css'
 
 type Aba = 'upload' | 'pecas' | 'documentos' | 'timeline' | 'grafo' | 'faq'
@@ -57,6 +58,9 @@ const STATUS_SYNC_LABEL: Record<string, string> = {
 }
 
 const ETAPA_SYNC_LABEL: Record<string, string> = {
+  consultando: 'Consultando jus.br/DataJud',
+  conferindo: 'Conferindo documentos já salvos',
+  baixando: 'Baixando documento novo do jus.br',
   lendo: 'Lendo documentos',
   resumindo: 'Resumindo peças',
   reclassificando: 'Reclassificando peças',
@@ -85,11 +89,16 @@ export default function AutosIACasoPage() {
   // de sincronização travada mesmo quando ela estava avançando normalmente.
   useEffect(() => {
     if (!emProcessamento || !casoId) return
+    // 15s (era 5s) e só com a aba visível: cada ciclo refaz Grafo + todas as
+    // páginas já carregadas de Peças e Documentos, e o servidor do banco é
+    // pequeno — o ciclo de 5s multiplicava a carga justamente durante a
+    // sincronização, quando o banco já está mais exigido.
     const id = setInterval(() => {
+      if (document.visibilityState !== 'visible') return
       qc.invalidateQueries({ queryKey: ['autos-ia', 'documentos-drive', casoId] })
       qc.invalidateQueries({ queryKey: ['autos-ia', 'pecas', casoId] })
       qc.invalidateQueries({ queryKey: ['autos-ia', 'grafo', casoId] })
-    }, 5000)
+    }, 15000)
     return () => clearInterval(id)
   }, [emProcessamento, casoId, qc])
 
@@ -146,14 +155,31 @@ export default function AutosIACasoPage() {
     },
   })
 
+  const recalcularIds = useMutation({
+    mutationFn: () => autosIa.recalcularIds(casoId!),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] })
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'grafo', casoId] })
+    },
+  })
+
   const resumirPendentes = useMutation({
     mutationFn: () => autosIa.resumirPendentes(casoId!),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] }),
+  })
+
+  const relerPendentes = useMutation({
+    mutationFn: () => autosIa.relerPendentes(casoId!),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] }),
   })
 
   const deletarCaso = useMutation({
     mutationFn: () => autosIa.deletarCaso(casoId!),
     onSuccess: () => navigate('/autos-ia'),
+    onError: (e: any) => {
+      setModalExcluir(false)
+      alert(`Erro ao excluir: ${e?.response?.data?.detail || e?.message}`)
+    },
   })
 
   const reclassificar = useMutation({
@@ -301,6 +327,18 @@ export default function AutosIACasoPage() {
                       >
                         {reagrupar.isPending ? 'Reagrupando...' : 'Reagrupar peças'}
                       </button>
+                      <button
+                        className={pageStyles.btnSmall}
+                        disabled={recalcularIds.isPending}
+                        onClick={() => {
+                          if (window.confirm('Corrigir o ID processual das peças já importadas usando o dado que o jus.br já entrega pronto, e reconectar referências que dependiam disso? 100% local, sem IA nem rede — não mexe em petição principal/anexos.')) {
+                            recalcularIds.mutate()
+                          }
+                        }}
+                        title="Corrige id_processual pelo documento_id real do jus.br e reconecta referências — sem IA, sem rede, sem mexer em principal/anexos"
+                      >
+                        {recalcularIds.isPending ? 'Recalculando...' : 'Recalcular IDs'}
+                      </button>
                       {!!pendentesResumo?.pendentes && (
                         <button
                           className={pageStyles.btnSmall}
@@ -315,6 +353,18 @@ export default function AutosIACasoPage() {
                           {resumirPendentes.isPending ? 'Resumindo...' : `Resumir pendentes (${pendentesResumo.pendentes})`}
                         </button>
                       )}
+                      <button
+                        className={pageStyles.btnSmall}
+                        disabled={relerPendentes.isPending}
+                        onClick={() => {
+                          if (window.confirm('Reler (baixar de novo do Drive + resumir de novo) TODAS as peças com falha de leitura registrada neste caso — inclui as que já viraram "resumida" mas com resumo genérico, porque a leitura original não trouxe o texto de verdade? Uma peça de cada vez, para não sobrecarregar. Pode levar alguns minutos.')) {
+                            relerPendentes.mutate()
+                          }
+                        }}
+                        title='Baixa de novo do Drive + resume de novo TODAS as peças com falha de leitura registrada — uma de cada vez'
+                      >
+                        {relerPendentes.isPending ? 'Relendo pendentes...' : 'Reler pendentes'}
+                      </button>
                     </>
                   )}
                 </>
@@ -943,7 +993,8 @@ function AnexarAPicker({
 function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | DocumentoDriveAnexo; nivel: number; casoId: string }) {
   const qc = useQueryClient()
   const anexos = 'anexos' in doc ? doc.anexos : []
-  const [aberto, setAberto] = useState(true)
+  const { estaAberto, alternar } = useColapsaveis(casoId)
+  const aberto = estaAberto(`doc:${doc.id}`)
   const [resumoAberto, setResumoAberto] = useState(false)
   const [editando, setEditando] = useState(false)
   const [anexandoAberto, setAnexandoAberto] = useState(false)
@@ -985,6 +1036,19 @@ function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | Document
     },
   })
 
+  const reler = useMutation({
+    mutationFn: () => autosIa.relerPeca(doc.id),
+    onSuccess: () => {
+      // A releitura roda em segundo plano (download + IA) — sem polling
+      // dedicado pra essa única peça, o "Relendo..." nunca saía da tela
+      // sozinho. Não é elegante, mas cobre o caso comum (poucos segundos).
+      invalidarDocumentos()
+      setTimeout(invalidarDocumentos, 5000)
+      setTimeout(invalidarDocumentos, 12000)
+    },
+    onError: (e: any) => alert(`Erro ao reler: ${e?.response?.data?.detail || e?.message}`),
+  })
+
   const salvarAnotacao = useMutation({
     mutationFn: () => autosIa.atualizarAnotacaoPeca(doc.id, {
       titulo_customizado: rascunhoTitulo.trim() || null,
@@ -1007,7 +1071,7 @@ function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | Document
             <button
               type="button"
               className={styles.docChevron}
-              onClick={() => setAberto(!aberto)}
+              onClick={() => alternar(`doc:${doc.id}`)}
               aria-expanded={aberto}
               aria-label={aberto ? 'Recolher anexos' : 'Expandir anexos'}
             >
@@ -1061,6 +1125,17 @@ function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | Document
           )}
           <span className={styles.tipoBadge}>{doc.tipo}</span>
           {doc.erro_mensagem && <span className={styles.docAvisoLeitura} title={doc.erro_mensagem}>⚠</span>}
+          {doc.erro_mensagem && (
+            <button
+              type="button"
+              className={styles.docTogglePeticao}
+              disabled={reler.isPending || doc.status === 'pendente_resumo'}
+              onClick={() => reler.mutate()}
+              title="Baixa o arquivo de novo do Drive e gera um resumo novo — só esta peça"
+            >
+              {reler.isPending || doc.status === 'pendente_resumo' ? 'Relendo...' : 'Reler documento'}
+            </button>
+          )}
           {temAnexos && <span className={styles.docAnexosCount}>{anexos.length} anexo{anexos.length > 1 ? 's' : ''}</span>}
           <button
             type="button"
@@ -1179,7 +1254,7 @@ function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | Document
 
 function AbaDocumentosDrive({ casoId, vinculadoAProcesso }: { casoId: string; vinculadoAProcesso: boolean }) {
   const [q, setQ] = useState('')
-  const [ordem, setOrdem] = useState<'asc' | 'desc'>('asc')
+  const [ordem, setOrdem] = useState<'asc' | 'desc'>('desc')
 
   const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteQuery({
     queryKey: ['autos-ia', 'documentos-drive', casoId, q, ordem],
@@ -1192,6 +1267,7 @@ function AbaDocumentosDrive({ casoId, vinculadoAProcesso }: { casoId: string; vi
     enabled: vinculadoAProcesso,
   })
   const documentos = data?.pages.flat() ?? []
+  const { recolherTodos, expandirTodos } = useColapsaveis(casoId)
 
   if (!vinculadoAProcesso) {
     return (
@@ -1221,6 +1297,21 @@ function AbaDocumentosDrive({ casoId, vinculadoAProcesso }: { casoId: string; vi
           title="Alternar ordem cronológica"
         >
           {ordem === 'desc' ? '↓ Mais novas primeiro' : '↑ Mais antigas primeiro'}
+        </button>
+        <button
+          type="button"
+          className={pageStyles.btnSmall}
+          onClick={() => recolherTodos('doc')}
+          title="Recolhe os anexos de todas as peças (fica salvo ao sair da tela)"
+        >
+          ▸ Recolher tudo
+        </button>
+        <button
+          type="button"
+          className={pageStyles.btnSmall}
+          onClick={() => expandirTodos('doc')}
+        >
+          ▾ Expandir tudo
         </button>
       </div>
 
@@ -1308,6 +1399,7 @@ function AbaTimeline({ casoId, arestasPorOrigem, nosPorId }: { casoId: string; a
 // ── Grafo ────────────────────────────────────────────────────────────────
 
 function AbaGrafo({ casoId }: { casoId: string }) {
+  const qc = useQueryClient()
   const { data: grafo, isLoading } = useQuery({
     queryKey: ['autos-ia', 'grafo', casoId],
     queryFn: () => autosIa.obterGrafo(casoId),
@@ -1316,7 +1408,21 @@ function AbaGrafo({ casoId }: { casoId: string }) {
   if (isLoading) return <p className={pageStyles.empty}>Carregando...</p>
   if (!grafo || grafo.nos.length === 0) return <p className={pageStyles.empty}>Nenhuma peça indexada ainda.</p>
 
-  return <GrafoTimeline nos={grafo.nos} arestas={grafo.arestas} />
+  const onRelido = () => {
+    // Releitura roda em segundo plano — sem polling dedicado a essa peça,
+    // agenda mais duas invalidações pra pegar o resultado sem precisar
+    // a pessoa recarregar a página manualmente (mesmo padrão da aba Documentos).
+    const invalidar = () => {
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'grafo', casoId] })
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'documentos-drive', casoId] })
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'pecas', casoId] })
+    }
+    invalidar()
+    setTimeout(invalidar, 5000)
+    setTimeout(invalidar, 12000)
+  }
+
+  return <GrafoRede nos={grafo.nos} arestas={grafo.arestas} onRelido={onRelido} />
 }
 
 // ── FAQ ──────────────────────────────────────────────────────────────────
@@ -1324,6 +1430,7 @@ function AbaGrafo({ casoId }: { casoId: string }) {
 function AbaFaq({ casoId, nosPorId }: { casoId: string; nosPorId: NosMap }) {
   const qc = useQueryClient()
   const [pergunta, setPergunta] = useState('')
+  const { recolherTodos, expandirTodos } = useColapsaveis(casoId)
 
   const { data: perguntas = [] } = useQuery({
     queryKey: ['autos-ia', 'faq', casoId],
@@ -1368,32 +1475,80 @@ function AbaFaq({ casoId, nosPorId }: { casoId: string; nosPorId: NosMap }) {
       {perguntas.length === 0 ? (
         <p className={pageStyles.empty}>Nenhuma pergunta ainda.</p>
       ) : (
-        perguntas.map((f) => (
-          <div key={f.id} className={styles.faqCard}>
-            <div className={styles.faqPergunta}>{f.pergunta}</div>
-            {f.status === 'pendente' && <p style={{ fontSize: 12.5, color: '#a16207' }}>Gerando resposta...</p>}
-            {f.status === 'erro' && <p style={{ fontSize: 12.5, color: '#b91c1c' }}>Erro: {f.erro_mensagem}</p>}
-            {f.resposta && <div className={styles.faqResposta}>{f.resposta}</div>}
-            {f.pecas_relacionadas && f.pecas_relacionadas.length > 0 && (
-              <div className={styles.faqFontes}>
-                {f.pecas_relacionadas.map((id) => {
-                  const no = nosPorId.get(id)
-                  return no ? (
-                    <span key={id} className={styles.keywordChip}>{no.titulo}</span>
-                  ) : null
-                })}
-              </div>
-            )}
-            <div className={styles.faqActions}>
-              <button className={pageStyles.btnSmall} onClick={() => reprocessar.mutate(f.id)}>
-                Regerar resposta
-              </button>
-              <button className={pageStyles.btnDanger} onClick={() => deletar.mutate(f.id)}>
-                Remover
-              </button>
+        <>
+        <div className={styles.filtrosRow} style={{ marginBottom: 8 }}>
+          <button
+            type="button"
+            className={pageStyles.btnSmall}
+            onClick={() => recolherTodos('faq')}
+            title="Recolhe todas as respostas (fica salvo ao sair da tela)"
+          >
+            ▸ Recolher tudo
+          </button>
+          <button type="button" className={pageStyles.btnSmall} onClick={() => expandirTodos('faq')}>
+            ▾ Expandir tudo
+          </button>
+        </div>
+        {perguntas.map((f) => (
+          <FaqCard
+            key={f.id}
+            casoId={casoId}
+            pergunta={f}
+            nosPorId={nosPorId}
+            onReprocessar={() => reprocessar.mutate(f.id)}
+            onDeletar={() => deletar.mutate(f.id)}
+          />
+        ))}
+        </>
+      )}
+    </div>
+  )
+}
+
+function FaqCard({
+  casoId, pergunta: f, nosPorId, onReprocessar, onDeletar,
+}: { casoId: string; pergunta: FaqPergunta; nosPorId: NosMap; onReprocessar: () => void; onDeletar: () => void }) {
+  const { estaAberto, alternar } = useColapsaveis(casoId)
+  const aberto = estaAberto(`faq:${f.id}`)
+
+  return (
+    <div className={styles.faqCard}>
+      <button
+        type="button"
+        className={styles.faqPerguntaBtn}
+        onClick={() => alternar(`faq:${f.id}`)}
+        aria-expanded={aberto}
+      >
+        <span className={styles.faqPergunta}>{f.pergunta}</span>
+        <span className={styles.faqToggle}>
+          {f.custo_usd > 0 && <span className={styles.faqCusto}>{formatarUsd(f.custo_usd)}</span>}
+          {aberto ? '▾ Retrair' : '▸ Expandir'}
+        </span>
+      </button>
+      {aberto && (
+        <>
+          {f.status === 'pendente' && <p style={{ fontSize: 12.5, color: '#a16207' }}>Gerando resposta...</p>}
+          {f.status === 'erro' && <p style={{ fontSize: 12.5, color: '#b91c1c' }}>Erro: {f.erro_mensagem}</p>}
+          {f.resposta && <div className={styles.faqResposta}>{f.resposta}</div>}
+          {f.pecas_relacionadas && f.pecas_relacionadas.length > 0 && (
+            <div className={styles.faqFontes}>
+              {f.pecas_relacionadas.map((id) => {
+                const no = nosPorId.get(id)
+                return no ? (
+                  <span key={id} className={styles.keywordChip}>{no.titulo}</span>
+                ) : null
+              })}
             </div>
+          )}
+          <div className={styles.faqActions}>
+            <button className={pageStyles.btnSmall} onClick={onReprocessar}>
+              Regerar resposta
+            </button>
+            <button className={pageStyles.btnDanger} onClick={onDeletar}>
+              Remover
+            </button>
           </div>
-        ))
+        </>
       )}
     </div>
   )

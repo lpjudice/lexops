@@ -13,6 +13,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from app.database import SessionLocal
 from app.models.andamento import AndamentoProcesso
 from app.models.autos_ia import AutosIACaso, AutosIADocumento, AutosIAPeca, AutosIAReferencia
 from app.services.autos_ia.extracao import extrair_paginas
@@ -82,7 +83,7 @@ def _commit_com_retry(db: Session, tentativas: int = 2, espera_segundos: float =
 RESUMO_MAX_WORKERS = 5
 
 
-_ROTULO_ID = re.compile(r"^(id\.?|evento|protocolo)\s*n?\.?\s*(\d{6,})$", re.IGNORECASE)
+_ROTULO_ID = re.compile(r"^(id\.?|evento|num\.?|número|protocolo)\s*n?\.?\s*(\d{6,})$", re.IGNORECASE)
 
 
 def _normalizar_id(valor: str) -> str:
@@ -93,10 +94,14 @@ def _normalizar_id(valor: str) -> str:
     pela normalização abaixo — ela só tira símbolos/espaços, não palavras —
     então "id103876454" nunca batia com o alvo, guardado como "103876454"
     puro. Reproduzido de verdade no Apex: 99,5% das referências ficavam
-    permanentemente "não localizadas" mesmo com o alvo já indexado. Só o
-    rótulo id/evento/protocolo é tratado assim (número de 6+ dígitos) — um
-    "DOC. 2" ou "fls. 228" não é um ID de peça, é uma citação local/de
-    página, e não deve virar um match forçado com qualquer coisa."""
+    permanentemente "não localizadas" mesmo com o alvo já indexado. "Num."
+    (rótulo do próprio jus.br pro número do evento/documento, tão comum
+    quanto "Id.") ficou de fora dessa lista na primeira correção — auditoria
+    posterior no Apex achou dezenas de "Num. NNNNNNN" com alvo já indexado
+    ainda presos em "não localizado" só por causa disso. Só os rótulos
+    id/evento/num/número/protocolo são tratados assim (número de 6+
+    dígitos) — um "DOC. 2" ou "fls. 228" não é um ID de peça, é uma citação
+    local/de página, e não deve virar um match forçado com qualquer coisa."""
     texto = valor.strip()
     rotulo = _ROTULO_ID.match(texto)
     if rotulo:
@@ -112,17 +117,41 @@ _PADRAO_DOC_N = re.compile(r"^doc\.?\s*0*(\d+)(?:\.\d+)?$", re.IGNORECASE)
 _PADRAO_ARQUIVO_DOC_N = re.compile(r"\(doc\.?\s*0*(\d+)\)", re.IGNORECASE)
 
 
+_ID_MINIMO_DIGITOS = 6
+
+
 def _eh_citacao_nao_indexavel(texto: str) -> bool:
     """Citações que por natureza nunca correspondem a uma peça indexada deste
     caso: número de página ("fls. 228/232" — aponta um trecho DENTRO de um
-    documento já referenciado por outro ID, não um documento em si) e número
-    de processo no formato CNJ (aponta um PROCESSO inteiro — pode ser o
-    próprio processo deste caso ou outro processo qualquer, nunca uma peça
-    individual). Persistir essas como AutosIAReferencia só cria um chip
-    cinza "não localizado" pra sempre, sem propósito — pedido do Lucas pra
-    não ter ruído nas menções."""
-    limpo = texto.strip().replace(" ", "")
-    return bool(_PADRAO_FLS.match(texto.strip())) or bool(_PADRAO_CNJ.match(limpo))
+    documento já referenciado por outro ID, não um documento em si), número de
+    processo no formato CNJ, e qualquer outra citação que não seja um ID de
+    peça de verdade — jurisprudência (REsp, AREsp, Súmula, Informativo...),
+    pareceres/decisões referidos por data ("Parecer do MP de 10/09/2026"),
+    ou um número curto/local (2-3 dígitos) que não é o ID global do jus.br.
+
+    A regra central: no PJE (nosso foco agora), um ID de peça É SEMPRE um
+    número puro de 6+ dígitos (com ou sem rótulo "Id./Num./Evento/Protocolo"
+    na frente — removido por _normalizar_id antes de chegar aqui). Qualquer
+    citação cujo texto, depois de normalizado, sobre com UMA LETRA SEQUER
+    (ex.: "REsp nº 2.164.771/SP", "CC nº 147.927/SP", "Súmula 417 STF") não é
+    um ID de peça — é jurisprudência, número de processo ou texto livre, e
+    não tem pra que virar um chip cinza "não localizado" pra sempre.
+    "DOC. N" é a exceção: não é um ID global, mas resolve localmente contra
+    os anexos do mesmo grupo (ver _resolver_doc_n_local) — precisa continuar
+    indexável mesmo não sendo um número puro. Pedido do Lucas pra não ter
+    ruído nas menções."""
+    bruto = texto.strip()
+    if _PADRAO_FLS.match(bruto):
+        return True
+    if _PADRAO_CNJ.match(bruto.replace(" ", "")):
+        return True
+    if _PADRAO_DOC_N.match(bruto):
+        return False
+    # Regra geral (cobre CNJ com rótulo na frente, jurisprudência, texto livre
+    # etc. sem precisar de um padrão específico pra cada formato): um ID de
+    # peça de verdade normaliza pra dígitos puros — sobrou letra, não é ID.
+    normalizado = _normalizar_id(bruto)
+    return not (normalizado.isdigit() and len(normalizado) >= _ID_MINIMO_DIGITOS)
 
 
 def _grupo_da_peca(db: Session, peca: AutosIAPeca) -> list[AutosIAPeca]:
@@ -279,10 +308,14 @@ def resumir_pecas_em_paralelo(
                 peca.status = "resumida"
                 if not peca.autor and resultado.peticionante:
                     peca.autor = resultado.peticionante[:255]
-                # id_proprio (o número pelo qual a peça se autorreferencia) é mais
-                # confiável que um ID interno do sistema de origem pra casar com
-                # menções de outras peças — sobrescreve quando a IA encontrar um.
-                if resultado.id_proprio:
+                # id_proprio (o número que a própria IA leu no texto) só preenche
+                # id_processual quando o jus.br não deu um documento_id confiável na
+                # criação da peça (ver jusbr_import._criar_peca) — ex.: peça de upload
+                # manual, sem andamento associado. Quando já existe um documento_id
+                # real, ele nunca é sobrescrito pelo palpite da IA: auditoria no Apex
+                # achou dezenas de casos em que a IA "achava" um número curto/local
+                # (tipo "107" ou "Evento 57") em vez do ID de verdade.
+                if resultado.id_proprio and not peca.id_processual:
                     peca.id_processual = resultado.id_proprio[:100]
                 # Peça-mãe (não é anexo de outra): confia na classificação da IA, que
                 # leu o texto inteiro — mais precisa que o rótulo bruto do tribunal ou
@@ -367,7 +400,7 @@ def reclassificar_pecas_em_paralelo(
                 resultado = futuro.result()
                 if not peca.autor and resultado.peticionante:
                     peca.autor = resultado.peticionante[:255]
-                if resultado.id_proprio:
+                if resultado.id_proprio and not peca.id_processual:
                     peca.id_processual = resultado.id_proprio[:100]
                 if peca.peca_pai_id is None:
                     peca.tipo = resultado.tipo
@@ -395,10 +428,15 @@ def reclassificar_caso(db: Session, caso: AutosIACaso) -> int:
     keywords. Retorna quantas peças foram reclassificadas."""
     from datetime import datetime, timezone
 
+    # Lido antes de qualquer commit: depois dele o objeto expira e reler
+    # `caso.id` numa sessão com a conexão caída (ex.: no log do except, antes
+    # do rollback) lança PendingRollbackError e esconde o erro real.
+    caso_id = caso.id
+
     pecas = (
         db.query(AutosIAPeca)
         .filter(
-            AutosIAPeca.caso_id == caso.id,
+            AutosIAPeca.caso_id == caso_id,
             AutosIAPeca.peca_pai_id.is_(None),
             AutosIAPeca.status == "resumida",
         )
@@ -419,33 +457,87 @@ def reclassificar_caso(db: Session, caso: AutosIACaso) -> int:
     caso.sync_iniciado_em = datetime.now(timezone.utc)
     db.commit()
 
+    # _progresso/_custo usam commit "melhor esforço": uma queda transitória de
+    # conexão do Postgres aqui não pode propagar e abortar a reclassificação
+    # inteira por causa só de uma atualização de progresso.
     def _progresso(feitas: int) -> None:
         caso.sync_itens_processados = feitas
-        db.commit()
+        try:
+            db.commit()
+        except Exception:
+            logger.warning("Falha ao gravar progresso da reclassificação do caso %s (conexão instável?)", caso_id)
+            try:
+                db.rollback()
+            except Exception:
+                pass
 
     def _custo(valor: float) -> None:
         caso.custo_usd_total = (caso.custo_usd_total or 0) + valor
-        db.commit()
+        try:
+            db.commit()
+        except Exception:
+            logger.warning("Falha ao gravar custo da reclassificação do caso %s (conexão instável?)", caso_id)
+            try:
+                db.rollback()
+            except Exception:
+                pass
 
     def _cancelar() -> bool:
         db.refresh(caso)
         return caso.sync_cancelar
 
-    reclassificar_pecas_em_paralelo(db, pecas, on_progresso=_progresso, on_custo=_custo, deve_cancelar=_cancelar)
-
-    db.refresh(caso)
-    cancelado = caso.sync_cancelar
-    caso.ultimo_sync_status = "cancelado" if cancelado else "ok"
-    caso.ultimo_sync_mensagem = (
-        f"Cancelado: {caso.sync_itens_processados or 0}/{len(pecas)} peça(s) reclassificada(s)."
-        if cancelado else f"{len(pecas)} peça(s) reclassificada(s)."
-    )
-    caso.sync_etapa = None
-    caso.sync_total_itens = None
-    caso.sync_itens_processados = None
-    caso.sync_detalhe = None
-    caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
-    db.commit()
+    try:
+        reclassificar_pecas_em_paralelo(db, pecas, on_progresso=_progresso, on_custo=_custo, deve_cancelar=_cancelar)
+        db.refresh(caso)
+        cancelado = caso.sync_cancelar
+        caso.ultimo_sync_status = "cancelado" if cancelado else "ok"
+        caso.ultimo_sync_mensagem = (
+            f"Cancelado: {caso.sync_itens_processados or 0}/{len(pecas)} peça(s) reclassificada(s)."
+            if cancelado else f"{len(pecas)} peça(s) reclassificada(s)."
+        )
+        caso.sync_etapa = None
+        caso.sync_total_itens = None
+        caso.sync_itens_processados = None
+        caso.sync_detalhe = None
+        caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
+        db.commit()
+    except Exception as exc:
+        logger.warning("Autos IA: erro ao reclassificar caso %s: %s", caso_id, exc)
+        # Grava o erro numa sessão nova, mesmo padrão de _gravar_status_sync
+        # (jusbr_import.py) — sem retentativa aqui: repetir a reclassificação
+        # pagaria de novo a IA de todas as peças.
+        try:
+            db.rollback()
+        except Exception:
+            logger.error("Rollback falhou ao reclassificar caso %s — conexão morta", caso_id)
+        # Tenta até 3x com espera curta: já reproduzido ao vivo uma janela
+        # em que até uma sessão NOVA falha de cara (Postgres recusando
+        # conexão nova) — mas essas janelas duraram só alguns segundos.
+        for tentativa in range(3):
+            if tentativa:
+                time.sleep(1.5 * tentativa)
+            db_erro = SessionLocal()
+            try:
+                caso_erro = db_erro.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
+                if caso_erro:
+                    caso_erro.ultimo_sync_status = "erro"
+                    caso_erro.ultimo_sync_mensagem = str(exc)[:2000]
+                    caso_erro.sync_etapa = None
+                    caso_erro.sync_total_itens = None
+                    caso_erro.sync_itens_processados = None
+                    caso_erro.sync_detalhe = None
+                    caso_erro.ultima_sincronizacao_em = datetime.now(timezone.utc)
+                    db_erro.commit()
+                break
+            except Exception:
+                logger.warning(
+                    "Também falhou ao gravar erro da reclassificação do caso %s na tentativa %d/3",
+                    caso_id, tentativa + 1,
+                )
+            finally:
+                db_erro.close()
+        else:
+            logger.error("Não foi possível gravar erro da reclassificação do caso %s em 3 tentativas", caso_id)
     return len(pecas)
 
 

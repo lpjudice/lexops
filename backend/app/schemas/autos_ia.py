@@ -177,6 +177,9 @@ class GrafoNo(BaseModel):
     pagina_inicio: int
     pagina_fim: int
     peca_pai_id: uuid.UUID | None = None
+    arquivo_drive_link: str | None = None
+    status: str
+    erro_mensagem: str | None = None
 
 
 class GrafoAresta(BaseModel):
@@ -209,6 +212,7 @@ class FaqPerguntaOut(BaseModel):
     pecas_relacionadas: list[str] | None
     status: str
     erro_mensagem: str | None
+    custo_usd: float = 0
     criado_em: datetime
 
     model_config = {"from_attributes": True}

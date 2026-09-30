@@ -1,3 +1,14 @@
+import logging
+
+# O nível padrão do Python é WARNING — sem isso, todo logger.info(...) do
+# nosso código (progresso de sincronização, retentativas após queda do banco
+# etc.) é descartado e nunca aparece em `flyctl logs`. INFO só no pacote
+# `app`: bibliotecas continuam em WARNING — o httpx em INFO loga a URL
+# completa de cada requisição, e algumas levam chave na query string
+# (Gemini `?key=`, Clicksign `?access_token=`), que iria parar no log.
+logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logging.getLogger("app").setLevel(logging.INFO)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -1785,6 +1796,11 @@ async def _startup_andamentos_bot():
 
 @app.on_event("startup")
 def _startup():
+    try:
+        from app.services.autos_ia.jusbr_import import reconciliar_sincronizacoes_interrompidas
+        reconciliar_sincronizacoes_interrompidas()
+    except Exception:
+        logging.getLogger(__name__).exception("Autos IA: reconciliação de sincronizações interrompidas falhou")
     try:
         from app.scheduler import start_scheduler
         start_scheduler()

@@ -266,6 +266,11 @@ class AutosIAPerguntaFaq(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pendente")
     # pendente | respondida | erro
     erro_mensagem: Mapped[str | None] = mapped_column(Text)
+    # Custo real (USD) da chamada de IA que respondeu esta pergunta — mesma
+    # base de app.services.autos_ia.precos usada pra resumo/segmentação, pra
+    # a pessoa ver quanto cada pergunta custou (o contexto virou texto
+    # integral das peças, não só resumo — bem mais caro por pergunta).
+    custo_usd: Mapped[float] = mapped_column(Float, nullable=False, default=0)
 
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     atualizado_em: Mapped[datetime] = mapped_column(

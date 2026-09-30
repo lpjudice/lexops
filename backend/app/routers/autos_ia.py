@@ -2,14 +2,15 @@
 ao restante do gestor. Cada Caso é um processo independente; os PDFs são
 enviados em blocos de páginas, segmentados em peças e resumidos por IA."""
 import logging
+import time
 import uuid
 from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import DateTime, cast, func, or_
-from sqlalchemy.orm import Session
+from sqlalchemy import func, or_
+from sqlalchemy.orm import Session, defer
 
 from app.database import SessionLocal, get_db
 from app.dependencies import get_current_user
@@ -26,7 +27,8 @@ from app.services.autos_ia.estimativa import estimar_importacao_existentes, esti
 from app.services.autos_ia.ingestao import processar_documento, reclassificar_caso, retomar_documento
 from app.services.autos_ia.jusbr_import import (
     atualizar_metadados_jusbr, contar_pecas_pendentes_resumo, importar_apenas_existentes,
-    listar_andamentos_pendentes, reagrupar_pecas_jusbr, resumir_pendentes_agora, sincronizar_caso_jusbr,
+    listar_andamentos_pendentes, reagrupar_pecas_jusbr, recalcular_ids_processuais, reler_peca,
+    reler_pecas_pendentes, resumir_pendentes_agora, sincronizar_caso_jusbr,
 )
 from app.services.autos_ia.nomes import derivar_nome_indexado
 from app.services.autos_ia.pdf_merge import montar_pdf_pecas
@@ -249,22 +251,35 @@ def _forcar_status_erro(caso_id: uuid.UUID, mensagem: str) -> None:
     no meio do processo), sem isso o caso ficava preso em "processando" pra
     sempre — só um redeploy (que reseta tudo no /health de novo) desemperrava.
     Abre uma sessão NOVA de propósito: a sessão original pode ser a própria
-    quebrada."""
-    db = SessionLocal()
-    try:
-        caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
-        if caso:
-            caso.ultimo_sync_status = "erro"
-            caso.ultimo_sync_mensagem = mensagem[:500]
-            caso.sync_etapa = None
-            caso.sync_total_itens = None
-            caso.sync_itens_processados = None
-            caso.sync_detalhe = None
-            db.commit()
-    except Exception:
-        logger.exception("Autos IA: falha ao registrar erro do caso %s (banco indisponível?)", caso_id)
-    finally:
-        db.close()
+    quebrada. Tenta até 3x com espera curta: reproduzido ao vivo um caso em
+    que até essa sessão nova falhou de cara (Postgres recusando conexão
+    nova, não só uma conexão velha morta) — mas essas janelas de
+    indisponibilidade total observadas até agora duraram só alguns
+    segundos, então uma segunda/terceira tentativa tem boa chance de
+    conseguir gravar o status em vez de deixar o caso preso."""
+    for tentativa in range(3):
+        if tentativa:
+            time.sleep(1.5 * tentativa)
+        db = SessionLocal()
+        try:
+            caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
+            if caso:
+                caso.ultimo_sync_status = "erro"
+                caso.ultimo_sync_mensagem = mensagem[:500]
+                caso.sync_etapa = None
+                caso.sync_total_itens = None
+                caso.sync_itens_processados = None
+                caso.sync_detalhe = None
+                db.commit()
+            return
+        except Exception:
+            logger.warning(
+                "Autos IA: falha ao registrar erro do caso %s na tentativa %d/3 (banco indisponível?)",
+                caso_id, tentativa + 1,
+            )
+        finally:
+            db.close()
+    logger.error("Autos IA: não foi possível registrar erro do caso %s em 3 tentativas — banco indisponível", caso_id)
 
 
 def _executar_sync_em_background(caso_id: uuid.UUID) -> None:
@@ -330,16 +345,20 @@ def _executar_reagrupar_em_background(caso_id: uuid.UUID) -> None:
     try:
         caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
         if caso:
-            try:
-                total = reagrupar_pecas_jusbr(db, caso)
-                caso.ultimo_sync_status = "ok"
-                caso.ultimo_sync_mensagem = f"{total} peça(s) reagrupada(s) (petição/anexo)."
-            except Exception as exc:
-                caso.ultimo_sync_status = "erro"
-                caso.ultimo_sync_mensagem = str(exc)
-            finally:
-                caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
-                db.commit()
+            total = reagrupar_pecas_jusbr(db, caso)
+            caso.ultimo_sync_status = "ok"
+            caso.ultimo_sync_mensagem = f"{total} peça(s) reagrupada(s) (petição/anexo)."
+            caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
+            db.commit()
+    except Exception as exc:
+        # Nunca tenta recuperar e reaproveitar `db` aqui: já reproduzimos ao
+        # vivo um caso em que db.rollback() "funcionava" (sem lançar) e a
+        # query seguinte na MESMA sessão falhava de novo com
+        # PendingRollbackError — a conexão pode ficar irrecuperável de
+        # verdade, não só com a transação abortada. _forcar_status_erro
+        # sempre abre uma sessão nova, comprovadamente confiável.
+        logger.exception("Autos IA: reagrupar do caso %s travou de forma inesperada", caso_id)
+        _forcar_status_erro(caso_id, f"Interrompida por um erro inesperado: {exc}")
     finally:
         db.close()
 
@@ -359,12 +378,59 @@ def reagrupar_agora(caso_id: uuid.UUID, background_tasks: BackgroundTasks, db: S
     return caso
 
 
+def _executar_recalcular_ids_em_background(caso_id: uuid.UUID) -> None:
+    from datetime import datetime, timezone
+    db = SessionLocal()
+    try:
+        caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
+        if caso:
+            atualizadas, reconectadas = recalcular_ids_processuais(db, caso)
+            caso.ultimo_sync_status = "ok"
+            caso.ultimo_sync_mensagem = (
+                f"{atualizadas} peça(s) com ID corrigido, {reconectadas} referência(s) reconectada(s)."
+            )
+            caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
+            db.commit()
+    except Exception as exc:
+        # Mesmo cuidado do reagrupar logo acima: nunca tenta recuperar `db`
+        # depois de uma falha — _forcar_status_erro abre sessão nova.
+        logger.exception("Autos IA: recalcular-ids do caso %s travou de forma inesperada", caso_id)
+        _forcar_status_erro(caso_id, f"Interrompida por um erro inesperado: {exc}")
+    finally:
+        db.close()
+
+
+@router.post("/casos/{caso_id}/recalcular-ids", response_model=CasoOut, status_code=status.HTTP_202_ACCEPTED)
+def recalcular_ids_agora(caso_id: uuid.UUID, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Corrige id_processual das peças já importadas usando o documento_id que o
+    jus.br já entrega pronto no andamento, e reconecta referências que dependiam
+    disso — 100% local, sem IA nem rede, e sem mexer em peca_pai_id/tipo (ao
+    contrário de /reagrupar, isso preserva qualquer reorganização manual feita
+    pelo usuário via tornar-principal/anexar-a/desvincular)."""
+    caso = _get_caso(db, caso_id)
+    if caso.ultimo_sync_status == "processando":
+        raise HTTPException(status_code=422, detail="Já há uma sincronização/reagrupamento em andamento.")
+    caso.ultimo_sync_status = "processando"
+    caso.ultimo_sync_mensagem = None
+    db.commit()
+    db.refresh(caso)
+    background_tasks.add_task(_executar_recalcular_ids_em_background, caso.id)
+    return caso
+
+
 def _executar_importacao_existentes_em_background(caso_id: uuid.UUID) -> None:
     db = SessionLocal()
     try:
         caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
         if caso:
             importar_apenas_existentes(db, caso)
+    except Exception as exc:
+        # Rede de segurança: importar_apenas_existentes já trata falha e
+        # rollback internamente, mas se mesmo assim algo escapar (ex.: a
+        # própria busca do caso falhar), sem isso o caso ficava preso em
+        # "processando" pra sempre. Mesmo padrão do resto do módulo.
+        logger.exception("Autos IA: importar-existentes do caso %s travou de forma inesperada", caso_id)
+        _forcar_status_erro(caso_id, f"Interrompida por um erro inesperado: {exc}")
     finally:
         db.close()
 
@@ -413,6 +479,48 @@ def resumir_pendentes_endpoint(caso_id: uuid.UUID, background_tasks: BackgroundT
     db.commit()
     db.refresh(caso)
     background_tasks.add_task(_executar_resumir_pendentes_em_background, caso.id)
+    return caso
+
+
+def _executar_reler_pendentes_em_background(caso_id: uuid.UUID) -> None:
+    from datetime import datetime, timezone
+    db = SessionLocal()
+    try:
+        caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
+        if caso:
+            sucesso, falha = reler_pecas_pendentes(db, caso)
+            caso.ultimo_sync_status = "cancelado" if caso.sync_cancelar else "ok"
+            caso.ultimo_sync_mensagem = (
+                f"{sucesso} peça(s) relida(s) com sucesso" + (f", {falha} falharam de novo." if falha else ".")
+                if (sucesso or falha) else "Nenhuma peça com falha de leitura pendente."
+            )
+            caso.sync_etapa = None
+            caso.sync_total_itens = None
+            caso.sync_itens_processados = None
+            caso.ultima_sincronizacao_em = datetime.now(timezone.utc)
+            db.commit()
+    except Exception as exc:
+        logger.exception("Autos IA: reler-pendentes do caso %s travou de forma inesperada", caso_id)
+        _forcar_status_erro(caso_id, f"Interrompida por um erro inesperado: {exc}")
+    finally:
+        db.close()
+
+
+@router.post("/casos/{caso_id}/reler-pendentes", response_model=CasoOut, status_code=status.HTTP_202_ACCEPTED)
+def reler_pendentes_endpoint(caso_id: uuid.UUID, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Reler (baixar de novo do Drive + resumir de novo) TODAS as peças deste
+    caso que ficaram com falha de leitura registrada — inclui as que já
+    viraram "resumida" com um resumo genérico (a IA não falhou, só recebeu
+    pouco texto pra trabalhar). Sequencial, uma peça de cada vez, pra não
+    sobrecarregar rede/IA de uma vez só."""
+    caso = _get_caso(db, caso_id)
+    if caso.ultimo_sync_status == "processando":
+        raise HTTPException(status_code=422, detail="Já há uma sincronização em andamento.")
+    caso.ultimo_sync_status = "processando"
+    caso.ultimo_sync_mensagem = None
+    db.commit()
+    db.refresh(caso)
+    background_tasks.add_task(_executar_reler_pendentes_em_background, caso.id)
     return caso
 
 
@@ -495,6 +603,13 @@ def _executar_reclassificacao_em_background(caso_id: uuid.UUID) -> None:
         caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
         if caso:
             reclassificar_caso(db, caso)
+    except Exception as exc:
+        # Rede de segurança: reclassificar_caso já trata falha e rollback
+        # internamente, mas se mesmo assim algo escapar, sem isso o caso
+        # ficava preso em "processando" pra sempre. Mesmo padrão do resto do
+        # módulo (ver _executar_sync_em_background).
+        logger.exception("Autos IA: reclassificar do caso %s travou de forma inesperada", caso_id)
+        _forcar_status_erro(caso_id, f"Interrompida por um erro inesperado: {exc}")
     finally:
         db.close()
 
@@ -552,7 +667,7 @@ def listar_pecas(
     limit = max(1, min(limit, 300))
     pecas = buscar_pecas(
         db, caso_id, query=q, data_inicio=di, data_fim=df, tipo=tipo, incluir_anexos=incluir_anexos,
-        offset=max(0, offset), limite=limit,
+        offset=max(0, offset), limite=limit, sem_texto=True,
     )
     return _com_total_anexos(db, caso_id, pecas)
 
@@ -593,22 +708,26 @@ def listar_documentos_drive(
     """Listagem compacta das peças/documentos vindos do jus.br/Drive, uma linha
     por peça-mãe com seus anexos aninhados — pra identificar cada arquivo pelo
     nome (derivado do próprio nome do arquivo, sem IA) e abrir direto no Drive,
-    sem precisar ler o resumo de cada um. Ordena por uma chave única de data/
-    hora (protocolado_em quando existe, senão meia-noite de data_andamento) —
-    ordenar por data_andamento e protocolado_em como colunas SEPARADAS (cada
-    uma com seu próprio nulls_last) fazia andamentos sem hora de protocolo
-    "pular" pro fim do dia mesmo quando vieram antes na realidade, o que
-    intercalava documento(s) e a petição deles fora de ordem."""
+    sem precisar ler o resumo de cada um.
+
+    Ordena por dia (data_andamento) e, dentro do dia, pela hora real de
+    protocolo (protocolado_em) quando ela existe — é o que de fato distingue
+    petição/decisão dos documentos que vieram junto na mesma hora — com
+    pagina_inicio como desempate final entre itens da mesma hora (ou sem
+    hora nenhuma). O cuidado é só no que falta hora de protocolo: em vez de
+    cair pra meia-noite do dia (que empurrava o item pro INÍCIO do dia mesmo
+    sendo, pela página, um dos ÚLTIMOS daquele lote — reproduzido de verdade
+    no Apex: os 3 últimos andamentos de 25/09, sem hora registrada, apareciam
+    antes de itens com página bem menor do mesmo dia), ele fica no fim do dia
+    em ordem crescente (e, simetricamente, no topo em ordem decrescente) —
+    geralmente são mesmo andamentos administrativos que fecham o dia
+    (disponibilização no DJ, decurso de prazo etc.), não o contrário."""
     _get_caso(db, caso_id)
     limit = max(1, min(limit, 200))
 
-    chave_ordem = func.coalesce(
-        AndamentoProcesso.protocolado_em,
-        cast(AndamentoProcesso.data_andamento, DateTime(timezone=True)),
-    )
-
     base = (
         db.query(AutosIAPeca)
+        .options(defer(AutosIAPeca.texto_md))
         .join(AndamentoProcesso, AutosIAPeca.andamento_id == AndamentoProcesso.id)
         .filter(
             AutosIAPeca.caso_id == caso_id,
@@ -627,15 +746,33 @@ def listar_documentos_drive(
             AndamentoProcesso.arquivo_nome.ilike(termo),
         ))
     if ordem == "asc":
-        base = base.order_by(chave_ordem.asc().nulls_last(), AutosIAPeca.pagina_inicio.asc())
+        base = base.order_by(
+            AndamentoProcesso.data_andamento.asc().nulls_last(),
+            AndamentoProcesso.protocolado_em.asc().nulls_last(),
+            AutosIAPeca.pagina_inicio.asc(),
+        )
     else:
-        base = base.order_by(chave_ordem.desc().nulls_last(), AutosIAPeca.pagina_inicio.desc())
+        base = base.order_by(
+            AndamentoProcesso.data_andamento.desc().nulls_last(),
+            AndamentoProcesso.protocolado_em.desc().nulls_first(),
+            # pagina_inicio SEMPRE crescente, mesmo aqui: ele só desempata
+            # principais de mesmo dia+hora (mesmo lote de submissão) — a
+            # ordem decrescente é dos LOTES entre si (o mais recente primeiro),
+            # nunca de "quem" veio primeiro DENTRO do mesmo lote. Invertido
+            # aqui mostraria documento antes da petição que o originou sempre
+            # que os dois batessem no mesmo timestamp — exatamente o efeito
+            # que não é desejado (petição 13/doc 14/doc 15 tem que aparecer
+            # nessa ordem, nunca 15-14-13, mesmo com o lote 10-11-12 vindo
+            # depois por inteiro).
+            AutosIAPeca.pagina_inicio.asc(),
+        )
     principais = base.offset(max(0, offset)).limit(limit).all()
 
     anexos: list[AutosIAPeca] = []
     if principais:
         anexos = (
             db.query(AutosIAPeca)
+            .options(defer(AutosIAPeca.texto_md))
             .filter(AutosIAPeca.peca_pai_id.in_([p.id for p in principais]))
             .order_by(AutosIAPeca.pagina_inicio.asc())
             .all()
@@ -789,6 +926,40 @@ def desvincular_peca(peca_id: uuid.UUID, db: Session = Depends(get_db)):
     return peca
 
 
+def _executar_reler_peca_em_background(peca_id: uuid.UUID) -> None:
+    db = SessionLocal()
+    try:
+        peca = db.query(AutosIAPeca).filter(AutosIAPeca.id == peca_id).first()
+        if not peca:
+            return
+        try:
+            reler_peca(db, peca)
+        except Exception as exc:
+            peca.status = "erro"
+            peca.erro_mensagem = str(exc)[:2000]
+            db.commit()
+    finally:
+        db.close()
+
+
+@router.post("/pecas/{peca_id}/reler", response_model=PecaOut, status_code=status.HTTP_202_ACCEPTED)
+def reler_peca_agora(peca_id: uuid.UUID, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Rebaixa e reprocessa só esta peça (Drive + IA) — pra quando a leitura
+    original falhou ou ficou incompleta. Nunca mexe em outras peças, nem
+    reprocessa o caso inteiro."""
+    peca = db.query(AutosIAPeca).filter(AutosIAPeca.id == peca_id).first()
+    if not peca:
+        raise HTTPException(status_code=404, detail="Peça não encontrada")
+    if not peca.andamento_id:
+        raise HTTPException(status_code=422, detail="Releitura só é suportada para peças importadas do jus.br.")
+    peca.status = "pendente_resumo"
+    peca.erro_mensagem = None
+    db.commit()
+    db.refresh(peca)
+    background_tasks.add_task(_executar_reler_peca_em_background, peca.id)
+    return peca
+
+
 @router.get("/casos/{caso_id}/pecas/download")
 def baixar_pecas_pdf(
     caso_id: uuid.UUID,
@@ -813,10 +984,28 @@ def baixar_pecas_pdf(
 @router.get("/casos/{caso_id}/grafo", response_model=GrafoOut)
 def obter_grafo(caso_id: uuid.UUID, db: Session = Depends(get_db)):
     _get_caso(db, caso_id)
-    pecas = db.query(AutosIAPeca).filter(AutosIAPeca.caso_id == caso_id).all()
+    # texto_md (23 MB num caso grande) não faz parte do grafo — ver buscar_pecas.
+    pecas = (
+        db.query(AutosIAPeca)
+        .options(defer(AutosIAPeca.texto_md))
+        .filter(AutosIAPeca.caso_id == caso_id)
+        .all()
+    )
     referencias = db.query(AutosIAReferencia).filter(AutosIAReferencia.caso_id == caso_id).all()
+    andamento_ids = [p.andamento_id for p in pecas if p.andamento_id]
+    links_drive = dict(
+        db.query(AndamentoProcesso.id, AndamentoProcesso.arquivo_drive_link)
+        .filter(AndamentoProcesso.id.in_(andamento_ids))
+        .all()
+    ) if andamento_ids else {}
+
+    nos = []
+    for p in pecas:
+        no = GrafoNo.model_validate(p, from_attributes=True)
+        no.arquivo_drive_link = links_drive.get(p.andamento_id)
+        nos.append(no)
     return GrafoOut(
-        nos=[GrafoNo.model_validate(p, from_attributes=True) for p in pecas],
+        nos=nos,
         arestas=[GrafoAresta.model_validate(r, from_attributes=True) for r in referencias],
     )
 
