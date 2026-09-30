@@ -23,6 +23,7 @@ class SignatarioOut(SignatarioCreate):
     id: uuid.UUID
     contrato_id: uuid.UUID
     clicksign_signer_key: str | None
+    clicksign_erro: str | None = None
     status_assinatura: StatusAssinatura
     assinado_em: datetime | None
 
