@@ -3,7 +3,7 @@ import uuid
 from datetime import date
 
 from sqlalchemy import func, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
 from app.models.autos_ia import AutosIAPeca
 
@@ -35,11 +35,19 @@ def buscar_pecas(
     incluir_anexos: bool = False,
     offset: int = 0,
     limite: int = 100,
+    sem_texto: bool = False,
 ) -> list[AutosIAPeca]:
     """`offset`/`limite` paginam o resultado — essencial num processo com centenas
     de peças; sem paginação, um caso grande simplesmente não cabia na tela e a
-    maior parte ficava invisível (nem aparecia nem era possível "ver mais")."""
+    maior parte ficava invisível (nem aparecia nem era possível "ver mais").
+
+    `sem_texto=True` não carrega `texto_md` (~21 kB por peça, 23 MB num caso
+    grande): as listagens da tela não usam o texto, e ele era lido do banco
+    de novo a cada página, a cada 5s durante uma sincronização. O FAQ, que
+    monta contexto a partir do texto, continua chamando com o padrão."""
     q = db.query(AutosIAPeca).filter(AutosIAPeca.caso_id == caso_id)
+    if sem_texto:
+        q = q.options(defer(AutosIAPeca.texto_md))
     if not incluir_anexos:
         q = q.filter(AutosIAPeca.peca_pai_id.is_(None))
     if tipo:
