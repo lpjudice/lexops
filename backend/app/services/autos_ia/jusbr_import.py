@@ -789,7 +789,11 @@ def _gravar_status_sync(caso_id, status: str, mensagem: str) -> None:
         AutosIACaso.ultima_sincronizacao_em: datetime.now(timezone.utc),
         **_CAMPOS_PROGRESSO_LIMPOS,
     }
-    if not _atualizar_caso_em_sessao_nova(caso_id, campos, tentativas=3):
+    # 6 tentativas (~20s de espera acumulada): depois que o Postgres reinicia os
+    # próprios processos (crash recovery), ele leva algumas dezenas de segundos
+    # pra voltar a aceitar conexão — 3 tentativas em 4s eram poucas e deixavam o
+    # caso preso em "processando" pra sempre.
+    if not _atualizar_caso_em_sessao_nova(caso_id, campos, tentativas=6):
         logger.error("Autos IA: não foi possível gravar o status final do caso %s — banco indisponível", caso_id)
 
 
@@ -822,15 +826,89 @@ def _finalizar_cancelado(caso_id, nome: str) -> None:
     )
 
 
+def _garantir_status_final(caso_id, nome: str) -> None:
+    """Última garantia: se a rotina terminou (por qualquer caminho, inclusive
+    exceção que não é `Exception`) e o caso continua "processando", grava erro.
+    Sem isso a tela ficava em "processando" pra sempre e só o botão Cancelar
+    destravava — reproduzido em produção: a thread da sincronização sumiu com
+    o caso em 368/871 e nada registrou o resultado."""
+    for tentativa in range(6):
+        if tentativa:
+            time.sleep(5)
+        sessao = SessionLocal()
+        try:
+            status = sessao.query(AutosIACaso.ultimo_sync_status).filter(AutosIACaso.id == caso_id).scalar()
+        except Exception:
+            _rollback_seguro(sessao)
+            continue
+        finally:
+            sessao.close()
+        if status == "processando":
+            logger.error("Autos IA: %s do caso %s terminou sem registrar o resultado — gravando erro", nome, caso_id)
+            _gravar_status_sync(
+                caso_id, "erro",
+                f"A {nome} terminou sem concluir (causa registrada no log do servidor). "
+                "O que já foi importado ficou salvo; tente de novo.",
+            )
+        return
+
+
+def reconciliar_sincronizacoes_interrompidas() -> int:
+    """Chamada uma vez ao iniciar o servidor: um reinício (deploy, queda da
+    máquina) mata as tarefas em segundo plano sem que elas gravem o resultado,
+    deixando o caso em "processando" pra sempre. Como há um único processo, no
+    início nenhuma sincronização pode estar de fato em andamento."""
+    for tentativa in range(6):
+        if tentativa:
+            time.sleep(5)
+        sessao = SessionLocal()
+        try:
+            n = (
+                sessao.query(AutosIACaso)
+                .filter(AutosIACaso.ultimo_sync_status == "processando")
+                .update(
+                    {
+                        AutosIACaso.ultimo_sync_status: "erro",
+                        AutosIACaso.ultimo_sync_mensagem: (
+                            "Interrompida porque o servidor foi reiniciado durante o processamento. "
+                            "O que já foi importado ficou salvo; clique em sincronizar de novo."
+                        ),
+                        **_CAMPOS_PROGRESSO_LIMPOS,
+                    },
+                    synchronize_session=False,
+                )
+            )
+            sessao.commit()
+            if n:
+                logger.warning("Autos IA: %d caso(s) preso(s) em 'processando' após reinício — marcados como erro", n)
+            return n
+        except Exception as exc:
+            logger.warning("Autos IA: reconciliação no startup falhou (tentativa %d/6): %s", tentativa + 1, exc)
+            _rollback_seguro(sessao)
+        finally:
+            sessao.close()
+    return 0
+
+
 def _executar_com_retentativa(db: Session, caso_id, nome: str, etapa) -> None:
     """Roda `etapa(db, tentativa)` — que faz o trabalho inteiro e grava ela
     mesma o status de sucesso — tentando de novo quando o banco derruba a
     conexão no meio. Nunca lança: termina sempre com o caso em ok, erro ou
     cancelado (a sessão `db` fica utilizável depois — o job agendado reusa a
     mesma sessão pro próximo caso)."""
+    try:
+        _rodar_tentativas(db, caso_id, nome, etapa)
+    finally:
+        _garantir_status_final(caso_id, nome)
+
+
+def _rodar_tentativas(db: Session, caso_id, nome: str, etapa) -> None:
     for tentativa in range(1, _TENTATIVAS_SYNC + 1):
+        inicio = time.monotonic()
+        logger.info("Autos IA: %s do caso %s — tentativa %d/%d iniciada", nome, caso_id, tentativa, _TENTATIVAS_SYNC)
         try:
             etapa(db, tentativa)
+            logger.info("Autos IA: %s do caso %s concluída em %.0fs", nome, caso_id, time.monotonic() - inicio)
             return
         except SincronizacaoCancelada:
             _rollback_seguro(db)
@@ -869,15 +947,28 @@ def _executar_com_retentativa(db: Session, caso_id, nome: str, etapa) -> None:
 
 
 def _criar_callback_progresso_jusbr(caso_id):
-    """Espelha no caso o progresso que o orquestrador do jus.br já emite
-    ("Enviando documento 3/10: x.pdf") — antes ninguém passava esse callback e
-    a tela ficava só em "Processando" durante toda a consulta, sem dar pra
-    saber se estava andando. Grava no máximo 1x a cada 2s (fora mudança de
-    etapa) e aproveita pra checar o Cancelar entre um documento e outro."""
-    ultimo = {"em": 0.0, "etapa": None}
+    """Espelha no caso o progresso que o orquestrador do jus.br já emite —
+    antes ninguém passava esse callback e a tela ficava só em "Processando"
+    durante toda a consulta, sem dar pra saber se estava andando. Grava no
+    máximo 1x a cada 2s (fora mudança de etapa) e aproveita pra checar o
+    Cancelar entre um documento e outro.
+
+    Distingue "conferindo" de "baixando": o orquestrador percorre TODOS os
+    andamentos do processo a cada sincronização e só baixa os que ainda não
+    têm arquivo salvo — a maioria só é conferida (rápido, sem rede). Chamar
+    tudo de "baixando" fazia parecer que os 871 documentos estavam sendo
+    baixados de novo."""
+    ultimo = {"em": 0.0, "etapa": None, "contando": False}
 
     def _callback(payload: dict) -> None:
-        etapa = "consultando" if payload.get("stage") == "consultando" else "baixando"
+        mensagem = payload.get("message") or ""
+        if payload.get("stage") == "consultando":
+            etapa = "consultando"
+        elif mensagem.startswith("Enviando documento"):
+            etapa = "baixando"
+        else:
+            etapa = "conferindo"
+            mensagem = f"Conferindo andamentos já sincronizados (sem baixar de novo) — {mensagem}"
         agora = time.monotonic()
         nova_etapa = etapa != ultimo["etapa"]
         if not nova_etapa and agora - ultimo["em"] < 2.0:
@@ -887,9 +978,12 @@ def _criar_callback_progresso_jusbr(caso_id):
             AutosIACaso.sync_etapa: etapa,
             AutosIACaso.sync_total_itens: payload.get("total") or None,
             AutosIACaso.sync_itens_processados: payload.get("processed") or 0,
-            AutosIACaso.sync_detalhe: (payload.get("message") or "")[:500] or None,
+            AutosIACaso.sync_detalhe: mensagem[:500] or None,
         }
-        if nova_etapa:
+        # O ETA da tela parte de sync_iniciado_em: marca uma vez, quando a
+        # contagem de documentos começa (não a cada troca conferindo/baixando).
+        if etapa != "consultando" and not ultimo["contando"]:
+            ultimo["contando"] = True
             campos[AutosIACaso.sync_iniciado_em] = datetime.now(timezone.utc)
         _atualizar_caso_em_sessao_nova(caso_id, campos)
         if _cancelamento_pedido(caso_id):

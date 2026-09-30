@@ -1796,6 +1796,11 @@ async def _startup_andamentos_bot():
 @app.on_event("startup")
 def _startup():
     try:
+        from app.services.autos_ia.jusbr_import import reconciliar_sincronizacoes_interrompidas
+        reconciliar_sincronizacoes_interrompidas()
+    except Exception:
+        logging.getLogger(__name__).exception("Autos IA: reconciliação de sincronizações interrompidas falhou")
+    try:
         from app.scheduler import start_scheduler
         start_scheduler()
     except ModuleNotFoundError:
