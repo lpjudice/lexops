@@ -10,7 +10,7 @@ from typing import Literal
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
 from app.database import SessionLocal, get_db
 from app.dependencies import get_current_user
@@ -667,7 +667,7 @@ def listar_pecas(
     limit = max(1, min(limit, 300))
     pecas = buscar_pecas(
         db, caso_id, query=q, data_inicio=di, data_fim=df, tipo=tipo, incluir_anexos=incluir_anexos,
-        offset=max(0, offset), limite=limit,
+        offset=max(0, offset), limite=limit, sem_texto=True,
     )
     return _com_total_anexos(db, caso_id, pecas)
 
@@ -727,6 +727,7 @@ def listar_documentos_drive(
 
     base = (
         db.query(AutosIAPeca)
+        .options(defer(AutosIAPeca.texto_md))
         .join(AndamentoProcesso, AutosIAPeca.andamento_id == AndamentoProcesso.id)
         .filter(
             AutosIAPeca.caso_id == caso_id,
@@ -771,6 +772,7 @@ def listar_documentos_drive(
     if principais:
         anexos = (
             db.query(AutosIAPeca)
+            .options(defer(AutosIAPeca.texto_md))
             .filter(AutosIAPeca.peca_pai_id.in_([p.id for p in principais]))
             .order_by(AutosIAPeca.pagina_inicio.asc())
             .all()
@@ -982,7 +984,13 @@ def baixar_pecas_pdf(
 @router.get("/casos/{caso_id}/grafo", response_model=GrafoOut)
 def obter_grafo(caso_id: uuid.UUID, db: Session = Depends(get_db)):
     _get_caso(db, caso_id)
-    pecas = db.query(AutosIAPeca).filter(AutosIAPeca.caso_id == caso_id).all()
+    # texto_md (23 MB num caso grande) não faz parte do grafo — ver buscar_pecas.
+    pecas = (
+        db.query(AutosIAPeca)
+        .options(defer(AutosIAPeca.texto_md))
+        .filter(AutosIAPeca.caso_id == caso_id)
+        .all()
+    )
     referencias = db.query(AutosIAReferencia).filter(AutosIAReferencia.caso_id == caso_id).all()
     andamento_ids = [p.andamento_id for p in pecas if p.andamento_id]
     links_drive = dict(

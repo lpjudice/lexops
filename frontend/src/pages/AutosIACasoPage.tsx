@@ -7,6 +7,7 @@ import ReferenciaHover from '../components/autosIa/ReferenciaHover'
 import GrafoRede from '../components/autosIa/GrafoRede'
 import Modal from '../components/Modal'
 import pageStyles from './Page.module.css'
+import { useColapsaveis } from '../utils/colapsaveis'
 import styles from './AutosIACasoPage.module.css'
 
 type Aba = 'upload' | 'pecas' | 'documentos' | 'timeline' | 'grafo' | 'faq'
@@ -88,11 +89,16 @@ export default function AutosIACasoPage() {
   // de sincronização travada mesmo quando ela estava avançando normalmente.
   useEffect(() => {
     if (!emProcessamento || !casoId) return
+    // 15s (era 5s) e só com a aba visível: cada ciclo refaz Grafo + todas as
+    // páginas já carregadas de Peças e Documentos, e o servidor do banco é
+    // pequeno — o ciclo de 5s multiplicava a carga justamente durante a
+    // sincronização, quando o banco já está mais exigido.
     const id = setInterval(() => {
+      if (document.visibilityState !== 'visible') return
       qc.invalidateQueries({ queryKey: ['autos-ia', 'documentos-drive', casoId] })
       qc.invalidateQueries({ queryKey: ['autos-ia', 'pecas', casoId] })
       qc.invalidateQueries({ queryKey: ['autos-ia', 'grafo', casoId] })
-    }, 5000)
+    }, 15000)
     return () => clearInterval(id)
   }, [emProcessamento, casoId, qc])
 
@@ -987,7 +993,8 @@ function AnexarAPicker({
 function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | DocumentoDriveAnexo; nivel: number; casoId: string }) {
   const qc = useQueryClient()
   const anexos = 'anexos' in doc ? doc.anexos : []
-  const [aberto, setAberto] = useState(true)
+  const { estaAberto, alternar } = useColapsaveis(casoId)
+  const aberto = estaAberto(`doc:${doc.id}`)
   const [resumoAberto, setResumoAberto] = useState(false)
   const [editando, setEditando] = useState(false)
   const [anexandoAberto, setAnexandoAberto] = useState(false)
@@ -1064,7 +1071,7 @@ function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | Document
             <button
               type="button"
               className={styles.docChevron}
-              onClick={() => setAberto(!aberto)}
+              onClick={() => alternar(`doc:${doc.id}`)}
               aria-expanded={aberto}
               aria-label={aberto ? 'Recolher anexos' : 'Expandir anexos'}
             >
@@ -1247,7 +1254,7 @@ function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | Document
 
 function AbaDocumentosDrive({ casoId, vinculadoAProcesso }: { casoId: string; vinculadoAProcesso: boolean }) {
   const [q, setQ] = useState('')
-  const [ordem, setOrdem] = useState<'asc' | 'desc'>('asc')
+  const [ordem, setOrdem] = useState<'asc' | 'desc'>('desc')
 
   const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteQuery({
     queryKey: ['autos-ia', 'documentos-drive', casoId, q, ordem],
@@ -1260,6 +1267,7 @@ function AbaDocumentosDrive({ casoId, vinculadoAProcesso }: { casoId: string; vi
     enabled: vinculadoAProcesso,
   })
   const documentos = data?.pages.flat() ?? []
+  const { recolherTodos, expandirTodos } = useColapsaveis(casoId)
 
   if (!vinculadoAProcesso) {
     return (
@@ -1289,6 +1297,21 @@ function AbaDocumentosDrive({ casoId, vinculadoAProcesso }: { casoId: string; vi
           title="Alternar ordem cronológica"
         >
           {ordem === 'desc' ? '↓ Mais novas primeiro' : '↑ Mais antigas primeiro'}
+        </button>
+        <button
+          type="button"
+          className={pageStyles.btnSmall}
+          onClick={() => recolherTodos('doc')}
+          title="Recolhe os anexos de todas as peças (fica salvo ao sair da tela)"
+        >
+          ▸ Recolher tudo
+        </button>
+        <button
+          type="button"
+          className={pageStyles.btnSmall}
+          onClick={() => expandirTodos('doc')}
+        >
+          ▾ Expandir tudo
         </button>
       </div>
 
@@ -1407,6 +1430,7 @@ function AbaGrafo({ casoId }: { casoId: string }) {
 function AbaFaq({ casoId, nosPorId }: { casoId: string; nosPorId: NosMap }) {
   const qc = useQueryClient()
   const [pergunta, setPergunta] = useState('')
+  const { recolherTodos, expandirTodos } = useColapsaveis(casoId)
 
   const { data: perguntas = [] } = useQuery({
     queryKey: ['autos-ia', 'faq', casoId],
@@ -1451,31 +1475,48 @@ function AbaFaq({ casoId, nosPorId }: { casoId: string; nosPorId: NosMap }) {
       {perguntas.length === 0 ? (
         <p className={pageStyles.empty}>Nenhuma pergunta ainda.</p>
       ) : (
-        perguntas.map((f) => (
+        <>
+        <div className={styles.filtrosRow} style={{ marginBottom: 8 }}>
+          <button
+            type="button"
+            className={pageStyles.btnSmall}
+            onClick={() => recolherTodos('faq')}
+            title="Recolhe todas as respostas (fica salvo ao sair da tela)"
+          >
+            ▸ Recolher tudo
+          </button>
+          <button type="button" className={pageStyles.btnSmall} onClick={() => expandirTodos('faq')}>
+            ▾ Expandir tudo
+          </button>
+        </div>
+        {perguntas.map((f) => (
           <FaqCard
             key={f.id}
+            casoId={casoId}
             pergunta={f}
             nosPorId={nosPorId}
             onReprocessar={() => reprocessar.mutate(f.id)}
             onDeletar={() => deletar.mutate(f.id)}
           />
-        ))
+        ))}
+        </>
       )}
     </div>
   )
 }
 
 function FaqCard({
-  pergunta: f, nosPorId, onReprocessar, onDeletar,
-}: { pergunta: FaqPergunta; nosPorId: NosMap; onReprocessar: () => void; onDeletar: () => void }) {
-  const [aberto, setAberto] = useState(true)
+  casoId, pergunta: f, nosPorId, onReprocessar, onDeletar,
+}: { casoId: string; pergunta: FaqPergunta; nosPorId: NosMap; onReprocessar: () => void; onDeletar: () => void }) {
+  const { estaAberto, alternar } = useColapsaveis(casoId)
+  const aberto = estaAberto(`faq:${f.id}`)
 
   return (
     <div className={styles.faqCard}>
       <button
         type="button"
         className={styles.faqPerguntaBtn}
-        onClick={() => setAberto(!aberto)}
+        onClick={() => alternar(`faq:${f.id}`)}
         aria-expanded={aberto}
       >
         <span className={styles.faqPergunta}>{f.pergunta}</span>
