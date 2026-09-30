@@ -290,7 +290,12 @@ export default function ContratosPage() {
   const enviar = useMutation({
     mutationFn: (id: string) => contratosApi.enviar(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['contratos'] }),
-    onError: (e: any) => alert(`Erro ao enviar para ClickSign:\n${e?.response?.data?.detail || e?.message || 'Erro desconhecido'}`),
+    onError: (e: any) => {
+      // Mesmo em erro pode ter mudado estado parcial (alguns signatários registrados,
+      // outros não) — recarrega pra não ficar com a tela desatualizada.
+      qc.invalidateQueries({ queryKey: ['contratos'] })
+      alert(`Erro ao enviar para ClickSign:\n${e?.response?.data?.detail || e?.message || 'Erro desconhecido'}`)
+    },
   })
 
   const cancelar = useMutation({
@@ -1251,13 +1256,20 @@ export default function ContratosPage() {
                                 <td>{s.email}</td>
                                 <td>{PAPEL_LABEL[s.papel as PapelSignatario] || s.papel}</td>
                                 <td>
-                                  <span className={`${cs.sigStatus} ${cs[`sig_${s.status_assinatura}`]}`}>
-                                    {s.status_assinatura === 'pendente' ? 'Pendente' :
-                                     s.status_assinatura === 'assinado' ? '✓ Assinado' : 'Recusado'}
-                                  </span>
+                                  {s.clicksign_erro ? (
+                                    <span className={cs.sigStatus} style={{ background: '#fee2e2', color: '#b91c1c' }}
+                                      title={`Nunca foi registrado no ClickSign — não recebeu convite nenhum: ${s.clicksign_erro}`}>
+                                      ⚠ Falha no ClickSign
+                                    </span>
+                                  ) : (
+                                    <span className={`${cs.sigStatus} ${cs[`sig_${s.status_assinatura}`]}`}>
+                                      {s.status_assinatura === 'pendente' ? 'Pendente' :
+                                       s.status_assinatura === 'assinado' ? '✓ Assinado' : 'Recusado'}
+                                    </span>
+                                  )}
                                 </td>
                                 <td style={{ display: 'flex', gap: 4 }}>
-                                  {s.status_assinatura === 'pendente' &&
+                                  {!s.clicksign_erro && s.status_assinatura === 'pendente' &&
                                     ['aguardando_assinatura', 'parcialmente_assinado'].includes(c.status) && (
                                     <button className={styles.btnTable} title="Reenviar e-mail de assinatura"
                                       disabled={lembrarSig.isPending}

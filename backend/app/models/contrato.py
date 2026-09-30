@@ -102,6 +102,10 @@ class Signatario(Base):
     # ClickSign
     clicksign_signer_key: Mapped[str | None] = mapped_column(String(255))
     clicksign_request_key: Mapped[str | None] = mapped_column(String(255))
+    # Preenchido quando a criação/vinculação desse signatário no ClickSign falha —
+    # nesse caso ele NUNCA existe lá e não recebe convite nenhum, mesmo que o envio
+    # geral do contrato "dê certo" pros outros signatários.
+    clicksign_erro: Mapped[str | None] = mapped_column(Text)
     status_assinatura: Mapped[str] = mapped_column(
         Enum("pendente", "assinado", "recusado", name="status_assinatura"),
         nullable=False,

@@ -1053,6 +1053,12 @@ def enviar_para_assinatura(contrato_id: uuid.UUID, db: Session = Depends(get_db)
 
     # 3. Criar signatários, vincular ao documento e enviar notificação por email
     # ↳ POST /lists vincula mas NÃO envia email; é necessário chamar POST /notifications
+    #
+    # IMPORTANTE: se este passo falhar pra alguém, esse signatário NUNCA existe no
+    # ClickSign — o documento pode fechar (auto_close) só com quem deu certo, e sem
+    # o fix em sincronizar-status/webhook isso fazia o sistema marcar essa pessoa
+    # como "assinado" mesmo sem ela nunca ter sido convidada (incidente real:
+    # contrato do Nilton Valério Rosa Valadão, 29/09/2026 — ver clicksign_erro).
     for sig in c.signatarios:
         try:
             signer_key = clicksign.criar_signatario(
@@ -1067,19 +1073,31 @@ def enviar_para_assinatura(contrato_id: uuid.UUID, db: Session = Depends(get_db)
                 sig.clicksign_request_key = req_key          # armazena por signatário
                 c.clicksign_request_signature_key = req_key
                 clicksign.notificar_signatario(req_key)      # dispara email de convite
+            sig.clicksign_erro = None
         except Exception as e:
-            erros.append(f"Signatário '{sig.email}': {e}")
+            msg = str(e)[:500]
+            sig.clicksign_erro = msg
+            erros.append(f"{sig.nome} ({sig.email}): {msg}")
 
     # (Não chamar /finish — isso fecha o documento permanentemente.
     #  auto_close=True já encerra ao receber todas as assinaturas.)
 
-    if erros:
-        import logging
-        logging.warning("ClickSign erros parciais: %s", erros)
-
     c.status = "aguardando_assinatura"
     db.commit()
     db.refresh(c)
+
+    if erros:
+        # Falha alto e cedo: melhor travar o clique do que deixar passar em silêncio
+        # (log) um signatário que nunca vai conseguir assinar porque nem foi criado
+        # no ClickSign. Quem enviou já vê isso na hora, não só nos logs do servidor.
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Enviado, mas com falha ao registrar signatário(s) no ClickSign — "
+                "essa(s) pessoa(s) NÃO vai(ão) conseguir assinar até corrigir e "
+                f"reenviar: {'; '.join(erros)}"
+            ),
+        )
     return c
 
 
@@ -1212,6 +1230,13 @@ def sincronizar_status_clicksign(contrato_id: uuid.UUID, db: Session = Depends(g
 
     por_key, por_email = _extrair_assinados(doc)
 
+    # IMPORTANTE: só marca "assinado" com prova positiva (chave/email batendo com
+    # quem o ClickSign diz que assinou). NÃO existe mais um fallback de "documento
+    # fechou, então marca todo mundo" — foi exatamente isso que causou o contrato
+    # do Nilton Valério Rosa Valadão (29/09/2026) aparecer como assinado no sistema
+    # sem ele nunca ter sido sequer registrado como signatário no ClickSign (a
+    # criação dele lá tinha falhado silenciosamente no envio; o envelope fechou só
+    # com os outros dois signatários reais, e esse fallback marcou o Nilton junto).
     for sig in c.signatarios:
         assinou = False
         ts = None
@@ -1219,8 +1244,6 @@ def sincronizar_status_clicksign(contrato_id: uuid.UUID, db: Session = Depends(g
             assinou, ts = True, por_key[sig.clicksign_signer_key]
         elif sig.email and sig.email.lower() in por_email:
             assinou, ts = True, por_email[sig.email.lower()]
-        elif doc_status == "closed":
-            assinou = True
         if assinou and sig.status_assinatura != "assinado":
             sig.status_assinatura = "assinado"
             sig.assinado_em = _parse_iso(ts) or datetime.now(timezone.utc)
@@ -1229,13 +1252,10 @@ def sincronizar_status_clicksign(contrato_id: uuid.UUID, db: Session = Depends(g
     todos_assinaram = bool(signatarios) and all(s.status_assinatura == "assinado" for s in signatarios)
     algum_assinou = any(s.status_assinatura == "assinado" for s in signatarios)
 
-    if doc_status == "closed" or todos_assinaram:
+    if todos_assinaram:
         c.status = "assinado"
-        # Baixa/arquiva o assinado sempre que já der pra considerar concluído — não só
-        # quando o ClickSign reporta "closed" literalmente (evita ficar sem o PDF final
-        # se o status demorar a fechar por lá mas todos já assinaram por aqui). Endpoint
-        # síncrono (roda em threadpool) — pode esperar o ClickSign gerar o link do
-        # assinado, que leva alguns segundos após o fechamento.
+        # Endpoint síncrono (roda em threadpool) — pode esperar o ClickSign gerar o
+        # link do assinado, que leva alguns segundos após o fechamento.
         _baixar_e_arquivar_assinado_clicksign(db, c, c.clicksign_document_key, tentativas=6, espera_s=4.0)
         try:
             from app.models.financeiro import Honorario
@@ -1244,6 +1264,14 @@ def sincronizar_status_clicksign(contrato_id: uuid.UUID, db: Session = Depends(g
                 h.pendente_assinatura = False
         except Exception:
             pass
+    elif doc_status == "closed":
+        # ClickSign fechou o envelope mas nem todo signatário do nosso sistema está
+        # confirmado — normalmente porque alguém nunca foi de fato registrado lá
+        # (ver Signatario.clicksign_erro). Fica "parcialmente assinado" (nunca
+        # "assinado" sem prova) pra não passar falsa impressão de confirmação;
+        # precisa de revisão manual — reenviar o convite pra quem falhou, ou tratar
+        # a assinatura por outro meio.
+        c.status = "parcialmente_assinado"
     elif algum_assinou:
         c.status = "parcialmente_assinado"
 
@@ -1302,7 +1330,12 @@ async def webhook_clicksign(request: Request, db: Session = Depends(get_db)):
         contrato.status = "cancelado"
 
     elif nome_evento == "close":
-        contrato.status = "assinado"
+        # Mesma regra do sincronizar-status: só marca "assinado" com todo mundo
+        # confirmado — o envelope pode fechar (auto_close) só com quem de fato
+        # conseguiu ser registrado como signatário no ClickSign, deixando alguém
+        # pendente no nosso sistema sem nunca ter sido convidado de verdade.
+        todos = db.query(Signatario).filter(Signatario.contrato_id == contrato.id).all()
+        contrato.status = "assinado" if all(s.status_assinatura == "assinado" for s in todos) else "parcialmente_assinado"
         _baixar_e_arquivar_assinado_clicksign(db, contrato, doc_key)
 
     db.commit()

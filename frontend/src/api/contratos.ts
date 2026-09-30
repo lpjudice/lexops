@@ -16,6 +16,7 @@ export interface Signatario {
   cpf?: string | null
   data_nascimento?: string | null
   clicksign_signer_key?: string
+  clicksign_erro?: string | null
   status_assinatura: StatusAssinatura
   assinado_em?: string
 }
