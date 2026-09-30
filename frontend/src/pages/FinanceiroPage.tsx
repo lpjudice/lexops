@@ -196,6 +196,11 @@ export default function FinanceiroPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['honorarios'] })
       qc.invalidateQueries({ queryKey: ['financeiro-resumo'] })
+      qc.invalidateQueries({ queryKey: ['fluxo-caixa'] })
+    },
+    onError: (e: any) => {
+      const d = e?.response?.data?.detail
+      alert(`Não foi possível excluir: ${typeof d === 'string' ? d : (d?.message || e?.message || 'erro desconhecido')}`)
     },
   })
 

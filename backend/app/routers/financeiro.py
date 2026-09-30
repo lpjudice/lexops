@@ -93,6 +93,53 @@ def deletar_honorario(honorario_id: uuid.UUID, db: Session = Depends(get_db)):
     h = db.query(Honorario).filter(Honorario.id == honorario_id).first()
     if not h:
         raise HTTPException(status_code=404, detail="Honorário não encontrado")
+
+    # VALIDAÇÃO ANTES DE EXCLUIR — nunca fazer bypass silencioso: apagar um recebível
+    # com pagamento/NF ativos causaria erro de caixa/fiscal. Barramos e o usuário resolve.
+    from sqlalchemy import or_
+    from app.models.nota_fiscal import NotaFiscal
+    bloqueios: list[str] = []
+
+    # 1) Pagamentos (recebimentos) já lançados = dinheiro no caixa
+    if h.recebimentos:
+        total = sum(float(r.valor) for r in h.recebimentos)
+        bloqueios.append(
+            f"{len(h.recebimentos)} pagamento(s) lançado(s) (R$ {total:,.2f}) — "
+            f"remova os recebimentos na aba do recebível antes de excluir"
+        )
+
+    # NFs vinculadas (direto, por compensação, ou pelo recebimento)
+    rec_ids = [r.id for r in h.recebimentos]
+    conds = [NotaFiscal.honorario_id == h.id, NotaFiscal.honorario_compensacao_id == h.id]
+    if rec_ids:
+        conds.append(NotaFiscal.recebimento_id.in_(rec_ids))
+    nfs_vinculadas = db.query(NotaFiscal).filter(or_(*conds)).all()
+    nfs_emitidas = [nf for nf in nfs_vinculadas if nf.status == "emitida"]
+
+    # 2) NF emitida vinculada = documento fiscal ativo
+    if nfs_emitidas:
+        nums = ", ".join(f"nº {nf.numero_nfse}" for nf in nfs_emitidas if nf.numero_nfse) or f"{len(nfs_emitidas)} nota(s)"
+        bloqueios.append(
+            f"NF emitida vinculada ({nums}) — cancele/substitua ou desvincule a NF antes de excluir"
+        )
+
+    if bloqueios:
+        raise HTTPException(
+            status_code=409,
+            detail="Não é possível excluir este recebível ainda: " + "; ".join(bloqueios) + ".",
+        )
+
+    # Sem bloqueios (sem pagamentos, sem NF emitida): desvincula NFs "mortas"
+    # (erro/rascunho/cancelada) para liberar a FK e exclui. Parcelas caem por cascade.
+    for nf in nfs_vinculadas:
+        if nf.honorario_id == h.id:
+            nf.honorario_id = None
+        if nf.honorario_compensacao_id == h.id:
+            nf.honorario_compensacao_id = None
+        if nf.recebimento_id in rec_ids:
+            nf.recebimento_id = None
+    db.flush()
+
     db.delete(h)
     db.commit()
 
