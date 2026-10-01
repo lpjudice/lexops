@@ -30,6 +30,7 @@ import {
   Camera,
   Mail,
   Search,
+  Wallet,
 } from 'lucide-react'
 import api from '../api/client'
 import { useAuth } from '../contexts/AuthContext'
@@ -108,6 +109,7 @@ const navGroups: NavGroup[] = [
     label: 'AUTOS IA',
     items: [
       { to: '/autos-ia', label: 'Autos IA', Icon: Search },
+      { to: '/carteira', label: 'Carteira', Icon: Wallet },
     ],
   },
   {
@@ -170,6 +172,8 @@ const PAGE_TITLES: Record<string, string> = {
   '/informativos': 'Informativos',
   '/informativos/assinantes': 'E-mails (Informativos)',
   '/configuracoes': 'Configurações',
+  '/carteira': 'Carteira',
+  '/autos-ia': 'Autos IA',
 }
 
 
