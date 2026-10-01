@@ -27,7 +27,7 @@ from app.services.carteira_ia import CarteiraIAService
 from app.services.carteira_relatorios import CarteiraRelatoriosService
 from app.services.carteira_drive import CarteiraDriveService
 
-router = APIRouter(prefix="/api/carteira", tags=["carteira"])
+router = APIRouter(prefix="/carteira", tags=["carteira"])
 
 
 # ─────────────────────────────────────────────────────────────────
