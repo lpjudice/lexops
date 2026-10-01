@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, computed_field
+from pydantic import BaseModel, computed_field, field_validator
 
 TipoPeca = Literal[
     "peticao", "decisao", "despacho", "certidao", "oficio", "recurso", "documento", "outro"
@@ -145,6 +145,7 @@ class DocumentoDriveAnexoOut(BaseModel):
     nota_usuario: str | None
     keywords_usuario: list[str] | None
     titulo_customizado: str | None
+    advogado_responsavel: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -163,6 +164,17 @@ class PecaAnotacaoUpdate(BaseModel):
     nota_usuario: str | None = None
     keywords_usuario: list[str] | None = None
     titulo_customizado: str | None = None
+    advogado_responsavel: str | None = None
+
+    @field_validator("advogado_responsavel")
+    @classmethod
+    def _normaliza_advogado(cls, v: str | None) -> str | None:
+        # Espaços nas pontas e duplicados no meio virariam "advogados" distintos
+        # no filtro do grafo; vazio vira null (limpa o campo).
+        if v is None:
+            return None
+        v = " ".join(v.split())
+        return v[:255] or None
 
 
 class GrafoNo(BaseModel):
@@ -180,6 +192,7 @@ class GrafoNo(BaseModel):
     arquivo_drive_link: str | None = None
     status: str
     erro_mensagem: str | None = None
+    advogado_responsavel: str | None = None
 
 
 class GrafoAresta(BaseModel):

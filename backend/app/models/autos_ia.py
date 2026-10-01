@@ -200,6 +200,9 @@ class AutosIAPeca(Base):
     nota_usuario: Mapped[str | None] = mapped_column(Text)
     keywords_usuario: Mapped[list[str] | None] = mapped_column(ARRAY(String(100)))
     titulo_customizado: Mapped[str | None] = mapped_column(String(500))
+    # Advogado responsável por esta peça (anotação manual do Lucas) — vira chip
+    # na listagem, entra na busca e é filtro no grafo.
+    advogado_responsavel: Mapped[str | None] = mapped_column(String(255))
 
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pendente_resumo")
     # pendente_resumo | resumida | erro

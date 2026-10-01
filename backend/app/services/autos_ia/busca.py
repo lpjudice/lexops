@@ -21,7 +21,9 @@ TSVECTOR_EXPR = func.to_tsvector(
     .concat(" ")
     .concat(func.coalesce(func.array_to_string(AutosIAPeca.keywords_usuario, " "), ""))
     .concat(" ")
-    .concat(func.coalesce(AutosIAPeca.nota_usuario, "")),
+    .concat(func.coalesce(AutosIAPeca.nota_usuario, ""))
+    .concat(" ")
+    .concat(func.coalesce(AutosIAPeca.advogado_responsavel, "")),
 )
 
 

@@ -412,3 +412,103 @@
   .aside { max-height: 220px; }
   .canvasWrap { height: 60vh; }
 }
+
+/* ── Linha do tempo (régua fixa no topo + faixas por tipo) ─────────────── */
+.canvasWrap { --altura-eixo: 46px; }
+.axisSvg {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%;
+  height: var(--altura-eixo);
+  background: var(--white);
+  border-bottom: 1px solid var(--gray-border);
+  z-index: 2;
+  pointer-events: none;
+}
+.scrollArea {
+  position: absolute;
+  top: var(--altura-eixo); left: 0; right: 0; bottom: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.axisPeriodo {
+  fill: var(--gray-mid);
+  font-family: 'Archivo', sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+.tick line { stroke: var(--gray-border); }
+.tick text {
+  fill: var(--gray-mid);
+  font-family: 'Archivo', sans-serif;
+  font-size: 10.5px;
+}
+.tickForte text { fill: var(--dark); font-weight: 700; font-size: 11px; }
+.tickForte line { stroke: var(--gray-mid); }
+
+.gridLine { stroke: var(--gray-border); stroke-opacity: 0.55; stroke-dasharray: 2 4; pointer-events: none; }
+.gridLineForte { stroke: var(--gray-mid); stroke-opacity: 0.4; stroke-dasharray: none; }
+
+.laneBand { fill: var(--light); fill-opacity: 0.55; }
+.laneBandAlt { fill: transparent; }
+.laneLabel {
+  font-family: 'Archivo', sans-serif;
+  font-size: 11.5px;
+  font-weight: 700;
+  fill: var(--dark);
+}
+.laneCount {
+  font-family: 'Archivo', sans-serif;
+  font-size: 10px;
+  fill: var(--gray-mid);
+}
+
+.guideLine { stroke: var(--dark); stroke-opacity: 0.55; stroke-width: 1px; stroke-dasharray: 3 3; pointer-events: none; }
+.guideRect { fill: var(--dark); }
+.guideText {
+  fill: var(--light);
+  font-family: 'Archivo', sans-serif;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.periodoCol { display: flex; flex-direction: column; gap: 6px; }
+.periodoLinha { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--gray-mid); }
+.periodoLinha span { width: 24px; flex-shrink: 0; }
+.dateInput, .selectInput {
+  font-family: inherit;
+  font-size: 12.5px;
+  padding: 6px 8px;
+  border: 1px solid var(--gray-border);
+  border-radius: 8px;
+  background: var(--light);
+  color: var(--dark);
+  min-width: 0;
+}
+.dateInput { flex: 1; min-width: 0; }
+.selectInput { width: 100%; }
+.dateInput:focus, .selectInput:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
+.limparBtn {
+  margin-top: 8px;
+  border: none;
+  background: none;
+  color: var(--teal);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  align-items: center;
+}
+.limparBtn:hover { text-decoration: underline; }
+
+.advChip {
+  display: inline-block;
+  background: #e0e7ff;
+  color: #3730a3;
+  border: 1px solid #c7d2fe;
+  border-radius: 999px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+}

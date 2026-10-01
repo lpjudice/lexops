@@ -40,9 +40,15 @@ function formatarData(d?: string | null) {
   return new Date(ano, mes - 1, dia).toLocaleDateString('pt-BR')
 }
 
+// Horário de protocolo é sempre exibido em Brasília (fonte dos dados), não no
+// fuso do navegador — viajando (ex.: Los Angeles, UTC-7/-8) a hora "andava"
+// junto com o fuso do computador. Isso é só exibição: a ordenação das peças
+// é feita no backend, a partir do instante guardado, e não muda.
+const FUSO_PROTOCOLO = 'America/Sao_Paulo'
+
 function formatarHora(d?: string | null) {
   if (!d) return null
-  return new Date(d).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  return new Date(d).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: FUSO_PROTOCOLO })
 }
 
 function formatarUsd(v: number) {
@@ -1001,11 +1007,23 @@ function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | Document
   const [rascunhoTitulo, setRascunhoTitulo] = useState(doc.titulo_customizado ?? '')
   const [rascunhoNota, setRascunhoNota] = useState(doc.nota_usuario ?? '')
   const [rascunhoKeywords, setRascunhoKeywords] = useState((doc.keywords_usuario ?? []).join(', '))
+  const [rascunhoAdvogado, setRascunhoAdvogado] = useState(doc.advogado_responsavel ?? '')
+  // Sugestões dos nomes já usados no caso (só busca quando o painel de edição abre).
+  const { data: advogadosSugeridos } = useQuery({
+    queryKey: ['autos-ia', 'advogados', casoId],
+    queryFn: () => autosIa.listarAdvogadosResponsaveis(casoId),
+    enabled: editando,
+    staleTime: 60_000,
+  })
   const temAnexos = anexos.length > 0
   const ehPeticao = doc.tipo === 'peticao'
   const temResumo = !!doc.resumo
   const nomeOriginal = doc.nome_indexado || doc.titulo
   const ehAnexo = nivel > 0
+  // Um tick = arquivo baixado; dois = baixado E já lido (resumo gerado). Ler
+  // implica ter o arquivo, mesmo que o link do Drive ainda não tenha sido gravado.
+  const lido = doc.status === 'resumida' && !doc.erro_mensagem
+  const baixado = lido || !!doc.arquivo_drive_link
 
   const invalidarDocumentos = () => {
     qc.invalidateQueries({ queryKey: ['autos-ia', 'documentos-drive', casoId] })
@@ -1056,9 +1074,12 @@ function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | Document
       keywords_usuario: rascunhoKeywords.trim()
         ? rascunhoKeywords.split(',').map((k) => k.trim()).filter(Boolean)
         : null,
+      advogado_responsavel: rascunhoAdvogado.trim() || null,
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['autos-ia', 'documentos-drive', casoId] })
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'grafo', casoId] })
+      qc.invalidateQueries({ queryKey: ['autos-ia', 'advogados', casoId] })
       setEditando(false)
     },
   })
@@ -1099,7 +1120,21 @@ function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | Document
           ) : (
             <span className={styles.docDriveIcone} />
           )}
-          <span className={`${styles.docNomeIndexado} ${ehPeticao ? styles.docNomeIndexadoPeticao : ''}`}>
+          {lido ? (
+            <span className={`${styles.docTicks} ${styles.docTicksLido}`} title="Baixado e lido" aria-label="Baixado e lido">✓✓</span>
+          ) : baixado ? (
+            <span className={styles.docTicks} title="Baixado (ainda não lido)" aria-label="Baixado, ainda não lido">✓</span>
+          ) : (
+            <span className={styles.docTicks} />
+          )}
+          <span
+            className={[
+              styles.docNomeIndexado,
+              ehPeticao ? styles.docNomeIndexadoPeticao : '',
+              doc.titulo_customizado ? styles.docNomeCustomizado : '',
+            ].join(' ')}
+            title={doc.titulo_customizado ? `Nome editado por você (original: ${nomeOriginal})` : undefined}
+          >
             {doc.titulo_customizado || nomeOriginal}
           </span>
           <button
@@ -1195,10 +1230,13 @@ function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | Document
           {doc.arquivo_nome && <span className={styles.docArquivoNome}>{doc.arquivo_nome}</span>}
           {doc.resumo && <span className={styles.docResumo}>{doc.resumo}</span>}
           {doc.nota_usuario && <span className={styles.docNotaUsuario}>{doc.nota_usuario}</span>}
-          {doc.keywords_usuario && doc.keywords_usuario.length > 0 && (
-            <span className={styles.docKeywordsUsuario}>
-              {doc.keywords_usuario.map((k) => <span key={k} className={styles.keywordChip}>{k}</span>)}
-            </span>
+          {((doc.keywords_usuario?.length ?? 0) > 0 || doc.advogado_responsavel) && (
+            <div className={styles.docChipsLinha}>
+              {doc.advogado_responsavel && (
+                <span className={styles.chipAdvogado} title="Advogado responsável">⚖ {doc.advogado_responsavel}</span>
+              )}
+              {doc.keywords_usuario?.map((k) => <span key={k} className={styles.chipManual}>{k}</span>)}
+            </div>
           )}
         </div>
         {resumoAberto && temResumo && (
@@ -1227,6 +1265,17 @@ function LinhaDocumento({ doc, nivel, casoId }: { doc: DocumentoDrive | Document
               value={rascunhoKeywords}
               onChange={(e) => setRascunhoKeywords(e.target.value)}
             />
+            <input
+              className={pageStyles.input}
+              placeholder="Advogado responsável"
+              list={`advogados-${doc.id}`}
+              maxLength={255}
+              value={rascunhoAdvogado}
+              onChange={(e) => setRascunhoAdvogado(e.target.value)}
+            />
+            <datalist id={`advogados-${doc.id}`}>
+              {(advogadosSugeridos ?? []).map((n) => <option key={n} value={n} />)}
+            </datalist>
             <div className={styles.docEditarAcoes}>
               <button
                 type="button"
@@ -1286,7 +1335,7 @@ function AbaDocumentosDrive({ casoId, vinculadoAProcesso }: { casoId: string; vi
       <div className={styles.filtrosRow} style={{ marginBottom: 12 }}>
         <input
           className={pageStyles.input}
-          placeholder="Buscar por nome, ID, nota ou palavra-chave..."
+          placeholder="Buscar por nome, ID, nota, palavra-chave ou advogado..."
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />

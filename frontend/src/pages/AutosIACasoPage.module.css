@@ -612,10 +612,57 @@
   padding: 1px 7px;
 }
 
-.docKeywordsUsuario {
-  display: inline-flex;
+/* Chips das anotações manuais: SEMPRE numa linha própria (flex-basis 100% no
+   container flex-wrap da sub-linha), pra não "grudarem" no fim da linha de
+   cima quando ela tem pouco texto. */
+.docChipsLinha {
+  flex: 0 0 100%;
+  display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  align-items: center;
+  gap: 4px 5px;
+}
+
+/* Palavra-chave manual: fundo amarelo bem visível (o cinza antigo sumia). */
+.chipManual {
+  background: #fde68a;
+  color: #713f12;
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* Advogado responsável: outra cor (índigo), separado do amarelo e longe do cinza. */
+.chipAdvogado {
+  background: #e0e7ff;
+  color: #3730a3;
+  border: 1px solid #c7d2fe;
+  border-radius: 999px;
+  padding: 1px 9px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* Ticks de status do arquivo — 1 = baixado, 2 = baixado e lido. Largura fixa
+   pra o nome do documento não "pular" entre linhas com e sem tick. */
+.docTicks {
+  flex-shrink: 0;
+  width: 22px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: -2px;
+  color: var(--gray-mid);
+  cursor: help;
+}
+.docTicksLido { color: #1baf7a; }
+
+/* Nome que o Lucas editou: cor própria (magenta) no lugar do azul/escuro,
+   pra ver de relance o que já foi renomeado. */
+.docNomeIndexado.docNomeCustomizado,
+.docNomeIndexadoPeticao.docNomeCustomizado {
+  color: #a21caf;
 }
 
 .docEditarPainel {

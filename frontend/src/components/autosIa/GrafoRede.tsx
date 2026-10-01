@@ -18,6 +18,62 @@ const COR_POR_TIPO: Record<TipoPeca, string> = {
   outro: '#e34948',
 }
 const NOME_TIPO = Object.fromEntries(TIPOS_PECA.map((t) => [t.value, t.label])) as Record<TipoPeca, string>
+// Ordem das faixas (de cima pra baixo): o que as partes pedem, depois o que o juízo decide.
+const ORDEM_TIPOS: TipoPeca[] = ['peticao', 'decisao', 'despacho', 'certidao', 'oficio', 'recurso', 'documento', 'outro']
+
+const DIA_MS = 86_400_000
+const MARGEM_ESQ = 112 // gutter dos rótulos das faixas
+const MARGEM_DIR = 28
+const ALTURA_EIXO = 46
+const ALTURA_FAIXA_MIN = 54
+const PADDING_FAIXA = 10
+const ZOOM_MAX = 90
+
+const loc = d3.timeFormatLocale({
+  dateTime: '%A, %e de %B de %Y', date: '%d/%m/%Y', time: '%H:%M:%S', periods: ['AM', 'PM'],
+  days: ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'],
+  shortDays: ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'],
+  months: ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'],
+  shortMonths: ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'],
+})
+const fDia = loc.format('%d')
+const fSemana = loc.format('%d %b')
+const fMes = loc.format('%b')
+const fAno = loc.format('%Y')
+const fCompleta = loc.format('%a, %d %b %Y')
+const fCurta = loc.format('%d %b %Y')
+
+type NivelTick = 'dia' | 'semana' | 'mes' | 'ano'
+const ESPACO_MIN_ENTRE_RODULOS_PX = 52
+
+/** Escolhe a granularidade da régua pelo espaço (px) por dia — sempre com rótulos
+ * espaçados o bastante pra serem lidos —, em vez de deixar o D3 decidir (que, com
+ * ~4 meses na tela, mostrava só 3 rótulos de mês). */
+function gerarTicks(inicio: Date, fim: Date, larguraPx: number): { ticks: Date[]; nivel: NivelTick } {
+  const dias = Math.max(1, (fim.getTime() - inicio.getTime()) / DIA_MS)
+  const pxPorDia = larguraPx / dias
+  const opcoes: { dias: number; nivel: NivelTick; intervalo: d3.TimeInterval }[] = [
+    { dias: 1, nivel: 'dia', intervalo: d3.timeDay.every(1)! },
+    { dias: 2, nivel: 'dia', intervalo: d3.timeDay.every(2)! },
+    { dias: 7, nivel: 'semana', intervalo: d3.timeMonday.every(1)! },
+    { dias: 14, nivel: 'semana', intervalo: d3.timeMonday.every(2)! },
+    { dias: 30, nivel: 'mes', intervalo: d3.timeMonth.every(1)! },
+    { dias: 61, nivel: 'mes', intervalo: d3.timeMonth.every(2)! },
+    { dias: 91, nivel: 'mes', intervalo: d3.timeMonth.every(3)! },
+    { dias: 365, nivel: 'ano', intervalo: d3.timeYear.every(1)! },
+  ]
+  const escolhida = opcoes.find((o) => o.dias * pxPorDia >= ESPACO_MIN_ENTRE_RODULOS_PX) ?? opcoes[opcoes.length - 1]
+  return { ticks: escolhida.intervalo.range(inicio, fim), nivel: escolhida.nivel }
+}
+
+/** Rótulo por nível: dia → "13" (e o nome do mês no dia 1º); semana → "13 abr"; mês → "abr" (ano em janeiro). */
+function rotuloTick(d: Date, nivel: NivelTick): string {
+  if (nivel === 'dia') return d.getDate() === 1 ? fMes(d) : fDia(d)
+  if (nivel === 'semana') return fSemana(d)
+  if (nivel === 'mes') return d.getMonth() === 0 ? fAno(d) : fMes(d)
+  return fAno(d)
+}
+function ehInicioDeMes(d: Date): boolean { return d3.timeMonth(d) >= d }
 
 function formatarData(d?: string | null): string {
   if (!d) return 'sem data'
@@ -39,12 +95,21 @@ function escapeHtml(s: string): string {
   return div.innerHTML
 }
 
-interface NoInterno extends GrafoNo, d3.SimulationNodeDatum {
+interface NoInterno extends GrafoNo {
   citacoes: number
+  /** Dia da peça (meia-noite local); null = sem data. */
   dt: Date | null
+  /** Instante usado no eixo X: o dia + uma fração dele pela ordem das páginas, pra
+   * peças do mesmo dia não se sobreporem nem trocarem de ordem. */
+  dtx: Date | null
+  /** Posição vertical final (centro da faixa + deslocamento do empilhamento). */
+  y: number
+  visivel: boolean
 }
-interface LinkInterno extends d3.SimulationLinkDatum<NoInterno> {
+interface LinkInterno {
   id: string
+  source: NoInterno
+  target: NoInterno
 }
 
 interface Props {
@@ -57,12 +122,13 @@ interface Props {
   onRelido?: () => void
 }
 
-/** Grafo de nós conectados: cada peça-mãe é um ponto, dimensionado por quantas
- * vezes é citada, colorido por tipo. Clique isola a vizinhança e abre o painel
- * de detalhe com os IDs mencionados (resolvidos e "não localizados"); "Fixar"
- * trava a vizinhança atual pra navegar só entre aqueles documentos. Tudo é
- * construído imperativamente com D3 dentro de `rootRef` — o layout de força e
- * o zoom/pan não convivem bem com o ciclo de re-render do React. */
+/** Linha do tempo de peças: cada peça-mãe é um ponto, na posição horizontal EXATA
+ * da sua data (régua fixa no topo, com mês/ano), em uma faixa por tipo (petição,
+ * decisão, despacho...). Dimensionado por quantas vezes é citada; as linhas mostram
+ * quem menciona quem. Clique isola a vizinhança e abre o painel de detalhe; "Fixar"
+ * trava a vizinhança atual. Filtros: tipo, busca, advogado responsável e período
+ * (De–Até, que também ajusta o zoom). Tudo é construído imperativamente com D3
+ * dentro de `rootRef` — zoom/pan não convivem bem com o ciclo de re-render do React. */
 export default function GrafoRede({ nos, arestas, onRelido }: Props) {
   const rootRef = useRef<HTMLDivElement>(null)
   const onRelidoRef = useRef(onRelido)
@@ -74,8 +140,25 @@ export default function GrafoRede({ nos, arestas, onRelido }: Props) {
 
     const nosRaiz: NoInterno[] = nos
       .filter((n) => !n.peca_pai_id)
-      .map((n) => ({ ...n, citacoes: 0, dt: parseDataLocal(n.data_peca) }))
+      .map((n) => ({ ...n, citacoes: 0, dt: parseDataLocal(n.data_peca), dtx: null, y: 0, visivel: true }))
     if (nosRaiz.length === 0) return
+
+    // Dentro do mesmo dia, a ordem das páginas (≈ ordem de juntada) distribui as
+    // peças ao longo do dia no eixo X — a hora de protocolo não entra aqui de
+    // propósito (ela depende de fuso e nem toda peça tem), então a ordem exibida
+    // é a mesma da listagem de Documentos.
+    const porDia = new Map<string, NoInterno[]>()
+    nosRaiz.forEach((n) => {
+      if (!n.dt) return
+      const chave = n.dt.getTime().toString()
+      porDia.set(chave, [...(porDia.get(chave) ?? []), n])
+    })
+    porDia.forEach((lista) => {
+      lista.sort((a, b) => a.pagina_inicio - b.pagina_inicio)
+      lista.forEach((n, i) => {
+        n.dtx = new Date(n.dt!.getTime() + (0.05 + 0.9 * ((i + 0.5) / lista.length)) * DIA_MS)
+      })
+    })
 
     const byId = new Map<string, NoInterno>()
     nosRaiz.forEach((n) => byId.set(n.id, n))
@@ -111,12 +194,9 @@ export default function GrafoRede({ nos, arestas, onRelido }: Props) {
 
     const links: LinkInterno[] = arestas
       .filter((a) => a.peca_destino_id)
-      .map((a) => ({ id: a.id, source: resolverRaiz(a.peca_origem_id), target: resolverRaiz(a.peca_destino_id!) }))
-      .filter((l) => byId.has(l.source as string) && byId.has(l.target as string) && l.source !== l.target)
-    links.forEach((l) => {
-      const alvo = byId.get(l.target as string)
-      if (alvo) alvo.citacoes += 1
-    })
+      .map((a) => ({ id: a.id, source: byId.get(resolverRaiz(a.peca_origem_id)), target: byId.get(resolverRaiz(a.peca_destino_id!)) }))
+      .filter((l): l is LinkInterno => !!l.source && !!l.target && l.source !== l.target)
+    links.forEach((l) => { l.target.citacoes += 1 })
 
     const citadaPorDestino = new Map<string, GrafoAresta[]>()
     arestas.forEach((a) => {
@@ -129,21 +209,48 @@ export default function GrafoRede({ nos, arestas, onRelido }: Props) {
       citadaPorDestino.set(destino, lista)
     })
 
-    const tiposPresentes = Array.from(new Set(nosRaiz.map((n) => n.tipo)))
+    const tiposPresentes = ORDEM_TIPOS.filter((t) => nosRaiz.some((n) => n.tipo === t))
     let tiposAtivos = new Set(tiposPresentes)
+    const advogados = Array.from(new Set(nosRaiz.map((n) => n.advogado_responsavel).filter((a): a is string => !!a)))
+      .sort((a, b) => a.localeCompare(b, 'pt-BR'))
+    const comDatas = nosRaiz.filter((n) => n.dtx)
+    const minData = comDatas.length ? d3.min(comDatas, (n) => n.dt as Date)! : null
+    const maxData = comDatas.length ? d3.max(comDatas, (n) => n.dt as Date)! : null
+    const iso = (d: Date | null) => d
+      ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      : ''
 
-    // ---- monta a casca de DOM (sidebar, canvas, painel, tooltip) ----
+    // ---- monta a casca de DOM (sidebar, régua, canvas, painel, tooltip) ----
     root.innerHTML = `
       <div class="${styles.wrap}">
         <aside class="${styles.aside}">
           <div>
             <span class="${styles.fieldLabel}">Busca</span>
-            <input type="search" class="${styles.searchInput}" placeholder="Título, ID, autor..." autocomplete="off" />
+            <input type="search" class="${styles.searchInput}" placeholder="Título, ID, autor, advogado..." autocomplete="off" />
           </div>
           <div class="${styles.statsGrid}">
-            <div class="${styles.stat}"><div class="${styles.statN}">${nosRaiz.length}</div><div class="${styles.statL}">peças</div></div>
-            <div class="${styles.stat}"><div class="${styles.statN}">${links.length}</div><div class="${styles.statL}">citações</div></div>
+            <div class="${styles.stat}"><div class="${styles.statN}" data-role="nPecas">${nosRaiz.length}</div><div class="${styles.statL}">peças</div></div>
+            <div class="${styles.stat}"><div class="${styles.statN}" data-role="nCitacoes">${links.length}</div><div class="${styles.statL}">citações</div></div>
           </div>
+          <div>
+            <span class="${styles.fieldLabel}">Período (de – até)</span>
+            <div class="${styles.periodoCol}">
+              <label class="${styles.periodoLinha}"><span>De</span>
+                <input type="date" class="${styles.dateInput}" data-role="de" aria-label="Data inicial" min="${iso(minData)}" max="${iso(maxData)}" /></label>
+              <label class="${styles.periodoLinha}"><span>Até</span>
+                <input type="date" class="${styles.dateInput}" data-role="ate" aria-label="Data final" min="${iso(minData)}" max="${iso(maxData)}" /></label>
+            </div>
+            <button type="button" class="${styles.limparBtn}" data-role="limparPeriodo" style="display:none">✕ Limpar período</button>
+          </div>
+          ${advogados.length > 0 ? `
+          <div>
+            <span class="${styles.fieldLabel}">Advogado responsável</span>
+            <select class="${styles.selectInput}" data-role="advogado">
+              <option value="">Todos</option>
+              <option value="__sem__">(sem advogado)</option>
+              ${advogados.map((a) => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join('')}
+            </select>
+          </div>` : ''}
           <div>
             <span class="${styles.fieldLabel}">Tipos (clique filtra · "só" isola)</span>
             <div class="${styles.legend}" data-role="legend"></div>
@@ -153,19 +260,23 @@ export default function GrafoRede({ nos, arestas, onRelido }: Props) {
             <div class="${styles.idIndex}" data-role="idindex"></div>
           </details>
           <div class="${styles.hint}">
-            <strong>Como ler:</strong> a posição horizontal segue a data (mais antiga à esquerda, eixo no
-            rodapé) — mesmo sem citação identificada, a ordem cronológica já mostra o que veio antes. O
-            tamanho do ponto cresce com quantas vezes a peça é citada; as linhas mostram quem menciona quem.
-            Clique num ponto pra ver o resumo e isolar suas conexões; arraste o fundo pra mover, role pra
-            dar zoom.
+            <strong>Como ler:</strong> cada faixa é um tipo de peça e a posição horizontal é a data exata
+            (régua no topo; mais antiga à esquerda). Peças do mesmo dia ficam lado a lado, na ordem das
+            páginas. O tamanho do ponto cresce com quantas vezes a peça é citada; as linhas mostram quem
+            menciona quem. Passe o mouse num ponto pra ver a data na régua; clique pra ver o resumo e
+            isolar suas conexões. Role pra dar zoom na linha do tempo, arraste pra andar nela — ou use o
+            filtro de período.
           </div>
         </aside>
         <main class="${styles.canvasWrap}">
-          <svg class="${styles.graphSvg}"></svg>
+          <svg class="${styles.axisSvg}" data-role="axisSvg" height="${ALTURA_EIXO}"></svg>
+          <div class="${styles.scrollArea}" data-role="scrollArea">
+            <svg class="${styles.graphSvg}" data-role="graphSvg"></svg>
+          </div>
           <div class="${styles.zoomControls}">
             <button type="button" class="${styles.zoomBtn}" data-role="zoomIn" aria-label="Mais zoom">+</button>
             <button type="button" class="${styles.zoomBtn}" data-role="zoomOut" aria-label="Menos zoom">−</button>
-            <button type="button" class="${styles.zoomBtn}" data-role="zoomReset" aria-label="Resetar zoom">⤢</button>
+            <button type="button" class="${styles.zoomBtn}" data-role="zoomReset" aria-label="Ver tudo" title="Ver tudo (limpa o período)">⤢</button>
           </div>
           <div class="${styles.panel}" data-role="panel">
             <button type="button" class="${styles.panelClose}" data-role="panelClose" aria-label="Fechar">✕</button>
@@ -191,9 +302,14 @@ export default function GrafoRede({ nos, arestas, onRelido }: Props) {
     const legendEl = q<HTMLDivElement>('[data-role="legend"]')
     const idIndexEl = q<HTMLDivElement>('[data-role="idindex"]')
     const canvasWrap = q<HTMLDivElement>(`.${styles.canvasWrap}`)
+    const scrollArea = q<HTMLDivElement>('[data-role="scrollArea"]')
     const panel = q<HTMLDivElement>('[data-role="panel"]')
     const tooltip = q<HTMLDivElement>('[data-role="tooltip"]')
     const buscaInput = q<HTMLInputElement>(`.${styles.searchInput}`)
+    const deInput = q<HTMLInputElement>('[data-role="de"]')
+    const ateInput = q<HTMLInputElement>('[data-role="ate"]')
+    const limparPeriodoBtn = q<HTMLButtonElement>('[data-role="limparPeriodo"]')
+    const advSelect = root.querySelector<HTMLSelectElement>('[data-role="advogado"]')
 
     // ---- legenda + índice de IDs ----
     tiposPresentes.forEach((tipo) => {
@@ -262,10 +378,9 @@ export default function GrafoRede({ nos, arestas, onRelido }: Props) {
       el.addEventListener('click', () => irPara(n.id))
     })
 
-    // ---- SVG + força ----
-    const width = canvasWrap.clientWidth || 600
-    const height = canvasWrap.clientHeight || 460
-    const svg = d3.select(q<SVGSVGElement>('svg'))
+    // ---- SVGs: régua fixa (topo) + faixas/pontos/linhas ----
+    const axisSvg = d3.select(q<SVGSVGElement>('[data-role="axisSvg"]'))
+    const svg = d3.select(q<SVGSVGElement>('[data-role="graphSvg"]'))
     const defs = svg.append('defs')
     tiposPresentes.forEach((tipo) => {
       defs.append('marker')
@@ -280,74 +395,208 @@ export default function GrafoRede({ nos, arestas, onRelido }: Props) {
         .attr('opacity', 0.5)
     })
 
-    const zoomLayer = svg.append('g')
-    const axisLayer = zoomLayer.append('g')
-    const edgeLayer = zoomLayer.append('g')
-    const nodeLayer = zoomLayer.append('g')
+    // Pontos/linhas/grade ficam recortados à área do tempo — ao andar a linha do tempo,
+    // nada passa por cima dos nomes das faixas (gutter da esquerda).
+    const clipId = `clip-grafo-${Math.random().toString(36).slice(2, 9)}`
+    const clipRect = defs.append('clipPath').attr('id', clipId).append('rect').attr('y', 0)
+    const laneLayer = svg.append('g')
+    const gridLayer = svg.append('g').attr('clip-path', `url(#${clipId})`)
+    const guideLine = svg.append('line').attr('class', styles.guideLine).style('display', 'none')
+    const edgeLayer = svg.append('g').attr('clip-path', `url(#${clipId})`)
+    const nodeLayer = svg.append('g').attr('clip-path', `url(#${clipId})`)
+
+    const axisTicks = axisSvg.append('g')
+    const axisPeriodo = axisSvg.append('text').attr('class', styles.axisPeriodo).attr('x', 10).attr('y', 14)
+    const guideLabel = axisSvg.append('g').style('display', 'none')
+    const guideRect = guideLabel.append('rect').attr('class', styles.guideRect).attr('y', 2).attr('height', 18).attr('rx', 5)
+    const guideText = guideLabel.append('text').attr('class', styles.guideText).attr('y', 15).attr('text-anchor', 'middle')
 
     const radius = d3.scaleSqrt()
       .domain([0, d3.max(nosRaiz, (n) => n.citacoes) || 1])
-      .range([5, 15])
+      .range([4.5, 12])
 
-    // Eixo cronológico: puxa cada nó horizontalmente pra posição proporcional à
-    // data da peça (mais antiga à esquerda), respondendo ao pedido de dar uma
-    // sequência temporal legível ao grafo — sem isso ele é só nuvem de pontos
-    // sem noção de "o que veio antes de quê". Força moderada (não trava): o
-    // link/charge/collide ainda podem organizar verticalmente por citação.
-    const comData = nosRaiz.filter((n) => n.dt)
-    const temEixoTempo = comData.length >= 2
-    const AXIS_Y = height - 34
-    const xScale = temEixoTempo
-      ? d3.scaleTime()
-        .domain(d3.extent(comData, (n) => n.dt as Date) as [Date, Date])
-        .range([64, Math.max(64 + 40, width - 24)])
-        .nice()
-      : null
+    let W = 600
+    let H = 400
+    let xBase = d3.scaleTime()
+    let dominio: [Date, Date] = [new Date(), new Date()]
+    let transformAtual = d3.zoomIdentity
+    let lanesInfo: { tipo: TipoPeca; top: number; h: number }[] = []
 
-    const sim = d3.forceSimulation<NoInterno>(nosRaiz)
-      .force('link', d3.forceLink<NoInterno, LinkInterno>(links).id((d) => d.id).distance(70).strength(0.35))
-      .force('charge', d3.forceManyBody().strength(-140))
-      .force('collide', d3.forceCollide<NoInterno>().radius((d) => radius(d.citacoes) + 14))
-    if (xScale) {
-      sim
-        .force('x', d3.forceX<NoInterno>((d) => (d.dt ? xScale(d.dt) : width / 2)).strength(0.22))
-        .force('y', d3.forceY<NoInterno>(height / 2 - 14).strength(0.05))
-    } else {
-      sim.force('center', d3.forceCenter(width / 2, height / 2))
-    }
+    const xz = () => transformAtual.rescaleX(xBase)
+    const semDataX = () => W - MARGEM_DIR + 2
+    const posX = (n: NoInterno, escala: d3.ScaleTime<number, number>) => (n.dtx ? escala(n.dtx) : semDataX())
 
-    if (xScale) {
-      axisLayer.attr('class', styles.axisEixo).attr('transform', `translate(0,${AXIS_Y})`)
-      axisLayer.call(
-        d3.axisBottom(xScale)
-          .ticks(Math.min(8, comData.length))
-          .tickFormat((d) => (d as Date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })) as unknown as (sel: typeof axisLayer) => void,
-      )
-    }
+    /** Calcula domínio X, empilhamento (beeswarm) por faixa e alturas. Roda no início
+     * e a cada resize (a largura muda as colisões). */
+    function calcularLayout() {
+      W = Math.max(320, scrollArea.clientWidth || 600)
+      const alturaDisponivel = Math.max(220, scrollArea.clientHeight || 420)
 
-    const edgeSel = edgeLayer.selectAll('path').data(links).enter().append('path')
-      .attr('class', styles.edge)
-      .attr('marker-end', (d) => {
-        const alvo = typeof d.target === 'object' ? d.target : byId.get(d.target as string)
-        return `url(#arrow-${alvo?.tipo ?? 'outro'})`
+      if (comDatas.length > 0) {
+        const t0 = d3.min(comDatas, (n) => n.dtx as Date)!.getTime()
+        const t1 = d3.max(comDatas, (n) => n.dtx as Date)!.getTime()
+        const pad = Math.max(1.5 * DIA_MS, (t1 - t0) * 0.025)
+        dominio = [new Date(t0 - pad), new Date(t1 + pad)]
+      } else {
+        const hoje = Date.now()
+        dominio = [new Date(hoje - 15 * DIA_MS), new Date(hoje + 15 * DIA_MS)]
+      }
+      xBase = d3.scaleTime().domain(dominio).range([MARGEM_ESQ, W - MARGEM_DIR - (comDatas.length < nosRaiz.length ? 26 : 0)])
+
+      const montar = (passo: number) => {
+        const info: { tipo: TipoPeca; top: number; h: number; meio: number }[] = []
+        let acumulado = 0
+        tiposPresentes.forEach((tipo) => {
+          const itens = nosRaiz.filter((n) => n.tipo === tipo).sort((a, b) => {
+            const xa = a.dtx ? a.dtx.getTime() : Infinity
+            const xb = b.dtx ? b.dtx.getTime() : Infinity
+            return xa - xb || a.pagina_inicio - b.pagina_inicio
+          })
+          const colocados: { x: number; y: number; r: number }[] = []
+          let maxK = 0
+          const candidatos = [0]
+          for (let k = 1; k <= 60; k++) candidatos.push(k, -k)
+          itens.forEach((n) => {
+            const x = posX(n, xBase)
+            const r = radius(n.citacoes)
+            let escolhido = 0
+            let kEscolhido = 0
+            for (const k of candidatos) {
+              const y = k * passo
+              let livre = true
+              for (let i = colocados.length - 1; i >= 0; i--) {
+                const p = colocados[i]
+                if (x - p.x > 40) break
+                const dx = x - p.x, dy = y - p.y
+                const min = r + p.r + 2.5
+                if (dx * dx + dy * dy < min * min) { livre = false; break }
+              }
+              if (livre) { escolhido = y; kEscolhido = k; break }
+            }
+            n.y = escolhido
+            colocados.push({ x, y: escolhido, r })
+            maxK = Math.max(maxK, Math.abs(kEscolhido))
+          })
+          const h = Math.max(ALTURA_FAIXA_MIN, 2 * (maxK * passo + 12 + PADDING_FAIXA))
+          info.push({ tipo, top: acumulado, h, meio: acumulado + h / 2 })
+          acumulado += h
+        })
+        return { info, total: acumulado }
+      }
+
+      let resultado = montar(13)
+      for (const passo of [10, 8, 7]) {
+        if (resultado.total <= alturaDisponivel) break
+        resultado = montar(passo)
+      }
+      // Sobrou altura: distribui entre as faixas pra ocupar o quadro todo.
+      const extra = Math.max(0, alturaDisponivel - resultado.total) / Math.max(1, resultado.info.length)
+      let topo = 0
+      lanesInfo = resultado.info.map((l) => {
+        const h = l.h + extra
+        const item = { tipo: l.tipo, top: topo, h }
+        topo += h
+        return item
       })
+      H = Math.max(alturaDisponivel, resultado.total)
+      // Reposiciona o Y absoluto (o beeswarm guardou só o deslocamento em relação ao centro da faixa).
+      lanesInfo.forEach((l) => {
+        nosRaiz.filter((n) => n.tipo === l.tipo).forEach((n) => { n.y = l.top + l.h / 2 + n.y })
+      })
+      svg.attr('width', W).attr('height', H)
+      axisSvg.attr('width', W)
+      clipRect.attr('x', MARGEM_ESQ - 8).attr('width', Math.max(0, W - MARGEM_ESQ + 8)).attr('height', H)
+    }
 
-    const nodeSel = nodeLayer.selectAll('g').data(nosRaiz).enter().append('g')
+    // ---- elementos que dependem do layout (faixas) ----
+    function desenharFaixas() {
+      laneLayer.selectAll('*').remove()
+      lanesInfo.forEach((l, i) => {
+        laneLayer.append('rect')
+          .attr('class', i % 2 === 0 ? styles.laneBand : `${styles.laneBand} ${styles.laneBandAlt}`)
+          .attr('x', 0).attr('y', l.top).attr('width', W).attr('height', l.h)
+        const rotulo = laneLayer.append('g').attr('transform', `translate(10,${l.top + l.h / 2})`)
+        rotulo.append('rect').attr('width', 8).attr('height', 8).attr('rx', 2).attr('y', -4).attr('fill', COR_POR_TIPO[l.tipo])
+        rotulo.append('text').attr('class', styles.laneLabel).attr('x', 14).attr('y', -1).text(NOME_TIPO[l.tipo])
+        rotulo.append('text').attr('class', styles.laneCount).attr('x', 14).attr('y', 11)
+          .text(`${nosRaiz.filter((n) => n.tipo === l.tipo).length} peça(s)`)
+      })
+      if (comDatas.length < nosRaiz.length) {
+        laneLayer.append('text').attr('class', styles.laneCount).attr('x', semDataX()).attr('y', 12).attr('text-anchor', 'end').text('sem data →')
+      }
+    }
+
+    const edgeSel = edgeLayer.selectAll<SVGPathElement, LinkInterno>('path').data(links).enter().append('path')
+      .attr('class', styles.edge)
+      .attr('marker-end', (d) => `url(#arrow-${d.target.tipo})`)
+
+    const nodeSel = nodeLayer.selectAll<SVGGElement, NoInterno>('g').data(nosRaiz).enter().append('g')
       .attr('class', styles.node)
-      .call(d3.drag<SVGGElement, NoInterno>()
-        .on('start', (event, d) => { if (!event.active) sim.alphaTarget(0.25).restart(); d.fx = d.x; d.fy = d.y })
-        .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y })
-        .on('end', (event, d) => { if (!event.active) sim.alphaTarget(0); d.fx = null; d.fy = null }))
-
     nodeSel.append('circle')
       .attr('r', (d) => radius(d.citacoes))
       .attr('fill', (d) => COR_POR_TIPO[d.tipo])
-
     nodeSel.append('text')
       .attr('class', styles.nodeText)
       .attr('dy', (d) => radius(d.citacoes) + 11)
       .attr('text-anchor', 'middle')
       .text((d) => (d.titulo.length > 26 ? d.titulo.slice(0, 26) + '…' : d.titulo))
+
+    function caminho(s: NoInterno, t: NoInterno, escala: d3.ScaleTime<number, number>): string {
+      const x1 = posX(s, escala), y1 = s.y, x2 = posX(t, escala), y2 = t.y
+      const alt = Math.min(80, 14 + Math.hypot(x2 - x1, y2 - y1) * 0.16)
+      return `M${x1},${y1}Q${(x1 + x2) / 2},${(y1 + y2) / 2 - alt} ${x2},${y2}`
+    }
+
+    /** Reposiciona tudo conforme o zoom/pan atual: pontos, linhas, régua e grade. */
+    function renderizar() {
+      const escala = xz()
+      nodeSel.attr('transform', (d) => `translate(${posX(d, escala)},${d.y})`)
+      edgeSel.attr('d', (d) => caminho(d.source, d.target, escala))
+      nodeSel.select<SVGTextElement>('text').style('display', (d) => (transformAtual.k >= 2.4 || d.id === selecionadoId ? null : 'none'))
+
+      const ini = escala.invert(MARGEM_ESQ), fim = escala.invert(W - MARGEM_DIR)
+      const { ticks, nivel } = gerarTicks(ini, fim, W - MARGEM_ESQ - MARGEM_DIR)
+      // Grade: um traço por rótulo + um mais forte em cada início de mês (referência de
+      // mês mesmo quando a régua está em dias/semanas).
+      const gradeDatas = Array.from(new Map([...ticks, ...d3.timeMonth.range(ini, fim)].map((t) => [t.getTime(), t])).values())
+      gridLayer.selectAll<SVGLineElement, Date>('line').data(gradeDatas, (t) => String(t.getTime()))
+        .join('line')
+        .attr('class', (t) => (ehInicioDeMes(t) ? `${styles.gridLine} ${styles.gridLineForte}` : styles.gridLine))
+        .attr('x1', (t) => escala(t)).attr('x2', (t) => escala(t)).attr('y1', 0).attr('y2', H)
+      axisTicks.selectAll<SVGGElement, Date>('g').data(ticks, (t) => String(t.getTime()))
+        .join((enter) => {
+          const g = enter.append('g')
+          g.append('line').attr('y1', ALTURA_EIXO - 7).attr('y2', ALTURA_EIXO)
+          g.append('text').attr('y', ALTURA_EIXO - 12).attr('text-anchor', 'middle')
+          return g
+        })
+        .attr('class', (t) => (ehInicioDeMes(t) ? `${styles.tick} ${styles.tickForte}` : styles.tick))
+        .attr('transform', (t) => `translate(${escala(t)},0)`)
+        .each(function (t) { d3.select(this).select('text').text(rotuloTick(t, nivel)) })
+      axisPeriodo.text(comDatas.length ? `${fCurta(ini)} → ${fCurta(fim)}` : 'sem datas nas peças')
+      // linha-guia acompanha a peça em foco
+      if (guiaId) mostrarGuia(byId.get(guiaId)!)
+    }
+
+    // ---- guia de data (liga o ponto à régua) ----
+    let guiaId: string | null = null
+    function mostrarGuia(d: NoInterno) {
+      if (!d.dtx) return
+      guiaId = d.id
+      const x = posX(d, xz())
+      guideLine.style('display', null).attr('x1', x).attr('x2', x).attr('y1', 0).attr('y2', H)
+      const texto = fCompleta(d.dt as Date)
+      guideText.text(texto).attr('x', 0)
+      const largura = texto.length * 6.2 + 14
+      guideRect.attr('x', -largura / 2).attr('width', largura)
+      guideLabel.style('display', null).attr('transform', `translate(${Math.min(W - largura / 2 - 4, Math.max(largura / 2 + 4, x))},0)`)
+    }
+    function esconderGuia() {
+      guiaId = null
+      guideLine.style('display', 'none')
+      guideLabel.style('display', 'none')
+      if (selecionadoId) { const sel = byId.get(selecionadoId); if (sel) mostrarGuia(sel) }
+    }
 
     const TOOLTIP_LARGURA = 260
     function mostrarTooltip(event: MouseEvent, d: NoInterno) {
@@ -363,58 +612,108 @@ export default function GrafoRede({ nos, arestas, onRelido }: Props) {
       tooltip.style.opacity = '1'
       const resumoTrecho = d.resumo ? `<div class="${styles.ttKw}">${escapeHtml(d.resumo.slice(0, 120))}${d.resumo.length > 120 ? '…' : ''}</div>` : ''
       const kwTrecho = d.keywords && d.keywords.length ? `<div class="${styles.ttKw}">${d.keywords.map(escapeHtml).join(' · ')}</div>` : ''
+      const advTrecho = d.advogado_responsavel ? `<div class="${styles.ttKw}">⚖ ${escapeHtml(d.advogado_responsavel)}</div>` : ''
       tooltip.innerHTML = `<div class="${styles.ttTipo}" style="color:${COR_POR_TIPO[d.tipo]}">${NOME_TIPO[d.tipo]}${d.id_processual ? ' · ID ' + escapeHtml(d.id_processual) : ''}</div>` +
         `<strong>${escapeHtml(d.titulo)}</strong><br>${formatarData(d.data_peca)}${d.autor ? ' · ' + escapeHtml(d.autor) : ''}` +
-        (d.citacoes ? `<br>citada ${d.citacoes}x` : '') + resumoTrecho + kwTrecho
+        (d.citacoes ? `<br>citada ${d.citacoes}x` : '') + advTrecho + resumoTrecho + kwTrecho
     }
     function esconderTooltip() { tooltip.style.opacity = '0' }
 
     nodeSel
-      .on('mousemove', (event, d) => mostrarTooltip(event, d))
-      .on('mouseleave', esconderTooltip)
+      .on('mousemove', (event, d) => { mostrarTooltip(event, d); mostrarGuia(d) })
+      .on('mouseleave', () => { esconderTooltip(); esconderGuia() })
       .on('click', (_event, d) => { esconderTooltip(); irPara(d.id) })
 
-    sim.on('tick', () => {
-      edgeSel.attr('d', (d) => {
-        const s = d.source as NoInterno, t = d.target as NoInterno
-        const dx = (t.x ?? 0) - (s.x ?? 0), dy = (t.y ?? 0) - (s.y ?? 0)
-        const dr = Math.sqrt(dx * dx + dy * dy) * 1.4
-        return `M${s.x},${s.y}A${dr},${dr} 0 0,1 ${t.x},${t.y}`
+    // ---- zoom/pan só no eixo do tempo (os pontos mantêm o tamanho) ----
+    const zoom = d3.zoom<SVGSVGElement, unknown>()
+      .scaleExtent([1, ZOOM_MAX])
+      .on('zoom', (event) => {
+        transformAtual = event.transform
+        renderizar()
       })
-      nodeSel.attr('transform', (d) => `translate(${d.x},${d.y})`)
+    function configurarZoom() {
+      zoom.extent([[0, 0], [W, H]]).translateExtent([[0, 0], [W, H]])
+    }
+    svg.call(zoom).on('dblclick.zoom', null)
+    q<HTMLButtonElement>('[data-role="zoomIn"]').addEventListener('click', () => svg.transition().call(zoom.scaleBy, 1.4))
+    q<HTMLButtonElement>('[data-role="zoomOut"]').addEventListener('click', () => svg.transition().call(zoom.scaleBy, 1 / 1.4))
+    q<HTMLButtonElement>('[data-role="zoomReset"]').addEventListener('click', () => {
+      deInput.value = ''
+      ateInput.value = ''
+      aplicarPeriodo()
     })
 
-    const zoom = d3.zoom<SVGSVGElement, unknown>().scaleExtent([0.3, 4]).on('zoom', (event) => {
-      zoomLayer.attr('transform', event.transform)
-    })
-    svg.call(zoom)
-    q<HTMLButtonElement>('[data-role="zoomIn"]').addEventListener('click', () => svg.transition().call(zoom.scaleBy, 1.3))
-    q<HTMLButtonElement>('[data-role="zoomOut"]').addEventListener('click', () => svg.transition().call(zoom.scaleBy, 1 / 1.3))
-    q<HTMLButtonElement>('[data-role="zoomReset"]').addEventListener('click', () => svg.transition().call(zoom.transform, d3.zoomIdentity))
+    // ---- período (De–Até): filtra E enquadra o zoom ----
+    let periodoDe: Date | null = null
+    let periodoAteExclusivo: Date | null = null
 
-    // ---- filtro (tipo/busca) + fixar ----
+    function enquadrarPeriodo() {
+      if (comDatas.length === 0) return
+      const a = periodoDe ?? dominio[0]
+      const b = periodoAteExclusivo ?? dominio[1]
+      const x0 = xBase(a), x1 = xBase(b)
+      const larguraUtil = W - MARGEM_DIR - MARGEM_ESQ
+      const k = Math.min(ZOOM_MAX, Math.max(1, larguraUtil / Math.max(1, x1 - x0)))
+      const tx = periodoDe || periodoAteExclusivo ? MARGEM_ESQ - k * x0 : 0
+      svg.transition().duration(260).call(zoom.transform, d3.zoomIdentity.translate(tx, 0).scale(k))
+    }
+    function aplicarPeriodo() {
+      const de = parseDataLocal(deInput.value)
+      const ate = parseDataLocal(ateInput.value)
+      periodoDe = de
+      periodoAteExclusivo = ate ? new Date(ate.getTime() + DIA_MS) : null
+      if (de && ate && de > ate) { // De > Até: troca, em vez de mostrar tela vazia
+        periodoDe = ate
+        periodoAteExclusivo = new Date(de.getTime() + DIA_MS)
+        deInput.value = ateInput.value
+        ateInput.value = iso(de)
+      }
+      limparPeriodoBtn.style.display = periodoDe || periodoAteExclusivo ? 'inline-flex' : 'none'
+      if (fixado) { fixado = false; fixadoIds = null; atualizarBotaoFixar() }
+      aplicarFiltro()
+      enquadrarPeriodo()
+    }
+    deInput.addEventListener('change', aplicarPeriodo)
+    ateInput.addEventListener('change', aplicarPeriodo)
+    limparPeriodoBtn.addEventListener('click', () => { deInput.value = ''; ateInput.value = ''; aplicarPeriodo() })
+
+    // ---- filtros (tipo/busca/advogado/período) + fixar ----
     let fixado = false
     let fixadoIds: Set<string> | null = null
+    const nPecasEl = q<HTMLDivElement>('[data-role="nPecas"]')
+    const nCitacoesEl = q<HTMLDivElement>('[data-role="nCitacoes"]')
+
+    function passaFiltros(d: NoInterno, termo: string, adv: string): boolean {
+      if (!tiposAtivos.has(d.tipo)) return false
+      if (termo && !(
+        d.titulo.toLowerCase().includes(termo) ||
+        (d.autor ?? '').toLowerCase().includes(termo) ||
+        (d.advogado_responsavel ?? '').toLowerCase().includes(termo) ||
+        (d.id_processual ?? '').includes(termo)
+      )) return false
+      if (adv === '__sem__' ? !!d.advogado_responsavel : adv && d.advogado_responsavel !== adv) return false
+      if (periodoDe || periodoAteExclusivo) {
+        if (!d.dt) return false
+        if (periodoDe && d.dt < periodoDe) return false
+        if (periodoAteExclusivo && d.dt >= periodoAteExclusivo) return false
+      }
+      return true
+    }
 
     function aplicarFiltro() {
       const termo = buscaInput.value.trim().toLowerCase()
-      nodeSel.style('display', (d) => {
-        if (fixadoIds) return fixadoIds.has(d.id) ? null : 'none'
-        const passaTipo = tiposAtivos.has(d.tipo)
-        const passaBusca = !termo ||
-          d.titulo.toLowerCase().includes(termo) ||
-          (d.autor ?? '').toLowerCase().includes(termo) ||
-          (d.id_processual ?? '').includes(termo)
-        return passaTipo && passaBusca ? null : 'none'
-      })
-      edgeSel.style('display', (d) => {
-        const s = typeof d.source === 'object' ? d.source : byId.get(d.source as string)!
-        const t = typeof d.target === 'object' ? d.target : byId.get(d.target as string)!
-        if (fixadoIds) return fixadoIds.has(s.id) && fixadoIds.has(t.id) ? null : 'none'
-        return tiposAtivos.has(s.tipo) && tiposAtivos.has(t.tipo) ? null : 'none'
-      })
+      const adv = advSelect?.value ?? ''
+      nosRaiz.forEach((d) => { d.visivel = fixadoIds ? fixadoIds.has(d.id) : passaFiltros(d, termo, adv) })
+      nodeSel.style('display', (d) => (d.visivel ? null : 'none'))
+      edgeSel.style('display', (d) => (d.source.visivel && d.target.visivel ? null : 'none'))
+      nPecasEl.textContent = String(nosRaiz.filter((d) => d.visivel).length)
+      nCitacoesEl.textContent = String(links.filter((l) => l.source.visivel && l.target.visivel).length)
     }
     buscaInput.addEventListener('input', aplicarFiltro)
+    advSelect?.addEventListener('change', () => {
+      if (fixado) { fixado = false; fixadoIds = null; atualizarBotaoFixar() }
+      aplicarFiltro()
+    })
 
     // ---- seleção / painel ----
     let selecionadoId: string | null = null
@@ -422,10 +721,8 @@ export default function GrafoRede({ nos, arestas, onRelido }: Props) {
     function vizinhos(id: string): Set<string> {
       const ids = new Set([id])
       links.forEach((l) => {
-        const s = typeof l.source === 'object' ? l.source.id : l.source
-        const t = typeof l.target === 'object' ? l.target.id : l.target
-        if (s === id) ids.add(t as string)
-        if (t === id) ids.add(s as string)
+        if (l.source.id === id) ids.add(l.target.id)
+        if (l.target.id === id) ids.add(l.source.id)
       })
       return ids
     }
@@ -467,6 +764,15 @@ export default function GrafoRede({ nos, arestas, onRelido }: Props) {
       if (row) row.classList.remove(styles.legendOff)
       if (fixado && fixadoIds && !fixadoIds.has(id)) { fixado = false; fixadoIds = null; atualizarBotaoFixar() }
       aplicarFiltro()
+      if (!alvo.visivel) {
+        // Peça escondida por período/advogado/busca (ex.: clique num ID do índice):
+        // limpa esses filtros em vez de abrir o painel de algo que não aparece.
+        buscaInput.value = ''
+        if (advSelect) advSelect.value = ''
+        deInput.value = ''
+        ateInput.value = ''
+        aplicarPeriodo()
+      }
       selecionar(id)
     }
 
@@ -509,16 +815,10 @@ export default function GrafoRede({ nos, arestas, onRelido }: Props) {
       const viz = vizinhos(id)
       nodeSel.classed(styles.nodeDim, (n) => !viz.has(n.id))
       nodeSel.classed(styles.nodeHi, (n) => n.id === id)
-      edgeSel.classed(styles.edgeDim, (l) => {
-        const s = typeof l.source === 'object' ? l.source.id : l.source
-        const t = typeof l.target === 'object' ? l.target.id : l.target
-        return !(s === id || t === id)
-      })
-      edgeSel.classed(styles.edgeHi, (l) => {
-        const s = typeof l.source === 'object' ? l.source.id : l.source
-        const t = typeof l.target === 'object' ? l.target.id : l.target
-        return s === id || t === id
-      })
+      edgeSel.classed(styles.edgeDim, (l) => !(l.source.id === id || l.target.id === id))
+      edgeSel.classed(styles.edgeHi, (l) => l.source.id === id || l.target.id === id)
+      mostrarGuia(d)
+      renderizar()
 
       q<HTMLSpanElement>('[data-role="pTipo"]').textContent = NOME_TIPO[d.tipo]
       q<HTMLSpanElement>('[data-role="pTipo"]').style.background = COR_POR_TIPO[d.tipo]
@@ -529,7 +829,8 @@ export default function GrafoRede({ nos, arestas, onRelido }: Props) {
       const paginas = d.pagina_inicio === d.pagina_fim ? `p. ${d.pagina_inicio}` : `p. ${d.pagina_inicio}–${d.pagina_fim}`
       q<HTMLDivElement>('[data-role="pMeta"]').innerHTML =
         `${formatarData(d.data_peca)}${d.autor ? ' · ' + escapeHtml(d.autor) : ''} · ${paginas} · ${d.citacoes}x citada` +
-        (d.id_processual ? ` <span class="${styles.ownId}">ID ${escapeHtml(d.id_processual)}</span>` : '')
+        (d.id_processual ? ` <span class="${styles.ownId}">ID ${escapeHtml(d.id_processual)}</span>` : '') +
+        (d.advogado_responsavel ? ` <span class="${styles.advChip}">⚖ ${escapeHtml(d.advogado_responsavel)}</span>` : '')
       q<HTMLDivElement>('[data-role="pIds"]').innerHTML = chipsDeMencoes(d)
       q<HTMLDivElement>('[data-role="pResumo"]').textContent = d.resumo || 'Ainda sem resumo gerado.'
       const naoLida = d.status !== 'resumida' || !!d.erro_mensagem
@@ -585,25 +886,39 @@ export default function GrafoRede({ nos, arestas, onRelido }: Props) {
       nodeSel.classed(styles.nodeDim, false).classed(styles.nodeHi, false)
       edgeSel.classed(styles.edgeDim, false).classed(styles.edgeHi, false)
       aplicarFiltro()
+      esconderGuia()
+      renderizar()
     })
 
+    // ---- primeira montagem + resize ----
+    function montarTudo() {
+      calcularLayout()
+      configurarZoom()
+      desenharFaixas()
+      renderizar()
+    }
+    montarTudo()
+    aplicarFiltro()
+
+    let larguraAnterior = scrollArea.clientWidth
+    let alturaAnterior = scrollArea.clientHeight
     const resizeObserver = new ResizeObserver(() => {
-      const w = canvasWrap.clientWidth, h = canvasWrap.clientHeight
-      if (w <= 0 || h <= 0) return
-      if (xScale) {
-        xScale.range([64, Math.max(64 + 40, w - 24)])
-        axisLayer.attr('transform', `translate(0,${h - 34})`)
-        sim.force('y', d3.forceY<NoInterno>(h / 2 - 14).strength(0.05))
-      } else {
-        sim.force('center', d3.forceCenter(w / 2, h / 2))
-      }
-      sim.alpha(0.3).restart()
+      const w = scrollArea.clientWidth, h = scrollArea.clientHeight
+      if (w <= 0 || h <= 0 || (w === larguraAnterior && h === alturaAnterior)) return
+      larguraAnterior = w; alturaAnterior = h
+      // O enquadramento é guardado em proporção do domínio, então um resize não "pula" o zoom.
+      const antes = xz()
+      const [a, b] = [antes.invert(MARGEM_ESQ), antes.invert(W - MARGEM_DIR)]
+      montarTudo()
+      const x0 = xBase(a), x1 = xBase(b)
+      const k = Math.min(ZOOM_MAX, Math.max(1, (W - MARGEM_DIR - MARGEM_ESQ) / Math.max(1, x1 - x0)))
+      transformAtual = d3.zoomIdentity.translate(MARGEM_ESQ - k * x0, 0).scale(k)
+      svg.call(zoom.transform, transformAtual)
     })
     resizeObserver.observe(canvasWrap)
 
     return () => {
       resizeObserver.disconnect()
-      sim.stop()
       root.innerHTML = ''
     }
   }, [nos, arestas])

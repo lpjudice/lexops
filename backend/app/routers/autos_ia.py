@@ -693,6 +693,7 @@ def _montar_documento_drive(peca: AutosIAPeca, andamento: AndamentoProcesso | No
         nota_usuario=peca.nota_usuario,
         keywords_usuario=peca.keywords_usuario,
         titulo_customizado=peca.titulo_customizado,
+        advogado_responsavel=peca.advogado_responsavel,
     )
 
 
@@ -741,6 +742,7 @@ def listar_documentos_drive(
             AutosIAPeca.titulo.ilike(termo),
             AutosIAPeca.titulo_customizado.ilike(termo),
             AutosIAPeca.nota_usuario.ilike(termo),
+            AutosIAPeca.advogado_responsavel.ilike(termo),
             AutosIAPeca.id_processual.ilike(termo),
             func.array_to_string(AutosIAPeca.keywords_usuario, " ").ilike(termo),
             AndamentoProcesso.arquivo_nome.ilike(termo),
@@ -798,6 +800,20 @@ def listar_documentos_drive(
         )
         resultado.append(item)
     return resultado
+
+
+@router.get("/casos/{caso_id}/advogados-responsaveis", response_model=list[str])
+def listar_advogados_responsaveis(caso_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Nomes de advogado já usados nas anotações deste caso — alimenta a
+    sugestão do campo (evita "Dr. Fulano" e "Fulano" virarem dois filtros)."""
+    _get_caso(db, caso_id)
+    linhas = (
+        db.query(AutosIAPeca.advogado_responsavel)
+        .filter(AutosIAPeca.caso_id == caso_id, AutosIAPeca.advogado_responsavel.isnot(None))
+        .distinct()
+        .all()
+    )
+    return sorted({nome for (nome,) in linhas if nome}, key=str.casefold)
 
 
 @router.get("/pecas/{peca_id}", response_model=PecaDetalheOut)

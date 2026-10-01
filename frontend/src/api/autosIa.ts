@@ -128,6 +128,7 @@ export interface DocumentoDriveAnexo {
   nota_usuario?: string | null
   keywords_usuario?: string[] | null
   titulo_customizado?: string | null
+  advogado_responsavel?: string | null
 }
 
 export interface DocumentoDrive extends DocumentoDriveAnexo {
@@ -149,6 +150,7 @@ export interface GrafoNo {
   arquivo_drive_link?: string | null
   status: StatusPeca
   erro_mensagem?: string | null
+  advogado_responsavel?: string | null
 }
 
 export interface GrafoAresta {
@@ -273,8 +275,14 @@ export const autosIa = {
 
   atualizarAnotacaoPeca: (
     pecaId: string,
-    data: { nota_usuario?: string | null; keywords_usuario?: string[] | null; titulo_customizado?: string | null },
+    data: {
+      nota_usuario?: string | null; keywords_usuario?: string[] | null; titulo_customizado?: string | null
+      advogado_responsavel?: string | null
+    },
   ) => api.patch<Peca>(`/autos-ia/pecas/${pecaId}/anotacao`, data).then((r) => r.data),
+
+  listarAdvogadosResponsaveis: (casoId: string) =>
+    api.get<string[]>(`/autos-ia/casos/${casoId}/advogados-responsaveis`).then((r) => r.data),
 
   listarAnexos: (pecaId: string) => api.get<Peca[]>(`/autos-ia/pecas/${pecaId}/anexos`).then((r) => r.data),
 
