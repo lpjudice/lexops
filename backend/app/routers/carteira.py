@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, desc
+from sqlalchemy import and_, or_, desc, func
 from typing import List, Optional
 from datetime import date, datetime
 import json
@@ -477,33 +477,33 @@ def dashboard(db: Session = Depends(get_db)):
 
     # Carteira total
     total_debentures = db.query(CarteiraDebenturePosicao).with_entities(
-        db.func.sum(CarteiraDebenturePosicao.valor_aplicado)
+        func.sum(CarteiraDebenturePosicao.valor_aplicado)
     ).scalar() or 0
 
     total_imobiliario = db.query(CarteiraImobiliarioPosicao).with_entities(
-        db.func.sum(CarteiraImobiliarioPosicao.valor_efetivamente_investido)
+        func.sum(CarteiraImobiliarioPosicao.valor_efetivamente_investido)
     ).scalar() or 0
 
     total_fundos = db.query(CarteiraFundoPosicao).with_entities(
-        db.func.sum(CarteiraFundoPosicao.valor_aplicado)
+        func.sum(CarteiraFundoPosicao.valor_aplicado)
     ).scalar() or 0
 
     carteira_total = total_debentures + total_imobiliario + total_fundos
 
     # Valor atual
     valor_atual_debentures = db.query(CarteiraDebenturePosicao).with_entities(
-        db.func.sum(CarteiraDebenturePosicao.valor_atual_estimado)
+        func.sum(CarteiraDebenturePosicao.valor_atual_estimado)
     ).scalar() or 0
 
     valor_atual_fundos = db.query(CarteiraFundoPosicao).with_entities(
-        db.func.sum(CarteiraFundoPosicao.valor_atual_estimado)
+        func.sum(CarteiraFundoPosicao.valor_atual_estimado)
     ).scalar() or 0
 
     valor_atual_total = valor_atual_debentures + valor_atual_fundos
 
     # Expectativa de honorários
     posicoes_com_honorario = db.query(
-        db.func.sum(CarteiraDebenturePosicao.valor_atual_estimado * CarteiraDebenturePosicao.percentual_sucesso_honor / 100)
+        func.sum(CarteiraDebenturePosicao.valor_atual_estimado * CarteiraDebenturePosicao.percentual_sucesso_honor / 100)
     ).filter(CarteiraDebenturePosicao.faz_parte_honorarios == True).scalar() or 0
 
     return {
