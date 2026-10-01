@@ -44,8 +44,11 @@ def _pasta_cliente(cliente_id: uuid.UUID) -> Path:
 # ── CRUD ──────────────────────────────────────────────────────────────────────
 
 @router.get("/", response_model=list[ClienteOut])
-def listar_clientes(db: Session = Depends(get_db)):
-    return db.query(Cliente).order_by(Cliente.nome).all()
+def listar_clientes(busca: str | None = None, limit: int = 500, db: Session = Depends(get_db)):
+    q = db.query(Cliente)
+    if busca:
+        q = q.filter(Cliente.nome.ilike(f'%{busca}%'))
+    return q.order_by(Cliente.nome).limit(limit).all()
 
 
 @router.post("/", response_model=ClienteOut, status_code=status.HTTP_201_CREATED)
