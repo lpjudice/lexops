@@ -42,7 +42,7 @@ import InformativoAssinantesPage from './pages/InformativoAssinantesPage'
 import AutosIAPage from './pages/AutosIAPage'
 import AutosIACasoPage from './pages/AutosIACasoPage'
 import PrivacidadePage from './pages/PrivacidadePage'
-import CarteiraPage from './pages/Carteira'
+import CarteiraPage from './pages/CarteiraSimple'
 
 const queryClient = new QueryClient()
 
