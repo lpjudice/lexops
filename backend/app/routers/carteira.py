@@ -782,11 +782,17 @@ def listar_arquivos_drive(cliente_id: int = Query(...), db: Session = Depends(ge
 def gerar_pdf_cliente(cliente_id: int, db: Session = Depends(get_db)):
     """[V1.3] Gera PDF consolidado do cliente com todos os ativos"""
     try:
-        pdf_bytes = CarteiraRelatoriosService.gerar_pdf_cliente(db, cliente_id)
+        pdf_bytes, nome_cliente = CarteiraRelatoriosService.gerar_pdf_cliente(db, cliente_id)
+        import unicodedata
+        slug = unicodedata.normalize('NFD', nome_cliente)
+        slug = ''.join(c for c in slug if unicodedata.category(c) != 'Mn')
+        slug = slug.lower().replace(' ', '_')[:40]
+        date_str = datetime.now().strftime('%Y%m%d')
+        filename = f"carteira_{slug}_{date_str}.pdf"
         return StreamingResponse(
             iter([pdf_bytes]),
             media_type="application/pdf",
-            headers={"Content-Disposition": f"attachment; filename=carteira_cliente_{cliente_id}.pdf"}
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

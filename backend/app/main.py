@@ -1465,6 +1465,33 @@ def _run_migrations() -> None:
         ]:
             conn.execute(text(_col))
 
+        # Carteira clientes: campos de qualificação para cópia de texto (PF + representante PJ)
+        for _col in [
+            "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS estado_civil VARCHAR(50)",
+            "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS profissao VARCHAR(100)",
+            "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS rg VARCHAR(50)",
+            "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS nacionalidade VARCHAR(100)",
+            "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS endereco TEXT",
+            "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS representante_nome VARCHAR(255)",
+            "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS representante_cpf VARCHAR(20)",
+            "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS representante_rg VARCHAR(50)",
+            "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS representante_nacionalidade VARCHAR(100)",
+            "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS representante_estado_civil VARCHAR(50)",
+            "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS representante_profissao VARCHAR(100)",
+            "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS representante_endereco TEXT",
+        ]:
+            conn.execute(text(_col))
+
+        # Debênture: campos de resgate (resgate solicitado → resposta → pagamento)
+        for _col in [
+            "ALTER TABLE carteira_debenture_posicao ADD COLUMN IF NOT EXISTS data_pedido_resgate DATE",
+            "ALTER TABLE carteira_debenture_posicao ADD COLUMN IF NOT EXISTS resposta_rhino TEXT",
+            "ALTER TABLE carteira_debenture_posicao ADD COLUMN IF NOT EXISTS foi_pago BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE carteira_debenture_posicao ADD COLUMN IF NOT EXISTS valor_pago FLOAT",
+            "ALTER TABLE carteira_debenture_posicao ADD COLUMN IF NOT EXISTS data_pagamento DATE",
+        ]:
+            conn.execute(text(_col))
+
         conn.commit()
 
 

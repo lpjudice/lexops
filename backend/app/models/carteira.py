@@ -21,6 +21,22 @@ class CarteiraCliente(Base):
     cpf = Column(String(20), unique=True, nullable=True)
     tipo_pessoa = Column(String(2), default='PF')
 
+    # Qualificação PF
+    estado_civil = Column(String(50), nullable=True)
+    profissao = Column(String(100), nullable=True)
+    rg = Column(String(50), nullable=True)
+    nacionalidade = Column(String(100), nullable=True)
+    endereco = Column(Text, nullable=True)
+
+    # Qualificação PJ — representante legal
+    representante_nome = Column(String(255), nullable=True)
+    representante_cpf = Column(String(20), nullable=True)
+    representante_rg = Column(String(50), nullable=True)
+    representante_nacionalidade = Column(String(100), nullable=True)
+    representante_estado_civil = Column(String(50), nullable=True)
+    representante_profissao = Column(String(100), nullable=True)
+    representante_endereco = Column(Text, nullable=True)
+
     # Contatos
     email = Column(String(255), nullable=True)
     telefone = Column(String(20), nullable=True)

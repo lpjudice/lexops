@@ -146,39 +146,53 @@ function MultiSelect({
   )
 }
 
-// ── Busca assíncrona de clientes do sistema principal ─────────────────
+// ── Busca assíncrona de clientes do sistema principal (debounced) ─────
 function SystemClientCombo({ onSelect }: { onSelect: (c: any) => void }) {
   const [search, setSearch] = useState('')
   const [open, setOpen] = useState(false)
-  const { data: allClientes = [] } = useQuery({
-    queryKey: ['sistema-clientes-todos'],
-    queryFn: () => api.get('/clientes').then(r => Array.isArray(r.data) ? r.data : (r.data?.data ?? [])),
-    staleTime: 120_000,
-  })
-  const results: any[] = search.length >= 1
-    ? (allClientes as any[]).filter((c: any) => c.nome?.toLowerCase().includes(search.toLowerCase()))
-    : (allClientes as any[])
+  const [results, setResults] = useState<any[]>([])
+  const [loading, setLoading] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout>>()
+
+  const buscar = async (s: string) => {
+    if (s.length < 2) { setResults([]); return }
+    setLoading(true)
+    try {
+      const r = await api.get('/clientes', { params: { busca: s, limit: 20 } })
+      const data = Array.isArray(r.data) ? r.data : (r.data?.data ?? [])
+      setResults(data)
+    } catch { setResults([]) }
+    finally { setLoading(false) }
+  }
+
+  const onChange = (s: string) => {
+    setSearch(s); setOpen(true)
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => buscar(s), 300)
+  }
 
   return (
     <div style={{ position: 'relative' }}>
-      <input className={styles.input} value={search} placeholder="Buscar no sistema principal..."
-        onChange={e => { setSearch(e.target.value); setOpen(true) }}
-        onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 180)} />
-      {open && results.length > 0 && (
+      <input className={styles.input} value={search}
+        placeholder="Buscar no sistema principal (min. 2 letras)..."
+        onChange={e => onChange(e.target.value)}
+        onFocus={() => { if (search.length >= 2) setOpen(true) }}
+        onBlur={() => setTimeout(() => setOpen(false), 180)} />
+      {open && (
         <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 200, background: 'var(--white)', border: '1px solid var(--gray-border)', borderRadius: 6, maxHeight: 220, overflowY: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }}>
-          {results.slice(0, 15).map((c: any) => (
+          {loading && <div style={{ padding: '10px 14px', color: 'var(--gray-mid)', fontSize: 13 }}>Buscando...</div>}
+          {!loading && search.length < 2 && <div style={{ padding: '10px 14px', color: 'var(--gray-mid)', fontSize: 12 }}>Digite pelo menos 2 letras</div>}
+          {!loading && search.length >= 2 && results.length === 0 && (
+            <div style={{ padding: '10px 14px', color: 'var(--gray-mid)', fontSize: 13 }}>Nenhum resultado para "{search}"</div>
+          )}
+          {!loading && results.map((c: any) => (
             <div key={c.id}
               style={{ padding: '8px 14px', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid var(--gray-light, #f3f4f6)', display: 'flex', gap: 10, alignItems: 'baseline' }}
-              onMouseDown={() => { onSelect(c); setSearch(''); setOpen(false) }}>
+              onMouseDown={() => { onSelect(c); setSearch(''); setOpen(false); setResults([]) }}>
               <strong>{c.nome}</strong>
               {c.cpf_cnpj && <span style={{ color: 'var(--gray-mid)', fontSize: 11 }}>{c.cpf_cnpj}</span>}
             </div>
           ))}
-        </div>
-      )}
-      {open && search.length > 0 && results.length === 0 && (
-        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 200, background: 'var(--white)', border: '1px solid var(--gray-border)', borderRadius: 6, padding: '10px 14px', color: 'var(--gray-mid)', fontSize: 13 }}>
-          Nenhum resultado para "{search}"
         </div>
       )}
     </div>
@@ -381,13 +395,13 @@ export default function CarteiraPage() {
   const salvarEstrategia = mk('/carteira/estrategias', ['carteira-estrategias'])
 
   const processarDocumento = useMutation({
-    mutationFn: (file: File) => {
+    mutationFn: ({ file, tipo }: { file: File; tipo: string }) => {
       const fd = new FormData(); fd.append('file', file)
-      return api.post('/carteira/processar-documento?tipo=geral', fd).then(r => r.data)
+      return api.post(`/carteira/processar-documento?tipo=${tipo}`, fd).then(r => r.data)
     },
     onSuccess: (data) => {
       if (data.dados_extraidos) setForm(f => ({ ...f, ...data.dados_extraidos }))
-      alert('Documento processado!')
+      alert('Documento processado! Verifique os campos preenchidos.')
     },
     onError: (e: any) => alert(e?.response?.data?.detail || 'Erro ao processar documento'),
   })
@@ -403,13 +417,22 @@ export default function CarteiraPage() {
   // ── Abrir edições ─────────────────────────────────────────────────
   const abrirEdicaoCliente = (c: any) => {
     const nome = c.nome ?? (c.observacoes?.startsWith('[IMPORTADO XLS] ') ? c.observacoes.replace('[IMPORTADO XLS] ', '') : '')
-    setForm({ nome, tipo_pessoa: c.tipo_pessoa ?? 'PF', cpf: c.cpf ?? '', email: c.email ?? '', telefone: c.telefone ?? '',
+    setForm({
+      nome, tipo_pessoa: c.tipo_pessoa ?? 'PF', cpf: c.cpf ?? '',
+      email: c.email ?? '', telefone: c.telefone ?? '',
+      rg: c.rg ?? '', nacionalidade: c.nacionalidade ?? '',
+      estado_civil: c.estado_civil ?? '', profissao: c.profissao ?? '', endereco: c.endereco ?? '',
+      representante_nome: c.representante_nome ?? '', representante_cpf: c.representante_cpf ?? '',
+      representante_rg: c.representante_rg ?? '', representante_nacionalidade: c.representante_nacionalidade ?? '',
+      representante_estado_civil: c.representante_estado_civil ?? '', representante_profissao: c.representante_profissao ?? '',
+      representante_endereco: c.representante_endereco ?? '',
       pro_labore_tipo: c.pro_labore_tipo ?? '', pro_labore_valor: c.pro_labore_valor ?? '',
       fee_imob_pct: c.fee_imob_pct ?? '', fee_fin_pct: c.fee_fin_pct ?? '',
       percentual_sucesso_geral: c.percentual_sucesso_geral ?? '',
       percentual_sucesso_imob: c.percentual_sucesso_imob ?? '', percentual_sucesso_fin: c.percentual_sucesso_fin ?? '',
       exito_split: !!(c.percentual_sucesso_imob || c.percentual_sucesso_fin),
-      cliente_uuid: c.cliente_uuid ?? '', observacoes: c.observacoes ?? '', ativo: c.ativo ?? true })
+      cliente_uuid: c.cliente_uuid ?? '', observacoes: c.observacoes ?? '', ativo: c.ativo ?? true,
+    })
     setEditandoClienteId(c.id); setModal('cliente')
   }
   const abrirEdicaoEmp = (e: any) => {
@@ -420,17 +443,56 @@ export default function CarteiraPage() {
       localizacao: e.localizacao ?? '', descricao: e.descricao ?? '', ativo: e.ativo })
     setEditandoEmpId(e.id); setModal('empreendimento')
   }
+  const pctExitoFin = (clienteId: number) => {
+    const c = clientes.find((x: any) => x.id === clienteId)
+    return c ? (c.percentual_sucesso_fin ?? c.percentual_sucesso_geral ?? '') : ''
+  }
+  const pctExitoImob = (clienteId: number) => {
+    const c = clientes.find((x: any) => x.id === clienteId)
+    return c ? (c.percentual_sucesso_imob ?? c.percentual_sucesso_geral ?? '') : ''
+  }
+
   const abrirEdicaoDeb = (d: any) => {
-    setForm({ ...d, faz_parte_honorarios: !!d.faz_parte_honorarios, foi_pago: !!d.foi_pago })
+    setForm({ ...d, faz_parte_honorarios: !!d.faz_parte_honorarios, foi_pago: !!d.foi_pago,
+      percentual_sucesso_honor: pctExitoFin(d.cliente_id) })
     setEditandoDebId(d.id); setModal('debenture')
   }
   const abrirEdicaoImob = (i: any) => {
-    setForm({ ...i, faz_parte_honorarios: !!i.faz_parte_honorarios })
+    setForm({ ...i, faz_parte_honorarios: !!i.faz_parte_honorarios,
+      percentual_sucesso_honorario: pctExitoImob(i.cliente_id) })
     setEditandoImobId(i.id); setModal('imobiliario')
   }
   const abrirEdicaoFundo = (f: any) => {
-    setForm({ ...f, faz_parte_honorarios: !!f.faz_parte_honorarios, tem_direito_recompra: !!f.tem_direito_recompra })
+    setForm({ ...f, faz_parte_honorarios: !!f.faz_parte_honorarios, tem_direito_recompra: !!f.tem_direito_recompra,
+      percentual_sucesso_honor: pctExitoFin(f.cliente_id) })
     setEditandoFundoId(f.id); setModal('fundo')
+  }
+
+  // ── Qualificação para clipboard ────────────────────────────────────
+  const qualificacaoTexto = (c: any): string => {
+    const nome = clienteNome(c.id)
+    if (c.tipo_pessoa === 'PJ') {
+      const repParts = [
+        c.representante_nome,
+        c.representante_nacionalidade,
+        c.representante_estado_civil,
+        c.representante_profissao,
+        c.representante_cpf ? `portador do CPF n. ${c.representante_cpf}` : null,
+        c.representante_rg ? `e da Carteira de Identidade n. ${c.representante_rg}` : null,
+        c.representante_endereco ? `residente e domiciliado(a) na ${c.representante_endereco}` : null,
+      ].filter(Boolean).join(', ')
+      return `${nome}, pessoa jurídica de direito privado, registrada sob o CNPJ n. ${c.cpf ?? '—'}, com endereço comercial na ${c.endereco ?? '—'}, representada por ${repParts || '—'}, de email ${c.email ?? '—'}.`
+    }
+    return [
+      nome,
+      c.nacionalidade,
+      c.estado_civil,
+      c.profissao,
+      c.cpf ? `portador do CPF n. ${c.cpf}` : null,
+      c.rg ? `e da Carteira de Identidade n. ${c.rg}` : null,
+      c.endereco ? `residente e domiciliado(a) na ${c.endereco}` : null,
+      c.email ? `de email ${c.email}` : null,
+    ].filter(Boolean).join(', ') + '.'
   }
 
   // ── Helpers UI ─────────────────────────────────────────────────────
@@ -541,9 +603,9 @@ export default function CarteiraPage() {
                   <div className={cs.clientePosicaoHeader}>
                     <div>
                       <span className={cs.clientePosicaoNome}>{nome}
-                        {quickAddBtn('Deb', () => { setForm({ cliente_id: c.id, status_resgate: 'Ativo', faz_parte_honorarios: false }); setEditandoDebId(null); setModal('debenture') })}
-                        {quickAddBtn('Imob', () => { setForm({ cliente_id: c.id, percentual_participacao: 100, faz_parte_honorarios: false }); setEditandoImobId(null); setModal('imobiliario') })}
-                        {quickAddBtn('Fundo', () => { setForm({ cliente_id: c.id, faz_parte_honorarios: false }); setEditandoFundoId(null); setModal('fundo') })}
+                        {quickAddBtn('Deb', () => { setForm({ cliente_id: c.id, status_resgate: 'Ativo', faz_parte_honorarios: false, percentual_sucesso_honor: pctExitoFin(c.id) }); setEditandoDebId(null); setModal('debenture') })}
+                        {quickAddBtn('Imob', () => { setForm({ cliente_id: c.id, percentual_participacao: 100, faz_parte_honorarios: false, percentual_sucesso_honorario: pctExitoImob(c.id) }); setEditandoImobId(null); setModal('imobiliario') })}
+                        {quickAddBtn('Fundo', () => { setForm({ cliente_id: c.id, faz_parte_honorarios: false, percentual_sucesso_honor: pctExitoFin(c.id) }); setEditandoFundoId(null); setModal('fundo') })}
                       </span>
                       <span className={cs.clientePosicaoTotal}>
                         {brl(totalApl)} aplicado
@@ -659,7 +721,10 @@ export default function CarteiraPage() {
           )}
           {clientesComDeb.length === 0 ? emptyGroup() : clientesComDeb.map(g => (
             <div key={g.id} className={cs.clienteFundoGroup}>
-              <div className={cs.clienteFundoNome}>{g.nome}</div>
+              <div className={cs.clienteFundoNome} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: 12 }}>
+                <span>{g.nome}</span>
+                {quickAddBtn('+ Posição', () => { setForm({ cliente_id: g.id, status_resgate: 'Ativo', faz_parte_honorarios: false, percentual_sucesso_honor: pctExitoFin(g.id) }); setEditandoDebId(null); setModal('debenture') })}
+              </div>
               <table className={styles.table} style={{ marginBottom: 0 }}>
                 {colsDeb()}
                 <thead><tr><th>Cautela</th><th>Emissão</th>{thR('Aplicado')}{thR('Atual')}<th>Status</th><th>Êxito%</th><th /></tr></thead>
@@ -701,7 +766,10 @@ export default function CarteiraPage() {
           )}
           {clientesComImob.length === 0 ? emptyGroup() : clientesComImob.map(g => (
             <div key={g.id} className={cs.clienteFundoGroup}>
-              <div className={cs.clienteFundoNome}>{g.nome}</div>
+              <div className={cs.clienteFundoNome} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: 12 }}>
+                <span>{g.nome}</span>
+                {quickAddBtn('+ Posição', () => { setForm({ cliente_id: g.id, percentual_participacao: 100, faz_parte_honorarios: false, percentual_sucesso_honorario: pctExitoImob(g.id) }); setEditandoImobId(null); setModal('imobiliario') })}
+              </div>
               <table className={styles.table} style={{ marginBottom: 0 }}>
                 {colsImob()}
                 <thead><tr><th>Empreendimento</th>{thR('Comprometido')}{thR('Investido')}<th>% Part.</th><th>Êxito%</th><th /></tr></thead>
@@ -743,7 +811,10 @@ export default function CarteiraPage() {
           )}
           {clientesComFundos.length === 0 ? emptyGroup() : clientesComFundos.map(g => (
             <div key={g.id} className={cs.clienteFundoGroup}>
-              <div className={cs.clienteFundoNome}>{g.nome}</div>
+              <div className={cs.clienteFundoNome} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: 12 }}>
+                <span>{g.nome}</span>
+                {quickAddBtn('+ Posição', () => { setForm({ cliente_id: g.id, faz_parte_honorarios: false, percentual_sucesso_honor: pctExitoFin(g.id) }); setEditandoFundoId(null); setModal('fundo') })}
+              </div>
               <table className={styles.table} style={{ marginBottom: 0 }}>
                 {colsFundos()}
                 <thead><tr><th>Fundo</th>{thR('Aplicado')}{thR('Atual')}<th>Data</th><th>Recompra</th><th>Êxito%</th><th /></tr></thead>
@@ -780,11 +851,11 @@ export default function CarteiraPage() {
           </div>
           <div className={styles.tableCard}>
             <table className={styles.table}>
-              <colgroup><col /><col style={{ width: 60 }} /><col style={{ width: 140 }} /><col style={{ width: 160 }} /><col style={{ width: 150 }} /><col style={{ width: 150 }} /><col style={{ width: 80 }} /><col style={{ width: 60 }} /></colgroup>
-              <thead><tr><th>Nome</th><th>Tipo</th><th>CPF/CNPJ</th><th>Fee entrada</th>{thR('Fee (R$ esp.)')}{thR('Êxito (R$ esp.)')}<th>Status</th><th /></tr></thead>
+              <colgroup><col /><col style={{ width: 60 }} /><col style={{ width: 140 }} /><col style={{ width: 160 }} /><col style={{ width: 150 }} /><col style={{ width: 150 }} /><col style={{ width: 80 }} /><col style={{ width: 36 }} /><col style={{ width: 60 }} /></colgroup>
+              <thead><tr><th>Nome</th><th>Tipo</th><th>CPF/CNPJ</th><th>Fee entrada</th>{thR('Fee (R$ esp.)')}{thR('Êxito (R$ esp.)')}<th>Status</th><th /><th /></tr></thead>
               <tbody>
                 {clientes.length === 0
-                  ? <tr><td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Nenhum registro</td></tr>
+                  ? <tr><td colSpan={9} style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Nenhum registro</td></tr>
                   : clientes.map((c: any) => {
                     const { feeEntrada, exito } = calcularHonorarios(c)
                     const feeLbl = c.pro_labore_tipo === 'fixo' ? brl(c.pro_labore_valor)
@@ -800,6 +871,10 @@ export default function CarteiraPage() {
                         <td style={{ textAlign: 'right' }}>{feeEntrada > 0 ? brl(feeEntrada) : '—'}</td>
                         <td style={{ textAlign: 'right' }}>{exito > 0 ? brl(exito) : '—'}</td>
                         <td>{statusBadge(c.ativo)}</td>
+                        <td>
+                          <button title="Copiar qualificação" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 15, color: 'var(--gray-mid)', padding: '0 4px' }}
+                            onClick={() => navigator.clipboard.writeText(qualificacaoTexto(c)).then(() => alert('Qualificação copiada!')).catch(() => alert('Erro ao copiar'))}>⎘</button>
+                        </td>
                         <td>{editBtn(() => abrirEdicaoCliente(c))}</td>
                       </tr>
                     )
@@ -929,19 +1004,42 @@ export default function CarteiraPage() {
             )}
           </div>
           <div style={{ marginBottom: 12 }}>
-            <label style={{ fontSize: 12, color: 'var(--gray-mid)', display: 'block', marginBottom: 4 }}>Preencher via documento (IA):</label>
+            <label style={{ fontSize: 12, color: 'var(--gray-mid)', display: 'block', marginBottom: 4 }}>Preencher via documento (IA) — contrato de honorários, procuração, doc pessoal:</label>
             <input type="file" accept=".pdf,.jpg,.png,.jpeg" style={{ fontSize: 12 }}
-              onChange={e => { const f = e.target.files?.[0]; if (f) processarDocumento.mutate(f) }} />
+              onChange={e => { const f = e.target.files?.[0]; if (f) processarDocumento.mutate({ file: f, tipo: 'cliente' }) }} />
             {processarDocumento.isPending && <span style={{ fontSize: 11, color: 'var(--teal)', marginLeft: 8 }}>Processando...</span>}
           </div>
           {fl('Nome completo *', fi('nome', 'text', 'Nome do investidor'))}
           {fl('Tipo pessoa', fs('tipo_pessoa', [{ value: 'PF', label: 'PF — Pessoa Física' }, { value: 'PJ', label: 'PJ — Pessoa Jurídica' }]))}
           {fl(form.tipo_pessoa === 'PJ' ? 'CNPJ' : 'CPF', fi('cpf', 'text'))}
-          {form.tipo_pessoa !== 'PJ' && fl('Estado civil', fs('estado_civil', [
-            { value: 'solteiro', label: 'Solteiro(a)' }, { value: 'casado', label: 'Casado(a)' }, { value: 'uniao_estavel', label: 'União estável' }, { value: 'divorciado', label: 'Divorciado(a)' }, { value: 'viuvo', label: 'Viúvo(a)' },
-          ]))}
-          {form.tipo_pessoa !== 'PJ' && fl('Profissão', fi('profissao'))}
-          {form.tipo_pessoa === 'PJ' && fl('Representante legal', fi('representante_nome'))}
+          {form.tipo_pessoa !== 'PJ' && (
+            <>
+              {fl('Nacionalidade', fi('nacionalidade', 'text', 'brasileiro(a)'))}
+              {fl('Estado civil', fs('estado_civil', [
+                { value: 'solteiro', label: 'Solteiro(a)' }, { value: 'casado', label: 'Casado(a)' }, { value: 'uniao_estavel', label: 'União estável' }, { value: 'divorciado', label: 'Divorciado(a)' }, { value: 'viuvo', label: 'Viúvo(a)' },
+              ]))}
+              {fl('Profissão', fi('profissao'))}
+              {fl('RG', fi('rg', 'text', 'Número do RG'))}
+              {fl('Endereço', fi('endereco', 'text', 'Rua, número, bairro, cidade/UF'))}
+            </>
+          )}
+          {form.tipo_pessoa === 'PJ' && (
+            <>
+              {fl('Endereço comercial', fi('endereco', 'text', 'Rua, número, bairro, cidade/UF'))}
+              <div style={{ borderTop: '1px solid var(--gray-border)', margin: '10px 0', paddingTop: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--indigo, #6366f1)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Representante legal</div>
+                {fl('Nome', fi('representante_nome'))}
+                {fl('CPF', fi('representante_cpf'))}
+                {fl('RG', fi('representante_rg'))}
+                {fl('Nacionalidade', fi('representante_nacionalidade', 'text', 'brasileiro(a)'))}
+                {fl('Estado civil', fs('representante_estado_civil', [
+                  { value: 'solteiro', label: 'Solteiro(a)' }, { value: 'casado', label: 'Casado(a)' }, { value: 'uniao_estavel', label: 'União estável' }, { value: 'divorciado', label: 'Divorciado(a)' }, { value: 'viuvo', label: 'Viúvo(a)' },
+                ]))}
+                {fl('Profissão', fi('representante_profissao'))}
+                {fl('Endereço', fi('representante_endereco', 'text', 'Rua, número, bairro, cidade/UF'))}
+              </div>
+            </>
+          )}
           {fl('E-mail', fi('email', 'email'))}
           {fl('Telefone', fi('telefone'))}
           <div style={{ borderTop: '1px solid var(--gray-border)', margin: '12px 0 0', paddingTop: 12 }}>
@@ -1037,6 +1135,12 @@ export default function CarteiraPage() {
       {/* ── MODAL DEBÊNTURE ──────────────────────────────────────── */}
       {modal === 'debenture' && (
         <Modal title={editandoDebId ? 'Editar Debênture' : 'Nova Posição — Debênture'} onClose={closeModal} width={560}>
+          <div style={{ background: 'var(--gray-light, #f8f9fa)', borderRadius: 6, padding: '8px 12px', marginBottom: 10 }}>
+            <label style={{ fontSize: 12, color: 'var(--indigo, #6366f1)', fontWeight: 600, display: 'block', marginBottom: 4 }}>Extração IA — escritura de emissão / termo de adesão:</label>
+            <input type="file" accept=".pdf,.jpg,.png,.jpeg" style={{ fontSize: 12 }}
+              onChange={e => { const f = e.target.files?.[0]; if (f) processarDocumento.mutate({ file: f, tipo: 'debenture' }) }} />
+            {processarDocumento.isPending && <span style={{ fontSize: 11, color: 'var(--teal)', marginLeft: 8 }}>Processando...</span>}
+          </div>
           {fl('Cliente *', <ComboSelect value={form.cliente_id} onChange={v => inp('cliente_id', Number(v))} options={clienteOptions} placeholder="Selecione o cliente..." />)}
           {fl('Emissão *', <ComboSelect value={form.emissao_id} onChange={v => inp('emissao_id', Number(v))} options={emissoes.map((e: any) => ({ value: e.id, label: `${e.nome_serie} — ${e.emissor}` }))} placeholder="Selecione a emissão..." />)}
           {fl('Nº Cautela *', fi('numero_cautela', 'text', 'CAU-001'))}
@@ -1081,6 +1185,12 @@ export default function CarteiraPage() {
       {/* ── MODAL IMOBILIÁRIO ────────────────────────────────────── */}
       {modal === 'imobiliario' && (
         <Modal title={editandoImobId ? 'Editar posição imobiliária' : 'Nova Posição — Imobiliário'} onClose={closeModal} width={520}>
+          <div style={{ background: 'var(--gray-light, #f8f9fa)', borderRadius: 6, padding: '8px 12px', marginBottom: 10 }}>
+            <label style={{ fontSize: 12, color: 'var(--amber, #b45309)', fontWeight: 600, display: 'block', marginBottom: 4 }}>Extração IA — contrato SCP / contrato de prestação / ficha do ativo:</label>
+            <input type="file" accept=".pdf,.jpg,.png,.jpeg" style={{ fontSize: 12 }}
+              onChange={e => { const f = e.target.files?.[0]; if (f) processarDocumento.mutate({ file: f, tipo: 'imobiliario' }) }} />
+            {processarDocumento.isPending && <span style={{ fontSize: 11, color: 'var(--teal)', marginLeft: 8 }}>Processando...</span>}
+          </div>
           {fl('Cliente *', <ComboSelect value={form.cliente_id} onChange={v => inp('cliente_id', Number(v))} options={clienteOptions} placeholder="Selecione o cliente..." />)}
           {fl('Empreendimento *', <ComboSelect value={form.empreendimento_id} onChange={v => inp('empreendimento_id', Number(v))} options={empreendimentos.map((e: any) => ({ value: e.id, label: e.nome_venda }))} placeholder="Selecione o empreendimento..." />)}
           {fl('Valor Total Comprometido (R$) *', fi('valor_total_compromissado', 'number'))}
@@ -1115,6 +1225,12 @@ export default function CarteiraPage() {
       {/* ── MODAL FUNDO POSIÇÃO ──────────────────────────────────── */}
       {modal === 'fundo' && (
         <Modal title={editandoFundoId ? 'Editar posição — Fundo' : 'Nova Posição — Fundo'} onClose={closeModal} width={520}>
+          <div style={{ background: 'var(--gray-light, #f8f9fa)', borderRadius: 6, padding: '8px 12px', marginBottom: 10 }}>
+            <label style={{ fontSize: 12, color: 'var(--blue, #1d4ed8)', fontWeight: 600, display: 'block', marginBottom: 4 }}>Extração IA — lâmina do fundo / regulamento:</label>
+            <input type="file" accept=".pdf,.jpg,.png,.jpeg" style={{ fontSize: 12 }}
+              onChange={e => { const f = e.target.files?.[0]; if (f) processarDocumento.mutate({ file: f, tipo: 'fundo' }) }} />
+            {processarDocumento.isPending && <span style={{ fontSize: 11, color: 'var(--teal)', marginLeft: 8 }}>Processando...</span>}
+          </div>
           {fl('Cliente *', <ComboSelect value={form.cliente_id} onChange={v => inp('cliente_id', Number(v))} options={clienteOptions} placeholder="Selecione o cliente..." />)}
           {fl('Fundo *', <ComboSelect value={form.fundo_id} onChange={v => inp('fundo_id', Number(v))} options={fundosRef.map((f: any) => ({ value: f.id, label: f.nome_fundo }))} placeholder="Selecione o fundo..." />)}
           {fl('Valor Aplicado (R$) *', fi('valor_aplicado', 'number'))}
