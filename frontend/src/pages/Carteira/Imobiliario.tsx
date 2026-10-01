@@ -2,12 +2,12 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import CarteiraTabela from '@/components/CarteiraTabela'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
+// removed: dialog'
+// removed: button'
+// removed: input'
+// removed: select'
+// removed: label'
+// removed: textarea'
 import api from '@/api/client'
 
 export default function Imobiliario() {

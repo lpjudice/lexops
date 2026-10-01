@@ -1,8 +1,8 @@
 // @ts-nocheck
 import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+// removed: tabs'
+// removed: card'
 import { DollarSign, Users, TrendingUp, Target } from 'lucide-react'
 import api from '@/api/client'
 import Debentures from './Debentures'

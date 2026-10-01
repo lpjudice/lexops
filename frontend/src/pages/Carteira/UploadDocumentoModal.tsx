@@ -1,10 +1,10 @@
 // @ts-nocheck
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+// removed: dialog'
+// removed: button'
+// removed: input'
+// removed: label'
 import { Upload, Loader2, CheckCircle, AlertCircle } from 'lucide-react'
 import api from '@/api/client'
 
