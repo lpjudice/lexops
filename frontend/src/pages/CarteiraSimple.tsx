@@ -36,39 +36,39 @@ export default function CarteiraPage() {
   // ── queries ──────────────────────────────────────────────────────
   const { data: dash } = useQuery({
     queryKey: ['carteira-dash'],
-    queryFn: () => api.get('/api/carteira/dashboard').then(r => r.data),
+    queryFn: () => api.get('/carteira/dashboard').then(r => r.data),
   })
   const { data: clientesRes } = useQuery({
     queryKey: ['carteira-clientes'],
-    queryFn: () => api.get('/api/carteira/clientes').then(r => r.data),
+    queryFn: () => api.get('/carteira/clientes').then(r => r.data),
   })
   const { data: emissoesRef = [] } = useQuery({
     queryKey: ['carteira-emissoes'],
-    queryFn: () => api.get('/api/carteira/emissoes').then(r => r.data),
+    queryFn: () => api.get('/carteira/emissoes').then(r => r.data),
   })
   const { data: debenturesRes } = useQuery({
     queryKey: ['carteira-debentures'],
-    queryFn: () => api.get('/api/carteira/debentures').then(r => r.data),
+    queryFn: () => api.get('/carteira/debentures').then(r => r.data),
   })
   const { data: empreendimentosRef = [] } = useQuery({
     queryKey: ['carteira-empreendimentos'],
-    queryFn: () => api.get('/api/carteira/empreendimentos').then(r => r.data),
+    queryFn: () => api.get('/carteira/empreendimentos').then(r => r.data),
   })
   const { data: imobiliarioRes } = useQuery({
     queryKey: ['carteira-imobiliario'],
-    queryFn: () => api.get('/api/carteira/imobiliario').then(r => r.data),
+    queryFn: () => api.get('/carteira/imobiliario').then(r => r.data),
   })
   const { data: fundosRefRes = [] } = useQuery({
     queryKey: ['carteira-fundos-ref'],
-    queryFn: () => api.get('/api/carteira/fundos-referencia').then(r => r.data),
+    queryFn: () => api.get('/carteira/fundos-referencia').then(r => r.data),
   })
   const { data: fundosRes } = useQuery({
     queryKey: ['carteira-fundos'],
-    queryFn: () => api.get('/api/carteira/fundos').then(r => r.data),
+    queryFn: () => api.get('/carteira/fundos').then(r => r.data),
   })
   const { data: estrategiasRes } = useQuery({
     queryKey: ['carteira-estrategias'],
-    queryFn: () => api.get('/api/carteira/estrategias').then(r => r.data),
+    queryFn: () => api.get('/carteira/estrategias').then(r => r.data),
   })
 
   const clientes: any[] = clientesRes?.data ?? []
@@ -99,14 +99,14 @@ export default function CarteiraPage() {
     onError: (e: any) => alert(e?.response?.data?.detail || 'Erro ao salvar'),
   })
 
-  const salvarCliente = mk('/api/carteira/clientes', ['carteira-clientes', 'carteira-dash'], ['usuario_cliente_id', 'pro_labore_valor', 'percentual_sucesso_geral'])
-  const salvarEmissao = mk('/api/carteira/emissoes', ['carteira-emissoes'], ['numero_emissao'])
-  const salvarDebenture = mk('/api/carteira/debentures', ['carteira-debentures', 'carteira-dash'], ['cliente_id', 'emissao_id', 'valor_aplicado', 'valor_atual_estimado', 'percentual_sucesso_honor', 'numero_debentures'])
-  const salvarEmpreendimento = mk('/api/carteira/empreendimentos', ['carteira-empreendimentos'])
-  const salvarImobiliario = mk('/api/carteira/imobiliario', ['carteira-imobiliario', 'carteira-dash'], ['cliente_id', 'empreendimento_id', 'valor_total_compromissado', 'valor_efetivamente_investido', 'percentual_participacao', 'percentual_sucesso_honorario'])
-  const salvarFundoRef = mk('/api/carteira/fundos-referencia', ['carteira-fundos-ref'])
-  const salvarFundo = mk('/api/carteira/fundos', ['carteira-fundos', 'carteira-dash'], ['cliente_id', 'fundo_id', 'valor_aplicado', 'valor_atual_estimado', 'percentual_sucesso_honor'])
-  const salvarEstrategia = mk('/api/carteira/estrategias', ['carteira-estrategias'])
+  const salvarCliente = mk('/carteira/clientes', ['carteira-clientes', 'carteira-dash'], ['usuario_cliente_id', 'pro_labore_valor', 'percentual_sucesso_geral'])
+  const salvarEmissao = mk('/carteira/emissoes', ['carteira-emissoes'], ['numero_emissao'])
+  const salvarDebenture = mk('/carteira/debentures', ['carteira-debentures', 'carteira-dash'], ['cliente_id', 'emissao_id', 'valor_aplicado', 'valor_atual_estimado', 'percentual_sucesso_honor', 'numero_debentures'])
+  const salvarEmpreendimento = mk('/carteira/empreendimentos', ['carteira-empreendimentos'])
+  const salvarImobiliario = mk('/carteira/imobiliario', ['carteira-imobiliario', 'carteira-dash'], ['cliente_id', 'empreendimento_id', 'valor_total_compromissado', 'valor_efetivamente_investido', 'percentual_participacao', 'percentual_sucesso_honorario'])
+  const salvarFundoRef = mk('/carteira/fundos-referencia', ['carteira-fundos-ref'])
+  const salvarFundo = mk('/carteira/fundos', ['carteira-fundos', 'carteira-dash'], ['cliente_id', 'fundo_id', 'valor_aplicado', 'valor_atual_estimado', 'percentual_sucesso_honor'])
+  const salvarEstrategia = mk('/carteira/estrategias', ['carteira-estrategias'])
 
   const emptyRow = (cols: number) => (
     <tr>
