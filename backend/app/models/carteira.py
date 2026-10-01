@@ -2,9 +2,7 @@ from datetime import date, datetime
 from typing import Optional, List
 from sqlalchemy import Column, Integer, String, Float, Date, DateTime, Boolean, ForeignKey, Text, JSON, Index
 from sqlalchemy.orm import relationship
-from sqlalchemy.ext.declarative import declarative_base
-
-Base = declarative_base()
+from app.database import Base
 
 
 # ─────────────────────────────────────────────────────────────────
