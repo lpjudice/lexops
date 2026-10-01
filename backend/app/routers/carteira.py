@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, desc
 from typing import List, Optional
@@ -23,6 +24,8 @@ from app.models.carteira import (
 )
 from app.database import get_db
 from app.services.carteira_ia import CarteiraIAService
+from app.services.carteira_relatorios import CarteiraRelatoriosService
+from app.services.carteira_drive import CarteiraDriveService
 
 router = APIRouter(prefix="/api/carteira", tags=["carteira"])
 
@@ -648,17 +651,94 @@ def listar_documentos(cliente_id: int = Query(...), db: Session = Depends(get_db
 
 
 # ─────────────────────────────────────────────────────────────────
-# V1.2 - GOOGLE DRIVE INTEGRATION (Stub para próxima fase)
+# V1.2 - GOOGLE DRIVE INTEGRATION
 # ─────────────────────────────────────────────────────────────────
 
 @router.post("/criar-pasta-drive")
 def criar_pasta_drive(cliente_id: int = Query(...), db: Session = Depends(get_db)):
-    """[V1.2] Cria pasta no Google Drive para o cliente"""
-    return {
-        "status": "pendente",
-        "mensagem": "Implementado em V1.2",
-        "placeholder": f"folder_drive_id_para_cliente_{cliente_id}"
-    }
+    """[V1.2] Cria pasta no Google Drive para o cliente e salva o link"""
+    try:
+        cliente = db.query(CarteiraCliente).filter(CarteiraCliente.id == cliente_id).first()
+        if not cliente:
+            raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+        resultado = CarteiraDriveService.criar_pasta_cliente(
+            cliente.nome or f"Cliente_{cliente_id}"
+        )
+
+        # Armazenar ID da pasta no cliente
+        if cliente.dados_adicionais is None:
+            cliente.dados_adicionais = {}
+
+        cliente.dados_adicionais['folder_drive_id'] = resultado['folder_id']
+        cliente.dados_adicionais['folder_drive_link'] = resultado['folder_link']
+        db.commit()
+
+        return {
+            "status": "sucesso",
+            "folder_id": resultado['folder_id'],
+            "folder_link": resultado['folder_link'],
+            "cliente_id": cliente_id,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/upload-para-drive")
+async def upload_para_drive(
+    cliente_id: int = Query(...),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    """[V1.2] Faz upload de documento direto para Google Drive do cliente"""
+    try:
+        cliente = db.query(CarteiraCliente).filter(CarteiraCliente.id == cliente_id).first()
+        if not cliente:
+            raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+        pasta_id = cliente.dados_adicionais.get('folder_drive_id') if cliente.dados_adicionais else None
+        if not pasta_id:
+            raise HTTPException(status_code=400, detail="Cliente não tem pasta no Drive")
+
+        conteudo = await file.read()
+        resultado = CarteiraDriveService.fazer_upload_documento(
+            conteudo,
+            file.filename or "documento",
+            pasta_id,
+            file.content_type or "application/octet-stream"
+        )
+
+        return {
+            "status": "sucesso",
+            "file_id": resultado['file_id'],
+            "file_link": resultado['file_link'],
+            "nome_arquivo": resultado['nome_arquivo'],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/listar-arquivos-drive")
+def listar_arquivos_drive(cliente_id: int = Query(...), db: Session = Depends(get_db)):
+    """[V1.2] Lista arquivos na pasta Drive do cliente"""
+    try:
+        cliente = db.query(CarteiraCliente).filter(CarteiraCliente.id == cliente_id).first()
+        if not cliente:
+            raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+        pasta_id = cliente.dados_adicionais.get('folder_drive_id') if cliente.dados_adicionais else None
+        if not pasta_id:
+            return {"arquivos": [], "mensagem": "Cliente não tem pasta no Drive"}
+
+        arquivos = CarteiraDriveService.listar_arquivos_pasta(pasta_id)
+        return {
+            "cliente_id": cliente_id,
+            "pasta_id": pasta_id,
+            "total_arquivos": len(arquivos),
+            "arquivos": arquivos
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -667,20 +747,30 @@ def criar_pasta_drive(cliente_id: int = Query(...), db: Session = Depends(get_db
 
 @router.get("/cliente/{cliente_id}/pdf")
 def gerar_pdf_cliente(cliente_id: int, db: Session = Depends(get_db)):
-    """[V1.3] Gera PDF consolidado do cliente"""
-    return {
-        "status": "pendente",
-        "mensagem": "Implementado em V1.3",
-        "placeholder": f"pdf_cliente_{cliente_id}.pdf"
-    }
+    """[V1.3] Gera PDF consolidado do cliente com todos os ativos"""
+    try:
+        pdf_bytes = CarteiraRelatoriosService.gerar_pdf_cliente(db, cliente_id)
+        return StreamingResponse(
+            iter([pdf_bytes]),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename=carteira_cliente_{cliente_id}.pdf"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/exportar-qualificacao")
-def exportar_qualificacao(cliente_ids: List[int] = Query(...), formato: str = Query("xlsx")):
+def exportar_qualificacao(cliente_ids: List[int], formato: str = "xlsx", db: Session = Depends(get_db)):
     """[V1.3] Exporta qualificação em XLSX ou PDF"""
-    return {
-        "status": "pendente",
-        "mensagem": "Implementado em V1.3",
-        "formato": formato,
-        "clientes": len(cliente_ids)
-    }
+    try:
+        if formato == "xlsx":
+            arquivo_bytes = CarteiraRelatoriosService.exportar_xlsx_qualificacao(db, cliente_ids)
+            return StreamingResponse(
+                iter([arquivo_bytes]),
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={"Content-Disposition": f"attachment; filename=qualificacao_carteira_{datetime.now().strftime('%Y%m%d')}.xlsx"}
+            )
+        else:
+            raise HTTPException(status_code=400, detail="Formato PDF não implementado ainda")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
