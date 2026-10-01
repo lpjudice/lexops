@@ -274,14 +274,6 @@ export default function CarteiraPage() {
   const filtrarPorNome = (nome: string, busca: string) =>
     !busca || nome.toLowerCase().includes(busca.toLowerCase())
 
-  const groupByCliente = (items: any[], valorKey: (i: any) => number, filtroEmps: (string | number)[], filtroFn?: (i: any) => boolean, clienteBusca = '') =>
-    [...new Set(items
-      .filter(i => filtroEmps.length === 0 || filtroEmps.map(String).some(v => filtroFn?.(i) ?? false))
-      .map(i => i.cliente_id))]
-      .map(cid => ({ id: cid, nome: clienteNome(cid), posicoes: items.filter(i => i.cliente_id === cid && (filtroEmps.length === 0 || filtroFn?.(i) ?? true)) }))
-      .filter(g => g.posicoes.length > 0 && filtrarPorNome(g.nome, clienteBusca))
-      .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
-
   // Grouped with filter
   const debsFiltradas = debentures.filter(d =>
     (filtroDebEmissoes.length === 0 || filtroDebEmissoes.map(String).includes(String(d.emissao_id)))
