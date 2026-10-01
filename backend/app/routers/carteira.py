@@ -17,7 +17,7 @@ from app.models.carteira import (
     CarteiraSocioAval,
     CarteiraUploadDocumento,
 )
-from app.db import get_db
+from app.database import get_db
 
 router = APIRouter(prefix="/api/carteira", tags=["carteira"])
 
