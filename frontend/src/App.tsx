@@ -42,6 +42,7 @@ import InformativoAssinantesPage from './pages/InformativoAssinantesPage'
 import AutosIAPage from './pages/AutosIAPage'
 import AutosIACasoPage from './pages/AutosIACasoPage'
 import PrivacidadePage from './pages/PrivacidadePage'
+import CarteiraPage from './pages/Carteira'
 
 const queryClient = new QueryClient()
 
@@ -105,6 +106,7 @@ function AppRoutes() {
         <Route path="conselho-juridico" element={<ConselhoJuridicoPage />} />
         <Route path="autos-ia" element={<AutosIAPage />} />
         <Route path="autos-ia/:casoId" element={<AutosIACasoPage />} />
+        <Route path="carteira" element={<CarteiraPage />} />
       </Route>
     </Routes>
   )
