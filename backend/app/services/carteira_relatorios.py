@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.models.carteira import (
     CarteiraCliente,
     CarteiraDebenturePosicao,
-    CarteiraDebentureEmissao,
+    CarteiraDebentureadotEmissao,
     CarteiraImobiliarioPosicao,
     CarteiraImobiliarioEmpreendimento,
     CarteiraFundoPosicao,
@@ -139,7 +139,7 @@ class CarteiraRelatoriosService:
         ).all()
 
         # Lookups para nomes reais
-        emissao_map = {e.id: e for e in db.query(CarteiraDebentureEmissao).all()}
+        emissao_map = {e.id: e for e in db.query(CarteiraDebentureadotEmissao).all()}
         emp_map = {e.id: e for e in db.query(CarteiraImobiliarioEmpreendimento).all()}
         fundo_map = {f.id: f for f in db.query(CarteiraFundoReferencia).all()}
 
