@@ -153,7 +153,7 @@ export default function Imobiliario() {
                     <SelectValue placeholder="Selecione" />
                   </SelectTrigger>
                   <SelectContent>
-                    {empreendimentos.map((e: any) => (
+                    {empreendimentos.map((e: any) => any) => (
                       <SelectItem key={e.id} value={String(e.id)}>
                         {e.nome_venda}
                       </SelectItem>

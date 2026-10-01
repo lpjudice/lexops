@@ -141,7 +141,7 @@ export default function Fundos() {
                     <SelectValue placeholder="Selecione" />
                   </SelectTrigger>
                   <SelectContent>
-                    {clientes.map((c: any) => (
+                    {clientes.map((c: any) => any) => (
                       <SelectItem key={c.id} value={String(c.id)}>
                         {c.observacoes || `Cliente ${c.id}`}
                       </SelectItem>
@@ -160,7 +160,7 @@ export default function Fundos() {
                     <SelectValue placeholder="Selecione" />
                   </SelectTrigger>
                   <SelectContent>
-                    {fundos.map((f: any) => (
+                    {fundos.map((f: any) => any) => (
                       <SelectItem key={f.id} value={String(f.id)}>
                         {f.nome_fundo.substring(0, 50)}
                       </SelectItem>

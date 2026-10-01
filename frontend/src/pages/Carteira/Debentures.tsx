@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import CarteiraTabela from '@/components/CarteiraTabela'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -39,23 +39,22 @@ export default function Debentures() {
     observacoes: '',
   })
 
-  // Dados
   const { data: debentures = [], isLoading } = useQuery({
     queryKey: ['carteira-debentures', filtroSerie, filtroStatus],
     queryFn: () =>
       api.get('/api/carteira/debentures', {
         params: { serie: filtroSerie, status_resgate: filtroStatus },
-      }).then(r => r.data.data),
+      }).then((r: any) => r.data.data),
   })
 
   const { data: emissoes = [] } = useQuery({
     queryKey: ['carteira-emissoes'],
-    queryFn: () => api.get('/api/carteira/emissoes').then(r => r.data),
+    queryFn: () => api.get('/api/carteira/emissoes').then((r: any) => r.data),
   })
 
   const { data: clientes = [] } = useQuery({
     queryKey: ['carteira-clientes'],
-    queryFn: () => api.get('/api/carteira/clientes', { params: { limit: 1000 } }).then(r => r.data.data),
+    queryFn: () => api.get('/api/carteira/clientes', { params: { limit: 1000 } }).then((r: any) => r.data.data),
   })
 
   // Mutações
@@ -95,7 +94,7 @@ export default function Debentures() {
     return 'text-gray-600'
   }
 
-  const statusColor = (status: string) => {
+  const statusColor = (status: string) => string) => {
     const colors: Record<string, string> = {
       'Ativo': 'bg-green-100 text-green-800',
       'Solicitado': 'bg-yellow-100 text-yellow-800',
@@ -137,7 +136,7 @@ export default function Debentures() {
     {
       key: 'status_resgate',
       label: 'Status',
-      render: (status: string) => (
+      render: (status: string) => string) => (
         <span className={`px-3 py-1 rounded-full text-sm font-medium ${statusColor(status)}`}>
           {status}
         </span>
@@ -259,7 +258,7 @@ export default function Debentures() {
                     <SelectValue placeholder="Selecione" />
                   </SelectTrigger>
                   <SelectContent>
-                    {emissoes.map((e: any) => (
+                    {emissoes.map((e: any) => any) => (
                       <SelectItem key={e.id} value={String(e.id)}>
                         {e.nome_serie}
                       </SelectItem>
