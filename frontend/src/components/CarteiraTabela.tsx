@@ -3,14 +3,12 @@ import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Edit2, Trash2, Eye, Download } from 'lucide-react'
+import { Edit2, Trash2, Eye } from 'lucide-react'
 
 interface Column {
   key: string
@@ -87,11 +85,11 @@ export default function CarteiraTabela({
             <TableHeader>
               <TableRow className="bg-gray-50">
                 {columns.map((col) => (
-                  <TableHead key={col.key} className="font-semibold">
+                  <TableCell key={col.key} className="font-semibold">
                     {col.label}
-                  </TableHead>
+                  </TableCell>
                 ))}
-                <TableHead className="text-right">Ações</TableHead>
+                <TableCell className="text-right font-semibold">Ações</TableCell>
               </TableRow>
             </TableHeader>
             <TableBody>
