@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '@/api/client'
 import Modal from '@/components/Modal'
@@ -26,7 +26,7 @@ const TABS_REF: { key: Tab; label: string }[] = [
   { key: 'estrategias', label: 'Estratégias' },
 ]
 
-// ── ComboSelect (síncrono) ────────────────────────────────────────────
+// ── ComboSelect (síncrono, fecha ao selecionar) ─────────────────────
 function ComboSelect({
   value, onChange, options, placeholder,
 }: {
@@ -70,7 +70,7 @@ function ComboSelect({
   )
 }
 
-// ── MultiSelect dropdown ─────────────────────────────────────────────
+// ── MultiSelect dropdown (fica aberto ao marcar) ─────────────────────
 function MultiSelect({
   values, onChange, options, placeholder,
 }: {
@@ -81,6 +81,20 @@ function MultiSelect({
 }) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false)
+        setSearch('')
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
   const filtered = search.length > 0
     ? options.filter(o => o.label.toLowerCase().includes(search.toLowerCase()))
     : options
@@ -89,40 +103,43 @@ function MultiSelect({
     : values.length === 1
     ? (options.find(o => String(o.value) === String(values[0]))?.label ?? '')
     : `${values.length} selecionados`
-
   const toggle = (v: string | number) => {
     const sv = String(v)
     onChange(values.map(String).includes(sv) ? values.filter(x => String(x) !== sv) : [...values, v])
   }
 
   return (
-    <div style={{ position: 'relative' }}>
-      <div className={styles.input} style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingRight: 28, userSelect: 'none', minHeight: 34 }}
-        onClick={() => setOpen(o => !o)} onBlur={() => setTimeout(() => setOpen(false), 200)} tabIndex={0}>
+    <div ref={containerRef} style={{ position: 'relative' }}>
+      <div className={styles.input}
+        style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingRight: 28, userSelect: 'none', minHeight: 34 }}
+        onClick={() => setOpen(o => !o)} tabIndex={0}>
         <span style={{ color: values.length === 0 ? 'var(--gray-mid)' : 'inherit', fontSize: 13 }}>{label}</span>
-        <span style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 10 }}>▾</span>
+        <span style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 10 }}>{open ? '▴' : '▾'}</span>
       </div>
       {open && (
-        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 200, background: 'var(--white)', border: '1px solid var(--gray-border)', borderRadius: 6, maxHeight: 240, overflowY: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }}>
-          <div style={{ padding: '6px 8px', borderBottom: '1px solid var(--gray-border)' }}>
-            <input className={styles.input} style={{ fontSize: 12, padding: '4px 8px' }} placeholder="Buscar..." value={search} onChange={e => setSearch(e.target.value)} />
+        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 200, background: 'var(--white)', border: '1px solid var(--gray-border)', borderRadius: 6, maxHeight: 260, overflowY: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }}>
+          <div style={{ padding: '6px 8px', borderBottom: '1px solid var(--gray-border)', position: 'sticky', top: 0, background: 'var(--white)', zIndex: 1 }}>
+            <input className={styles.input} style={{ fontSize: 12, padding: '4px 8px' }} placeholder="Buscar..." value={search}
+              onChange={e => setSearch(e.target.value)} onClick={e => e.stopPropagation()} autoFocus />
           </div>
           {values.length > 0 && (
-            <div style={{ padding: '6px 14px', cursor: 'pointer', fontSize: 12, color: 'var(--teal)', borderBottom: '1px solid var(--gray-border)' }} onMouseDown={() => onChange([])}>
-              ✕ Limpar seleção
-            </div>
+            <div style={{ padding: '6px 14px', cursor: 'pointer', fontSize: 12, color: 'var(--teal)', borderBottom: '1px solid var(--gray-border)' }}
+              onClick={() => onChange([])}>✕ Limpar seleção</div>
           )}
-          {filtered.slice(0, 40).map(o => {
-            const sel = values.map(String).includes(String(o.value))
-            return (
-              <div key={o.value}
-                style={{ padding: '7px 14px', cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8, background: sel ? 'var(--teal-light, #f0fdfa)' : undefined, borderBottom: '1px solid var(--gray-light, #f3f4f6)' }}
-                onMouseDown={() => toggle(o.value)}>
-                <input type="checkbox" readOnly checked={sel} style={{ cursor: 'pointer' }} />
-                {o.label}
-              </div>
-            )
-          })}
+          {filtered.length === 0
+            ? <div style={{ padding: '10px 14px', color: 'var(--gray-mid)', fontSize: 13 }}>Sem resultados</div>
+            : filtered.slice(0, 40).map(o => {
+              const sel = values.map(String).includes(String(o.value))
+              return (
+                <div key={o.value}
+                  style={{ padding: '7px 14px', cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8, background: sel ? 'var(--teal-light, #f0fdfa)' : undefined, borderBottom: '1px solid var(--gray-light, #f3f4f6)' }}
+                  onClick={() => toggle(o.value)}>
+                  <input type="checkbox" readOnly checked={sel} style={{ cursor: 'pointer', accentColor: 'var(--teal)' }} />
+                  {o.label}
+                </div>
+              )
+            })
+          }
         </div>
       )}
     </div>
@@ -133,7 +150,6 @@ function MultiSelect({
 function SystemClientCombo({ onSelect }: { onSelect: (c: any) => void }) {
   const [search, setSearch] = useState('')
   const [open, setOpen] = useState(false)
-  // Carrega todos os clientes (backend aceita busca=... após fix)
   const { data: allClientes = [] } = useQuery({
     queryKey: ['sistema-clientes-todos'],
     queryFn: () => api.get('/clientes').then(r => Array.isArray(r.data) ? r.data : (r.data?.data ?? [])),
@@ -145,14 +161,9 @@ function SystemClientCombo({ onSelect }: { onSelect: (c: any) => void }) {
 
   return (
     <div style={{ position: 'relative' }}>
-      <input
-        className={styles.input}
-        value={search}
-        placeholder="Buscar no sistema principal..."
+      <input className={styles.input} value={search} placeholder="Buscar no sistema principal..."
         onChange={e => { setSearch(e.target.value); setOpen(true) }}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setTimeout(() => setOpen(false), 180)}
-      />
+        onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 180)} />
       {open && results.length > 0 && (
         <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 200, background: 'var(--white)', border: '1px solid var(--gray-border)', borderRadius: 6, maxHeight: 220, overflowY: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }}>
           {results.slice(0, 15).map((c: any) => (
@@ -181,21 +192,32 @@ export default function CarteiraPage() {
   const [form, setForm] = useState<Record<string, any>>({})
   const [editandoClienteId, setEditandoClienteId] = useState<number | null>(null)
   const [editandoEmpId, setEditandoEmpId] = useState<number | null>(null)
-  // Filtros multi-select
+  const [editandoDebId, setEditandoDebId] = useState<number | null>(null)
+  const [editandoImobId, setEditandoImobId] = useState<number | null>(null)
+  const [editandoFundoId, setEditandoFundoId] = useState<number | null>(null)
+  // Filtros multi-select por ativo
   const [filtroDebEmissoes, setFiltroDebEmissoes] = useState<(string | number)[]>([])
   const [filtroImobEmps, setFiltroImobEmps] = useState<(string | number)[]>([])
   const [filtroFundosFundos, setFiltroFundosFundos] = useState<(string | number)[]>([])
-  // Filtros de cliente
+  // Filtros por cliente
   const [filtroClienteDeb, setFiltroClienteDeb] = useState('')
   const [filtroClienteImob, setFiltroClienteImob] = useState('')
   const [filtroClienteFundos, setFiltroClienteFundos] = useState('')
   const [filtroClientePos, setFiltroClientePos] = useState('')
+  // Filtro tipo de ativo em Posição por Cliente
+  const [mostrarDebs, setMostrarDebs] = useState(true)
+  const [mostrarImob, setMostrarImob] = useState(true)
+  const [mostrarFundosPOS, setMostrarFundosPOS] = useState(true)
+
   const qc = useQueryClient()
-
   const inp = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }))
-  const closeModal = () => { setModal(null); setForm({}); setEditandoClienteId(null); setEditandoEmpId(null) }
+  const closeModal = () => {
+    setModal(null); setForm({})
+    setEditandoClienteId(null); setEditandoEmpId(null)
+    setEditandoDebId(null); setEditandoImobId(null); setEditandoFundoId(null)
+  }
 
-  // ── Render helpers (funções, não componentes → sem perda de foco) ─
+  // ── Render helpers ────────────────────────────────────────────────
   const fi = (k: string, type = 'text', placeholder = '') => (
     <input className={styles.input} type={type} value={form[k] ?? ''} onChange={e => inp(k, e.target.value)} placeholder={placeholder} />
   )
@@ -213,7 +235,6 @@ export default function CarteiraPage() {
   )
 
   // ── Queries ───────────────────────────────────────────────────────
-  const { data: dash } = useQuery({ queryKey: ['carteira-dash'], queryFn: () => api.get('/carteira/dashboard').then(r => r.data) })
   const { data: clientesRes } = useQuery({ queryKey: ['carteira-clientes'], queryFn: () => api.get('/carteira/clientes', { params: { limit: 200 } }).then(r => r.data) })
   const { data: emissoesRef = [] } = useQuery({ queryKey: ['carteira-emissoes'], queryFn: () => api.get('/carteira/emissoes').then(r => r.data) })
   const { data: debenturesRes } = useQuery({ queryKey: ['carteira-debentures'], queryFn: () => api.get('/carteira/debentures', { params: { limit: 500 } }).then(r => r.data) })
@@ -244,7 +265,7 @@ export default function CarteiraPage() {
   const empreendimentoNome = (id: number) => empreendimentos.find(e => e.id === id)?.nome_venda ?? `#${id}`
   const fundoNome = (id: number) => fundosRef.find(f => f.id === id)?.nome_fundo ?? `#${id}`
 
-  // ── Cálculo de valores esperados por cliente ───────────────────────
+  // ── KPIs calculados no frontend ────────────────────────────────────
   const calcularHonorarios = (c: any) => {
     const debs = debentures.filter(d => d.cliente_id === c.id)
     const imobs = imobiliario.filter(i => i.cliente_id === c.id)
@@ -252,37 +273,42 @@ export default function CarteiraPage() {
     const totalFin = [...debs, ...fnds].reduce((s, p) => s + (p.valor_aplicado ?? 0), 0)
     const totalImob = imobs.reduce((s, p) => s + (p.valor_total_compromissado ?? 0), 0)
     const totalGeral = totalFin + totalImob
-
     let feeEntrada = 0
-    if (c.pro_labore_tipo === 'fixo') {
-      feeEntrada = c.pro_labore_valor ?? 0
-    } else if (c.pro_labore_tipo === 'percentual') {
-      feeEntrada = (totalImob * ((c.fee_imob_pct ?? 0) / 100)) + (totalFin * ((c.fee_fin_pct ?? 0) / 100))
-    }
-
+    if (c.pro_labore_tipo === 'fixo') feeEntrada = c.pro_labore_valor ?? 0
+    else if (c.pro_labore_tipo === 'percentual')
+      feeEntrada = totalImob * ((c.fee_imob_pct ?? 0) / 100) + totalFin * ((c.fee_fin_pct ?? 0) / 100)
     let exito = 0
-    if (c.percentual_sucesso_imob || c.percentual_sucesso_fin) {
-      exito = (totalImob * ((c.percentual_sucesso_imob ?? 0) / 100)) + (totalFin * ((c.percentual_sucesso_fin ?? 0) / 100))
-    } else if (c.percentual_sucesso_geral) {
+    if (c.percentual_sucesso_imob || c.percentual_sucesso_fin)
+      exito = totalImob * ((c.percentual_sucesso_imob ?? 0) / 100) + totalFin * ((c.percentual_sucesso_fin ?? 0) / 100)
+    else if (c.percentual_sucesso_geral)
       exito = totalGeral * ((c.percentual_sucesso_geral ?? 0) / 100)
-    }
-
-    return { totalGeral, feeEntrada, exito }
+    return { totalGeral, totalFin, totalImob, feeEntrada, exito }
   }
 
-  // ── Agrupamentos e filtros ─────────────────────────────────────────
+  const kpiImob = imobiliario.reduce((s, i) => s + (i.valor_total_compromissado ?? 0), 0)
+  const kpiFin = [...debentures, ...fundos].reduce((s, p) => s + (p.valor_aplicado ?? 0), 0)
+  const kpiTotal = kpiImob + kpiFin
+  const kpiFeeEntrada = clientes.reduce((s, c) => s + calcularHonorarios(c).feeEntrada, 0)
+  const kpiExito = clientes.reduce((s, c) => s + calcularHonorarios(c).exito, 0)
+
+  // ── CNPJ duplicado em empreendimentos ──────────────────────────────
+  const cnpjCount: Record<string, number> = {}
+  empreendimentos.forEach(e => {
+    if (e.cnpj_empreendimento) cnpjCount[e.cnpj_empreendimento] = (cnpjCount[e.cnpj_empreendimento] || 0) + 1
+  })
+
+  // ── Filtros ────────────────────────────────────────────────────────
   const filtrarPorNome = (nome: string, busca: string) =>
     !busca || nome.toLowerCase().includes(busca.toLowerCase())
 
-  // Grouped with filter
   const debsFiltradas = debentures.filter(d =>
-    (filtroDebEmissoes.length === 0 || filtroDebEmissoes.map(String).includes(String(d.emissao_id)))
+    filtroDebEmissoes.length === 0 || filtroDebEmissoes.map(String).includes(String(d.emissao_id))
   )
   const imobFiltrado = imobiliario.filter(i =>
-    (filtroImobEmps.length === 0 || filtroImobEmps.map(String).includes(String(i.empreendimento_id)))
+    filtroImobEmps.length === 0 || filtroImobEmps.map(String).includes(String(i.empreendimento_id))
   )
   const fundosFiltrados = fundos.filter(f =>
-    (filtroFundosFundos.length === 0 || filtroFundosFundos.map(String).includes(String(f.fundo_id)))
+    filtroFundosFundos.length === 0 || filtroFundosFundos.map(String).includes(String(f.fundo_id))
   )
 
   const clientesComDeb = [...new Set(debsFiltradas.map(d => d.cliente_id))]
@@ -319,35 +345,41 @@ export default function CarteiraPage() {
     onSuccess: () => { keys.forEach(k => qc.invalidateQueries({ queryKey: [k] })); closeModal() },
     onError: (e: any) => alert(e?.response?.data?.detail || 'Erro ao salvar'),
   })
-
-  const numC = ['pro_labore_valor', 'percentual_sucesso_geral', 'fee_imob_pct', 'fee_fin_pct', 'percentual_sucesso_imob', 'percentual_sucesso_fin']
-  const salvarCliente = mk('/carteira/clientes', ['carteira-clientes', 'carteira-dash'], numC)
-  const atualizarCliente = useMutation({
+  const mkPut = (urlFn: () => string, keys: string[], numFields: string[] = []) => useMutation({
     mutationFn: () => {
       const p = { ...form }
-      numC.forEach(k => { if (p[k] !== undefined && p[k] !== '') p[k] = Number(p[k]) })
-      return api.put(`/carteira/clientes/${editandoClienteId}`, p).then(r => r.data)
+      numFields.forEach(k => { if (p[k] !== undefined && p[k] !== '') p[k] = Number(p[k]) })
+      return api.put(urlFn(), p).then(r => r.data)
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['carteira-clientes'] }); qc.invalidateQueries({ queryKey: ['carteira-dash'] }); closeModal() },
+    onSuccess: () => { keys.forEach(k => qc.invalidateQueries({ queryKey: [k] })); closeModal() },
     onError: (e: any) => alert(e?.response?.data?.detail || 'Erro ao salvar'),
   })
+
+  const numC = ['pro_labore_valor', 'percentual_sucesso_geral', 'fee_imob_pct', 'fee_fin_pct', 'percentual_sucesso_imob', 'percentual_sucesso_fin']
+  const salvarCliente = mk('/carteira/clientes', ['carteira-clientes'], numC)
+  const atualizarCliente = mkPut(() => `/carteira/clientes/${editandoClienteId}`, ['carteira-clientes'], numC)
+
   const salvarEmissao = mk('/carteira/emissoes', ['carteira-emissoes'], ['numero_emissao'])
+
   const numDeb = ['cliente_id', 'emissao_id', 'valor_aplicado', 'valor_atual_estimado', 'percentual_sucesso_honor', 'numero_debentures', 'valor_pago']
-  const salvarDebenture = mk('/carteira/debentures', ['carteira-debentures', 'carteira-dash'], numDeb)
+  const salvarDebenture = mk('/carteira/debentures', ['carteira-debentures'], numDeb)
+  const atualizarDebenture = mkPut(() => `/carteira/debentures/${editandoDebId}`, ['carteira-debentures'], numDeb)
+
   const salvarEmpreendimento = mk('/carteira/empreendimentos', ['carteira-empreendimentos'])
-  const atualizarEmpreendimento = useMutation({
-    mutationFn: () => api.put(`/carteira/empreendimentos/${editandoEmpId}`, form).then(r => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['carteira-empreendimentos'] }); closeModal() },
-    onError: (e: any) => alert(e?.response?.data?.detail || 'Erro ao salvar'),
-  })
-  const salvarImobiliario = mk('/carteira/imobiliario', ['carteira-imobiliario', 'carteira-dash'],
-    ['cliente_id', 'empreendimento_id', 'valor_total_compromissado', 'valor_efetivamente_investido', 'percentual_participacao', 'percentual_sucesso_honorario'])
+  const atualizarEmpreendimento = mkPut(() => `/carteira/empreendimentos/${editandoEmpId}`, ['carteira-empreendimentos'])
+
+  const numImob = ['cliente_id', 'empreendimento_id', 'valor_total_compromissado', 'valor_efetivamente_investido', 'percentual_participacao', 'percentual_sucesso_honorario']
+  const salvarImobiliario = mk('/carteira/imobiliario', ['carteira-imobiliario'], numImob)
+  const atualizarImobiliario = mkPut(() => `/carteira/imobiliario/${editandoImobId}`, ['carteira-imobiliario'], numImob)
+
   const salvarFundoRef = mk('/carteira/fundos-referencia', ['carteira-fundos-ref'])
-  const salvarFundo = mk('/carteira/fundos', ['carteira-fundos', 'carteira-dash'],
-    ['cliente_id', 'fundo_id', 'valor_aplicado', 'valor_atual_estimado', 'percentual_sucesso_honor'])
+
+  const numFundo = ['cliente_id', 'fundo_id', 'valor_aplicado', 'valor_atual_estimado', 'percentual_sucesso_honor']
+  const salvarFundo = mk('/carteira/fundos', ['carteira-fundos'], numFundo)
+  const atualizarFundo = mkPut(() => `/carteira/fundos/${editandoFundoId}`, ['carteira-fundos'], numFundo)
+
   const salvarEstrategia = mk('/carteira/estrategias', ['carteira-estrategias'])
 
-  // V2: IA upload
   const processarDocumento = useMutation({
     mutationFn: (file: File) => {
       const fd = new FormData(); fd.append('file', file)
@@ -355,12 +387,11 @@ export default function CarteiraPage() {
     },
     onSuccess: (data) => {
       if (data.dados_extraidos) setForm(f => ({ ...f, ...data.dados_extraidos }))
-      alert('Documento processado! Verifique os campos preenchidos automaticamente.')
+      alert('Documento processado!')
     },
     onError: (e: any) => alert(e?.response?.data?.detail || 'Erro ao processar documento'),
   })
 
-  // V1.3: XLSX export
   const exportarXlsx = async () => {
     const ids = clientes.map((c: any) => c.id)
     const res = await api.post('/carteira/exportar-qualificacao?formato=xlsx', ids, { responseType: 'blob' })
@@ -371,33 +402,35 @@ export default function CarteiraPage() {
 
   // ── Abrir edições ─────────────────────────────────────────────────
   const abrirEdicaoCliente = (c: any) => {
-    const nomeAtual = c.nome ?? (c.observacoes?.startsWith('[IMPORTADO XLS] ') ? c.observacoes.replace('[IMPORTADO XLS] ', '') : '')
-    setForm({
-      nome: nomeAtual, tipo_pessoa: c.tipo_pessoa ?? 'PF', cpf: c.cpf ?? '',
-      email: c.email ?? '', telefone: c.telefone ?? '',
+    const nome = c.nome ?? (c.observacoes?.startsWith('[IMPORTADO XLS] ') ? c.observacoes.replace('[IMPORTADO XLS] ', '') : '')
+    setForm({ nome, tipo_pessoa: c.tipo_pessoa ?? 'PF', cpf: c.cpf ?? '', email: c.email ?? '', telefone: c.telefone ?? '',
       pro_labore_tipo: c.pro_labore_tipo ?? '', pro_labore_valor: c.pro_labore_valor ?? '',
       fee_imob_pct: c.fee_imob_pct ?? '', fee_fin_pct: c.fee_fin_pct ?? '',
       percentual_sucesso_geral: c.percentual_sucesso_geral ?? '',
-      percentual_sucesso_imob: c.percentual_sucesso_imob ?? '',
-      percentual_sucesso_fin: c.percentual_sucesso_fin ?? '',
+      percentual_sucesso_imob: c.percentual_sucesso_imob ?? '', percentual_sucesso_fin: c.percentual_sucesso_fin ?? '',
       exito_split: !!(c.percentual_sucesso_imob || c.percentual_sucesso_fin),
-      cliente_uuid: c.cliente_uuid ?? '', observacoes: c.observacoes ?? '', ativo: c.ativo ?? true,
-    })
-    setEditandoClienteId(c.id)
-    setModal('cliente')
+      cliente_uuid: c.cliente_uuid ?? '', observacoes: c.observacoes ?? '', ativo: c.ativo ?? true })
+    setEditandoClienteId(c.id); setModal('cliente')
   }
-
   const abrirEdicaoEmp = (e: any) => {
-    setForm({
-      nome_venda: e.nome_venda, prestadora_nome: e.prestadora_nome ?? 'Apex Realty',
+    setForm({ nome_venda: e.nome_venda, prestadora_nome: e.prestadora_nome ?? 'Apex Realty',
       prestadora_cnpj: e.prestadora_cnpj ?? '', nome_razao_social: e.nome_razao_social ?? '',
-      cnpj_empreendimento: e.cnpj_empreendimento ?? '', spe_nome: e.spe_nome ?? '',
-      spe_cnpj: e.spe_cnpj ?? '', subveiculos: e.subveiculos ?? [],
-      tipo_desenvolvimento: e.tipo_desenvolvimento ?? '', localizacao: e.localizacao ?? '',
-      descricao: e.descricao ?? '', ativo: e.ativo,
-    })
-    setEditandoEmpId(e.id)
-    setModal('empreendimento')
+      cnpj_empreendimento: e.cnpj_empreendimento ?? '', spe_nome: e.spe_nome ?? '', spe_cnpj: e.spe_cnpj ?? '',
+      subveiculos: e.subveiculos ?? [], tipo_desenvolvimento: e.tipo_desenvolvimento ?? '',
+      localizacao: e.localizacao ?? '', descricao: e.descricao ?? '', ativo: e.ativo })
+    setEditandoEmpId(e.id); setModal('empreendimento')
+  }
+  const abrirEdicaoDeb = (d: any) => {
+    setForm({ ...d, faz_parte_honorarios: !!d.faz_parte_honorarios, foi_pago: !!d.foi_pago })
+    setEditandoDebId(d.id); setModal('debenture')
+  }
+  const abrirEdicaoImob = (i: any) => {
+    setForm({ ...i, faz_parte_honorarios: !!i.faz_parte_honorarios })
+    setEditandoImobId(i.id); setModal('imobiliario')
+  }
+  const abrirEdicaoFundo = (f: any) => {
+    setForm({ ...f, faz_parte_honorarios: !!f.faz_parte_honorarios, tem_direito_recompra: !!f.tem_direito_recompra })
+    setEditandoFundoId(f.id); setModal('fundo')
   }
 
   // ── Helpers UI ─────────────────────────────────────────────────────
@@ -418,13 +451,11 @@ export default function CarteiraPage() {
   const editBtn = (onClick: () => void) => (
     <button style={{ background: 'none', border: '1px solid var(--gray-border)', borderRadius: 4, padding: '3px 10px', cursor: 'pointer', fontSize: 12, color: 'var(--gray-mid)' }} onClick={onClick}>Editar</button>
   )
+  const quickAddBtn = (label: string, onClick: () => void) => (
+    <button style={{ background: 'none', border: '1px solid var(--teal)', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', fontSize: 11, color: 'var(--teal)', marginLeft: 6 }} onClick={onClick}>+ {label}</button>
+  )
 
-  // Barra de filtros reutilizável
-  const filterBar = (
-    extra: React.ReactNode,
-    clienteBusca: string,
-    setClienteBusca: (v: string) => void,
-  ) => (
+  const filterBar = (extra: React.ReactNode, clienteBusca: string, setClienteBusca: (v: string) => void) => (
     <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 14, flexWrap: 'wrap' }}>
       {extra}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -438,48 +469,30 @@ export default function CarteiraPage() {
     <div style={{ textAlign: 'center', padding: '40px 24px', color: '#9ca3af', fontSize: 14 }}>Nenhum registro encontrado</div>
   )
 
-  // Colunas fixas para alinhamento entre grupos — colgroup para cada tabela
+  // Colgroups fixos para alinhamento
   const colsDeb = () => (
-    <colgroup>
-      <col style={{ width: 130 }} />{/* Cautela */}
-      <col />{/* Emissão */}
-      <col style={{ width: 150 }} />{/* Aplicado */}
-      <col style={{ width: 150 }} />{/* Atual */}
-      <col style={{ width: 130 }} />{/* Status */}
-      <col style={{ width: 80 }} />{/* Êxito% */}
-    </colgroup>
+    <colgroup><col style={{ width: 120 }} /><col /><col style={{ width: 145 }} /><col style={{ width: 145 }} /><col style={{ width: 120 }} /><col style={{ width: 75 }} /><col style={{ width: 60 }} /></colgroup>
   )
   const colsImob = () => (
-    <colgroup>
-      <col />{/* Empreendimento */}
-      <col style={{ width: 155 }} />{/* Comprometido */}
-      <col style={{ width: 155 }} />{/* Investido */}
-      <col style={{ width: 80 }} />{/* % Part */}
-      <col style={{ width: 80 }} />{/* Êxito% */}
-    </colgroup>
+    <colgroup><col /><col style={{ width: 150 }} /><col style={{ width: 150 }} /><col style={{ width: 75 }} /><col style={{ width: 75 }} /><col style={{ width: 60 }} /></colgroup>
   )
   const colsFundos = () => (
-    <colgroup>
-      <col />{/* Fundo */}
-      <col style={{ width: 150 }} />{/* Aplicado */}
-      <col style={{ width: 150 }} />{/* Atual */}
-      <col style={{ width: 110 }} />{/* Data */}
-      <col style={{ width: 100 }} />{/* Recompra */}
-      <col style={{ width: 80 }} />{/* Êxito% */}
-    </colgroup>
+    <colgroup><col /><col style={{ width: 140 }} /><col style={{ width: 140 }} /><col style={{ width: 105 }} /><col style={{ width: 90 }} /><col style={{ width: 75 }} /><col style={{ width: 60 }} /></colgroup>
   )
+  const thR = (label: string) => <th style={{ textAlign: 'right' }}>{label}</th>
 
   return (
     <div style={{ padding: '24px 28px' }}>
       <div className={styles.pageHeader}><h1 className={styles.pageTitle}>Carteira</h1></div>
 
       {/* KPI Cards */}
-      <div className={cs.kpiGrid}>
-        <div className={cs.kpiCard}><span className={cs.kpiLabel}>Clientes</span><span className={cs.kpiValue}>{dash?.total_clientes ?? 0}</span></div>
-        <div className={cs.kpiCard}><span className={cs.kpiLabel}>Carteira Total</span><span className={cs.kpiValue}>{brl(dash?.carteira_total)}</span></div>
-        <div className={cs.kpiCard}><span className={cs.kpiLabel}>Valor Atual</span><span className={cs.kpiValue}>{brl(dash?.valor_atual_total)}</span></div>
-        <div className={cs.kpiCard}><span className={cs.kpiLabel}>Fee Entrada (total)</span><span className={cs.kpiValue}>{brl(dash?.pro_labore_mensal)}</span></div>
-        <div className={cs.kpiCard}><span className={cs.kpiLabel}>Expectativa Êxito</span><span className={cs.kpiValue}>{brl(dash?.expectativa_honorarios)}</span></div>
+      <div className={cs.kpiGrid} style={{ gridTemplateColumns: 'repeat(6, 1fr)' }}>
+        <div className={cs.kpiCard}><span className={cs.kpiLabel}>Clientes</span><span className={cs.kpiValue}>{clientes.length}</span></div>
+        <div className={cs.kpiCard}><span className={cs.kpiLabel}>Total Geral</span><span className={cs.kpiValue}>{brl(kpiTotal)}</span></div>
+        <div className={cs.kpiCard} style={{ borderTop: '3px solid var(--amber, #f59e0b)' }}><span className={cs.kpiLabel}>Imobiliário</span><span className={cs.kpiValue}>{brl(kpiImob)}</span></div>
+        <div className={cs.kpiCard} style={{ borderTop: '3px solid var(--teal)' }}><span className={cs.kpiLabel}>Financeiro</span><span className={cs.kpiValue}>{brl(kpiFin)}</span></div>
+        <div className={cs.kpiCard}><span className={cs.kpiLabel}>Fee Entrada (esp.)</span><span className={cs.kpiValue}>{brl(kpiFeeEntrada)}</span></div>
+        <div className={cs.kpiCard}><span className={cs.kpiLabel}>Expectativa Êxito</span><span className={cs.kpiValue}>{brl(kpiExito)}</span></div>
       </div>
 
       {/* Tab Bar */}
@@ -497,9 +510,18 @@ export default function CarteiraPage() {
       {/* ══ POSIÇÃO POR CLIENTE ═══════════════════════════════════ */}
       {tab === 'posicao-cliente' && (
         <>
-          <div style={{ display: 'flex', gap: 10, marginBottom: 14, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ display: 'flex', gap: 12, marginBottom: 14, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
               <input className={styles.input} style={{ width: 220 }} placeholder="Filtrar por cliente..." value={filtroClientePos} onChange={e => setFiltroClientePos(e.target.value)} />
+              <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, cursor: 'pointer' }}>
+                <input type="checkbox" checked={mostrarDebs} onChange={e => setMostrarDebs(e.target.checked)} style={{ accentColor: 'var(--teal)' }} /> Debêntures
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, cursor: 'pointer' }}>
+                <input type="checkbox" checked={mostrarImob} onChange={e => setMostrarImob(e.target.checked)} style={{ accentColor: 'var(--amber, #f59e0b)' }} /> Imobiliário
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, cursor: 'pointer' }}>
+                <input type="checkbox" checked={mostrarFundosPOS} onChange={e => setMostrarFundosPOS(e.target.checked)} style={{ accentColor: 'var(--blue, #3b82f6)' }} /> Fundos
+              </label>
             </div>
             <button className={styles.btnSmall} onClick={exportarXlsx}>Exportar XLSX</button>
           </div>
@@ -511,16 +533,20 @@ export default function CarteiraPage() {
               const imobs = imobiliario.filter(i => i.cliente_id === c.id)
               const fnds = fundos.filter(f => f.cliente_id === c.id)
               const { feeEntrada, exito } = calcularHonorarios(c)
-              const totalAplicado = debs.reduce((s, d) => s + (d.valor_aplicado ?? 0), 0) +
+              const totalApl = debs.reduce((s, d) => s + (d.valor_aplicado ?? 0), 0) +
                 imobs.reduce((s, i) => s + (i.valor_total_compromissado ?? 0), 0) +
                 fnds.reduce((s, f) => s + (f.valor_aplicado ?? 0), 0)
               return (
                 <div key={c.id} className={cs.clientePosicaoCard}>
                   <div className={cs.clientePosicaoHeader}>
                     <div>
-                      <span className={cs.clientePosicaoNome}>{nome}</span>
+                      <span className={cs.clientePosicaoNome}>{nome}
+                        {quickAddBtn('Deb', () => { setForm({ cliente_id: c.id, status_resgate: 'Ativo', faz_parte_honorarios: false }); setEditandoDebId(null); setModal('debenture') })}
+                        {quickAddBtn('Imob', () => { setForm({ cliente_id: c.id, percentual_participacao: 100, faz_parte_honorarios: false }); setEditandoImobId(null); setModal('imobiliario') })}
+                        {quickAddBtn('Fundo', () => { setForm({ cliente_id: c.id, faz_parte_honorarios: false }); setEditandoFundoId(null); setModal('fundo') })}
+                      </span>
                       <span className={cs.clientePosicaoTotal}>
-                        {brl(totalAplicado)} aplicado
+                        {brl(totalApl)} aplicado
                         {feeEntrada > 0 && ` · Fee: ${brl(feeEntrada)}`}
                         {exito > 0 && ` · Êxito esp.: ${brl(exito)}`}
                       </span>
@@ -528,40 +554,40 @@ export default function CarteiraPage() {
                     <button className={styles.btnSmall} onClick={() => window.open(`/api/carteira/cliente/${c.id}/pdf`, '_blank')}>PDF</button>
                   </div>
 
-                  {debs.length > 0 && (
+                  {mostrarDebs && debs.length > 0 && (
                     <div className={cs.posicaoSecao}>
-                      <div className={cs.posicaoSecaoTitulo}>Debêntures ({debs.length})</div>
+                      <div className={cs.posicaoSecaoTitulo}>Debêntures ({debs.length}) · {brl(debs.reduce((s, d) => s + (d.valor_aplicado ?? 0), 0))}</div>
                       <table className={styles.table} style={{ marginBottom: 0 }}>
                         {colsDeb()}
-                        <thead><tr><th>Cautela</th><th>Emissão</th><th>Aplicado</th><th>Atual</th><th>Status</th><th>Êxito %</th></tr></thead>
+                        <thead><tr><th>Cautela</th><th>Emissão</th>{thR('Aplicado')}{thR('Atual')}<th>Status</th><th>Êxito%</th><th /></tr></thead>
                         <tbody>
                           {debs.map(d => (
                             <tr key={d.id}>
-                              <td>{d.numero_cautela}</td>
-                              <td>{emissaoNome(d.emissao_id)}</td>
+                              <td>{d.numero_cautela}</td><td>{emissaoNome(d.emissao_id)}</td>
                               <td style={{ textAlign: 'right' }}>{brl(d.valor_aplicado)}</td>
                               <td style={{ textAlign: 'right' }}>{d.valor_atual_estimado ? brl(d.valor_atual_estimado) : '—'}</td>
                               <td>{statusBadge(d.status_resgate)}</td>
                               <td>{d.faz_parte_honorarios ? pct(d.percentual_sucesso_honor) : '—'}</td>
+                              <td>{editBtn(() => abrirEdicaoDeb(d))}</td>
                             </tr>
                           ))}
                           <tr style={{ background: 'var(--gray-light, #f8f9fa)', fontWeight: 600 }}>
                             <td colSpan={2}>Total</td>
                             <td style={{ textAlign: 'right' }}>{brl(debs.reduce((s, d) => s + (d.valor_aplicado ?? 0), 0))}</td>
                             <td style={{ textAlign: 'right' }}>{brl(debs.reduce((s, d) => s + (d.valor_atual_estimado ?? d.valor_aplicado ?? 0), 0))}</td>
-                            <td /><td />
+                            <td /><td /><td />
                           </tr>
                         </tbody>
                       </table>
                     </div>
                   )}
 
-                  {imobs.length > 0 && (
+                  {mostrarImob && imobs.length > 0 && (
                     <div className={cs.posicaoSecao}>
-                      <div className={cs.posicaoSecaoTitulo}>Imobiliário ({imobs.length})</div>
+                      <div className={cs.posicaoSecaoTitulo}>Imobiliário ({imobs.length}) · {brl(imobs.reduce((s, i) => s + (i.valor_total_compromissado ?? 0), 0))}</div>
                       <table className={styles.table} style={{ marginBottom: 0 }}>
                         {colsImob()}
-                        <thead><tr><th>Empreendimento</th><th>Comprometido</th><th>Investido</th><th>% Part.</th><th>Êxito %</th></tr></thead>
+                        <thead><tr><th>Empreendimento</th>{thR('Comprometido')}{thR('Investido')}<th>% Part.</th><th>Êxito%</th><th /></tr></thead>
                         <tbody>
                           {imobs.map(i => (
                             <tr key={i.id}>
@@ -570,25 +596,26 @@ export default function CarteiraPage() {
                               <td style={{ textAlign: 'right' }}>{brl(i.valor_efetivamente_investido)}</td>
                               <td>{pct(i.percentual_participacao)}</td>
                               <td>{i.faz_parte_honorarios ? pct(i.percentual_sucesso_honorario) : '—'}</td>
+                              <td>{editBtn(() => abrirEdicaoImob(i))}</td>
                             </tr>
                           ))}
                           <tr style={{ background: 'var(--gray-light, #f8f9fa)', fontWeight: 600 }}>
                             <td>Total</td>
                             <td style={{ textAlign: 'right' }}>{brl(imobs.reduce((s, i) => s + (i.valor_total_compromissado ?? 0), 0))}</td>
                             <td style={{ textAlign: 'right' }}>{brl(imobs.reduce((s, i) => s + (i.valor_efetivamente_investido ?? 0), 0))}</td>
-                            <td /><td />
+                            <td /><td /><td />
                           </tr>
                         </tbody>
                       </table>
                     </div>
                   )}
 
-                  {fnds.length > 0 && (
+                  {mostrarFundosPOS && fnds.length > 0 && (
                     <div className={cs.posicaoSecao}>
-                      <div className={cs.posicaoSecaoTitulo}>Fundos ({fnds.length})</div>
+                      <div className={cs.posicaoSecaoTitulo}>Fundos ({fnds.length}) · {brl(fnds.reduce((s, f) => s + (f.valor_aplicado ?? 0), 0))}</div>
                       <table className={styles.table} style={{ marginBottom: 0 }}>
                         {colsFundos()}
-                        <thead><tr><th>Fundo</th><th>Aplicado</th><th>Atual</th><th>Data</th><th>Recompra</th><th>Êxito %</th></tr></thead>
+                        <thead><tr><th>Fundo</th>{thR('Aplicado')}{thR('Atual')}<th>Data</th><th>Recompra</th><th>Êxito%</th><th /></tr></thead>
                         <tbody>
                           {fnds.map(f => (
                             <tr key={f.id}>
@@ -598,13 +625,14 @@ export default function CarteiraPage() {
                               <td>{f.data_aplicacao ?? '—'}</td>
                               <td>{f.tem_direito_recompra ? <span className={`${styles.badge} ${styles.status_suspenso}`}>Sim</span> : '—'}</td>
                               <td>{f.faz_parte_honorarios ? pct(f.percentual_sucesso_honor) : '—'}</td>
+                              <td>{editBtn(() => abrirEdicaoFundo(f))}</td>
                             </tr>
                           ))}
                           <tr style={{ background: 'var(--gray-light, #f8f9fa)', fontWeight: 600 }}>
                             <td>Total</td>
                             <td style={{ textAlign: 'right' }}>{brl(fnds.reduce((s, f) => s + (f.valor_aplicado ?? 0), 0))}</td>
                             <td style={{ textAlign: 'right' }}>{brl(fnds.reduce((s, f) => s + (f.valor_atual_estimado ?? f.valor_aplicado ?? 0), 0))}</td>
-                            <td colSpan={3} />
+                            <td colSpan={4} />
                           </tr>
                         </tbody>
                       </table>
@@ -620,7 +648,7 @@ export default function CarteiraPage() {
       {/* ══ DEBÊNTURES ═══════════════════════════════════════════ */}
       {tab === 'debentures' && (
         <>
-          {addBtn('Nova Posição', () => { setForm({ status_resgate: 'Ativo', faz_parte_honorarios: false }); setModal('debenture') })}
+          {addBtn('Nova Posição', () => { setForm({ status_resgate: 'Ativo', faz_parte_honorarios: false }); setEditandoDebId(null); setModal('debenture') })}
           {filterBar(
             <><label style={{ fontSize: 12, color: 'var(--gray-mid)', whiteSpace: 'nowrap' }}>Emissão:</label>
             <div style={{ width: 260 }}>
@@ -634,23 +662,23 @@ export default function CarteiraPage() {
               <div className={cs.clienteFundoNome}>{g.nome}</div>
               <table className={styles.table} style={{ marginBottom: 0 }}>
                 {colsDeb()}
-                <thead><tr><th>Cautela</th><th>Emissão</th><th>Aplicado</th><th>Atual</th><th>Status</th><th>Êxito %</th></tr></thead>
+                <thead><tr><th>Cautela</th><th>Emissão</th>{thR('Aplicado')}{thR('Atual')}<th>Status</th><th>Êxito%</th><th /></tr></thead>
                 <tbody>
                   {g.posicoes.map((d: any) => (
                     <tr key={d.id}>
-                      <td><strong>{d.numero_cautela}</strong></td>
-                      <td>{emissaoNome(d.emissao_id)}</td>
+                      <td><strong>{d.numero_cautela}</strong></td><td>{emissaoNome(d.emissao_id)}</td>
                       <td style={{ textAlign: 'right' }}>{brl(d.valor_aplicado)}</td>
                       <td style={{ textAlign: 'right' }}>{d.valor_atual_estimado ? brl(d.valor_atual_estimado) : '—'}</td>
                       <td>{statusBadge(d.status_resgate)}</td>
                       <td>{d.faz_parte_honorarios ? pct(d.percentual_sucesso_honor) : '—'}</td>
+                      <td>{editBtn(() => abrirEdicaoDeb(d))}</td>
                     </tr>
                   ))}
                   <tr style={{ background: 'var(--gray-light, #f8f9fa)', fontWeight: 600 }}>
                     <td colSpan={2}>Total</td>
                     <td style={{ textAlign: 'right' }}>{brl(g.posicoes.reduce((s: number, d: any) => s + (d.valor_aplicado ?? 0), 0))}</td>
                     <td style={{ textAlign: 'right' }}>{brl(g.posicoes.reduce((s: number, d: any) => s + (d.valor_atual_estimado ?? d.valor_aplicado ?? 0), 0))}</td>
-                    <td /><td />
+                    <td /><td /><td />
                   </tr>
                 </tbody>
               </table>
@@ -662,7 +690,7 @@ export default function CarteiraPage() {
       {/* ══ IMOBILIÁRIO ════════════════════════════════════════════ */}
       {tab === 'imobiliario' && (
         <>
-          {addBtn('Nova Posição', () => { setForm({ percentual_participacao: 100, faz_parte_honorarios: false }); setModal('imobiliario') })}
+          {addBtn('Nova Posição', () => { setForm({ percentual_participacao: 100, faz_parte_honorarios: false }); setEditandoImobId(null); setModal('imobiliario') })}
           {filterBar(
             <><label style={{ fontSize: 12, color: 'var(--gray-mid)', whiteSpace: 'nowrap' }}>Empreendimento:</label>
             <div style={{ width: 280 }}>
@@ -676,7 +704,7 @@ export default function CarteiraPage() {
               <div className={cs.clienteFundoNome}>{g.nome}</div>
               <table className={styles.table} style={{ marginBottom: 0 }}>
                 {colsImob()}
-                <thead><tr><th>Empreendimento</th><th>Comprometido</th><th>Investido</th><th>% Part.</th><th>Êxito %</th></tr></thead>
+                <thead><tr><th>Empreendimento</th>{thR('Comprometido')}{thR('Investido')}<th>% Part.</th><th>Êxito%</th><th /></tr></thead>
                 <tbody>
                   {g.posicoes.map((i: any) => (
                     <tr key={i.id}>
@@ -685,13 +713,14 @@ export default function CarteiraPage() {
                       <td style={{ textAlign: 'right' }}>{brl(i.valor_efetivamente_investido)}</td>
                       <td>{pct(i.percentual_participacao)}</td>
                       <td>{i.faz_parte_honorarios ? pct(i.percentual_sucesso_honorario) : '—'}</td>
+                      <td>{editBtn(() => abrirEdicaoImob(i))}</td>
                     </tr>
                   ))}
                   <tr style={{ background: 'var(--gray-light, #f8f9fa)', fontWeight: 600 }}>
                     <td>Total</td>
                     <td style={{ textAlign: 'right' }}>{brl(g.posicoes.reduce((s: number, i: any) => s + (i.valor_total_compromissado ?? 0), 0))}</td>
                     <td style={{ textAlign: 'right' }}>{brl(g.posicoes.reduce((s: number, i: any) => s + (i.valor_efetivamente_investido ?? 0), 0))}</td>
-                    <td /><td />
+                    <td /><td /><td />
                   </tr>
                 </tbody>
               </table>
@@ -703,7 +732,7 @@ export default function CarteiraPage() {
       {/* ══ FUNDOS ═════════════════════════════════════════════════ */}
       {tab === 'fundos' && (
         <>
-          {addBtn('Nova Posição', () => { setForm({ faz_parte_honorarios: false }); setModal('fundo') })}
+          {addBtn('Nova Posição', () => { setForm({ faz_parte_honorarios: false }); setEditandoFundoId(null); setModal('fundo') })}
           {filterBar(
             <><label style={{ fontSize: 12, color: 'var(--gray-mid)', whiteSpace: 'nowrap' }}>Fundo:</label>
             <div style={{ width: 260 }}>
@@ -717,7 +746,7 @@ export default function CarteiraPage() {
               <div className={cs.clienteFundoNome}>{g.nome}</div>
               <table className={styles.table} style={{ marginBottom: 0 }}>
                 {colsFundos()}
-                <thead><tr><th>Fundo</th><th>Aplicado</th><th>Atual</th><th>Data</th><th>Recompra</th><th>Êxito %</th></tr></thead>
+                <thead><tr><th>Fundo</th>{thR('Aplicado')}{thR('Atual')}<th>Data</th><th>Recompra</th><th>Êxito%</th><th /></tr></thead>
                 <tbody>
                   {g.posicoes.map((f: any) => (
                     <tr key={f.id}>
@@ -727,13 +756,14 @@ export default function CarteiraPage() {
                       <td>{f.data_aplicacao ?? '—'}</td>
                       <td>{f.tem_direito_recompra ? <span className={`${styles.badge} ${styles.status_suspenso}`}>Sim</span> : '—'}</td>
                       <td>{f.faz_parte_honorarios ? pct(f.percentual_sucesso_honor) : '—'}</td>
+                      <td>{editBtn(() => abrirEdicaoFundo(f))}</td>
                     </tr>
                   ))}
                   <tr style={{ background: 'var(--gray-light, #f8f9fa)', fontWeight: 600 }}>
                     <td>Total</td>
                     <td style={{ textAlign: 'right' }}>{brl(g.posicoes.reduce((s: number, f: any) => s + (f.valor_aplicado ?? 0), 0))}</td>
                     <td style={{ textAlign: 'right' }}>{brl(g.posicoes.reduce((s: number, f: any) => s + (f.valor_atual_estimado ?? f.valor_aplicado ?? 0), 0))}</td>
-                    <td colSpan={3} />
+                    <td colSpan={4} />
                   </tr>
                 </tbody>
               </table>
@@ -750,26 +780,23 @@ export default function CarteiraPage() {
           </div>
           <div className={styles.tableCard}>
             <table className={styles.table}>
-              <colgroup>
-                <col /><col style={{ width: 60 }} /><col style={{ width: 140 }} />
-                <col style={{ width: 170 }} /><col style={{ width: 150 }} /><col style={{ width: 150 }} /><col style={{ width: 80 }} /><col style={{ width: 60 }} />
-              </colgroup>
-              <thead><tr><th>Nome</th><th>Tipo</th><th>CPF/CNPJ</th><th>Fee entrada</th><th>Fee (R$ esperado)</th><th>Êxito (R$ esperado)</th><th>Status</th><th /></tr></thead>
+              <colgroup><col /><col style={{ width: 60 }} /><col style={{ width: 140 }} /><col style={{ width: 160 }} /><col style={{ width: 150 }} /><col style={{ width: 150 }} /><col style={{ width: 80 }} /><col style={{ width: 60 }} /></colgroup>
+              <thead><tr><th>Nome</th><th>Tipo</th><th>CPF/CNPJ</th><th>Fee entrada</th>{thR('Fee (R$ esp.)')}{thR('Êxito (R$ esp.)')}<th>Status</th><th /></tr></thead>
               <tbody>
                 {clientes.length === 0
                   ? <tr><td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Nenhum registro</td></tr>
                   : clientes.map((c: any) => {
                     const { feeEntrada, exito } = calcularHonorarios(c)
-                    const temFee = c.pro_labore_tipo && c.pro_labore_tipo !== 'nenhum'
-                    const feePctLabel = c.pro_labore_tipo === 'percentual'
-                      ? (c.fee_imob_pct || c.fee_fin_pct ? `${c.fee_imob_pct ?? 0}% imob / ${c.fee_fin_pct ?? 0}% fin` : `${c.pro_labore_valor ?? 0}%`)
-                      : c.pro_labore_valor ? brl(c.pro_labore_valor) : '—'
+                    const feeLbl = c.pro_labore_tipo === 'fixo' ? brl(c.pro_labore_valor)
+                      : c.pro_labore_tipo === 'percentual'
+                        ? (c.fee_imob_pct || c.fee_fin_pct ? `${c.fee_imob_pct ?? 0}%i/${c.fee_fin_pct ?? 0}%f` : `${c.pro_labore_valor ?? 0}%`)
+                        : '—'
                     return (
                       <tr key={c.id}>
                         <td><strong>{clienteNome(c.id)}</strong></td>
                         <td><span className={styles.badge}>{c.tipo_pessoa ?? 'PF'}</span></td>
                         <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{c.cpf ?? '—'}</td>
-                        <td>{temFee ? feePctLabel : '—'}</td>
+                        <td>{feeLbl}</td>
                         <td style={{ textAlign: 'right' }}>{feeEntrada > 0 ? brl(feeEntrada) : '—'}</td>
                         <td style={{ textAlign: 'right' }}>{exito > 0 ? brl(exito) : '—'}</td>
                         <td>{statusBadge(c.ativo)}</td>
@@ -794,10 +821,8 @@ export default function CarteiraPage() {
                 {emissoes.length === 0
                   ? <tr><td colSpan={6} style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Nenhum registro</td></tr>
                   : emissoes.map((e: any) => (
-                    <tr key={e.id}>
-                      <td><strong>{e.nome_serie}</strong></td><td>{e.numero_emissao}ª</td>
-                      <td>{e.emissor}</td>
-                      <td>{e.indexador}{e.taxa_adicional ? ` + ${e.taxa_adicional}` : ''}</td>
+                    <tr key={e.id}><td><strong>{e.nome_serie}</strong></td><td>{e.numero_emissao}ª</td>
+                      <td>{e.emissor}</td><td>{e.indexador}{e.taxa_adicional ? ` + ${e.taxa_adicional}` : ''}</td>
                       <td>{e.data_vencimento_previsto ?? '—'}</td><td>{statusBadge(e.ativo)}</td>
                     </tr>
                   ))}
@@ -813,20 +838,26 @@ export default function CarteiraPage() {
           {addBtn('Novo Empreendimento', () => { setForm({ prestadora_nome: 'Apex Realty', subveiculos: [] }); setEditandoEmpId(null); setModal('empreendimento') })}
           <div className={styles.tableCard}>
             <table className={styles.table}>
-              <thead><tr><th>Projeto</th><th>Veículo (Razão Social)</th><th>CNPJ Veículo</th><th>Sub-veículos</th><th>Status</th><th /></tr></thead>
+              <thead><tr><th>Projeto</th><th>Razão Social do Veículo</th><th>CNPJ</th><th>Sub-veículos</th><th>Status</th><th /></tr></thead>
               <tbody>
                 {empreendimentos.length === 0
                   ? <tr><td colSpan={6} style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Nenhum registro</td></tr>
-                  : empreendimentos.map((e: any) => (
-                    <tr key={e.id}>
-                      <td><strong>{e.nome_venda}</strong></td>
-                      <td style={{ fontSize: 12 }}>{e.nome_razao_social ?? '—'}</td>
-                      <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{e.cnpj_empreendimento ?? '—'}</td>
-                      <td style={{ fontSize: 12 }}>{(e.subveiculos?.length ?? 0) > 0 ? `${e.subveiculos.length}` : '—'}</td>
-                      <td>{statusBadge(e.ativo)}</td>
-                      <td>{editBtn(() => abrirEdicaoEmp(e))}</td>
-                    </tr>
-                  ))}
+                  : empreendimentos.map((e: any) => {
+                    const isDup = e.cnpj_empreendimento && (cnpjCount[e.cnpj_empreendimento] ?? 0) > 1
+                    return (
+                      <tr key={e.id}>
+                        <td><strong>{e.nome_venda}</strong></td>
+                        <td style={{ fontSize: 12 }}>{e.nome_razao_social ?? '—'}</td>
+                        <td style={{ fontFamily: 'monospace', fontSize: 11 }}>
+                          {e.cnpj_empreendimento ?? '—'}
+                          {isDup && <span style={{ marginLeft: 6, color: 'var(--red, #ef4444)', fontSize: 10, fontWeight: 700 }} title="CNPJ repetido">⚠ dup.</span>}
+                        </td>
+                        <td style={{ fontSize: 12 }}>{(e.subveiculos?.length ?? 0) > 0 ? e.subveiculos.length : '—'}</td>
+                        <td>{statusBadge(e.ativo)}</td>
+                        <td>{editBtn(() => abrirEdicaoEmp(e))}</td>
+                      </tr>
+                    )
+                  })}
               </tbody>
             </table>
           </div>
@@ -890,48 +921,38 @@ export default function CarteiraPage() {
                 setForm(f => ({ ...f, nome: n || f.nome, cpf: c.cpf ?? f.cpf, email: c.email ?? f.email, telefone: c.telefone ?? f.telefone, tipo_pessoa: c.tipo_pessoa ?? f.tipo_pessoa, cliente_uuid: c.cliente_uuid ?? f.cliente_uuid }))
               }} options={clienteOptions} placeholder="Selecionar já cadastrado na carteira..." />
             </div>
-            <SystemClientCombo onSelect={c => {
-              setForm(f => ({ ...f, nome: c.nome ?? f.nome, cpf: c.cpf_cnpj ?? f.cpf, email: c.email ?? f.email, telefone: c.telefone ?? f.telefone, tipo_pessoa: c.tipo === 'PF' ? 'PF' : 'PJ', cliente_uuid: c.id }))
-            }} />
+            <SystemClientCombo onSelect={c => setForm(f => ({ ...f, nome: c.nome ?? f.nome, cpf: c.cpf_cnpj ?? f.cpf, email: c.email ?? f.email, telefone: c.telefone ?? f.telefone, tipo_pessoa: c.tipo === 'PF' ? 'PF' : 'PJ', cliente_uuid: c.id }))} />
             {form.cliente_uuid && (
-              <div style={{ fontSize: 11, color: 'var(--teal)', marginTop: 4 }}>✓ Vinculado ao sistema
+              <div style={{ fontSize: 11, color: 'var(--teal)', marginTop: 4 }}>✓ Vinculado
                 <button style={{ marginLeft: 8, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gray-mid)', fontSize: 11 }} onClick={() => inp('cliente_uuid', '')}>remover</button>
               </div>
             )}
           </div>
-
-          {/* V1.1 — Upload de documento IA */}
           <div style={{ marginBottom: 12 }}>
             <label style={{ fontSize: 12, color: 'var(--gray-mid)', display: 'block', marginBottom: 4 }}>Preencher via documento (IA):</label>
             <input type="file" accept=".pdf,.jpg,.png,.jpeg" style={{ fontSize: 12 }}
               onChange={e => { const f = e.target.files?.[0]; if (f) processarDocumento.mutate(f) }} />
             {processarDocumento.isPending && <span style={{ fontSize: 11, color: 'var(--teal)', marginLeft: 8 }}>Processando...</span>}
           </div>
-
           {fl('Nome completo *', fi('nome', 'text', 'Nome do investidor'))}
           {fl('Tipo pessoa', fs('tipo_pessoa', [{ value: 'PF', label: 'PF — Pessoa Física' }, { value: 'PJ', label: 'PJ — Pessoa Jurídica' }]))}
-          {fl(form.tipo_pessoa === 'PJ' ? 'CNPJ' : 'CPF', fi('cpf', 'text', form.tipo_pessoa === 'PJ' ? '00.000.000/0001-00' : '000.000.000-00'))}
+          {fl(form.tipo_pessoa === 'PJ' ? 'CNPJ' : 'CPF', fi('cpf', 'text'))}
           {form.tipo_pessoa !== 'PJ' && fl('Estado civil', fs('estado_civil', [
-            { value: 'solteiro', label: 'Solteiro(a)' }, { value: 'casado', label: 'Casado(a)' },
-            { value: 'uniao_estavel', label: 'União estável' }, { value: 'divorciado', label: 'Divorciado(a)' }, { value: 'viuvo', label: 'Viúvo(a)' },
+            { value: 'solteiro', label: 'Solteiro(a)' }, { value: 'casado', label: 'Casado(a)' }, { value: 'uniao_estavel', label: 'União estável' }, { value: 'divorciado', label: 'Divorciado(a)' }, { value: 'viuvo', label: 'Viúvo(a)' },
           ]))}
-          {form.tipo_pessoa !== 'PJ' && fl('Profissão', fi('profissao', 'text', 'Ex: Empresário, Médico'))}
+          {form.tipo_pessoa !== 'PJ' && fl('Profissão', fi('profissao'))}
           {form.tipo_pessoa === 'PJ' && fl('Representante legal', fi('representante_nome'))}
           {fl('E-mail', fi('email', 'email'))}
-          {fl('Telefone', fi('telefone', 'text', '(27) 9 9999-9999'))}
-
+          {fl('Telefone', fi('telefone'))}
           <div style={{ borderTop: '1px solid var(--gray-border)', margin: '12px 0 0', paddingTop: 12 }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 10 }}>Fee de entrada</div>
-            {fl('Tipo de fee', fs('pro_labore_tipo', [
-              { value: '', label: 'Sem fee de entrada' }, { value: 'fixo', label: 'Valor fixo (R$)' }, { value: 'percentual', label: 'Percentual do investimento (%)' },
-            ]))}
-            {form.pro_labore_tipo === 'fixo' && fl('Valor (R$)', fi('pro_labore_valor', 'number', 'Ex: 10000'))}
+            {fl('Tipo de fee', fs('pro_labore_tipo', [{ value: '', label: 'Sem fee de entrada' }, { value: 'fixo', label: 'Valor fixo (R$)' }, { value: 'percentual', label: 'Percentual do investimento (%)' }]))}
+            {form.pro_labore_tipo === 'fixo' && fl('Valor (R$)', fi('pro_labore_valor', 'number'))}
             {form.pro_labore_tipo === 'percentual' && (
-              <>{fl('% sobre ativos imobiliários', fi('fee_imob_pct', 'number', 'Ex: 2'))}
-                {fl('% sobre ativos financeiros (deb./fundos)', fi('fee_fin_pct', 'number', 'Ex: 2'))}</>
+              <>{fl('% sobre ativos imobiliários', fi('fee_imob_pct', 'number'))}
+                {fl('% sobre ativos financeiros', fi('fee_fin_pct', 'number'))}</>
             )}
           </div>
-
           <div style={{ borderTop: '1px solid var(--gray-border)', margin: '12px 0 0', paddingTop: 12 }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 10 }}>Honorários de êxito</div>
             <div className={styles.formRow}>
@@ -940,13 +961,12 @@ export default function CarteiraPage() {
                 % diferente por tipo de ativo
               </label>
             </div>
-            {!form.exito_split && fl('% êxito (geral)', fi('percentual_sucesso_geral', 'number', 'Ex: 20'))}
+            {!form.exito_split && fl('% êxito (geral)', fi('percentual_sucesso_geral', 'number'))}
             {form.exito_split && (
-              <>{fl('% êxito imobiliário', fi('percentual_sucesso_imob', 'number', 'Ex: 20'))}
-                {fl('% êxito financeiro (deb./fundos)', fi('percentual_sucesso_fin', 'number', 'Ex: 20'))}</>
+              <>{fl('% êxito imobiliário', fi('percentual_sucesso_imob', 'number'))}
+                {fl('% êxito financeiro', fi('percentual_sucesso_fin', 'number'))}</>
             )}
           </div>
-
           <div style={{ marginTop: 12 }}>
             {fl('Observações', fta('observacoes', 2))}
             {editandoClienteId && fl('Status', fs('ativo', [{ value: 'true', label: 'Ativo' }, { value: 'false', label: 'Inativo' }]))}
@@ -964,11 +984,11 @@ export default function CarteiraPage() {
           <div style={{ borderTop: '1px solid var(--gray-border)', margin: '10px 0', paddingTop: 10 }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Cadeia estrutural</div>
             {fl('Prestadora', fi('prestadora_nome', 'text', 'Apex Realty'))}
-            {fl('CNPJ prestadora', fi('prestadora_cnpj', 'text', '00.000.000/0001-00'))}
-            {fl('Razão social do veículo', fi('nome_razao_social', 'text', 'ABMPARSPE 12 PARTICIPACOES LTDA'))}
-            {fl('CNPJ do veículo', fi('cnpj_empreendimento', 'text', '00.000.000/0001-00'))}
-            {fl('SPE executora', fi('spe_nome', 'text', 'Nome da SPE'))}
-            {fl('CNPJ SPE', fi('spe_cnpj', 'text', '00.000.000/0001-00'))}
+            {fl('CNPJ prestadora', fi('prestadora_cnpj'))}
+            {fl('Razão social do veículo', fi('nome_razao_social'))}
+            {fl('CNPJ do veículo', fi('cnpj_empreendimento'))}
+            {fl('SPE executora', fi('spe_nome'))}
+            {fl('CNPJ SPE', fi('spe_cnpj'))}
           </div>
           <div style={{ borderTop: '1px solid var(--gray-border)', margin: '10px 0', paddingTop: 10 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
@@ -978,11 +998,9 @@ export default function CarteiraPage() {
             {(form.subveiculos ?? []).map((sv: any, idx: number) => (
               <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 120px 32px', gap: 6, marginBottom: 6, alignItems: 'end' }}>
                 <div><label style={{ fontSize: 11, color: 'var(--gray-mid)' }}>Nome</label>
-                  <input className={styles.input} value={sv.nome} placeholder="Nome"
-                    onChange={e => { const s = [...form.subveiculos]; s[idx] = { ...sv, nome: e.target.value }; inp('subveiculos', s) }} /></div>
+                  <input className={styles.input} value={sv.nome} placeholder="Nome" onChange={e => { const s = [...form.subveiculos]; s[idx] = { ...sv, nome: e.target.value }; inp('subveiculos', s) }} /></div>
                 <div><label style={{ fontSize: 11, color: 'var(--gray-mid)' }}>CNPJ</label>
-                  <input className={styles.input} value={sv.cnpj} placeholder="00.000.000/0001-00"
-                    onChange={e => { const s = [...form.subveiculos]; s[idx] = { ...sv, cnpj: e.target.value }; inp('subveiculos', s) }} /></div>
+                  <input className={styles.input} value={sv.cnpj} placeholder="00.000.000/0001-00" onChange={e => { const s = [...form.subveiculos]; s[idx] = { ...sv, cnpj: e.target.value }; inp('subveiculos', s) }} /></div>
                 <div><label style={{ fontSize: 11, color: 'var(--gray-mid)' }}>Tipo</label>
                   <select className={styles.input} value={sv.tipo} onChange={e => { const s = [...form.subveiculos]; s[idx] = { ...sv, tipo: e.target.value }; inp('subveiculos', s) }}>
                     <option value="SCP">SCP</option><option value="SPE">SPE</option><option value="Cota">Cota</option><option value="Outro">Outro</option>
@@ -992,8 +1010,8 @@ export default function CarteiraPage() {
               </div>
             ))}
           </div>
-          {fl('Tipo desenvolvimento', fi('tipo_desenvolvimento', 'text', 'Residencial, Loteamento...'))}
-          {fl('Localização', fi('localizacao', 'text', 'Ex: Vitória, ES'))}
+          {fl('Tipo desenvolvimento', fi('tipo_desenvolvimento'))}
+          {fl('Localização', fi('localizacao'))}
           {fl('Descrição', fta('descricao', 2))}
           <button className={styles.btnPrimary} onClick={() => editandoEmpId ? atualizarEmpreendimento.mutate() : salvarEmpreendimento.mutate()} disabled={salvarEmpreendimento.isPending || atualizarEmpreendimento.isPending}>
             {(salvarEmpreendimento.isPending || atualizarEmpreendimento.isPending) ? 'Salvando...' : 'Salvar'}
@@ -1001,45 +1019,43 @@ export default function CarteiraPage() {
         </Modal>
       )}
 
-      {/* ── MODAL EMISSÃO ─────────────────────────────────────────── */}
+      {/* ── MODAL EMISSÃO ────────────────────────────────────────── */}
       {modal === 'emissao' && (
         <Modal title="Nova Emissão de Debênture" onClose={closeModal} width={520}>
           {fl('Nome da Série *', fi('nome_serie', 'text', 'Ex: APEX I'))}
           {fl('Nº da Emissão *', fi('numero_emissao', 'number'))}
-          {fl('Emissor *', fi('emissor', 'text', 'Razão social do emissor'))}
-          {fl('CNPJ Emissor', fi('cnpj_emissor', 'text', '00.000.000/0001-00'))}
-          {fl('Indexador', fi('indexador', 'text', 'Ex: CDI, IPCA'))}
-          {fl('Taxa Adicional', fi('taxa_adicional', 'text', 'Ex: + 2% a.a.'))}
+          {fl('Emissor *', fi('emissor'))}
+          {fl('CNPJ Emissor', fi('cnpj_emissor'))}
+          {fl('Indexador', fi('indexador', 'text', 'CDI, IPCA...'))}
+          {fl('Taxa Adicional', fi('taxa_adicional', 'text', '+ 2% a.a.'))}
           {fl('Data Início', fi('data_inicio_emissao', 'date'))}
           {fl('Data Vencimento Previsto', fi('data_vencimento_previsto', 'date'))}
           <button className={styles.btnPrimary} onClick={() => salvarEmissao.mutate()} disabled={salvarEmissao.isPending}>{salvarEmissao.isPending ? 'Salvando...' : 'Salvar'}</button>
         </Modal>
       )}
 
-      {/* ── MODAL DEBÊNTURE (completo com resgate) ───────────────── */}
+      {/* ── MODAL DEBÊNTURE ──────────────────────────────────────── */}
       {modal === 'debenture' && (
-        <Modal title="Nova Posição — Debênture" onClose={closeModal} width={560}>
+        <Modal title={editandoDebId ? 'Editar Debênture' : 'Nova Posição — Debênture'} onClose={closeModal} width={560}>
           {fl('Cliente *', <ComboSelect value={form.cliente_id} onChange={v => inp('cliente_id', Number(v))} options={clienteOptions} placeholder="Selecione o cliente..." />)}
           {fl('Emissão *', <ComboSelect value={form.emissao_id} onChange={v => inp('emissao_id', Number(v))} options={emissoes.map((e: any) => ({ value: e.id, label: `${e.nome_serie} — ${e.emissor}` }))} placeholder="Selecione a emissão..." />)}
-          {fl('Nº Cautela *', fi('numero_cautela', 'text', 'Ex: CAU-001'))}
+          {fl('Nº Cautela *', fi('numero_cautela', 'text', 'CAU-001'))}
           {fl('Nº de Debêntures', fi('numero_debentures', 'number'))}
           {fl('Valor Aplicado (R$) *', fi('valor_aplicado', 'number'))}
           {fl('Data de Aquisição *', fi('data_aquisicao', 'date'))}
           {fl('Valor Atual Estimado (R$)', fi('valor_atual_estimado', 'number'))}
-
           <div style={{ borderTop: '1px solid var(--gray-border)', margin: '10px 0', paddingTop: 10 }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Resgate</div>
             {fl('Status', fs('status_resgate', [{ value: 'Ativo', label: 'Ativo' }, { value: 'Resgate Solicitado', label: 'Resgate Solicitado' }, { value: 'Resgatado', label: 'Resgatado' }]))}
             {(form.status_resgate === 'Resgate Solicitado' || form.status_resgate === 'Resgatado') && (
-              <>{fl('Data do pedido de resgate', fi('data_pedido_resgate', 'date'))}
+              <>{fl('Data pedido de resgate', fi('data_pedido_resgate', 'date'))}
                 {fl('Resposta Rhino / emissor', fta('resposta_rhino', 2))}</>
             )}
             {form.status_resgate === 'Resgatado' && (
               <>
                 <div className={styles.formRow}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
-                    <input type="checkbox" checked={!!form.foi_pago} onChange={e => inp('foi_pago', e.target.checked)} />
-                    Pagamento efetuado
+                    <input type="checkbox" checked={!!form.foi_pago} onChange={e => inp('foi_pago', e.target.checked)} /> Pagamento efetuado
                   </label>
                 </div>
                 {form.foi_pago && (
@@ -1048,37 +1064,38 @@ export default function CarteiraPage() {
               </>
             )}
           </div>
-
           <div style={{ borderTop: '1px solid var(--gray-border)', margin: '10px 0', paddingTop: 10 }}>
             <div className={styles.formRow}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
-                <input type="checkbox" checked={!!form.faz_parte_honorarios} onChange={e => inp('faz_parte_honorarios', e.target.checked)} />
-                Faz parte de honorários de êxito
+                <input type="checkbox" checked={!!form.faz_parte_honorarios} onChange={e => inp('faz_parte_honorarios', e.target.checked)} /> Faz parte de honorários de êxito
               </label>
             </div>
-            {form.faz_parte_honorarios && fl('% Êxito', fi('percentual_sucesso_honor', 'number', 'Ex: 20'))}
+            {form.faz_parte_honorarios && fl('% Êxito', fi('percentual_sucesso_honor', 'number'))}
           </div>
-          <button className={styles.btnPrimary} onClick={() => salvarDebenture.mutate()} disabled={salvarDebenture.isPending}>{salvarDebenture.isPending ? 'Salvando...' : 'Salvar'}</button>
+          <button className={styles.btnPrimary} onClick={() => editandoDebId ? atualizarDebenture.mutate() : salvarDebenture.mutate()} disabled={salvarDebenture.isPending || atualizarDebenture.isPending}>
+            {(salvarDebenture.isPending || atualizarDebenture.isPending) ? 'Salvando...' : 'Salvar'}
+          </button>
         </Modal>
       )}
 
       {/* ── MODAL IMOBILIÁRIO ────────────────────────────────────── */}
       {modal === 'imobiliario' && (
-        <Modal title="Nova Posição — Imobiliário" onClose={closeModal} width={520}>
+        <Modal title={editandoImobId ? 'Editar posição imobiliária' : 'Nova Posição — Imobiliário'} onClose={closeModal} width={520}>
           {fl('Cliente *', <ComboSelect value={form.cliente_id} onChange={v => inp('cliente_id', Number(v))} options={clienteOptions} placeholder="Selecione o cliente..." />)}
           {fl('Empreendimento *', <ComboSelect value={form.empreendimento_id} onChange={v => inp('empreendimento_id', Number(v))} options={empreendimentos.map((e: any) => ({ value: e.id, label: e.nome_venda }))} placeholder="Selecione o empreendimento..." />)}
           {fl('Valor Total Comprometido (R$) *', fi('valor_total_compromissado', 'number'))}
-          {fl('Valor Efetivamente Investido (R$) *', fi('valor_efetivamente_investido', 'number'))}
+          {fl('Valor Efetivamente Investido (R$)', fi('valor_efetivamente_investido', 'number'))}
           {fl('% Participação', fi('percentual_participacao', 'number', '100'))}
           {fl('Data Primeiro Aporte', fi('data_primeiro_aporte', 'date'))}
           <div className={styles.formRow}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
-              <input type="checkbox" checked={!!form.faz_parte_honorarios} onChange={e => inp('faz_parte_honorarios', e.target.checked)} />
-              Faz parte de honorários de êxito
+              <input type="checkbox" checked={!!form.faz_parte_honorarios} onChange={e => inp('faz_parte_honorarios', e.target.checked)} /> Faz parte de honorários de êxito
             </label>
           </div>
           {form.faz_parte_honorarios && fl('% Êxito', fi('percentual_sucesso_honorario', 'number'))}
-          <button className={styles.btnPrimary} onClick={() => salvarImobiliario.mutate()} disabled={salvarImobiliario.isPending}>{salvarImobiliario.isPending ? 'Salvando...' : 'Salvar'}</button>
+          <button className={styles.btnPrimary} onClick={() => editandoImobId ? atualizarImobiliario.mutate() : salvarImobiliario.mutate()} disabled={salvarImobiliario.isPending || atualizarImobiliario.isPending}>
+            {(salvarImobiliario.isPending || atualizarImobiliario.isPending) ? 'Salvando...' : 'Salvar'}
+          </button>
         </Modal>
       )}
 
@@ -1090,14 +1107,14 @@ export default function CarteiraPage() {
           {fl('Gestora', fi('gestora'))}
           {fl('Administradora', fi('administradora'))}
           {fl('Tipo', fi('tipo_fundo', 'text', 'FII, FIA, Multimercado...'))}
-          {fl('Indexador', fi('indexador', 'text', 'CDI, IPCA...'))}
+          {fl('Indexador', fi('indexador'))}
           <button className={styles.btnPrimary} onClick={() => salvarFundoRef.mutate()} disabled={salvarFundoRef.isPending}>{salvarFundoRef.isPending ? 'Salvando...' : 'Salvar'}</button>
         </Modal>
       )}
 
       {/* ── MODAL FUNDO POSIÇÃO ──────────────────────────────────── */}
       {modal === 'fundo' && (
-        <Modal title="Nova Posição — Fundo" onClose={closeModal} width={520}>
+        <Modal title={editandoFundoId ? 'Editar posição — Fundo' : 'Nova Posição — Fundo'} onClose={closeModal} width={520}>
           {fl('Cliente *', <ComboSelect value={form.cliente_id} onChange={v => inp('cliente_id', Number(v))} options={clienteOptions} placeholder="Selecione o cliente..." />)}
           {fl('Fundo *', <ComboSelect value={form.fundo_id} onChange={v => inp('fundo_id', Number(v))} options={fundosRef.map((f: any) => ({ value: f.id, label: f.nome_fundo }))} placeholder="Selecione o fundo..." />)}
           {fl('Valor Aplicado (R$) *', fi('valor_aplicado', 'number'))}
@@ -1106,19 +1123,19 @@ export default function CarteiraPage() {
           {fl('Nº Conta', fi('numero_conta'))}
           <div className={styles.formRow}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
-              <input type="checkbox" checked={!!form.faz_parte_honorarios} onChange={e => inp('faz_parte_honorarios', e.target.checked)} />
-              Faz parte de honorários de êxito
+              <input type="checkbox" checked={!!form.faz_parte_honorarios} onChange={e => inp('faz_parte_honorarios', e.target.checked)} /> Faz parte de honorários de êxito
             </label>
           </div>
           {form.faz_parte_honorarios && fl('% Êxito', fi('percentual_sucesso_honor', 'number'))}
           <div className={styles.formRow}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
-              <input type="checkbox" checked={!!form.tem_direito_recompra} onChange={e => inp('tem_direito_recompra', e.target.checked)} />
-              Tem direito de recompra
+              <input type="checkbox" checked={!!form.tem_direito_recompra} onChange={e => inp('tem_direito_recompra', e.target.checked)} /> Tem direito de recompra
             </label>
           </div>
           {form.tem_direito_recompra && fl('Data vencimento recompra', fi('data_vencimento_recompra', 'date'))}
-          <button className={styles.btnPrimary} onClick={() => salvarFundo.mutate()} disabled={salvarFundo.isPending}>{salvarFundo.isPending ? 'Salvando...' : 'Salvar'}</button>
+          <button className={styles.btnPrimary} onClick={() => editandoFundoId ? atualizarFundo.mutate() : salvarFundo.mutate()} disabled={salvarFundo.isPending || atualizarFundo.isPending}>
+            {(salvarFundo.isPending || atualizarFundo.isPending) ? 'Salvando...' : 'Salvar'}
+          </button>
         </Modal>
       )}
 

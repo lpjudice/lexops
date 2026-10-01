@@ -57,7 +57,7 @@ class CarteiraRelatoriosService:
         )
 
         # Título
-        story.append(Paragraph("📊 CARTEIRA DE ATIVOS", title_style))
+        story.append(Paragraph("CARTEIRA DE ATIVOS", title_style))
         story.append(Paragraph(f"Cliente: <b>{cliente.nome or f'Cliente {cliente.id}'}</b>", styles['Normal']))
         story.append(Paragraph(f"Data: {datetime.now().strftime('%d/%m/%Y %H:%M')}", styles['Normal']))
         story.append(Spacer(1, 0.3*inch))
@@ -98,14 +98,16 @@ class CarteiraRelatoriosService:
 
         # Debêntures
         if debentures:
-            story.append(Paragraph("💰 DEBÊNTURES", title_style))
-            deb_data = [['Cautela', 'Valor Aplicado', 'Valor Atual', 'Variação']]
+            story.append(Paragraph("DEBENTURES", title_style))
+            deb_data = [['Cautela', 'Valor Aplicado', 'Valor Atual', 'Variacao']]
             for d in debentures:
-                var = ((d.valor_atual_estimado - d.valor_aplicado) / d.valor_aplicado * 100) if d.valor_aplicado > 0 else 0
+                apl = d.valor_aplicado or 0
+                atu = d.valor_atual_estimado or apl
+                var = ((atu - apl) / apl * 100) if apl > 0 else 0
                 deb_data.append([
                     d.numero_cautela or '-',
-                    f'R$ {d.valor_aplicado:,.0f}',
-                    f'R$ {d.valor_atual_estimado:,.0f}',
+                    f'R$ {apl:,.0f}',
+                    f'R$ {atu:,.0f}',
                     f'{var:.2f}%'
                 ])
 
@@ -123,14 +125,14 @@ class CarteiraRelatoriosService:
 
         # Imobiliário
         if imobiliario:
-            story.append(Paragraph("🏢 IMOBILIÁRIO", title_style))
-            imob_data = [['Empreendimento', 'Investido', 'Retorno Esperado', '%']]
+            story.append(Paragraph("IMOBILIARIO", title_style))
+            imob_data = [['Empreendimento', 'Comprometido', 'Investido', '%']]
             for i in imobiliario:
                 imob_data.append([
-                    f'Empreendimento {i.id}',
-                    f'R$ {i.valor_efetivamente_investido:,.0f}',
-                    f'R$ {i.valor_esperado_retorno:,.0f}',
-                    f'{i.percentual_participacao:.1f}%'
+                    f'Emp. {i.empreendimento_id}',
+                    f'R$ {(i.valor_total_compromissado or 0):,.0f}',
+                    f'R$ {(i.valor_efetivamente_investido or 0):,.0f}',
+                    f'{(i.percentual_participacao or 0):.1f}%'
                 ])
 
             imob_table = Table(imob_data, colWidths=[2*inch, 1.5*inch, 1.5*inch, 1*inch])
@@ -147,17 +149,16 @@ class CarteiraRelatoriosService:
 
         # Fundos
         if fundos:
-            story.append(Paragraph("📈 FUNDOS", title_style))
-            fund_data = [['Fundo', 'Investido', 'Valor Atual', 'Cotas']]
+            story.append(Paragraph("FUNDOS", title_style))
+            fund_data = [['Fundo', 'Aplicado', 'Valor Atual']]
             for f in fundos:
                 fund_data.append([
-                    f'Fundo {f.id}',
-                    f'R$ {f.valor_aplicado:,.0f}',
-                    f'R$ {f.valor_atual_estimado or 0:,.0f}',
-                    f'{f.quantidade_cotas:.0f}'
+                    f'Fundo {f.fundo_id}',
+                    f'R$ {(f.valor_aplicado or 0):,.0f}',
+                    f'R$ {(f.valor_atual_estimado or 0):,.0f}',
                 ])
 
-            fund_table = Table(fund_data, colWidths=[2*inch, 1.5*inch, 1.5*inch, 1.5*inch])
+            fund_table = Table(fund_data, colWidths=[2*inch, 1.5*inch, 1.5*inch])
             fund_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#3B82F6')),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
