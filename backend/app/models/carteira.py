@@ -169,6 +169,9 @@ class CarteiraImobiliarioEmpreendimento(Base):
     spe_nome = Column(String(255), nullable=True)
     spe_cnpj = Column(String(20), nullable=True)
 
+    # Sub-veículos (SCPs, cotas, etc.) — array de {nome, cnpj, tipo}
+    subveiculos = Column(JSON, default=list, nullable=True)
+
     tipo_desenvolvimento = Column(String(100), nullable=True)
     localizacao = Column(String(255), nullable=True)
     abmparse_veiculo = Column(String(100), nullable=True)

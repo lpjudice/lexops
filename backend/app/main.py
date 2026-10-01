@@ -1461,6 +1461,7 @@ def _run_migrations() -> None:
             "ALTER TABLE carteira_imobiliario_empreendimento ADD COLUMN IF NOT EXISTS prestadora_cnpj VARCHAR(20)",
             "ALTER TABLE carteira_imobiliario_empreendimento ADD COLUMN IF NOT EXISTS spe_nome VARCHAR(255)",
             "ALTER TABLE carteira_imobiliario_empreendimento ADD COLUMN IF NOT EXISTS spe_cnpj VARCHAR(20)",
+            "ALTER TABLE carteira_imobiliario_empreendimento ADD COLUMN IF NOT EXISTS subveiculos JSONB",
         ]:
             conn.execute(text(_col))
 
