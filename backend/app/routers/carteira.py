@@ -37,17 +37,20 @@ router = APIRouter(prefix="/carteira", tags=["carteira"])
 @router.get("/clientes")
 def listar_clientes(
     skip: int = Query(0),
-    limit: int = Query(100),
+    limit: int = Query(200),
     ativo: Optional[bool] = None,
+    busca: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     """Lista todos os clientes da carteira"""
     query = db.query(CarteiraCliente)
     if ativo is not None:
         query = query.filter(CarteiraCliente.ativo == ativo)
+    if busca:
+        query = query.filter(CarteiraCliente.nome.ilike(f"%{busca}%"))
 
     total = query.count()
-    clientes = query.offset(skip).limit(limit).all()
+    clientes = query.order_by(CarteiraCliente.nome).offset(skip).limit(limit).all()
 
     return {
         "total": total,

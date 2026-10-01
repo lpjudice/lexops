@@ -13,25 +13,30 @@ const brl = (v: number | null | undefined) =>
 const pct = (v: number | null | undefined) =>
   `${(v ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}%`
 
-const TABS: { key: Tab; label: string }[] = [
-  { key: 'clientes', label: 'Clientes' },
+const TABS_REF: { key: Tab; label: string }[] = [
   { key: 'emissoes', label: 'Emissões' },
-  { key: 'debentures', label: 'Debêntures' },
   { key: 'empreendimentos', label: 'Empreendimentos' },
-  { key: 'imobiliario', label: 'Imobiliário' },
   { key: 'fundos-ref', label: 'Fundos Ref.' },
-  { key: 'fundos', label: 'Fundos Posição' },
   { key: 'estrategias', label: 'Estratégias' },
+]
+
+const TABS_POS: { key: Tab; label: string }[] = [
+  { key: 'clientes', label: 'Clientes' },
+  { key: 'debentures', label: 'Debêntures' },
+  { key: 'imobiliario', label: 'Imobiliário' },
+  { key: 'fundos', label: 'Fundos Posição' },
 ]
 
 export default function CarteiraPage() {
   const [tab, setTab] = useState<Tab>('debentures')
   const [modal, setModal] = useState<string | null>(null)
   const [form, setForm] = useState<Record<string, any>>({})
+  const [editandoClienteId, setEditandoClienteId] = useState<number | null>(null)
+  const [buscaSistema, setBuscaSistema] = useState('')
   const qc = useQueryClient()
 
   const inp = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }))
-  const closeModal = () => { setModal(null); setForm({}) }
+  const closeModal = () => { setModal(null); setForm({}); setEditandoClienteId(null); setBuscaSistema('') }
 
   // ── queries ──────────────────────────────────────────────────────
   const { data: dash } = useQuery({
@@ -40,7 +45,7 @@ export default function CarteiraPage() {
   })
   const { data: clientesRes } = useQuery({
     queryKey: ['carteira-clientes'],
-    queryFn: () => api.get('/carteira/clientes').then(r => r.data),
+    queryFn: () => api.get('/carteira/clientes', { params: { limit: 200 } }).then(r => r.data),
   })
   const { data: emissoesRef = [] } = useQuery({
     queryKey: ['carteira-emissoes'],
@@ -48,7 +53,7 @@ export default function CarteiraPage() {
   })
   const { data: debenturesRes } = useQuery({
     queryKey: ['carteira-debentures'],
-    queryFn: () => api.get('/carteira/debentures').then(r => r.data),
+    queryFn: () => api.get('/carteira/debentures', { params: { limit: 200 } }).then(r => r.data),
   })
   const { data: empreendimentosRef = [] } = useQuery({
     queryKey: ['carteira-empreendimentos'],
@@ -56,7 +61,7 @@ export default function CarteiraPage() {
   })
   const { data: imobiliarioRes } = useQuery({
     queryKey: ['carteira-imobiliario'],
-    queryFn: () => api.get('/carteira/imobiliario').then(r => r.data),
+    queryFn: () => api.get('/carteira/imobiliario', { params: { limit: 200 } }).then(r => r.data),
   })
   const { data: fundosRefRes = [] } = useQuery({
     queryKey: ['carteira-fundos-ref'],
@@ -64,11 +69,17 @@ export default function CarteiraPage() {
   })
   const { data: fundosRes } = useQuery({
     queryKey: ['carteira-fundos'],
-    queryFn: () => api.get('/carteira/fundos').then(r => r.data),
+    queryFn: () => api.get('/carteira/fundos', { params: { limit: 200 } }).then(r => r.data),
   })
   const { data: estrategiasRes } = useQuery({
     queryKey: ['carteira-estrategias'],
     queryFn: () => api.get('/carteira/estrategias').then(r => r.data),
+  })
+  // Busca de clientes no sistema principal (para vincular ao carteira_cliente)
+  const { data: clientesSistema = [] } = useQuery({
+    queryKey: ['clientes-sistema-busca', buscaSistema],
+    queryFn: () => api.get('/clientes', { params: { busca: buscaSistema, limit: 10 } }).then(r => r.data?.data ?? r.data),
+    enabled: buscaSistema.length >= 2,
   })
 
   const clientes: any[] = clientesRes?.data ?? []
@@ -81,6 +92,13 @@ export default function CarteiraPage() {
   const fundosRef: any[] = Array.isArray(fundosRefRes) ? fundosRefRes : []
 
   // ── lookup helpers ────────────────────────────────────────────────
+  const clienteNome = (id: number) => {
+    const c = clientes.find((c: any) => c.id === id)
+    if (!c) return `#${id}`
+    if (c.nome) return c.nome
+    if (c.observacoes?.startsWith('[IMPORTADO XLS] ')) return c.observacoes.replace('[IMPORTADO XLS] ', '')
+    return `#${id}`
+  }
   const emissaoNome = (id: number) => emissoes.find(e => e.id === id)?.nome_serie ?? `#${id}`
   const empreendimentoNome = (id: number) => empreendimentos.find(e => e.id === id)?.nome_venda ?? `#${id}`
   const fundoNome = (id: number) => fundosRef.find(f => f.id === id)?.nome_fundo ?? `#${id}`
@@ -99,14 +117,56 @@ export default function CarteiraPage() {
     onError: (e: any) => alert(e?.response?.data?.detail || 'Erro ao salvar'),
   })
 
-  const salvarCliente = mk('/carteira/clientes', ['carteira-clientes', 'carteira-dash'], ['usuario_cliente_id', 'pro_labore_valor', 'percentual_sucesso_geral'])
+  const salvarCliente = mk('/carteira/clientes', ['carteira-clientes', 'carteira-dash'],
+    ['pro_labore_valor', 'percentual_sucesso_geral'])
+
+  const atualizarCliente = useMutation({
+    mutationFn: () => {
+      const payload: Record<string, any> = { ...form }
+      ;['pro_labore_valor', 'percentual_sucesso_geral'].forEach(k => {
+        if (payload[k] !== undefined && payload[k] !== '') payload[k] = Number(payload[k])
+      })
+      return api.put(`/carteira/clientes/${editandoClienteId}`, payload).then(r => r.data)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['carteira-clientes'] })
+      qc.invalidateQueries({ queryKey: ['carteira-dash'] })
+      closeModal()
+    },
+    onError: (e: any) => alert(e?.response?.data?.detail || 'Erro ao salvar'),
+  })
+
   const salvarEmissao = mk('/carteira/emissoes', ['carteira-emissoes'], ['numero_emissao'])
-  const salvarDebenture = mk('/carteira/debentures', ['carteira-debentures', 'carteira-dash'], ['cliente_id', 'emissao_id', 'valor_aplicado', 'valor_atual_estimado', 'percentual_sucesso_honor', 'numero_debentures'])
+  const salvarDebenture = mk('/carteira/debentures', ['carteira-debentures', 'carteira-dash'],
+    ['cliente_id', 'emissao_id', 'valor_aplicado', 'valor_atual_estimado', 'percentual_sucesso_honor', 'numero_debentures'])
   const salvarEmpreendimento = mk('/carteira/empreendimentos', ['carteira-empreendimentos'])
-  const salvarImobiliario = mk('/carteira/imobiliario', ['carteira-imobiliario', 'carteira-dash'], ['cliente_id', 'empreendimento_id', 'valor_total_compromissado', 'valor_efetivamente_investido', 'percentual_participacao', 'percentual_sucesso_honorario'])
+  const salvarImobiliario = mk('/carteira/imobiliario', ['carteira-imobiliario', 'carteira-dash'],
+    ['cliente_id', 'empreendimento_id', 'valor_total_compromissado', 'valor_efetivamente_investido', 'percentual_participacao', 'percentual_sucesso_honorario'])
   const salvarFundoRef = mk('/carteira/fundos-referencia', ['carteira-fundos-ref'])
-  const salvarFundo = mk('/carteira/fundos', ['carteira-fundos', 'carteira-dash'], ['cliente_id', 'fundo_id', 'valor_aplicado', 'valor_atual_estimado', 'percentual_sucesso_honor'])
+  const salvarFundo = mk('/carteira/fundos', ['carteira-fundos', 'carteira-dash'],
+    ['cliente_id', 'fundo_id', 'valor_aplicado', 'valor_atual_estimado', 'percentual_sucesso_honor'])
   const salvarEstrategia = mk('/carteira/estrategias', ['carteira-estrategias'])
+
+  // ── abrir edição de cliente ───────────────────────────────────────
+  const abrirEdicaoCliente = (c: any) => {
+    const nomeAtual = c.nome ?? (c.observacoes?.startsWith('[IMPORTADO XLS] ')
+      ? c.observacoes.replace('[IMPORTADO XLS] ', '') : '')
+    setForm({
+      nome: nomeAtual,
+      tipo_pessoa: c.tipo_pessoa ?? 'PF',
+      cpf: c.cpf ?? '',
+      email: c.email ?? '',
+      telefone: c.telefone ?? '',
+      pro_labore_tipo: c.pro_labore_tipo ?? 'fixo',
+      pro_labore_valor: c.pro_labore_valor ?? '',
+      percentual_sucesso_geral: c.percentual_sucesso_geral ?? '',
+      cliente_uuid: c.cliente_uuid ?? '',
+      observacoes: c.observacoes ?? '',
+      ativo: c.ativo ?? true,
+    })
+    setEditandoClienteId(c.id)
+    setModal('cliente')
+  }
 
   const emptyRow = (cols: number) => (
     <tr>
@@ -148,6 +208,11 @@ export default function CarteiraPage() {
     </div>
   )
 
+  const clienteOptions = clientes.map((c: any) => ({
+    value: c.id,
+    label: clienteNome(c.id),
+  }))
+
   return (
     <div style={{ padding: '24px 28px' }}>
       <div className={styles.pageHeader}>
@@ -178,9 +243,20 @@ export default function CarteiraPage() {
         </div>
       </div>
 
-      {/* Tab Bar */}
+      {/* Tab Bar com dois grupos */}
       <div className={cs.tabBar}>
-        {TABS.map(t => (
+        <span className={cs.tabGroupLabel}>Carteira</span>
+        {TABS_POS.map(t => (
+          <button
+            key={t.key}
+            className={`${cs.tabBtn} ${tab === t.key ? cs.tabBtnActive : ''}`}
+            onClick={() => setTab(t.key)}
+          >
+            {t.label}
+          </button>
+        ))}
+        <span className={cs.tabGroupLabel} style={{ marginLeft: 8 }}>Referência</span>
+        {TABS_REF.map(t => (
           <button
             key={t.key}
             className={`${cs.tabBtn} ${tab === t.key ? cs.tabBtnActive : ''}`}
@@ -194,24 +270,37 @@ export default function CarteiraPage() {
       {/* ── CLIENTES ─────────────────────────────────────────────── */}
       {tab === 'clientes' && (
         <>
-          {addBtn('Novo Cliente', () => { setForm({ pro_labore_tipo: 'fixo', tipo_pessoa: 'PF' }); setModal('cliente') })}
+          {addBtn('Novo Cliente', () => {
+            setForm({ pro_labore_tipo: 'fixo', tipo_pessoa: 'PF' })
+            setEditandoClienteId(null)
+            setModal('cliente')
+          })}
           <div className={styles.tableCard}>
             <table className={styles.table}>
               <thead>
                 <tr>
-                  <th>#</th><th>ID Sistema</th><th>Tipo PL</th>
-                  <th>Pro-Labore</th><th>% Sucesso</th><th>Status</th>
+                  <th>Nome</th><th>Tipo</th><th>CPF</th>
+                  <th>Modelo honor.</th><th>Pro-Labore</th><th>% Sucesso</th><th>Status</th><th></th>
                 </tr>
               </thead>
               <tbody>
-                {clientes.length === 0 ? emptyRow(6) : clientes.map((c: any) => (
+                {clientes.length === 0 ? emptyRow(8) : clientes.map((c: any) => (
                   <tr key={c.id}>
-                    <td>{c.id}</td>
-                    <td>{c.usuario_cliente_id}</td>
-                    <td>{c.pro_labore_tipo}</td>
-                    <td>{brl(c.pro_labore_valor)}</td>
-                    <td>{pct(c.percentual_sucesso_geral)}</td>
+                    <td><strong>{clienteNome(c.id)}</strong></td>
+                    <td><span className={styles.badge}>{c.tipo_pessoa ?? 'PF'}</span></td>
+                    <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{c.cpf ?? '—'}</td>
+                    <td>{c.pro_labore_tipo === 'percentual' ? '% carteira' : 'mensal fixo'}</td>
+                    <td>{c.pro_labore_valor ? brl(c.pro_labore_valor) : '—'}</td>
+                    <td>{c.percentual_sucesso_geral ? pct(c.percentual_sucesso_geral) : '—'}</td>
                     <td>{statusBadge(c.ativo)}</td>
+                    <td>
+                      <button
+                        style={{ background: 'none', border: '1px solid var(--gray-border)', borderRadius: 4, padding: '3px 10px', cursor: 'pointer', fontSize: 12, color: 'var(--gray-mid)' }}
+                        onClick={() => abrirEdicaoCliente(c)}
+                      >
+                        Editar
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -258,17 +347,16 @@ export default function CarteiraPage() {
             <table className={styles.table}>
               <thead>
                 <tr>
-                  <th>#</th><th>Cautela</th><th>Emissão</th><th>Cliente</th>
+                  <th>Cautela</th><th>Emissão</th><th>Cliente</th>
                   <th>Aplicado</th><th>Atual</th><th>Status</th><th>Honorários</th>
                 </tr>
               </thead>
               <tbody>
-                {debentures.length === 0 ? emptyRow(8) : debentures.map((d: any) => (
+                {debentures.length === 0 ? emptyRow(7) : debentures.map((d: any) => (
                   <tr key={d.id}>
-                    <td>{d.id}</td>
                     <td><strong>{d.numero_cautela}</strong></td>
                     <td>{emissaoNome(d.emissao_id)}</td>
-                    <td>#{d.cliente_id}</td>
+                    <td>{clienteNome(d.cliente_id)}</td>
                     <td>{brl(d.valor_aplicado)}</td>
                     <td>{d.valor_atual_estimado ? brl(d.valor_atual_estimado) : '—'}</td>
                     <td>{statusBadge(d.status_resgate)}</td>
@@ -318,16 +406,15 @@ export default function CarteiraPage() {
             <table className={styles.table}>
               <thead>
                 <tr>
-                  <th>#</th><th>Empreendimento</th><th>Cliente</th>
+                  <th>Empreendimento</th><th>Cliente</th>
                   <th>Comprometido</th><th>Investido</th><th>% Part.</th><th>Honorários</th>
                 </tr>
               </thead>
               <tbody>
-                {imobiliario.length === 0 ? emptyRow(7) : imobiliario.map((i: any) => (
+                {imobiliario.length === 0 ? emptyRow(6) : imobiliario.map((i: any) => (
                   <tr key={i.id}>
-                    <td>{i.id}</td>
                     <td>{empreendimentoNome(i.empreendimento_id)}</td>
-                    <td>#{i.cliente_id}</td>
+                    <td>{clienteNome(i.cliente_id)}</td>
                     <td>{brl(i.valor_total_compromissado)}</td>
                     <td>{brl(i.valor_efetivamente_investido)}</td>
                     <td>{pct(i.percentual_participacao)}</td>
@@ -378,16 +465,15 @@ export default function CarteiraPage() {
             <table className={styles.table}>
               <thead>
                 <tr>
-                  <th>#</th><th>Fundo</th><th>Cliente</th>
+                  <th>Fundo</th><th>Cliente</th>
                   <th>Aplicado</th><th>Atual</th><th>Data Aplicação</th><th>Honorários</th>
                 </tr>
               </thead>
               <tbody>
-                {fundos.length === 0 ? emptyRow(7) : fundos.map((f: any) => (
+                {fundos.length === 0 ? emptyRow(6) : fundos.map((f: any) => (
                   <tr key={f.id}>
-                    <td>{f.id}</td>
                     <td>{fundoNome(f.fundo_id)}</td>
-                    <td>#{f.cliente_id}</td>
+                    <td>{clienteNome(f.cliente_id)}</td>
                     <td>{brl(f.valor_aplicado)}</td>
                     <td>{f.valor_atual_estimado ? brl(f.valor_atual_estimado) : '—'}</td>
                     <td>{f.data_aplicacao ?? '—'}</td>
@@ -427,28 +513,141 @@ export default function CarteiraPage() {
 
       {/* ════════════════ MODAIS ════════════════════════════════════ */}
 
+      {/* ── MODAL CLIENTE (criar + editar) ───────────────────────── */}
       {modal === 'cliente' && (
-        <Modal title="Novo Cliente na Carteira" onClose={closeModal}>
-          <Field label="ID do Cliente no Sistema *">
-            <Inp k="usuario_cliente_id" type="number" placeholder="ID numérico do cliente" />
+        <Modal
+          title={editandoClienteId ? `Editar cliente — ${clienteNome(editandoClienteId)}` : 'Novo cliente na carteira'}
+          onClose={closeModal}
+          width={560}
+        >
+          {/* Vinculação ao sistema principal */}
+          <div style={{ background: 'var(--gray-light, #f8f9fa)', borderRadius: 6, padding: '10px 14px', marginBottom: 12 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--gray-mid)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
+              Vincular a cliente existente no sistema
+            </div>
+            <input
+              className={styles.input}
+              placeholder="Digite o nome para buscar..."
+              value={buscaSistema}
+              onChange={e => setBuscaSistema(e.target.value)}
+              style={{ marginBottom: clientesSistema.length > 0 ? 6 : 0 }}
+            />
+            {clientesSistema.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {clientesSistema.map((cs: any) => (
+                  <button
+                    key={cs.id}
+                    style={{ textAlign: 'left', background: 'white', border: '1px solid var(--gray-border)', borderRadius: 4, padding: '5px 10px', cursor: 'pointer', fontSize: 13 }}
+                    onClick={() => {
+                      inp('nome', cs.nome)
+                      inp('cpf', cs.cpf_cnpj ?? '')
+                      inp('email', cs.email ?? '')
+                      inp('telefone', cs.telefone ?? '')
+                      inp('tipo_pessoa', cs.tipo === 'PF' ? 'PF' : 'PJ')
+                      inp('cliente_uuid', cs.id)
+                      setBuscaSistema('')
+                    }}
+                  >
+                    <strong>{cs.nome}</strong>
+                    {cs.cpf_cnpj && <span style={{ color: 'var(--gray-mid)', marginLeft: 8, fontSize: 12 }}>{cs.cpf_cnpj}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+            {form.cliente_uuid && (
+              <div style={{ fontSize: 11, color: 'var(--teal, #0d9488)', marginTop: 4 }}>
+                ✓ Vinculado ao cadastro do sistema
+                <button
+                  style={{ marginLeft: 8, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gray-mid)', fontSize: 11 }}
+                  onClick={() => inp('cliente_uuid', '')}
+                >remover vínculo</button>
+              </div>
+            )}
+          </div>
+
+          <Field label="Nome completo *">
+            <Inp k="nome" placeholder="Nome do investidor" />
           </Field>
-          <Field label="Tipo Pessoa">
-            <Sel k="tipo_pessoa" options={[{ value: 'PF', label: 'PF — Pessoa Física' }, { value: 'PJ', label: 'PJ — Pessoa Jurídica' }]} />
+          <Field label="Tipo pessoa">
+            <Sel k="tipo_pessoa" options={[
+              { value: 'PF', label: 'PF — Pessoa Física' },
+              { value: 'PJ', label: 'PJ — Pessoa Jurídica' },
+            ]} />
           </Field>
-          <Field label="Tipo Pro-Labore">
-            <Sel k="pro_labore_tipo" options={[{ value: 'fixo', label: 'Fixo (mensal)' }, { value: 'percentual', label: 'Percentual sobre carteira' }]} />
+          <Field label={form.tipo_pessoa === 'PJ' ? 'CNPJ' : 'CPF'}>
+            <Inp k="cpf" placeholder={form.tipo_pessoa === 'PJ' ? '00.000.000/0001-00' : '000.000.000-00'} />
           </Field>
-          <Field label="Valor Pro-Labore (R$)">
-            <Inp k="pro_labore_valor" type="number" placeholder="Ex: 5000" />
+
+          {form.tipo_pessoa !== 'PJ' && (
+            <>
+              <Field label="Estado civil">
+                <Sel k="estado_civil" options={[
+                  { value: 'solteiro', label: 'Solteiro(a)' },
+                  { value: 'casado', label: 'Casado(a)' },
+                  { value: 'uniao_estavel', label: 'União estável' },
+                  { value: 'divorciado', label: 'Divorciado(a)' },
+                  { value: 'viuvo', label: 'Viúvo(a)' },
+                ]} />
+              </Field>
+              <Field label="Profissão">
+                <Inp k="profissao" placeholder="Ex: Empresário, Médico" />
+              </Field>
+            </>
+          )}
+
+          {form.tipo_pessoa === 'PJ' && (
+            <Field label="Representante legal">
+              <Inp k="representante_nome" placeholder="Nome do representante" />
+            </Field>
+          )}
+
+          <Field label="E-mail">
+            <Inp k="email" type="email" placeholder="email@exemplo.com" />
           </Field>
-          <Field label="% Sucesso Geral">
-            <Inp k="percentual_sucesso_geral" type="number" placeholder="Ex: 20" />
+          <Field label="Telefone">
+            <Inp k="telefone" placeholder="(27) 9 9999-9999" />
           </Field>
+
+          <div style={{ borderTop: '1px solid var(--gray-border)', margin: '12px 0', paddingTop: 12 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--gray-mid)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
+              Modelo de honorários
+            </div>
+            <Field label="Tipo de cobrança">
+              <Sel k="pro_labore_tipo" options={[
+                { value: 'fixo', label: 'Mensal fixo (pro-labore)' },
+                { value: 'percentual', label: 'Percentual sobre carteira' },
+                { value: 'nenhum', label: 'Nenhum (apenas êxito)' },
+              ]} />
+            </Field>
+            {form.pro_labore_tipo !== 'nenhum' && (
+              <Field label={form.pro_labore_tipo === 'percentual' ? '% da carteira (ao ano)' : 'Valor mensal (R$)'}>
+                <Inp k="pro_labore_valor" type="number" placeholder={form.pro_labore_tipo === 'percentual' ? 'Ex: 1.5' : 'Ex: 5000'} />
+              </Field>
+            )}
+            <Field label="% Honorários de êxito (geral)">
+              <Inp k="percentual_sucesso_geral" type="number" placeholder="Ex: 20" />
+            </Field>
+          </div>
+
           <Field label="Observações">
-            <textarea className={styles.input} rows={3} value={form.observacoes ?? ''} onChange={e => inp('observacoes', e.target.value)} />
+            <textarea className={styles.input} rows={2} value={form.observacoes ?? ''} onChange={e => inp('observacoes', e.target.value)} />
           </Field>
-          <button className={styles.btnPrimary} onClick={() => salvarCliente.mutate()} disabled={salvarCliente.isPending}>
-            {salvarCliente.isPending ? 'Salvando...' : 'Salvar'}
+
+          {editandoClienteId && (
+            <Field label="Status">
+              <Sel k="ativo" options={[
+                { value: 'true', label: 'Ativo' },
+                { value: 'false', label: 'Inativo' },
+              ]} />
+            </Field>
+          )}
+
+          <button
+            className={styles.btnPrimary}
+            onClick={() => editandoClienteId ? atualizarCliente.mutate() : salvarCliente.mutate()}
+            disabled={salvarCliente.isPending || atualizarCliente.isPending}
+          >
+            {(salvarCliente.isPending || atualizarCliente.isPending) ? 'Salvando...' : 'Salvar'}
           </button>
         </Modal>
       )}
@@ -488,7 +687,7 @@ export default function CarteiraPage() {
       {modal === 'debenture' && (
         <Modal title="Nova Posição — Debênture" onClose={closeModal} width={560}>
           <Field label="Cliente *">
-            <Sel k="cliente_id" options={clientes.map((c: any) => ({ value: c.id, label: `#${c.id} — ID sistema ${c.usuario_cliente_id}` }))} />
+            <Sel k="cliente_id" options={clienteOptions} />
           </Field>
           <Field label="Emissão *">
             <Sel k="emissao_id" options={emissoes.map((e: any) => ({ value: e.id, label: `${e.nome_serie} — ${e.emissor}` }))} />
@@ -558,7 +757,7 @@ export default function CarteiraPage() {
       {modal === 'imobiliario' && (
         <Modal title="Nova Posição — Imobiliário" onClose={closeModal} width={560}>
           <Field label="Cliente *">
-            <Sel k="cliente_id" options={clientes.map((c: any) => ({ value: c.id, label: `#${c.id} — ID sistema ${c.usuario_cliente_id}` }))} />
+            <Sel k="cliente_id" options={clienteOptions} />
           </Field>
           <Field label="Empreendimento *">
             <Sel k="empreendimento_id" options={empreendimentos.map((e: any) => ({ value: e.id, label: e.nome_venda }))} />
@@ -621,7 +820,7 @@ export default function CarteiraPage() {
       {modal === 'fundo' && (
         <Modal title="Nova Posição — Fundo" onClose={closeModal} width={560}>
           <Field label="Cliente *">
-            <Sel k="cliente_id" options={clientes.map((c: any) => ({ value: c.id, label: `#${c.id} — ID sistema ${c.usuario_cliente_id}` }))} />
+            <Sel k="cliente_id" options={clienteOptions} />
           </Field>
           <Field label="Fundo *">
             <Sel k="fundo_id" options={fundosRef.map((f: any) => ({ value: f.id, label: f.nome_fundo }))} />

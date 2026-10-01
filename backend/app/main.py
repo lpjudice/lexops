@@ -1418,6 +1418,31 @@ def _run_migrations() -> None:
             "ALTER TABLE autos_ia_documentos ADD COLUMN IF NOT EXISTS pecas_resumidas INTEGER NOT NULL DEFAULT 0"
         ))
 
+        # Carteira: nome denormalizado + link UUID ao cliente canônico
+        conn.execute(text(
+            "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS nome VARCHAR(255)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_carteira_cliente_nome ON carteira_cliente(nome)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS cliente_uuid VARCHAR(36)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_carteira_cliente_uuid ON carteira_cliente(cliente_uuid)"
+        ))
+        # Carteira: usuario_cliente_id pode ser nulo (clientes importados do XLS não têm ID real)
+        conn.execute(text(
+            "ALTER TABLE carteira_cliente ALTER COLUMN usuario_cliente_id DROP NOT NULL"
+        ))
+        # Backfill: extrai nome de observacoes onde padrão [IMPORTADO XLS] está presente
+        conn.execute(text("""
+            UPDATE carteira_cliente
+               SET nome = REGEXP_REPLACE(observacoes, E'^\\[IMPORTADO XLS\\] ', '')
+             WHERE observacoes LIKE '[IMPORTADO XLS] %'
+               AND nome IS NULL
+        """))
+
         conn.commit()
 
 

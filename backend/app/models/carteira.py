@@ -13,7 +13,11 @@ class CarteiraCliente(Base):
     __tablename__ = 'carteira_cliente'
 
     id = Column(Integer, primary_key=True)
-    usuario_cliente_id = Column(Integer, nullable=False, unique=True)
+    usuario_cliente_id = Column(Integer, nullable=True)
+    # Link ao cliente canônico do sistema (UUID como string)
+    cliente_uuid = Column(String(36), nullable=True, index=True)
+    # Nome denormalizado — preenchido ao criar/editar ou importado do XLS
+    nome = Column(String(255), nullable=True, index=True)
     cpf = Column(String(20), unique=True, nullable=True)
     tipo_pessoa = Column(String(2), default='PF')
 
