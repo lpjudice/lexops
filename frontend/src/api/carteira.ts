@@ -61,6 +61,49 @@ export const carteiraAPI = {
     api.post('/api/carteira/exportar-qualificacao', { cliente_ids: clienteIds, formato }, {
       responseType: 'blob',
     }),
+
+  // V1.1 - IA & Upload
+  processarDocumento: (file: File, tipo: string = 'geral') => {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('tipo', tipo)
+    return api.post('/api/carteira/processar-documento', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
+
+  compararTermoEmissao: (fileTermo: File, fileEmissao: File) => {
+    const formData = new FormData()
+    formData.append('file_termo', fileTermo)
+    formData.append('file_emissao', fileEmissao)
+    return api.post('/api/carteira/comparar-termo-emissao', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
+
+  uploadDocumento: (clienteId: number, file: File, tipo: string = 'geral') => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post(`/api/carteira/upload-documento?cliente_id=${clienteId}&tipo=${tipo}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
+
+  listarDocumentos: (clienteId: number) =>
+    api.get(`/api/carteira/documentos?cliente_id=${clienteId}`).then(r => r.data),
+
+  // V1.2 - Drive Integration (stubs)
+  criarPastaDrive: (clienteId: number) =>
+    api.post(`/api/carteira/criar-pasta-drive?cliente_id=${clienteId}`).then(r => r.data),
+
+  // V1.3 - Relatórios (stubs)
+  gerarPDFCliente: (clienteId: number) =>
+    api.get(`/api/carteira/cliente/${clienteId}/pdf`, { responseType: 'blob' }),
+
+  exportarQualificacaoV13: (clienteIds: number[], formato: 'xlsx' | 'pdf' = 'xlsx') =>
+    api.post('/api/carteira/exportar-qualificacao', { cliente_ids: clienteIds, formato }, {
+      responseType: 'blob',
+    }),
 }
 
 export default carteiraAPI

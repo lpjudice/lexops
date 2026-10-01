@@ -4,6 +4,10 @@ from sqlalchemy import and_, or_, desc
 from typing import List, Optional
 from datetime import date, datetime
 import json
+import base64
+from io import BytesIO
+import httpx
+import os
 
 from app.models.carteira import (
     CarteiraCliente,
@@ -18,6 +22,7 @@ from app.models.carteira import (
     CarteiraUploadDocumento,
 )
 from app.database import get_db
+from app.services.carteira_ia import CarteiraIAService
 
 router = APIRouter(prefix="/api/carteira", tags=["carteira"])
 
@@ -510,4 +515,172 @@ def dashboard(db: Session = Depends(get_db)):
             "imobiliario": total_imobiliario,
             "fundos": total_fundos,
         }
+    }
+
+
+# ─────────────────────────────────────────────────────────────────
+# V1.1 - IA & UPLOAD (Claude Vision para leitura de documentos)
+# ─────────────────────────────────────────────────────────────────
+
+@router.post("/processar-documento")
+async def processar_documento_com_ia(
+    file: UploadFile = File(...),
+    tipo: str = Query("geral"),
+    db: Session = Depends(get_db)
+):
+    """
+    Processa um documento (PDF/imagem) com Claude Vision.
+    Tipos: geral, debenture, imobiliario, fundo
+    Extrai campos para auto-fill de formulários.
+    """
+    try:
+        conteudo = await file.read()
+        mime_type = file.content_type or "application/pdf"
+
+        resultado = await CarteiraIAService.processar_documento(
+            conteudo,
+            mime_type,
+            tipo
+        )
+
+        return {
+            "status": "sucesso",
+            "dados_extraidos": resultado["dados"],
+            "nome_arquivo": file.filename,
+            "tipo_processado": resultado["tipo"],
+            "modelo": resultado["modelo"],
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Erro ao processar documento: {str(e)}")
+
+
+@router.post("/comparar-termo-emissao")
+async def comparar_termo_emissao(
+    file_termo: UploadFile = File(...),
+    file_emissao: UploadFile = File(...),
+):
+    """
+    Compara Termo de Securitização com Emissão.
+    Identifica contradições em taxa, vencimento, etc.
+    """
+    try:
+        conteudo_termo = await file_termo.read()
+        conteudo_emissao = await file_emissao.read()
+
+        mime_termo = file_termo.content_type or "application/pdf"
+        mime_emissao = file_emissao.content_type or "application/pdf"
+
+        resultado_termo = await CarteiraIAService.processar_documento(
+            conteudo_termo, mime_termo, "debenture"
+        )
+        resultado_emissao = await CarteiraIAService.processar_documento(
+            conteudo_emissao, mime_emissao, "debenture"
+        )
+
+        comparacao = CarteiraIAService.comparar_termo_vs_emissao(
+            resultado_termo["dados"],
+            resultado_emissao["dados"],
+        )
+
+        return {
+            "status": "sucesso",
+            "termo": resultado_termo["dados"],
+            "emissao": resultado_emissao["dados"],
+            "comparacao": comparacao,
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Erro ao comparar: {str(e)}")
+
+
+@router.post("/upload-documento")
+async def upload_documento(
+    cliente_id: int = Query(...),
+    tipo: str = Query("geral"),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """Salva documento na carteira do cliente"""
+    try:
+        cliente = db.query(CarteiraCliente).filter(CarteiraCliente.id == cliente_id).first()
+        if not cliente:
+            raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+        conteudo = await file.read()
+
+        documento = CarteiraUploadDocumento(
+            cliente_id=cliente_id,
+            nome_arquivo=file.filename,
+            tipo_documento=tipo,
+            mime_type=file.content_type,
+            tamanho_bytes=len(conteudo),
+            dados_binarios=conteudo,
+        )
+        db.add(documento)
+        db.commit()
+        db.refresh(documento)
+
+        return {"id": documento.id, "nome": documento.nome_arquivo, "status": "salvo"}
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/documentos")
+def listar_documentos(cliente_id: int = Query(...), db: Session = Depends(get_db)):
+    """Lista documentos de um cliente"""
+    documentos = db.query(CarteiraUploadDocumento).filter(
+        CarteiraUploadDocumento.cliente_id == cliente_id
+    ).order_by(desc(CarteiraUploadDocumento.data_upload)).all()
+
+    return [
+        {
+            "id": doc.id,
+            "nome": doc.nome_arquivo,
+            "tipo": doc.tipo_documento,
+            "tamanho_kb": doc.tamanho_bytes / 1024,
+            "data_upload": doc.data_upload.isoformat(),
+        }
+        for doc in documentos
+    ]
+
+
+# ─────────────────────────────────────────────────────────────────
+# V1.2 - GOOGLE DRIVE INTEGRATION (Stub para próxima fase)
+# ─────────────────────────────────────────────────────────────────
+
+@router.post("/criar-pasta-drive")
+def criar_pasta_drive(cliente_id: int = Query(...), db: Session = Depends(get_db)):
+    """[V1.2] Cria pasta no Google Drive para o cliente"""
+    return {
+        "status": "pendente",
+        "mensagem": "Implementado em V1.2",
+        "placeholder": f"folder_drive_id_para_cliente_{cliente_id}"
+    }
+
+
+# ─────────────────────────────────────────────────────────────────
+# V1.3 - RELATÓRIOS & PDF (Stub para próxima fase)
+# ─────────────────────────────────────────────────────────────────
+
+@router.get("/cliente/{cliente_id}/pdf")
+def gerar_pdf_cliente(cliente_id: int, db: Session = Depends(get_db)):
+    """[V1.3] Gera PDF consolidado do cliente"""
+    return {
+        "status": "pendente",
+        "mensagem": "Implementado em V1.3",
+        "placeholder": f"pdf_cliente_{cliente_id}.pdf"
+    }
+
+
+@router.post("/exportar-qualificacao")
+def exportar_qualificacao(cliente_ids: List[int] = Query(...), formato: str = Query("xlsx")):
+    """[V1.3] Exporta qualificação em XLSX ou PDF"""
+    return {
+        "status": "pendente",
+        "mensagem": "Implementado em V1.3",
+        "formato": formato,
+        "clientes": len(cliente_ids)
     }

@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import api from '@/api/client'
+import UploadDocumentoModal from './UploadDocumentoModal'
 
 interface DebenturePosicao {
   id: number
@@ -27,6 +28,7 @@ export default function Debentures() {
   const [filtroSerie, setFiltroSerie] = useState('')
   const [filtroStatus, setFiltroStatus] = useState('')
   const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [isUploadOpen, setIsUploadOpen] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
 
   const [formData, setFormData] = useState({
@@ -147,42 +149,50 @@ export default function Debentures() {
 
   return (
     <div className="space-y-4">
-      {/* Filtros */}
-      <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div>
-          <Label className="text-sm font-medium">Série</Label>
-          <Input
-            placeholder="BRMAPEX110..."
-            value={filtroSerie}
-            onChange={(e) => setFiltroSerie(e.target.value)}
-          />
-        </div>
-        <div>
-          <Label className="text-sm font-medium">Status Resgate</Label>
-          <Select value={filtroStatus} onValueChange={setFiltroStatus}>
-            <SelectTrigger>
-              <SelectValue placeholder="Todos" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">Todos</SelectItem>
-              <SelectItem value="Ativo">Ativo</SelectItem>
-              <SelectItem value="Solicitado">Solicitado</SelectItem>
-              <SelectItem value="Negado">Negado</SelectItem>
-              <SelectItem value="Processando">Processando</SelectItem>
-              <SelectItem value="Liquidado">Liquidado</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="flex items-end">
-          <Button
-            variant="outline"
-            onClick={() => {
-              setFiltroSerie('')
-              setFiltroStatus('')
-            }}
-          >
-            Limpar Filtros
-          </Button>
+      {/* Filtros & Ações */}
+      <div className="space-y-3">
+        <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <Label className="text-sm font-medium">Série</Label>
+            <Input
+              placeholder="BRMAPEX110..."
+              value={filtroSerie}
+              onChange={(e) => setFiltroSerie(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label className="text-sm font-medium">Status Resgate</Label>
+            <Select value={filtroStatus} onValueChange={setFiltroStatus}>
+              <SelectTrigger>
+                <SelectValue placeholder="Todos" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">Todos</SelectItem>
+                <SelectItem value="Ativo">Ativo</SelectItem>
+                <SelectItem value="Solicitado">Solicitado</SelectItem>
+                <SelectItem value="Negado">Negado</SelectItem>
+                <SelectItem value="Processando">Processando</SelectItem>
+                <SelectItem value="Liquidado">Liquidado</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setFiltroSerie('')
+                setFiltroStatus('')
+              }}
+            >
+              Limpar
+            </Button>
+            <Button
+              className="bg-purple-600 hover:bg-purple-700 flex-1"
+              onClick={() => setIsUploadOpen(true)}
+            >
+              📄 Extrair com IA
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -356,6 +366,13 @@ export default function Debentures() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Modal de Upload com IA */}
+      <UploadDocumentoModal
+        clienteId={formData.cliente_id}
+        open={isUploadOpen}
+        onOpenChange={setIsUploadOpen}
+      />
     </div>
   )
 }
