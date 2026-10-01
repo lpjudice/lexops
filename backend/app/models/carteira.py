@@ -30,10 +30,17 @@ class CarteiraCliente(Base):
     contrato_principal_id = Column(Integer, nullable=True)
     procuracao_id = Column(Integer, nullable=True)
 
-    # Honorários
-    pro_labore_tipo = Column(String(50), default='fixo')
-    pro_labore_valor = Column(Float, nullable=True)
-    percentual_sucesso_geral = Column(Float, default=0.0)
+    # Honorários — fee de entrada (uma única vez por investimento)
+    pro_labore_tipo = Column(String(50), nullable=True)      # 'fixo' | 'percentual' | null
+    pro_labore_valor = Column(Float, nullable=True)           # R$ (se fixo) ou % geral (se percentual)
+    fee_imob_pct = Column(Float, nullable=True)               # % fee imobiliário (override quando diferente)
+    fee_fin_pct = Column(Float, nullable=True)                # % fee financeiro — debêntures/fundos (override)
+
+    # Honorários — êxito
+    percentual_sucesso_geral = Column(Float, default=0.0)     # % do êxito (geral)
+    percentual_sucesso_imob = Column(Float, nullable=True)    # % êxito imobiliário (override)
+    percentual_sucesso_fin = Column(Float, nullable=True)     # % êxito financeiro (override)
+
     observacao_honorarios = Column(Text, nullable=True)
     fonte_captacao = Column(String(255), nullable=True)
 
@@ -149,8 +156,19 @@ class CarteiraImobiliarioEmpreendimento(Base):
 
     id = Column(Integer, primary_key=True)
     nome_venda = Column(String(255), unique=True, nullable=False)
-    nome_razao_social = Column(String(255), nullable=True)
-    cnpj_empreendimento = Column(String(20), nullable=True)
+
+    # Cadeia estrutural: prestadora → veículo → SPE
+    prestadora_nome = Column(String(255), default='Apex Realty', nullable=True)
+    prestadora_cnpj = Column(String(20), nullable=True)
+
+    # Veículo imobiliário (ABMPARSE / BRM entity)
+    nome_razao_social = Column(String(255), nullable=True)   # razão social do veículo
+    cnpj_empreendimento = Column(String(20), nullable=True)  # CNPJ do veículo
+
+    # SPE (quando diferente do veículo)
+    spe_nome = Column(String(255), nullable=True)
+    spe_cnpj = Column(String(20), nullable=True)
+
     tipo_desenvolvimento = Column(String(100), nullable=True)
     localizacao = Column(String(255), nullable=True)
     abmparse_veiculo = Column(String(100), nullable=True)

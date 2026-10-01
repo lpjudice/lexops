@@ -243,6 +243,36 @@ def criar_empreendimento(data: dict, db: Session = Depends(get_db)):
     return empreendimento
 
 
+@router.put("/empreendimentos/{emp_id}")
+def atualizar_empreendimento(emp_id: int, data: dict, db: Session = Depends(get_db)):
+    """Atualiza empreendimento"""
+    emp = db.query(CarteiraImobiliarioEmpreendimento).filter(
+        CarteiraImobiliarioEmpreendimento.id == emp_id
+    ).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Empreendimento não encontrado")
+    for key, value in data.items():
+        setattr(emp, key, value)
+    db.commit()
+    db.refresh(emp)
+    return emp
+
+
+@router.delete("/empreendimentos/{emp_id}")
+def deletar_empreendimento(emp_id: int, db: Session = Depends(get_db)):
+    """Deleta empreendimento (apenas se sem posições vinculadas)"""
+    emp = db.query(CarteiraImobiliarioEmpreendimento).filter(
+        CarteiraImobiliarioEmpreendimento.id == emp_id
+    ).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Empreendimento não encontrado")
+    if emp.posicoes:
+        raise HTTPException(status_code=400, detail="Empreendimento possui posições vinculadas")
+    db.delete(emp)
+    db.commit()
+    return {"ok": True}
+
+
 # ─────────────────────────────────────────────────────────────────
 # IMOBILIÁRIO - POSIÇÕES DO CLIENTE
 # ─────────────────────────────────────────────────────────────────

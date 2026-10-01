@@ -1443,6 +1443,27 @@ def _run_migrations() -> None:
                AND nome IS NULL
         """))
 
+        # Carteira clientes: campos de honorários split imob/fin
+        for _col in [
+            "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS fee_imob_pct FLOAT",
+            "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS fee_fin_pct FLOAT",
+            "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS percentual_sucesso_imob FLOAT",
+            "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS percentual_sucesso_fin FLOAT",
+            # pro_labore_tipo agora é nullable (null = sem fee de entrada)
+            "ALTER TABLE carteira_cliente ALTER COLUMN pro_labore_tipo DROP NOT NULL",
+            "ALTER TABLE carteira_cliente ALTER COLUMN pro_labore_tipo DROP DEFAULT",
+        ]:
+            conn.execute(text(_col))
+
+        # Empreendimento: cadeia estrutural (prestadora → veículo → SPE)
+        for _col in [
+            "ALTER TABLE carteira_imobiliario_empreendimento ADD COLUMN IF NOT EXISTS prestadora_nome VARCHAR(255) DEFAULT 'Apex Realty'",
+            "ALTER TABLE carteira_imobiliario_empreendimento ADD COLUMN IF NOT EXISTS prestadora_cnpj VARCHAR(20)",
+            "ALTER TABLE carteira_imobiliario_empreendimento ADD COLUMN IF NOT EXISTS spe_nome VARCHAR(255)",
+            "ALTER TABLE carteira_imobiliario_empreendimento ADD COLUMN IF NOT EXISTS spe_cnpj VARCHAR(20)",
+        ]:
+            conn.execute(text(_col))
+
         conn.commit()
 
 
