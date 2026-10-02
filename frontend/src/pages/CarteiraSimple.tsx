@@ -348,6 +348,8 @@ export default function CarteiraPage() {
   const [expandImob, setExpandImob] = useState(false)
   // Posição — modo de visualização
   const [viewModePosicao, setViewModePosicao] = useState<'cliente' | 'ativo'>('cliente')
+  const [filtroAtivoEmissao, setFiltroAtivoEmissao] = useState('')
+  const [filtroAtivoFundo, setFiltroAtivoFundo] = useState('')
 
   const { isSuperAdmin } = useAuth()
   const qc = useQueryClient()
@@ -833,7 +835,7 @@ export default function CarteiraPage() {
                 <span style={{ fontWeight: 700 }}>{brl(r.total)}</span>
                 {r.pctRisco != null && (
                   <span style={{ fontSize: 11, color: '#d97706', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 4, padding: '0 5px' }}>
-                    {r.pctRisco}% risco → {brl(r.total * r.pctRisco / 100)}
+                    {r.pctRisco}% recuperável → {brl(r.total * r.pctRisco / 100)}
                   </span>
                 )}
               </div>
@@ -1016,17 +1018,29 @@ export default function CarteiraPage() {
                 {label} · {brl(total)}
               </div>
             )
-            const clienteTag = (clienteId: number) => (
-              <span key={clienteId} style={{ fontSize: 11, background: 'var(--gray-light, #f3f4f6)', border: '1px solid var(--gray-border)', borderRadius: 4, padding: '1px 7px', whiteSpace: 'nowrap' }}>
-                {clienteNome(clienteId)}
-              </span>
+            const clienteRow = (clienteId: number, valor: number) => (
+              <div key={clienteId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 10px', background: 'var(--gray-light, #f3f4f6)', borderRadius: 4, marginBottom: 3 }}>
+                <span style={{ fontSize: 12 }}>{clienteNome(clienteId)}</span>
+                <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{brl(valor)}</span>
+              </div>
             )
             return (
               <div>
+                {/* Filtros por ativo */}
+                <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+                  {mostrarDebs && (
+                    <input className={styles.input} style={{ width: 200 }} placeholder="Filtrar emissão..." value={filtroAtivoEmissao} onChange={e => setFiltroAtivoEmissao(e.target.value)} />
+                  )}
+                  {mostrarFundosPOS && (
+                    <input className={styles.input} style={{ width: 200 }} placeholder="Filtrar fundo..." value={filtroAtivoFundo} onChange={e => setFiltroAtivoFundo(e.target.value)} />
+                  )}
+                </div>
+
                 {mostrarDebs && (() => {
                   const byEmissao: Record<number, any[]> = {}
                   for (const d of debentures) { if (!byEmissao[d.emissao_id]) byEmissao[d.emissao_id] = []; byEmissao[d.emissao_id].push(d) }
-                  const entries = Object.entries(byEmissao).sort((a, b) => b[1].reduce((s: number, d: any) => s + (d.valor_aplicado ?? 0), 0) - a[1].reduce((s: number, d: any) => s + (d.valor_aplicado ?? 0), 0))
+                  let entries = Object.entries(byEmissao).sort((a, b) => b[1].reduce((s: number, d: any) => s + (d.valor_aplicado ?? 0), 0) - a[1].reduce((s: number, d: any) => s + (d.valor_aplicado ?? 0), 0))
+                  if (filtroAtivoEmissao) entries = entries.filter(([id]) => emissaoNome(Number(id)).toLowerCase().includes(filtroAtivoEmissao.toLowerCase()))
                   if (!entries.length) return null
                   return (<>
                     {sectionTitle('Debêntures', debentures.reduce((s, d) => s + (d.valor_aplicado ?? 0), 0), 'var(--teal)')}
@@ -1038,8 +1052,8 @@ export default function CarteiraPage() {
                             <span className={cs.clientePosicaoNome}>{emissaoNome(Number(emissaoId))}</span>
                             <span className={cs.clientePosicaoTotal}>{brl(total)} · {debs.length} posições</span>
                           </div>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '8px 0 4px' }}>
-                            {debs.map((d: any) => clienteTag(d.cliente_id))}
+                          <div style={{ padding: '6px 0 4px' }}>
+                            {debs.map((d: any) => clienteRow(d.cliente_id, d.valor_aplicado ?? 0))}
                           </div>
                         </div>
                       )
@@ -1063,8 +1077,8 @@ export default function CarteiraPage() {
                             <span className={cs.clientePosicaoNome}>{emp?.nome_venda ?? `Empreendimento ${empId}`}</span>
                             <span className={cs.clientePosicaoTotal}>{brl(total)} · {imobs.length} posições</span>
                           </div>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '8px 0 4px' }}>
-                            {imobs.map((i: any) => clienteTag(i.cliente_id))}
+                          <div style={{ padding: '6px 0 4px' }}>
+                            {imobs.map((i: any) => clienteRow(i.cliente_id, i.valor_total_compromissado ?? 0))}
                           </div>
                         </div>
                       )
@@ -1075,21 +1089,29 @@ export default function CarteiraPage() {
                 {mostrarFundosPOS && (() => {
                   const byFundo: Record<number, any[]> = {}
                   for (const f of fundos) { if (!byFundo[f.fundo_id]) byFundo[f.fundo_id] = []; byFundo[f.fundo_id].push(f) }
-                  const entries = Object.entries(byFundo).sort((a, b) => b[1].reduce((s: number, f: any) => s + (f.valor_aplicado ?? 0), 0) - a[1].reduce((s: number, f: any) => s + (f.valor_aplicado ?? 0), 0))
+                  let entries = Object.entries(byFundo).sort((a, b) => b[1].reduce((s: number, f: any) => s + (f.valor_aplicado ?? 0), 0) - a[1].reduce((s: number, f: any) => s + (f.valor_aplicado ?? 0), 0))
+                  if (filtroAtivoFundo) entries = entries.filter(([id]) => {
+                    const r = fundosRef.find((x: any) => x.id === Number(id))
+                    return (r?.nome_fundo ?? '').toLowerCase().includes(filtroAtivoFundo.toLowerCase())
+                  })
                   if (!entries.length) return null
                   return (<>
                     {sectionTitle('Fundos', fundos.reduce((s, f) => s + (f.valor_aplicado ?? 0), 0), '#3b82f6')}
                     {entries.map(([fundoId, fnds]) => {
                       const ref = fundosRef.find((r: any) => r.id === Number(fundoId))
                       const total = fnds.reduce((s: number, f: any) => s + (f.valor_aplicado ?? 0), 0)
+                      const pctRecup = ref?.percentual_credito_recuperavel
                       return (
                         <div key={fundoId} className={cs.clientePosicaoCard} style={{ marginBottom: 10 }}>
                           <div className={cs.clientePosicaoHeader}>
                             <span className={cs.clientePosicaoNome}>{ref?.nome_fundo ?? `Fundo ${fundoId}`}</span>
-                            <span className={cs.clientePosicaoTotal}>{brl(total)} · {fnds.length} posições{ref?.percentual_credito_recuperavel != null ? ` · ${ref.percentual_credito_recuperavel}% risco → ${brl(total * ref.percentual_credito_recuperavel / 100)}` : ''}</span>
+                            <span className={cs.clientePosicaoTotal}>
+                              {brl(total)} · {fnds.length} posições
+                              {pctRecup != null && <span style={{ fontSize: 11, color: '#d97706', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 4, padding: '0 5px', marginLeft: 6 }}>{pctRecup}% recuperável → {brl(total * pctRecup / 100)}</span>}
+                            </span>
                           </div>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '8px 0 4px' }}>
-                            {fnds.map((f: any) => clienteTag(f.cliente_id))}
+                          <div style={{ padding: '6px 0 4px' }}>
+                            {fnds.map((f: any) => clienteRow(f.cliente_id, f.valor_aplicado ?? 0))}
                           </div>
                         </div>
                       )
@@ -1223,7 +1245,15 @@ export default function CarteiraPage() {
                 <tbody>
                   {g.posicoes.map((f: any) => (
                     <tr key={f.id}>
-                      <td><strong>{fundoNome(f.fundo_id)}</strong></td>
+                      <td>
+                        <strong>{fundoNome(f.fundo_id)}</strong>
+                        {(() => {
+                          const ref = fundosRef.find((r: any) => r.id === f.fundo_id)
+                          return ref?.percentual_credito_recuperavel != null
+                            ? <span style={{ fontSize: 10, background: '#fffbeb', color: '#d97706', border: '1px solid #fde68a', borderRadius: 3, padding: '1px 5px', marginLeft: 6, whiteSpace: 'nowrap' }}>{ref.percentual_credito_recuperavel}% recup.</span>
+                            : null
+                        })()}
+                      </td>
                       <td style={{ textAlign: 'right' }}>{brl(f.valor_aplicado)}</td>
                       <td style={{ textAlign: 'right' }}>{f.valor_atual_estimado ? brl(f.valor_atual_estimado) : '—'}</td>
                       <td>{f.data_aplicacao ?? '—'}</td>
@@ -1680,9 +1710,14 @@ export default function CarteiraPage() {
           {fl('Administradora', fi('administradora'))}
           {fl('Tipo', fi('tipo_fundo', 'text', 'FII, FIA, Multimercado...'))}
           {fl('Indexador', fi('indexador'))}
-          {fl('% Crédito Recuperável', <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {fi('percentual_credito_recuperavel', 'number', 'Ex: 34 ou 70')}
-            <span style={{ fontSize: 11, color: 'var(--gray-mid)', whiteSpace: 'nowrap' }}>% do total em risco</span>
+          {fl('% Recuperável (máx.)', <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {fi('percentual_credito_recuperavel', 'number', 'Ex: 34')}
+              <span style={{ fontSize: 11, color: 'var(--gray-mid)', whiteSpace: 'nowrap' }}>% do valor aplicado</span>
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--gray-mid)', marginTop: 4, lineHeight: 1.4 }}>
+              Percentual máximo que ainda pode ser recuperado. O restante está perdido. Ex: 34 → 34% recuperável, 66% perdido.
+            </div>
           </div>)}
           <button className={styles.btnPrimary} onClick={() => editandoFundoRefId ? atualizarFundoRef.mutate() : salvarFundoRef.mutate()} disabled={salvarFundoRef.isPending || atualizarFundoRef.isPending}>{(salvarFundoRef.isPending || atualizarFundoRef.isPending) ? 'Salvando...' : 'Salvar'}</button>
         </Modal>
