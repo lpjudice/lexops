@@ -76,6 +76,23 @@ def criar_cliente(data: dict, db: Session = Depends(get_db)):
     db.add(cliente)
     db.commit()
     db.refresh(cliente)
+
+    root_folder_id = os.getenv("CARTEIRA_ROOT_FOLDER_ID")
+    if root_folder_id:
+        try:
+            resultado = CarteiraDriveService.criar_pasta_cliente(
+                cliente.nome or f"Cliente_{cliente.id}",
+                pasta_pai_id=root_folder_id,
+            )
+            cliente.folder_drive_principal_id = resultado["folder_id"]
+            cliente.folder_drive_url = resultado["folder_link"]
+            if cliente.email:
+                CarteiraDriveService.compartilhar_com_email(resultado["folder_id"], cliente.email, role="reader")
+            db.commit()
+        except Exception as _e:
+            import logging
+            logging.getLogger("app").warning(f"Drive auto-create falhou para cliente {cliente.id}: {_e}")
+
     return cliente
 
 

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '@/api/client'
@@ -343,6 +343,11 @@ export default function CarteiraPage() {
   const [driveCarregando, setDriveCarregando] = useState(false)
   // Cadeia societária modal
   const [cadeiaEmpId, setCadeiaEmpId] = useState<number | null>(null)
+  // KPI expand
+  const [expandFundos, setExpandFundos] = useState(false)
+  const [expandImob, setExpandImob] = useState(false)
+  // Posição — modo de visualização
+  const [viewModePosicao, setViewModePosicao] = useState<'cliente' | 'ativo'>('cliente')
 
   const { isSuperAdmin } = useAuth()
   const qc = useQueryClient()
@@ -423,10 +428,36 @@ export default function CarteiraPage() {
   }
 
   const kpiImob = imobiliario.reduce((s, i) => s + (i.valor_total_compromissado ?? 0), 0)
-  const kpiFin = [...debentures, ...fundos].reduce((s, p) => s + (p.valor_aplicado ?? 0), 0)
+  const kpiDeb  = debentures.reduce((s, d) => s + (d.valor_aplicado ?? 0), 0)
+  const kpiFundos = fundos.reduce((s, f) => s + (f.valor_aplicado ?? 0), 0)
+  const kpiFin = kpiDeb + kpiFundos
   const kpiTotal = kpiImob + kpiFin
   const kpiFeeEntrada = clientes.reduce((s, c) => s + calcularHonorarios(c).feeEntrada, 0)
   const kpiExito = clientes.reduce((s, c) => s + calcularHonorarios(c).exito, 0)
+
+  // Breakdown de fundos por CNPJ (para card expandível)
+  const fundosBreakdown = useMemo(() => {
+    const byCnpj: Record<string, { nome: string; total: number; pctRisco: number | null }> = {}
+    for (const f of fundos) {
+      const ref = fundosRef.find((r: any) => r.id === f.fundo_id)
+      const key = ref?.cnpj_fundo ?? `sem-cnpj-${f.fundo_id}`
+      if (!byCnpj[key]) byCnpj[key] = { nome: ref?.nome_fundo ?? `Fundo ${f.fundo_id}`, total: 0, pctRisco: ref?.percentual_credito_recuperavel ?? null }
+      byCnpj[key].total += (f.valor_aplicado ?? 0)
+    }
+    return Object.values(byCnpj).sort((a, b) => b.total - a.total)
+  }, [fundos, fundosRef])
+
+  // Breakdown de imobiliário por empreendimento (para card expandível)
+  const imobBreakdown = useMemo(() => {
+    const byEmp: Record<string, { nome: string; total: number }> = {}
+    for (const i of imobiliario) {
+      const emp = empreendimentos.find((e: any) => e.id === i.empreendimento_id)
+      const key = String(i.empreendimento_id ?? 'sem-emp')
+      if (!byEmp[key]) byEmp[key] = { nome: emp?.nome_venda ?? `Empreendimento ${i.empreendimento_id}`, total: 0 }
+      byEmp[key].total += (i.valor_total_compromissado ?? 0)
+    }
+    return Object.values(byEmp).sort((a, b) => b.total - a.total)
+  }, [imobiliario, empreendimentos])
 
   // ── CNPJ duplicado em empreendimentos ──────────────────────────────
   const cnpjCount: Record<string, number> = {}
@@ -755,14 +786,60 @@ export default function CarteiraPage() {
       <div className={styles.pageHeader}><h1 className={styles.pageTitle}>Carteira</h1></div>
 
       {/* KPI Cards */}
-      <div className={cs.kpiGrid} style={{ gridTemplateColumns: 'repeat(6, 1fr)' }}>
+      <div className={cs.kpiGrid} style={{ gridTemplateColumns: 'repeat(7, 1fr)' }}>
         <div className={cs.kpiCard}><span className={cs.kpiLabel}>Clientes</span><span className={cs.kpiValue}>{clientes.length}</span></div>
         <div className={cs.kpiCard}><span className={cs.kpiLabel}>Total Geral</span><span className={cs.kpiValue}>{brl(kpiTotal)}</span></div>
-        <div className={cs.kpiCard} style={{ borderTop: '3px solid var(--amber, #f59e0b)' }}><span className={cs.kpiLabel}>Imobiliário</span><span className={cs.kpiValue}>{brl(kpiImob)}</span></div>
-        <div className={cs.kpiCard} style={{ borderTop: '3px solid var(--teal)' }}><span className={cs.kpiLabel}>Financeiro</span><span className={cs.kpiValue}>{brl(kpiFin)}</span></div>
+        <div className={cs.kpiCard} style={{ borderTop: '3px solid var(--amber, #f59e0b)', cursor: 'pointer' }}
+          onClick={() => setExpandImob(v => !v)}>
+          <span className={cs.kpiLabel}>Imobiliário {expandImob ? '▴' : '▾'}</span>
+          <span className={cs.kpiValue}>{brl(kpiImob)}</span>
+        </div>
+        <div className={cs.kpiCard} style={{ borderTop: '3px solid var(--teal)' }}>
+          <span className={cs.kpiLabel}>Debêntures</span><span className={cs.kpiValue}>{brl(kpiDeb)}</span>
+        </div>
+        <div className={cs.kpiCard} style={{ borderTop: '3px solid #3b82f6', cursor: 'pointer' }}
+          onClick={() => setExpandFundos(v => !v)}>
+          <span className={cs.kpiLabel}>Fundos {expandFundos ? '▴' : '▾'}</span>
+          <span className={cs.kpiValue}>{brl(kpiFundos)}</span>
+        </div>
         <div className={cs.kpiCard}><span className={cs.kpiLabel}>Fee Entrada (esp.)</span><span className={cs.kpiValue}>{isSuperAdmin ? brl(kpiFeeEntrada) : '🔒'}</span></div>
         <div className={cs.kpiCard}><span className={cs.kpiLabel}>Expectativa Êxito</span><span className={cs.kpiValue}>{isSuperAdmin ? brl(kpiExito) : '🔒'}</span></div>
       </div>
+
+      {/* Breakdown expandível — Imobiliário por empreendimento */}
+      {expandImob && (
+        <div style={{ background: 'var(--bg-card, white)', border: '1px solid var(--gray-border, #e5e7eb)', borderRadius: 8, padding: '12px 16px', marginBottom: 12, display: 'flex', flexWrap: 'wrap', gap: '6px 24px' }}>
+          {imobBreakdown.length === 0
+            ? <span style={{ fontSize: 12, color: 'var(--gray-mid)' }}>Sem posições imobiliárias</span>
+            : imobBreakdown.map(r => (
+              <div key={r.nome} style={{ fontSize: 12, display: 'flex', gap: 8 }}>
+                <span style={{ color: 'var(--amber, #f59e0b)', fontWeight: 600 }}>▪</span>
+                <span>{r.nome}</span>
+                <span style={{ fontWeight: 700 }}>{brl(r.total)}</span>
+              </div>
+            ))}
+        </div>
+      )}
+
+      {/* Breakdown expandível — Fundos por CNPJ */}
+      {expandFundos && (
+        <div style={{ background: 'var(--bg-card, white)', border: '1px solid var(--gray-border, #e5e7eb)', borderRadius: 8, padding: '12px 16px', marginBottom: 12, display: 'flex', flexWrap: 'wrap', gap: '6px 24px' }}>
+          {fundosBreakdown.length === 0
+            ? <span style={{ fontSize: 12, color: 'var(--gray-mid)' }}>Sem posições em fundos</span>
+            : fundosBreakdown.map(r => (
+              <div key={r.nome} style={{ fontSize: 12, display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                <span style={{ color: '#3b82f6', fontWeight: 600 }}>▪</span>
+                <span>{r.nome}</span>
+                <span style={{ fontWeight: 700 }}>{brl(r.total)}</span>
+                {r.pctRisco != null && (
+                  <span style={{ fontSize: 11, color: '#d97706', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 4, padding: '0 5px' }}>
+                    {r.pctRisco}% risco → {brl(r.total * r.pctRisco / 100)}
+                  </span>
+                )}
+              </div>
+            ))}
+        </div>
+      )}
 
       {/* Tab Bar */}
       <div className={cs.tabBar}>
@@ -781,7 +858,9 @@ export default function CarteiraPage() {
         <>
           <div style={{ display: 'flex', gap: 12, marginBottom: 14, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-              <input className={styles.input} style={{ width: 220 }} placeholder="Filtrar por cliente..." value={filtroClientePos} onChange={e => setFiltroClientePos(e.target.value)} />
+              {viewModePosicao === 'cliente' && (
+                <input className={styles.input} style={{ width: 220 }} placeholder="Filtrar por cliente..." value={filtroClientePos} onChange={e => setFiltroClientePos(e.target.value)} />
+              )}
               <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, cursor: 'pointer' }}>
                 <input type="checkbox" checked={mostrarDebs} onChange={e => setMostrarDebs(e.target.checked)} style={{ accentColor: 'var(--teal)' }} /> Debêntures
               </label>
@@ -792,8 +871,17 @@ export default function CarteiraPage() {
                 <input type="checkbox" checked={mostrarFundosPOS} onChange={e => setMostrarFundosPOS(e.target.checked)} style={{ accentColor: 'var(--blue, #3b82f6)' }} /> Fundos
               </label>
             </div>
-            <button className={styles.btnSmall} onClick={exportarXlsx}>Exportar XLSX</button>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <div style={{ display: 'flex', border: '1px solid var(--gray-border)', borderRadius: 6, overflow: 'hidden', fontSize: 12 }}>
+                <button style={{ padding: '4px 12px', background: viewModePosicao === 'cliente' ? 'var(--teal)' : 'transparent', color: viewModePosicao === 'cliente' ? 'white' : 'var(--gray-mid)', border: 'none', cursor: 'pointer' }}
+                  onClick={() => setViewModePosicao('cliente')}>Por Cliente</button>
+                <button style={{ padding: '4px 12px', background: viewModePosicao === 'ativo' ? 'var(--teal)' : 'transparent', color: viewModePosicao === 'ativo' ? 'white' : 'var(--gray-mid)', border: 'none', cursor: 'pointer' }}
+                  onClick={() => setViewModePosicao('ativo')}>Por Ativo</button>
+              </div>
+              <button className={styles.btnSmall} onClick={exportarXlsx}>Exportar XLSX</button>
+            </div>
           </div>
+          <div style={{ display: viewModePosicao === 'ativo' ? 'none' : undefined }}>
           {clientesAtivos.length === 0
             ? emptyGroup()
             : clientesAtivos.map((c: any) => {
@@ -1063,6 +1151,98 @@ export default function CarteiraPage() {
               </table>
             </div>
           ))}
+          </div>
+
+          {/* ── VISUALIZAÇÃO POR ATIVO ─────────────────────────────── */}
+          {viewModePosicao === 'ativo' && (() => {
+            const sectionTitle = (label: string, total: number, cor: string) => (
+              <div style={{ fontWeight: 700, fontSize: 13, color: cor, borderBottom: `2px solid ${cor}`, paddingBottom: 4, marginBottom: 10, marginTop: 16 }}>
+                {label} · {brl(total)}
+              </div>
+            )
+            const clienteTag = (clienteId: number) => (
+              <span key={clienteId} style={{ fontSize: 11, background: 'var(--gray-light, #f3f4f6)', border: '1px solid var(--gray-border)', borderRadius: 4, padding: '1px 7px', whiteSpace: 'nowrap' }}>
+                {clienteNome(clienteId)}
+              </span>
+            )
+            return (
+              <div>
+                {mostrarDebs && (() => {
+                  const byEmissao: Record<number, any[]> = {}
+                  for (const d of debentures) { if (!byEmissao[d.emissao_id]) byEmissao[d.emissao_id] = []; byEmissao[d.emissao_id].push(d) }
+                  const entries = Object.entries(byEmissao).sort((a, b) => b[1].reduce((s: number, d: any) => s + (d.valor_aplicado ?? 0), 0) - a[1].reduce((s: number, d: any) => s + (d.valor_aplicado ?? 0), 0))
+                  if (!entries.length) return null
+                  return (<>
+                    {sectionTitle('Debêntures', debentures.reduce((s, d) => s + (d.valor_aplicado ?? 0), 0), 'var(--teal)')}
+                    {entries.map(([emissaoId, debs]) => {
+                      const total = debs.reduce((s: number, d: any) => s + (d.valor_aplicado ?? 0), 0)
+                      return (
+                        <div key={emissaoId} className={cs.clientePosicaoCard} style={{ marginBottom: 10 }}>
+                          <div className={cs.clientePosicaoHeader}>
+                            <span className={cs.clientePosicaoNome}>{emissaoNome(Number(emissaoId))}</span>
+                            <span className={cs.clientePosicaoTotal}>{brl(total)} · {debs.length} posições</span>
+                          </div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '8px 0 4px' }}>
+                            {debs.map((d: any) => clienteTag(d.cliente_id))}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </>)
+                })()}
+
+                {mostrarImob && (() => {
+                  const byEmp: Record<number, any[]> = {}
+                  for (const i of imobiliario) { if (!byEmp[i.empreendimento_id]) byEmp[i.empreendimento_id] = []; byEmp[i.empreendimento_id].push(i) }
+                  const entries = Object.entries(byEmp).sort((a, b) => b[1].reduce((s: number, i: any) => s + (i.valor_total_compromissado ?? 0), 0) - a[1].reduce((s: number, i: any) => s + (i.valor_total_compromissado ?? 0), 0))
+                  if (!entries.length) return null
+                  return (<>
+                    {sectionTitle('Imobiliário', imobiliario.reduce((s, i) => s + (i.valor_total_compromissado ?? 0), 0), 'var(--amber, #f59e0b)')}
+                    {entries.map(([empId, imobs]) => {
+                      const emp = empreendimentos.find((x: any) => x.id === Number(empId))
+                      const total = imobs.reduce((s: number, i: any) => s + (i.valor_total_compromissado ?? 0), 0)
+                      return (
+                        <div key={empId} className={cs.clientePosicaoCard} style={{ marginBottom: 10 }}>
+                          <div className={cs.clientePosicaoHeader}>
+                            <span className={cs.clientePosicaoNome}>{emp?.nome_venda ?? `Empreendimento ${empId}`}</span>
+                            <span className={cs.clientePosicaoTotal}>{brl(total)} · {imobs.length} posições</span>
+                          </div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '8px 0 4px' }}>
+                            {imobs.map((i: any) => clienteTag(i.cliente_id))}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </>)
+                })()}
+
+                {mostrarFundosPOS && (() => {
+                  const byFundo: Record<number, any[]> = {}
+                  for (const f of fundos) { if (!byFundo[f.fundo_id]) byFundo[f.fundo_id] = []; byFundo[f.fundo_id].push(f) }
+                  const entries = Object.entries(byFundo).sort((a, b) => b[1].reduce((s: number, f: any) => s + (f.valor_aplicado ?? 0), 0) - a[1].reduce((s: number, f: any) => s + (f.valor_aplicado ?? 0), 0))
+                  if (!entries.length) return null
+                  return (<>
+                    {sectionTitle('Fundos', fundos.reduce((s, f) => s + (f.valor_aplicado ?? 0), 0), '#3b82f6')}
+                    {entries.map(([fundoId, fnds]) => {
+                      const ref = fundosRef.find((r: any) => r.id === Number(fundoId))
+                      const total = fnds.reduce((s: number, f: any) => s + (f.valor_aplicado ?? 0), 0)
+                      return (
+                        <div key={fundoId} className={cs.clientePosicaoCard} style={{ marginBottom: 10 }}>
+                          <div className={cs.clientePosicaoHeader}>
+                            <span className={cs.clientePosicaoNome}>{ref?.nome_fundo ?? `Fundo ${fundoId}`}</span>
+                            <span className={cs.clientePosicaoTotal}>{brl(total)} · {fnds.length} posições{ref?.percentual_credito_recuperavel != null ? ` · ${ref.percentual_credito_recuperavel}% risco → ${brl(total * ref.percentual_credito_recuperavel / 100)}` : ''}</span>
+                          </div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '8px 0 4px' }}>
+                            {fnds.map((f: any) => clienteTag(f.cliente_id))}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </>)
+                })()}
+              </div>
+            )
+          })()}
         </>
       )}
 
@@ -1327,10 +1507,10 @@ export default function CarteiraPage() {
           <div style={{ borderTop: '1px solid var(--gray-border)', margin: '10px 0', paddingTop: 10 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
               <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Sub-veículos ({(form.subveiculos ?? []).length})</span>
-              <button className={styles.btnSmall} onClick={() => inp('subveiculos', [...(form.subveiculos ?? []), { nome: '', cnpj: '', tipo: 'SCP' }])}>+ Adicionar</button>
+              <button className={styles.btnSmall} onClick={() => inp('subveiculos', [...(form.subveiculos ?? []), { nome: '', cnpj: '', tipo: 'SCP', camada: 'spe' }])}>+ Adicionar</button>
             </div>
             {(form.subveiculos ?? []).map((sv: any, idx: number) => (
-              <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 120px 32px', gap: 6, marginBottom: 6, alignItems: 'end' }}>
+              <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 90px 110px 32px', gap: 6, marginBottom: 6, alignItems: 'end' }}>
                 <div><label style={{ fontSize: 11, color: 'var(--gray-mid)' }}>Nome</label>
                   <input className={styles.input} value={sv.nome} placeholder="Nome" onChange={e => { const s = [...form.subveiculos]; s[idx] = { ...sv, nome: e.target.value }; inp('subveiculos', s) }} /></div>
                 <div><label style={{ fontSize: 11, color: 'var(--gray-mid)' }}>CNPJ</label>
@@ -1338,6 +1518,11 @@ export default function CarteiraPage() {
                 <div><label style={{ fontSize: 11, color: 'var(--gray-mid)' }}>Tipo</label>
                   <select className={styles.input} value={sv.tipo} onChange={e => { const s = [...form.subveiculos]; s[idx] = { ...sv, tipo: e.target.value }; inp('subveiculos', s) }}>
                     <option value="SCP">SCP</option><option value="SPE">SPE</option><option value="Cota">Cota</option><option value="Outro">Outro</option>
+                  </select></div>
+                <div><label style={{ fontSize: 11, color: 'var(--gray-mid)' }}>Vinculado a</label>
+                  <select className={styles.input} value={sv.camada ?? 'spe'} onChange={e => { const s = [...form.subveiculos]; s[idx] = { ...sv, camada: e.target.value }; inp('subveiculos', s) }}>
+                    <option value="veiculo">Veículo</option>
+                    <option value="spe">SPE</option>
                   </select></div>
                 <button style={{ background: 'none', border: '1px solid var(--red, #ef4444)', color: 'var(--red, #ef4444)', borderRadius: 4, padding: '4px 8px', cursor: 'pointer', fontSize: 12 }}
                   onClick={() => inp('subveiculos', form.subveiculos.filter((_: any, i: number) => i !== idx))}>✕</button>
@@ -1495,6 +1680,10 @@ export default function CarteiraPage() {
           {fl('Administradora', fi('administradora'))}
           {fl('Tipo', fi('tipo_fundo', 'text', 'FII, FIA, Multimercado...'))}
           {fl('Indexador', fi('indexador'))}
+          {fl('% Crédito Recuperável', <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {fi('percentual_credito_recuperavel', 'number', 'Ex: 34 ou 70')}
+            <span style={{ fontSize: 11, color: 'var(--gray-mid)', whiteSpace: 'nowrap' }}>% do total em risco</span>
+          </div>)}
           <button className={styles.btnPrimary} onClick={() => editandoFundoRefId ? atualizarFundoRef.mutate() : salvarFundoRef.mutate()} disabled={salvarFundoRef.isPending || atualizarFundoRef.isPending}>{(salvarFundoRef.isPending || atualizarFundoRef.isPending) ? 'Salvando...' : 'Salvar'}</button>
         </Modal>
       )}
@@ -1672,56 +1861,83 @@ export default function CarteiraPage() {
       {cadeiaEmpId !== null && (() => {
         const e = empreendimentos.find((x: any) => x.id === cadeiaEmpId)
         if (!e) return null
-        const nodeStyle: React.CSSProperties = {
-          border: '2px solid var(--teal, #0d9488)', borderRadius: 8, padding: '10px 16px',
-          minWidth: 200, maxWidth: 260, background: 'var(--bg-card, white)',
-          textAlign: 'center', fontSize: 12,
-        }
-        const labelStyle: React.CSSProperties = {
-          fontSize: 10, fontWeight: 700, color: 'var(--teal)', textTransform: 'uppercase',
-          letterSpacing: '0.07em', marginBottom: 2,
-        }
-        const arrowStyle: React.CSSProperties = {
-          textAlign: 'center', fontSize: 18, color: 'var(--gray-mid, #9ca3af)', margin: '4px 0', lineHeight: 1,
-        }
-        const nodeBox = (label: string, nome: string | null | undefined, cnpj: string | null | undefined, borderColor?: string) => (
-          nome ? (
-            <div style={{ ...nodeStyle, ...(borderColor ? { border: `2px solid ${borderColor}` } : {}) }}>
-              <div style={{ ...labelStyle, ...(borderColor ? { color: borderColor } : {}) }}>{label}</div>
-              <div style={{ fontWeight: 700, fontSize: 13 }}>{nome}</div>
-              {cnpj && <div style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--gray-mid)' }}>{cnpj}</div>}
-            </div>
-          ) : null
-        )
         const subvs: any[] = e.subveiculos ?? []
-        const temCadeia = e.prestadora_nome || e.nome_razao_social || e.spe_nome || subvs.length > 0
+        const svVeiculo = subvs.filter(sv => (sv.camada ?? 'spe') === 'veiculo')
+        const svSpe = subvs.filter(sv => (sv.camada ?? 'spe') === 'spe')
+
+        const nodeBase: React.CSSProperties = {
+          border: '2px solid var(--teal, #0d9488)', borderRadius: 8, padding: '8px 14px',
+          minWidth: 180, background: 'var(--bg-card, white)', textAlign: 'center', fontSize: 12,
+        }
+        const lbl: React.CSSProperties = {
+          fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 2,
+        }
+        const nodeBox = (label: string, nome: string, cnpj?: string | null, color = 'var(--teal)') => (
+          <div style={{ ...nodeBase, border: `2px solid ${color}` }}>
+            <div style={{ ...lbl, color }}>{label}</div>
+            <div style={{ fontWeight: 700, fontSize: 13 }}>{nome}</div>
+            {cnpj && <div style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--gray-mid)' }}>{cnpj}</div>}
+          </div>
+        )
+        const miniBox = (sv: any) => (
+          <div key={sv.nome} style={{ ...nodeBase, border: '1.5px solid #818cf8', minWidth: 120, padding: '6px 10px' }}>
+            <div style={{ ...lbl, color: '#6366f1' }}>{sv.tipo ?? 'Sub-veículo'}</div>
+            <div style={{ fontWeight: 600, fontSize: 11 }}>{sv.nome}</div>
+            {sv.cnpj && <div style={{ fontFamily: 'monospace', fontSize: 9, color: 'var(--gray-mid)' }}>{sv.cnpj}</div>}
+          </div>
+        )
+        const arrow = <div style={{ textAlign: 'center', fontSize: 18, color: '#9ca3af', lineHeight: 1, margin: '3px 0' }}>↓</div>
+        const branchRow = (items: any[]) => items.length === 0 ? null : (
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-start', paddingLeft: 8, alignItems: 'center' }}>
+            <span style={{ fontSize: 12, color: '#9ca3af' }}>└→</span>
+            {items.map((sv: any, i: number) => <React.Fragment key={i}>{miniBox(sv)}</React.Fragment>)}
+          </div>
+        )
+
+        const temCadeia = e.nome_razao_social || e.spe_nome || subvs.length > 0
+
         return (
-          <Modal title={`Cadeia Societária — ${e.nome_venda}`} onClose={() => setCadeiaEmpId(null)} width={520}>
+          <Modal title={`Cadeia Societária — ${e.nome_venda}`} onClose={() => setCadeiaEmpId(null)} width={560}>
             {!temCadeia ? (
               <div style={{ fontSize: 13, color: 'var(--gray-mid)', fontStyle: 'italic', padding: '24px 0', textAlign: 'center' }}>
-                Cadeia não preenchida. Edite o empreendimento para adicionar Prestadora, Veículo, SPE e Sub-veículos.
+                Cadeia não preenchida. Edite o empreendimento para adicionar Veículo, SPE e Sub-veículos.
               </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0, padding: '8px 0' }}>
-                {nodeBox('Prestadora de Serviços', e.prestadora_nome ?? 'Apex Realty', e.prestadora_cnpj, '#6366f1')}
-                {e.nome_razao_social && <div style={arrowStyle}>↓</div>}
-                {nodeBox('Veículo Imobiliário', e.nome_razao_social, e.cnpj_empreendimento)}
-                {e.spe_nome && <><div style={arrowStyle}>↓</div>{nodeBox('SPE', e.spe_nome, e.spe_cnpj, '#0891b2')}</>}
-                {subvs.length > 0 && (
-                  <>
-                    <div style={arrowStyle}>↓</div>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--gray-mid)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Sub-veículos ({subvs.length})</div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
-                      {subvs.map((sv: any, i: number) => (
-                        <div key={i} style={{ ...nodeStyle, minWidth: 140, maxWidth: 180, border: '1.5px solid #a5b4fc' }}>
-                          <div style={{ ...labelStyle, color: '#6366f1' }}>{sv.tipo ?? 'Sub-veículo'}</div>
-                          <div style={{ fontWeight: 600, fontSize: 12 }}>{sv.nome}</div>
-                          {sv.cnpj && <div style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--gray-mid)' }}>{sv.cnpj}</div>}
-                        </div>
-                      ))}
+              <div style={{ padding: '8px 0' }}>
+                {/* Prestadora — contrato de serviço, fora da estrutura societária */}
+                {(e.prestadora_nome || e.prestadora_cnpj) && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18, padding: '7px 14px', border: '2px dashed #818cf8', borderRadius: 8, background: 'rgba(99,102,241,0.04)', fontSize: 12 }}>
+                    <div>
+                      <div style={{ fontSize: 9, fontWeight: 700, color: '#6366f1', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Prestadora de Serviços (contrato)</div>
+                      <div style={{ fontWeight: 700, fontSize: 13 }}>{e.prestadora_nome ?? '—'}</div>
+                      {e.prestadora_cnpj && <div style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--gray-mid)' }}>{e.prestadora_cnpj}</div>}
                     </div>
-                  </>
+                    <div style={{ marginLeft: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                      <span style={{ fontSize: 10, color: '#818cf8', borderTop: '1px dashed #818cf8', paddingTop: 2, whiteSpace: 'nowrap' }}>contrato de serviço</span>
+                    </div>
+                  </div>
                 )}
+
+                {/* Estrutura societária vertical */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {e.nome_razao_social && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {nodeBox('Veículo Imobiliário', e.nome_razao_social, e.cnpj_empreendimento)}
+                      {branchRow(svVeiculo)}
+                    </div>
+                  )}
+                  {e.spe_nome && e.nome_razao_social && arrow}
+                  {e.spe_nome && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {nodeBox('SPE', e.spe_nome, e.spe_cnpj, '#0891b2')}
+                      {branchRow(svSpe)}
+                    </div>
+                  )}
+                  {/* Sub-veículos sem camada explícita, ligados ao último nó */}
+                  {subvs.filter(sv => !sv.camada && sv.camada !== 'veiculo' && sv.camada !== 'spe').length > 0 && (
+                    branchRow(subvs.filter(sv => !sv.camada))
+                  )}
+                </div>
               </div>
             )}
           </Modal>

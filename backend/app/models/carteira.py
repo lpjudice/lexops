@@ -310,6 +310,7 @@ class CarteiraFundoReferencia(Base):
     tipo_fundo = Column(String(50), nullable=True)
     indexador = Column(String(100), nullable=True)
     percentual_esperado = Column(Float, nullable=True)
+    percentual_credito_recuperavel = Column(Float, nullable=True)
     data_constituicao = Column(Date, nullable=True)
     data_criacao = Column(DateTime, default=datetime.now)
     ativo = Column(Boolean, default=True)

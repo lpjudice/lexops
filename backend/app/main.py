@@ -1511,6 +1511,8 @@ def _run_migrations() -> None:
             # cliente: colunas de Drive (folder_drive_principal_id / folder_drive_url)
             "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS folder_drive_principal_id VARCHAR(255)",
             "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS folder_drive_url VARCHAR(500)",
+            # fundo referência: percentual de crédito recuperável (ex: Carbyne 34%, 70%)
+            "ALTER TABLE carteira_fundo_referencia ADD COLUMN IF NOT EXISTS percentual_credito_recuperavel FLOAT",
         ]:
             conn.execute(text(_col))
 
