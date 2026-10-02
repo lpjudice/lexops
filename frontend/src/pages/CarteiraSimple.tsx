@@ -1007,6 +1007,98 @@ export default function CarteiraPage() {
               )
             })
           }
+          </div>
+
+          {/* ── VISUALIZAÇÃO POR ATIVO ─────────────────────────────── */}
+          {viewModePosicao === 'ativo' && (() => {
+            const sectionTitle = (label: string, total: number, cor: string) => (
+              <div style={{ fontWeight: 700, fontSize: 13, color: cor, borderBottom: `2px solid ${cor}`, paddingBottom: 4, marginBottom: 10, marginTop: 16 }}>
+                {label} · {brl(total)}
+              </div>
+            )
+            const clienteTag = (clienteId: number) => (
+              <span key={clienteId} style={{ fontSize: 11, background: 'var(--gray-light, #f3f4f6)', border: '1px solid var(--gray-border)', borderRadius: 4, padding: '1px 7px', whiteSpace: 'nowrap' }}>
+                {clienteNome(clienteId)}
+              </span>
+            )
+            return (
+              <div>
+                {mostrarDebs && (() => {
+                  const byEmissao: Record<number, any[]> = {}
+                  for (const d of debentures) { if (!byEmissao[d.emissao_id]) byEmissao[d.emissao_id] = []; byEmissao[d.emissao_id].push(d) }
+                  const entries = Object.entries(byEmissao).sort((a, b) => b[1].reduce((s: number, d: any) => s + (d.valor_aplicado ?? 0), 0) - a[1].reduce((s: number, d: any) => s + (d.valor_aplicado ?? 0), 0))
+                  if (!entries.length) return null
+                  return (<>
+                    {sectionTitle('Debêntures', debentures.reduce((s, d) => s + (d.valor_aplicado ?? 0), 0), 'var(--teal)')}
+                    {entries.map(([emissaoId, debs]) => {
+                      const total = debs.reduce((s: number, d: any) => s + (d.valor_aplicado ?? 0), 0)
+                      return (
+                        <div key={emissaoId} className={cs.clientePosicaoCard} style={{ marginBottom: 10 }}>
+                          <div className={cs.clientePosicaoHeader}>
+                            <span className={cs.clientePosicaoNome}>{emissaoNome(Number(emissaoId))}</span>
+                            <span className={cs.clientePosicaoTotal}>{brl(total)} · {debs.length} posições</span>
+                          </div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '8px 0 4px' }}>
+                            {debs.map((d: any) => clienteTag(d.cliente_id))}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </>)
+                })()}
+
+                {mostrarImob && (() => {
+                  const byEmp: Record<number, any[]> = {}
+                  for (const i of imobiliario) { if (!byEmp[i.empreendimento_id]) byEmp[i.empreendimento_id] = []; byEmp[i.empreendimento_id].push(i) }
+                  const entries = Object.entries(byEmp).sort((a, b) => b[1].reduce((s: number, i: any) => s + (i.valor_total_compromissado ?? 0), 0) - a[1].reduce((s: number, i: any) => s + (i.valor_total_compromissado ?? 0), 0))
+                  if (!entries.length) return null
+                  return (<>
+                    {sectionTitle('Imobiliário', imobiliario.reduce((s, i) => s + (i.valor_total_compromissado ?? 0), 0), 'var(--amber, #f59e0b)')}
+                    {entries.map(([empId, imobs]) => {
+                      const emp = empreendimentos.find((x: any) => x.id === Number(empId))
+                      const total = imobs.reduce((s: number, i: any) => s + (i.valor_total_compromissado ?? 0), 0)
+                      return (
+                        <div key={empId} className={cs.clientePosicaoCard} style={{ marginBottom: 10 }}>
+                          <div className={cs.clientePosicaoHeader}>
+                            <span className={cs.clientePosicaoNome}>{emp?.nome_venda ?? `Empreendimento ${empId}`}</span>
+                            <span className={cs.clientePosicaoTotal}>{brl(total)} · {imobs.length} posições</span>
+                          </div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '8px 0 4px' }}>
+                            {imobs.map((i: any) => clienteTag(i.cliente_id))}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </>)
+                })()}
+
+                {mostrarFundosPOS && (() => {
+                  const byFundo: Record<number, any[]> = {}
+                  for (const f of fundos) { if (!byFundo[f.fundo_id]) byFundo[f.fundo_id] = []; byFundo[f.fundo_id].push(f) }
+                  const entries = Object.entries(byFundo).sort((a, b) => b[1].reduce((s: number, f: any) => s + (f.valor_aplicado ?? 0), 0) - a[1].reduce((s: number, f: any) => s + (f.valor_aplicado ?? 0), 0))
+                  if (!entries.length) return null
+                  return (<>
+                    {sectionTitle('Fundos', fundos.reduce((s, f) => s + (f.valor_aplicado ?? 0), 0), '#3b82f6')}
+                    {entries.map(([fundoId, fnds]) => {
+                      const ref = fundosRef.find((r: any) => r.id === Number(fundoId))
+                      const total = fnds.reduce((s: number, f: any) => s + (f.valor_aplicado ?? 0), 0)
+                      return (
+                        <div key={fundoId} className={cs.clientePosicaoCard} style={{ marginBottom: 10 }}>
+                          <div className={cs.clientePosicaoHeader}>
+                            <span className={cs.clientePosicaoNome}>{ref?.nome_fundo ?? `Fundo ${fundoId}`}</span>
+                            <span className={cs.clientePosicaoTotal}>{brl(total)} · {fnds.length} posições{ref?.percentual_credito_recuperavel != null ? ` · ${ref.percentual_credito_recuperavel}% risco → ${brl(total * ref.percentual_credito_recuperavel / 100)}` : ''}</span>
+                          </div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '8px 0 4px' }}>
+                            {fnds.map((f: any) => clienteTag(f.cliente_id))}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </>)
+                })()}
+              </div>
+            )
+          })()}
         </>
       )}
 
@@ -1151,98 +1243,6 @@ export default function CarteiraPage() {
               </table>
             </div>
           ))}
-          </div>
-
-          {/* ── VISUALIZAÇÃO POR ATIVO ─────────────────────────────── */}
-          {viewModePosicao === 'ativo' && (() => {
-            const sectionTitle = (label: string, total: number, cor: string) => (
-              <div style={{ fontWeight: 700, fontSize: 13, color: cor, borderBottom: `2px solid ${cor}`, paddingBottom: 4, marginBottom: 10, marginTop: 16 }}>
-                {label} · {brl(total)}
-              </div>
-            )
-            const clienteTag = (clienteId: number) => (
-              <span key={clienteId} style={{ fontSize: 11, background: 'var(--gray-light, #f3f4f6)', border: '1px solid var(--gray-border)', borderRadius: 4, padding: '1px 7px', whiteSpace: 'nowrap' }}>
-                {clienteNome(clienteId)}
-              </span>
-            )
-            return (
-              <div>
-                {mostrarDebs && (() => {
-                  const byEmissao: Record<number, any[]> = {}
-                  for (const d of debentures) { if (!byEmissao[d.emissao_id]) byEmissao[d.emissao_id] = []; byEmissao[d.emissao_id].push(d) }
-                  const entries = Object.entries(byEmissao).sort((a, b) => b[1].reduce((s: number, d: any) => s + (d.valor_aplicado ?? 0), 0) - a[1].reduce((s: number, d: any) => s + (d.valor_aplicado ?? 0), 0))
-                  if (!entries.length) return null
-                  return (<>
-                    {sectionTitle('Debêntures', debentures.reduce((s, d) => s + (d.valor_aplicado ?? 0), 0), 'var(--teal)')}
-                    {entries.map(([emissaoId, debs]) => {
-                      const total = debs.reduce((s: number, d: any) => s + (d.valor_aplicado ?? 0), 0)
-                      return (
-                        <div key={emissaoId} className={cs.clientePosicaoCard} style={{ marginBottom: 10 }}>
-                          <div className={cs.clientePosicaoHeader}>
-                            <span className={cs.clientePosicaoNome}>{emissaoNome(Number(emissaoId))}</span>
-                            <span className={cs.clientePosicaoTotal}>{brl(total)} · {debs.length} posições</span>
-                          </div>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '8px 0 4px' }}>
-                            {debs.map((d: any) => clienteTag(d.cliente_id))}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </>)
-                })()}
-
-                {mostrarImob && (() => {
-                  const byEmp: Record<number, any[]> = {}
-                  for (const i of imobiliario) { if (!byEmp[i.empreendimento_id]) byEmp[i.empreendimento_id] = []; byEmp[i.empreendimento_id].push(i) }
-                  const entries = Object.entries(byEmp).sort((a, b) => b[1].reduce((s: number, i: any) => s + (i.valor_total_compromissado ?? 0), 0) - a[1].reduce((s: number, i: any) => s + (i.valor_total_compromissado ?? 0), 0))
-                  if (!entries.length) return null
-                  return (<>
-                    {sectionTitle('Imobiliário', imobiliario.reduce((s, i) => s + (i.valor_total_compromissado ?? 0), 0), 'var(--amber, #f59e0b)')}
-                    {entries.map(([empId, imobs]) => {
-                      const emp = empreendimentos.find((x: any) => x.id === Number(empId))
-                      const total = imobs.reduce((s: number, i: any) => s + (i.valor_total_compromissado ?? 0), 0)
-                      return (
-                        <div key={empId} className={cs.clientePosicaoCard} style={{ marginBottom: 10 }}>
-                          <div className={cs.clientePosicaoHeader}>
-                            <span className={cs.clientePosicaoNome}>{emp?.nome_venda ?? `Empreendimento ${empId}`}</span>
-                            <span className={cs.clientePosicaoTotal}>{brl(total)} · {imobs.length} posições</span>
-                          </div>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '8px 0 4px' }}>
-                            {imobs.map((i: any) => clienteTag(i.cliente_id))}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </>)
-                })()}
-
-                {mostrarFundosPOS && (() => {
-                  const byFundo: Record<number, any[]> = {}
-                  for (const f of fundos) { if (!byFundo[f.fundo_id]) byFundo[f.fundo_id] = []; byFundo[f.fundo_id].push(f) }
-                  const entries = Object.entries(byFundo).sort((a, b) => b[1].reduce((s: number, f: any) => s + (f.valor_aplicado ?? 0), 0) - a[1].reduce((s: number, f: any) => s + (f.valor_aplicado ?? 0), 0))
-                  if (!entries.length) return null
-                  return (<>
-                    {sectionTitle('Fundos', fundos.reduce((s, f) => s + (f.valor_aplicado ?? 0), 0), '#3b82f6')}
-                    {entries.map(([fundoId, fnds]) => {
-                      const ref = fundosRef.find((r: any) => r.id === Number(fundoId))
-                      const total = fnds.reduce((s: number, f: any) => s + (f.valor_aplicado ?? 0), 0)
-                      return (
-                        <div key={fundoId} className={cs.clientePosicaoCard} style={{ marginBottom: 10 }}>
-                          <div className={cs.clientePosicaoHeader}>
-                            <span className={cs.clientePosicaoNome}>{ref?.nome_fundo ?? `Fundo ${fundoId}`}</span>
-                            <span className={cs.clientePosicaoTotal}>{brl(total)} · {fnds.length} posições{ref?.percentual_credito_recuperavel != null ? ` · ${ref.percentual_credito_recuperavel}% risco → ${brl(total * ref.percentual_credito_recuperavel / 100)}` : ''}</span>
-                          </div>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '8px 0 4px' }}>
-                            {fnds.map((f: any) => clienteTag(f.cliente_id))}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </>)
-                })()}
-              </div>
-            )
-          })()}
         </>
       )}
 
