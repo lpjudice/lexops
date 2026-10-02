@@ -915,6 +915,44 @@ def resolver_pasta_id_raiz(subpath: list[str]) -> str | None:
             return None
 
 
+def compartilhar_subpasta(
+    nome_cliente: str, subfolder: str, email: str, role: str = "reader",
+    sub_subfolder: str | None = None,
+) -> bool:
+    """Compartilha a subpasta {nome_cliente}/{subfolder} com `email`. Retorna True se ok."""
+    tokens = _load_tokens()
+    if not tokens:
+        return False
+
+    def _do(tkns: dict) -> bool:
+        h = _auth_headers(tkns)
+        cid = _resolver_pasta_cliente(nome_cliente, h)
+        fid = _get_or_create_subfolder(subfolder, cid, h)
+        if sub_subfolder:
+            fid = _get_or_create_subfolder(sub_subfolder, fid, h)
+        r = httpx.post(
+            f"{DRIVE_META}/files/{fid}/permissions",
+            headers={**h, "Content-Type": "application/json"},
+            params={"supportsAllDrives": True, "sendNotificationEmail": False},
+            content=json.dumps({"type": "user", "role": role, "emailAddress": email}),
+            timeout=30,
+        )
+        r.raise_for_status()
+        return True
+
+    try:
+        return _do(tokens)
+    except Exception as exc:
+        if not _is_unauthorized(exc):
+            logger.warning("Falha ao compartilhar pasta %s/%s: %s", nome_cliente, subfolder, exc)
+            return False
+        try:
+            return _do(_refresh(tokens))
+        except Exception as exc2:
+            logger.warning("Falha ao compartilhar pasta apos refresh: %s", exc2)
+            return False
+
+
 def listar_arquivos(nome_cliente: str, subfolder: str, sub_subfolder: str | None = None) -> list[dict]:
     """Lists files from {nome_cliente}/{subfolder}[/{sub_subfolder}] in Drive."""
     tokens = _load_tokens()

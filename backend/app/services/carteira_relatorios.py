@@ -74,10 +74,12 @@ def _p(text, style) -> Paragraph:
 def _header_block(nome_cliente: str, data_str: str) -> Table:
     """Logo à esquerda, info do documento à direita — exatamente como a referência."""
     try:
-        logo = Image(_LOGO_PATH)
+        probe = Image(_LOGO_PATH)
         target_w = 40 * mm
-        logo.drawWidth = target_w
-        logo.drawHeight = target_w * logo.imageHeight / logo.imageWidth
+        target_h = target_w * probe.imageHeight / probe.imageWidth
+        # width/height precisam ir no construtor (kind='direct') — setar
+        # drawWidth/drawHeight depois de criado não é respeitado dentro de Table.
+        logo = Image(_LOGO_PATH, width=target_w, height=target_h, kind='direct')
         logo.hAlign = 'LEFT'
         logo_cell = logo
     except Exception:
@@ -112,13 +114,14 @@ def _title_row(nome_cliente: str) -> Table:
     """Título grande à esquerda + pill escuro com nome do cliente à direita."""
     title_cell = Table(
         [[_p("CARTEIRA DE INVESTIMENTOS",
-             _s('tt1', fontSize=15, fontName='Helvetica-Bold', textColor=DARK, spaceAfter=1))],
+             _s('tt1', fontSize=15, leading=18, fontName='Helvetica-Bold', textColor=DARK))],
          [_p("Posicoes ativas · Relatorio consolidado",
-             _s('tt2', fontSize=9, fontName='Helvetica', textColor=GRAY_MID))]],
+             _s('tt2', fontSize=9, leading=11, fontName='Helvetica', textColor=GRAY_MID))]],
         colWidths=[110 * mm],
     )
     title_cell.setStyle(TableStyle([
-        ('TOPPADDING', (0, 0), (-1, -1), 0), ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
+        ('TOPPADDING', (0, 0), (-1, -1), 0), ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ('BOTTOMPADDING', (0, 0), (0, 0), 2),
         ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0),
     ]))
 
@@ -159,12 +162,12 @@ def _kpi_card(label: str, value: str, sub: str = '', dark: bool = False) -> Tabl
     val_color = WHITE
     sub_color = colors.HexColor('#6B7280') if not dark else colors.HexColor('#9CA3AF')
 
-    rows = [[_p(label, _s('kl', fontSize=7, fontName='Helvetica-Bold',
-                           textColor=lbl_color, spaceAfter=3))],
-            [_p(value, _s('kv', fontSize=13, fontName='Helvetica-Bold',
-                           textColor=val_color, spaceAfter=1))]]
+    rows = [[_p(label, _s('kl', fontSize=7, leading=9, fontName='Helvetica-Bold',
+                           textColor=lbl_color))],
+            [_p(value, _s('kv', fontSize=13, leading=16, fontName='Helvetica-Bold',
+                           textColor=val_color))]]
     if sub:
-        rows.append([_p(sub, _s('ks', fontSize=7, fontName='Helvetica',
+        rows.append([_p(sub, _s('ks', fontSize=7, leading=9, fontName='Helvetica',
                                  textColor=sub_color))])
 
     inner = Table(rows, colWidths=[40 * mm])
@@ -229,21 +232,25 @@ def _asset_table(headers: list, rows: list, col_widths: list,
 def _dark_footer_bar(total_geral: float, exito: float = 0) -> Table:
     """Barra escura de rodapé com total em destaque (estilo INVESTIMENTO da referência)."""
     left_rows = [[_p("TOTAL APLICADO",
-                      _s('fl', fontSize=7, fontName='Helvetica-Bold',
-                         textColor=colors.HexColor('#9CA3AF'), spaceAfter=2))],
+                      _s('fl', fontSize=7, leading=9, fontName='Helvetica-Bold',
+                         textColor=colors.HexColor('#9CA3AF')))],
                  [_p(_brl(total_geral),
-                      _s('fv', fontSize=20, fontName='Helvetica-Bold',
-                         textColor=WHITE, spaceAfter=1))]]
+                      _s('fv', fontSize=20, leading=23, fontName='Helvetica-Bold',
+                         textColor=WHITE))]]
     if exito > 0:
         left_rows.append([_p(f"Expectativa de exito: {_brl(exito)}",
-                              _s('fe', fontSize=8, fontName='Helvetica',
-                                 textColor=colors.HexColor('#6B7280')))])
+                              _s('fe', fontSize=8, leading=10, fontName='Helvetica',
+                                 textColor=colors.HexColor('#9CA3AF')))])
 
     left = Table(left_rows, colWidths=[85 * mm])
-    left.setStyle(TableStyle([
-        ('TOPPADDING', (0, 0), (-1, -1), 0), ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+    left_style = [
+        ('TOPPADDING', (0, 0), (-1, -1), 0), ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ('BOTTOMPADDING', (0, 0), (0, 0), 1),
         ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0),
-    ]))
+    ]
+    if exito > 0:
+        left_style.append(('TOPPADDING', (0, 2), (0, 2), 2))
+    left.setStyle(TableStyle(left_style))
 
     right = _p(
         "Honorarios calculados sobre valores efetivamente recuperados.<br/>"
@@ -473,13 +480,13 @@ class CarteiraRelatoriosService:
             ))
             story.append(Spacer(1, 5 * mm))
 
-        # ── 8. Barra dark com total ───────────────────────────────────────────
-        story.append(Spacer(1, 4 * mm))
-        story.append(_dark_footer_bar(total_geral, exito))
-        story.append(Spacer(1, 3 * mm))
-
-        # ── 9. Rodapé final ───────────────────────────────────────────────────
-        story.append(_bottom_footer())
+        # ── 8-9. Barra dark com total + rodapé final (nunca separados por quebra de página)
+        story.append(KeepTogether([
+            Spacer(1, 4 * mm),
+            _dark_footer_bar(total_geral, exito),
+            Spacer(1, 3 * mm),
+            _bottom_footer(),
+        ]))
 
         doc.build(story)
         return buffer.getvalue(), nome_cliente

@@ -8,7 +8,6 @@ import json
 import base64
 from io import BytesIO
 import httpx
-import os
 
 from app.models.carteira import (
     CarteiraCliente,
@@ -77,21 +76,16 @@ def criar_cliente(data: dict, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(cliente)
 
-    root_folder_id = os.getenv("CARTEIRA_ROOT_FOLDER_ID")
-    if root_folder_id:
-        try:
-            resultado = CarteiraDriveService.criar_pasta_cliente(
-                cliente.nome or f"Cliente_{cliente.id}",
-                pasta_pai_id=root_folder_id,
-            )
-            cliente.folder_drive_principal_id = resultado["folder_id"]
-            cliente.folder_drive_url = resultado["folder_link"]
-            if cliente.email:
-                CarteiraDriveService.compartilhar_com_email(resultado["folder_id"], cliente.email, role="reader")
-            db.commit()
-        except Exception as _e:
-            import logging
-            logging.getLogger("app").warning(f"Drive auto-create falhou para cliente {cliente.id}: {_e}")
+    try:
+        resultado = CarteiraDriveService.criar_pasta_cliente(cliente.nome or f"Cliente_{cliente.id}")
+        cliente.folder_drive_principal_id = resultado["folder_id"]
+        cliente.folder_drive_url = resultado["folder_link"]
+        if cliente.email:
+            CarteiraDriveService.compartilhar_com_email(cliente.nome, cliente.email, role="reader")
+        db.commit()
+    except Exception as _e:
+        import logging
+        logging.getLogger("app").warning(f"Drive auto-create falhou para cliente {cliente.id}: {_e}")
 
     return cliente
 
@@ -668,12 +662,12 @@ async def processar_e_salvar_documento(
 
         if cliente_id:
             cliente = db.query(CarteiraCliente).filter(CarteiraCliente.id == cliente_id).first()
-            if cliente and cliente.folder_drive_principal_id:
+            if cliente and cliente.nome:
                 try:
                     dr = CarteiraDriveService.fazer_upload_documento(
                         conteudo,
                         file.filename or "documento",
-                        cliente.folder_drive_principal_id,
+                        cliente.nome,
                         mime_type,
                     )
                     drive_file_id = dr["file_id"]
@@ -840,15 +834,14 @@ async def upload_para_drive(
         if not cliente:
             raise HTTPException(status_code=404, detail="Cliente não encontrado")
 
-        pasta_id = cliente.folder_drive_principal_id
-        if not pasta_id:
-            raise HTTPException(status_code=400, detail="Cliente não tem pasta no Drive")
+        if not cliente.nome:
+            raise HTTPException(status_code=400, detail="Cliente sem nome cadastrado")
 
         conteudo = await file.read()
         resultado = CarteiraDriveService.fazer_upload_documento(
             conteudo,
             file.filename or "documento",
-            pasta_id,
+            cliente.nome,
             file.content_type or "application/octet-stream"
         )
 
@@ -870,14 +863,12 @@ def listar_arquivos_drive(cliente_id: int = Query(...), db: Session = Depends(ge
         if not cliente:
             raise HTTPException(status_code=404, detail="Cliente não encontrado")
 
-        pasta_id = cliente.folder_drive_principal_id
-        if not pasta_id:
-            return {"arquivos": [], "mensagem": "Cliente não tem pasta no Drive"}
+        if not cliente.nome:
+            return {"arquivos": [], "mensagem": "Cliente sem nome cadastrado"}
 
-        arquivos = CarteiraDriveService.listar_arquivos_pasta(pasta_id)
+        arquivos = CarteiraDriveService.listar_arquivos_pasta(cliente.nome)
         return {
             "cliente_id": cliente_id,
-            "pasta_id": pasta_id,
             "total_arquivos": len(arquivos),
             "arquivos": arquivos
         }
