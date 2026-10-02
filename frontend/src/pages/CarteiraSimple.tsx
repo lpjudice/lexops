@@ -350,6 +350,9 @@ export default function CarteiraPage() {
   const [viewModePosicao, setViewModePosicao] = useState<'cliente' | 'ativo'>('cliente')
   const [filtroAtivoEmissao, setFiltroAtivoEmissao] = useState('')
   const [filtroAtivoFundo, setFiltroAtivoFundo] = useState('')
+  const [viewModeDebs, setViewModeDebs] = useState<'cliente' | 'ativo'>('cliente')
+  const [viewModeFundos, setViewModeFundos] = useState<'cliente' | 'ativo'>('cliente')
+  const [viewModeImob, setViewModeImob] = useState<'cliente' | 'ativo'>('cliente')
 
   const { isSuperAdmin } = useAuth()
   const qc = useQueryClient()
@@ -414,7 +417,14 @@ export default function CarteiraPage() {
     const debs = debentures.filter(d => d.cliente_id === c.id)
     const imobs = imobiliario.filter(i => i.cliente_id === c.id)
     const fnds = fundos.filter(f => f.cliente_id === c.id)
-    const totalFin = [...debs, ...fnds].reduce((s, p) => s + (p.valor_aplicado ?? 0), 0)
+    const totalDebValue = debs.reduce((s, d) => s + (d.valor_aplicado ?? 0), 0)
+    // Para fundos com % queda, usa apenas a parcela recuperável no cálculo de êxito
+    const totalFundValue = fnds.reduce((s, f) => {
+      const ref = fundosRef.find((r: any) => r.id === f.fundo_id)
+      const queda = ref?.percentual_credito_recuperavel
+      return s + (f.valor_aplicado ?? 0) * (queda != null ? (1 - queda / 100) : 1)
+    }, 0)
+    const totalFin = totalDebValue + totalFundValue
     const totalImob = imobs.reduce((s, p) => s + (p.valor_total_compromissado ?? 0), 0)
     const totalGeral = totalFin + totalImob
     let feeEntrada = 0
@@ -783,6 +793,20 @@ export default function CarteiraPage() {
   )
   const thR = (label: string) => <th style={{ textAlign: 'right' }}>{label}</th>
 
+  const viewToggle = (mode: 'cliente' | 'ativo', setMode: (v: 'cliente' | 'ativo') => void) => (
+    <div style={{ display: 'flex', border: '1px solid var(--gray-border)', borderRadius: 6, overflow: 'hidden', fontSize: 12, marginLeft: 'auto', flexShrink: 0 }}>
+      <button style={{ padding: '4px 12px', background: mode === 'cliente' ? 'var(--teal)' : 'transparent', color: mode === 'cliente' ? 'white' : 'var(--gray-mid)', border: 'none', cursor: 'pointer' }} onClick={() => setMode('cliente')}>Por Cliente</button>
+      <button style={{ padding: '4px 12px', background: mode === 'ativo' ? 'var(--teal)' : 'transparent', color: mode === 'ativo' ? 'white' : 'var(--gray-mid)', border: 'none', cursor: 'pointer' }} onClick={() => setMode('ativo')}>Por Ativo</button>
+    </div>
+  )
+
+  const atvClienteRow = (clienteId: number, valor: number) => (
+    <div key={clienteId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 10px', background: 'var(--gray-light, #f3f4f6)', borderRadius: 4, marginBottom: 3 }}>
+      <span style={{ fontSize: 12 }}>{clienteNome(clienteId)}</span>
+      <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{brl(valor)}</span>
+    </div>
+  )
+
   return (
     <div style={{ padding: '24px 28px' }}>
       <div className={styles.pageHeader}><h1 className={styles.pageTitle}>Carteira</h1></div>
@@ -834,8 +858,8 @@ export default function CarteiraPage() {
                 <span>{r.nome}</span>
                 <span style={{ fontWeight: 700 }}>{brl(r.total)}</span>
                 {r.pctRisco != null && (
-                  <span style={{ fontSize: 11, color: '#d97706', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 4, padding: '0 5px' }}>
-                    {r.pctRisco}% recuperável → {brl(r.total * r.pctRisco / 100)}
+                  <span style={{ fontSize: 11, color: '#dc2626', background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: 4, padding: '0 5px' }}>
+                    {r.pctRisco}% queda · {brl(r.total * (1 - r.pctRisco / 100))} recup.
                   </span>
                 )}
               </div>
@@ -1107,7 +1131,7 @@ export default function CarteiraPage() {
                             <span className={cs.clientePosicaoNome}>{ref?.nome_fundo ?? `Fundo ${fundoId}`}</span>
                             <span className={cs.clientePosicaoTotal}>
                               {brl(total)} · {fnds.length} posições
-                              {pctRecup != null && <span style={{ fontSize: 11, color: '#d97706', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 4, padding: '0 5px', marginLeft: 6 }}>{pctRecup}% recuperável → {brl(total * pctRecup / 100)}</span>}
+                              {pctRecup != null && <span style={{ fontSize: 11, color: '#dc2626', background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: 4, padding: '0 5px', marginLeft: 6 }}>{pctRecup}% queda · {brl(total * (1 - pctRecup / 100))} recup.</span>}
                             </span>
                           </div>
                           <div style={{ padding: '6px 0 4px' }}>
@@ -1133,10 +1157,36 @@ export default function CarteiraPage() {
             <div style={{ width: 260 }}>
               <MultiSelect values={filtroDebEmissoes} onChange={setFiltroDebEmissoes}
                 options={emissoes.map(e => ({ value: e.id, label: `${e.nome_serie} — ${e.emissor}` }))} placeholder="Todas as emissões" />
-            </div></>,
+            </div>
+            {viewToggle(viewModeDebs, setViewModeDebs)}</>,
             filtroClienteDeb, setFiltroClienteDeb,
           )}
-          {clientesComDeb.length === 0 ? emptyGroup() : clientesComDeb.map(g => (
+          {viewModeDebs === 'ativo' && (() => {
+            const byEmissao: Record<number, any[]> = {}
+            for (const d of debsFiltradas) { if (!byEmissao[d.emissao_id]) byEmissao[d.emissao_id] = []; byEmissao[d.emissao_id].push(d) }
+            const entries = Object.entries(byEmissao).sort((a, b) => b[1].reduce((s: number, d: any) => s + (d.valor_aplicado ?? 0), 0) - a[1].reduce((s: number, d: any) => s + (d.valor_aplicado ?? 0), 0))
+            if (!entries.length) return emptyGroup()
+            return (<div>{entries.map(([emissaoId, debs]) => {
+              const total = debs.reduce((s: number, d: any) => s + (d.valor_aplicado ?? 0), 0)
+              return (
+                <div key={emissaoId} className={cs.clientePosicaoCard} style={{ marginBottom: 10 }}>
+                  <div className={cs.clientePosicaoHeader}>
+                    <span className={cs.clientePosicaoNome}>{emissaoNome(Number(emissaoId))}</span>
+                    <span className={cs.clientePosicaoTotal}>{brl(total)} · {debs.length} posições</span>
+                  </div>
+                  <div style={{ padding: '6px 0 4px' }}>
+                    {debs.map((d: any) => (
+                      <div key={d.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 10px', background: 'var(--gray-light, #f3f4f6)', borderRadius: 4, marginBottom: 3 }}>
+                        <span style={{ fontSize: 12 }}>{clienteNome(d.cliente_id)}</span>
+                        <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{brl(d.valor_aplicado ?? 0)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}</div>)
+          })()}
+          {viewModeDebs === 'cliente' && (clientesComDeb.length === 0 ? emptyGroup() : clientesComDeb.map(g => (
             <div key={g.id} className={cs.clienteFundoGroup}>
               <div className={cs.clienteFundoNome} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: 12 }}>
                 <span>{g.nome}</span>
@@ -1171,7 +1221,7 @@ export default function CarteiraPage() {
                 </tbody>
               </table>
             </div>
-          ))}
+          )))}
         </>
       )}
 
@@ -1184,10 +1234,37 @@ export default function CarteiraPage() {
             <div style={{ width: 280 }}>
               <MultiSelect values={filtroImobEmps} onChange={setFiltroImobEmps}
                 options={empreendimentos.map(e => ({ value: e.id, label: e.nome_venda }))} placeholder="Todos" />
-            </div></>,
+            </div>
+            {viewToggle(viewModeImob, setViewModeImob)}</>,
             filtroClienteImob, setFiltroClienteImob,
           )}
-          {clientesComImob.length === 0 ? emptyGroup() : clientesComImob.map(g => (
+          {viewModeImob === 'ativo' && (() => {
+            const byEmp: Record<number, any[]> = {}
+            for (const i of imobFiltrado) { if (!byEmp[i.empreendimento_id]) byEmp[i.empreendimento_id] = []; byEmp[i.empreendimento_id].push(i) }
+            const entries = Object.entries(byEmp).sort((a, b) => b[1].reduce((s: number, i: any) => s + (i.valor_total_compromissado ?? 0), 0) - a[1].reduce((s: number, i: any) => s + (i.valor_total_compromissado ?? 0), 0))
+            if (!entries.length) return emptyGroup()
+            return (<div>{entries.map(([empId, imobs]) => {
+              const emp = empreendimentos.find((x: any) => x.id === Number(empId))
+              const total = imobs.reduce((s: number, i: any) => s + (i.valor_total_compromissado ?? 0), 0)
+              return (
+                <div key={empId} className={cs.clientePosicaoCard} style={{ marginBottom: 10 }}>
+                  <div className={cs.clientePosicaoHeader}>
+                    <span className={cs.clientePosicaoNome}>{emp?.nome_venda ?? `Empreendimento ${empId}`}</span>
+                    <span className={cs.clientePosicaoTotal}>{brl(total)} · {imobs.length} posições</span>
+                  </div>
+                  <div style={{ padding: '6px 0 4px' }}>
+                    {imobs.map((i: any) => (
+                      <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 10px', background: 'var(--gray-light, #f3f4f6)', borderRadius: 4, marginBottom: 3 }}>
+                        <span style={{ fontSize: 12 }}>{clienteNome(i.cliente_id)}</span>
+                        <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{brl(i.valor_total_compromissado ?? 0)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}</div>)
+          })()}
+          {viewModeImob === 'cliente' && (clientesComImob.length === 0 ? emptyGroup() : clientesComImob.map(g => (
             <div key={g.id} className={cs.clienteFundoGroup}>
               <div className={cs.clienteFundoNome} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: 12 }}>
                 <span>{g.nome}</span>
@@ -1217,7 +1294,7 @@ export default function CarteiraPage() {
                 </tbody>
               </table>
             </div>
-          ))}
+          )))}
         </>
       )}
 
@@ -1230,10 +1307,41 @@ export default function CarteiraPage() {
             <div style={{ width: 260 }}>
               <MultiSelect values={filtroFundosFundos} onChange={setFiltroFundosFundos}
                 options={fundosRef.map(f => ({ value: f.id, label: f.nome_fundo }))} placeholder="Todos" />
-            </div></>,
+            </div>
+            {viewToggle(viewModeFundos, setViewModeFundos)}</>,
             filtroClienteFundos, setFiltroClienteFundos,
           )}
-          {clientesComFundos.length === 0 ? emptyGroup() : clientesComFundos.map(g => (
+          {viewModeFundos === 'ativo' && (() => {
+            const byFundo: Record<number, any[]> = {}
+            for (const f of fundosFiltrados) { if (!byFundo[f.fundo_id]) byFundo[f.fundo_id] = []; byFundo[f.fundo_id].push(f) }
+            const entries = Object.entries(byFundo).sort((a, b) => b[1].reduce((s: number, f: any) => s + (f.valor_aplicado ?? 0), 0) - a[1].reduce((s: number, f: any) => s + (f.valor_aplicado ?? 0), 0))
+            if (!entries.length) return emptyGroup()
+            return (<div>{entries.map(([fundoId, fnds]) => {
+              const ref = fundosRef.find((r: any) => r.id === Number(fundoId))
+              const total = fnds.reduce((s: number, f: any) => s + (f.valor_aplicado ?? 0), 0)
+              const queda = ref?.percentual_credito_recuperavel
+              return (
+                <div key={fundoId} className={cs.clientePosicaoCard} style={{ marginBottom: 10 }}>
+                  <div className={cs.clientePosicaoHeader}>
+                    <span className={cs.clientePosicaoNome}>
+                      {ref?.nome_fundo ?? `Fundo ${fundoId}`}
+                      {queda != null && <span style={{ fontSize: 11, color: '#dc2626', background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: 4, padding: '0 5px', marginLeft: 6 }}>{queda}% queda · {brl(total * (1 - queda / 100))} recup.</span>}
+                    </span>
+                    <span className={cs.clientePosicaoTotal}>{brl(total)} aplicado</span>
+                  </div>
+                  <div style={{ padding: '6px 0 4px' }}>
+                    {fnds.map((f: any) => (
+                      <div key={f.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 10px', background: 'var(--gray-light, #f3f4f6)', borderRadius: 4, marginBottom: 3 }}>
+                        <span style={{ fontSize: 12 }}>{clienteNome(f.cliente_id)}</span>
+                        <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{brl(f.valor_aplicado ?? 0)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}</div>)
+          })()}
+          {viewModeFundos === 'cliente' && (clientesComFundos.length === 0 ? emptyGroup() : clientesComFundos.map(g => (
             <div key={g.id} className={cs.clienteFundoGroup}>
               <div className={cs.clienteFundoNome} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: 12 }}>
                 <span>{g.nome}</span>
@@ -1250,7 +1358,7 @@ export default function CarteiraPage() {
                         {(() => {
                           const ref = fundosRef.find((r: any) => r.id === f.fundo_id)
                           return ref?.percentual_credito_recuperavel != null
-                            ? <span style={{ fontSize: 10, background: '#fffbeb', color: '#d97706', border: '1px solid #fde68a', borderRadius: 3, padding: '1px 5px', marginLeft: 6, whiteSpace: 'nowrap' }}>{ref.percentual_credito_recuperavel}% recup.</span>
+                            ? <span style={{ fontSize: 10, background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', borderRadius: 3, padding: '1px 5px', marginLeft: 6, whiteSpace: 'nowrap' }}>{ref.percentual_credito_recuperavel}% queda</span>
                             : null
                         })()}
                       </td>
@@ -1272,7 +1380,7 @@ export default function CarteiraPage() {
                 </tbody>
               </table>
             </div>
-          ))}
+          )))}
         </>
       )}
 
@@ -1395,7 +1503,19 @@ export default function CarteiraPage() {
                 {fundosRef.length === 0
                   ? <tr><td colSpan={6} style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Nenhum registro</td></tr>
                   : fundosRef.map((f: any) => (
-                    <tr key={f.id}><td><strong>{f.nome_fundo}</strong></td><td>{f.cnpj_fundo ?? '—'}</td><td>{f.gestora ?? '—'}</td><td>{f.tipo_fundo ?? '—'}</td><td>{statusBadge(f.ativo)}</td><td>{editBtn(() => abrirEdicaoFundoRef(f))}</td></tr>
+                    <tr key={f.id}>
+                      <td>
+                        <strong>{f.nome_fundo}</strong>
+                        {f.percentual_credito_recuperavel != null && (
+                          <span style={{ fontSize: 10, background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', borderRadius: 3, padding: '1px 5px', marginLeft: 6, whiteSpace: 'nowrap' }}>{f.percentual_credito_recuperavel}% queda</span>
+                        )}
+                      </td>
+                      <td>{f.cnpj_fundo ?? '—'}</td>
+                      <td>{f.gestora ?? '—'}</td>
+                      <td>{f.tipo_fundo ?? '—'}</td>
+                      <td>{statusBadge(f.ativo)}</td>
+                      <td>{editBtn(() => abrirEdicaoFundoRef(f))}</td>
+                    </tr>
                   ))}
               </tbody>
             </table>
@@ -1710,13 +1830,13 @@ export default function CarteiraPage() {
           {fl('Administradora', fi('administradora'))}
           {fl('Tipo', fi('tipo_fundo', 'text', 'FII, FIA, Multimercado...'))}
           {fl('Indexador', fi('indexador'))}
-          {fl('% Recuperável (máx.)', <div>
+          {fl('% de Queda', <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              {fi('percentual_credito_recuperavel', 'number', 'Ex: 34')}
-              <span style={{ fontSize: 11, color: 'var(--gray-mid)', whiteSpace: 'nowrap' }}>% do valor aplicado</span>
+              {fi('percentual_credito_recuperavel', 'number', 'Ex: 70')}
+              <span style={{ fontSize: 11, color: 'var(--gray-mid)', whiteSpace: 'nowrap' }}>% perdido do valor aplicado</span>
             </div>
             <div style={{ fontSize: 10, color: 'var(--gray-mid)', marginTop: 4, lineHeight: 1.4 }}>
-              Percentual máximo que ainda pode ser recuperado. O restante está perdido. Ex: 34 → 34% recuperável, 66% perdido.
+              Percentual de perda estimada. Ex: 70 → 70% perdido, 30% recuperável. Usado no cálculo de expectativa futura.
             </div>
           </div>)}
           <button className={styles.btnPrimary} onClick={() => editandoFundoRefId ? atualizarFundoRef.mutate() : salvarFundoRef.mutate()} disabled={salvarFundoRef.isPending || atualizarFundoRef.isPending}>{(salvarFundoRef.isPending || atualizarFundoRef.isPending) ? 'Salvando...' : 'Salvar'}</button>
