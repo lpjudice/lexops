@@ -632,6 +632,63 @@ async def processar_documento_com_ia(
         raise HTTPException(status_code=400, detail=f"Erro ao processar documento: {str(e)}")
 
 
+@router.post("/processar-e-salvar-documento")
+async def processar_e_salvar_documento(
+    file: UploadFile = File(...),
+    tipo: str = Query("geral"),
+    cliente_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Processa com IA, salva no DB e envia ao Drive (se o cliente tiver pasta)."""
+    try:
+        conteudo = await file.read()
+        mime_type = file.content_type or "application/pdf"
+
+        resultado_ia = await CarteiraIAService.processar_documento(conteudo, mime_type, tipo)
+
+        drive_file_id: Optional[str] = None
+        drive_file_link: Optional[str] = None
+
+        if cliente_id:
+            cliente = db.query(CarteiraCliente).filter(CarteiraCliente.id == cliente_id).first()
+            if cliente and cliente.folder_drive_principal_id:
+                try:
+                    dr = CarteiraDriveService.fazer_upload_documento(
+                        conteudo,
+                        file.filename or "documento",
+                        cliente.folder_drive_principal_id,
+                        mime_type,
+                    )
+                    drive_file_id = dr["file_id"]
+                    drive_file_link = dr["file_link"]
+                except Exception:
+                    pass
+
+            if cliente:
+                doc = CarteiraUploadDocumento(
+                    cliente_id=cliente_id,
+                    nome_arquivo=file.filename,
+                    tipo_documento=tipo,
+                    mime_type=mime_type,
+                    tamanho_bytes=len(conteudo),
+                    dados_binarios=conteudo,
+                )
+                db.add(doc)
+                db.commit()
+
+        return {
+            "status": "sucesso",
+            "dados_extraidos": resultado_ia["dados"],
+            "nome_arquivo": file.filename,
+            "tipo_processado": resultado_ia["tipo"],
+            "modelo": resultado_ia["modelo"],
+            "drive_file_id": drive_file_id,
+            "drive_file_link": drive_file_link,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Erro ao processar documento: {str(e)}")
+
+
 @router.post("/comparar-termo-emissao")
 async def comparar_termo_emissao(
     file_termo: UploadFile = File(...),
@@ -740,12 +797,8 @@ def criar_pasta_drive(cliente_id: int = Query(...), db: Session = Depends(get_db
             cliente.nome or f"Cliente_{cliente_id}"
         )
 
-        # Armazenar ID da pasta no cliente
-        if cliente.dados_adicionais is None:
-            cliente.dados_adicionais = {}
-
-        cliente.dados_adicionais['folder_drive_id'] = resultado['folder_id']
-        cliente.dados_adicionais['folder_drive_link'] = resultado['folder_link']
+        cliente.folder_drive_principal_id = resultado['folder_id']
+        cliente.folder_drive_url = resultado['folder_link']
         db.commit()
 
         return {
@@ -770,7 +823,7 @@ async def upload_para_drive(
         if not cliente:
             raise HTTPException(status_code=404, detail="Cliente não encontrado")
 
-        pasta_id = cliente.dados_adicionais.get('folder_drive_id') if cliente.dados_adicionais else None
+        pasta_id = cliente.folder_drive_principal_id
         if not pasta_id:
             raise HTTPException(status_code=400, detail="Cliente não tem pasta no Drive")
 
@@ -800,7 +853,7 @@ def listar_arquivos_drive(cliente_id: int = Query(...), db: Session = Depends(ge
         if not cliente:
             raise HTTPException(status_code=404, detail="Cliente não encontrado")
 
-        pasta_id = cliente.dados_adicionais.get('folder_drive_id') if cliente.dados_adicionais else None
+        pasta_id = cliente.folder_drive_principal_id
         if not pasta_id:
             return {"arquivos": [], "mensagem": "Cliente não tem pasta no Drive"}
 

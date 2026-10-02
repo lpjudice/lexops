@@ -129,7 +129,10 @@ TEAL_LINE  = TEAL
 def _logo_header(nome_cliente: str, data_str: str) -> Table:
     """Logo à esquerda, info do cliente à direita"""
     try:
-        logo = Image(_LOGO_PATH, width=52*mm, height=14*mm)
+        logo = Image(_LOGO_PATH)
+        target_w = 48 * mm
+        logo.drawWidth = target_w
+        logo.drawHeight = target_w * logo.imageHeight / logo.imageWidth
         logo.hAlign = 'LEFT'
         logo_cell = logo
     except Exception:

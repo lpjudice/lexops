@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '@/api/client'
@@ -172,7 +172,7 @@ function UnifiedClientCombo({
     if (s.length < 2) { setSistemResults([]); return }
     setLoading(true)
     try {
-      const r = await api.get('/clientes', { params: { busca: s, limit: 20 } })
+      const r = await api.get('/clientes/', { params: { busca: s, limit: 20 } })
       const data = Array.isArray(r.data) ? r.data : (r.data?.data ?? [])
       const localCpfs = new Set(localClientes.map(c => c.cpf).filter(Boolean))
       setSistemResults(data.filter((x: any) => !localCpfs.has(x.cpf_cnpj)))
@@ -337,6 +337,12 @@ export default function CarteiraPage() {
   const [editandoEstrategiaId, setEditandoEstrategiaId] = useState<number | null>(null)
   // Resgate antecipado modal
   const [resgateDebId, setResgateDebId] = useState<number | null>(null)
+  // Drive modal
+  const [driveClienteId, setDriveClienteId] = useState<number | null>(null)
+  const [driveArquivos, setDriveArquivos] = useState<any[]>([])
+  const [driveCarregando, setDriveCarregando] = useState(false)
+  // Cadeia societária modal
+  const [cadeiaEmpId, setCadeiaEmpId] = useState<number | null>(null)
 
   const { isSuperAdmin } = useAuth()
   const qc = useQueryClient()
@@ -541,6 +547,31 @@ export default function CarteiraPage() {
     },
     onError: (e: any) => alert(e?.response?.data?.detail || 'Erro ao processar documento'),
   })
+
+  const criarPastaDrive = useMutation({
+    mutationFn: (clienteId: number) =>
+      api.post(`/carteira/criar-pasta-drive?cliente_id=${clienteId}`).then(r => r.data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['carteira-clientes'] }) },
+    onError: (e: any) => alert(e?.response?.data?.detail || 'Erro ao criar pasta Drive'),
+  })
+
+  const carregarArquivosDrive = async (clienteId: number) => {
+    setDriveCarregando(true)
+    try {
+      const r = await api.get(`/carteira/listar-arquivos-drive?cliente_id=${clienteId}`)
+      setDriveArquivos(r.data.arquivos ?? [])
+    } catch {
+      setDriveArquivos([])
+    } finally {
+      setDriveCarregando(false)
+    }
+  }
+
+  const uploadDriveFile = async (clienteId: number, file: File) => {
+    const fd = new FormData(); fd.append('file', file)
+    await api.post(`/carteira/upload-para-drive?cliente_id=${clienteId}`, fd)
+    await carregarArquivosDrive(clienteId)
+  }
 
   const exportarXlsx = async () => {
     const ids = clientes.map((c: any) => c.id)
@@ -1043,11 +1074,11 @@ export default function CarteiraPage() {
           </div>
           <div className={styles.tableCard}>
             <table className={styles.table}>
-              <colgroup><col /><col style={{ width: 60 }} /><col style={{ width: 140 }} /><col style={{ width: 160 }} /><col style={{ width: 150 }} /><col style={{ width: 150 }} /><col style={{ width: 80 }} /><col style={{ width: 36 }} /><col style={{ width: 60 }} /></colgroup>
-              <thead><tr><th>Nome</th><th>Tipo</th><th>CPF/CNPJ</th><th>{isSuperAdmin ? 'Fee entrada' : '🔒 Fee'}</th>{thR(isSuperAdmin ? 'Fee (R$ esp.)' : '🔒')}{thR(isSuperAdmin ? 'Êxito (R$ esp.)' : '🔒')}<th>Status</th><th /><th /></tr></thead>
+              <colgroup><col /><col style={{ width: 60 }} /><col style={{ width: 140 }} /><col style={{ width: 160 }} /><col style={{ width: 150 }} /><col style={{ width: 150 }} /><col style={{ width: 80 }} /><col style={{ width: 36 }} /><col style={{ width: 36 }} /><col style={{ width: 60 }} /></colgroup>
+              <thead><tr><th>Nome</th><th>Tipo</th><th>CPF/CNPJ</th><th>{isSuperAdmin ? 'Fee entrada' : '🔒 Fee'}</th>{thR(isSuperAdmin ? 'Fee (R$ esp.)' : '🔒')}{thR(isSuperAdmin ? 'Êxito (R$ esp.)' : '🔒')}<th>Status</th><th /><th title="Drive" /></tr></thead>
               <tbody>
                 {clientes.length === 0
-                  ? <tr><td colSpan={9} style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Nenhum registro</td></tr>
+                  ? <tr><td colSpan={10} style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Nenhum registro</td></tr>
                   : clientes.map((c: any) => {
                     const { feeEntrada, exito } = calcularHonorarios(c)
                     const feeLbl = c.pro_labore_tipo === 'fixo' ? brl(c.pro_labore_valor)
@@ -1066,6 +1097,13 @@ export default function CarteiraPage() {
                         <td>
                           <button title="Copiar qualificação" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: '#374151', padding: '0 4px' }}
                             onClick={() => navigator.clipboard.writeText(qualificacaoTexto(c)).then(() => alert('Qualificação copiada!')).catch(() => alert('Erro ao copiar'))}>⎘</button>
+                        </td>
+                        <td>
+                          <button
+                            title={c.folder_drive_principal_id ? 'Ver pasta Drive' : 'Criar pasta no Drive'}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 15, color: c.folder_drive_principal_id ? '#16a34a' : '#9ca3af', padding: '0 4px' }}
+                            onClick={() => { setDriveClienteId(c.id); if (c.folder_drive_principal_id) carregarArquivosDrive(c.id) }}
+                          >📁</button>
                         </td>
                         <td>{editBtn(() => abrirEdicaoCliente(c))}</td>
                       </tr>
@@ -1106,10 +1144,10 @@ export default function CarteiraPage() {
           {addBtn('Novo Empreendimento', () => { setForm({ prestadora_nome: 'Apex Realty', subveiculos: [] }); setEditandoEmpId(null); setModal('empreendimento') })}
           <div className={styles.tableCard}>
             <table className={styles.table}>
-              <thead><tr><th>Projeto</th><th>Razão Social do Veículo</th><th>CNPJ</th><th>Sub-veículos</th><th>Status</th><th /></tr></thead>
+              <thead><tr><th>Projeto</th><th>Razão Social do Veículo</th><th>CNPJ</th><th>Sub-veículos</th><th>Status</th><th title="Cadeia" /><th /></tr></thead>
               <tbody>
                 {empreendimentos.length === 0
-                  ? <tr><td colSpan={6} style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Nenhum registro</td></tr>
+                  ? <tr><td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Nenhum registro</td></tr>
                   : empreendimentos.map((e: any) => {
                     const isDup = e.cnpj_empreendimento && (cnpjCount[e.cnpj_empreendimento] ?? 0) > 1
                     return (
@@ -1122,6 +1160,10 @@ export default function CarteiraPage() {
                         </td>
                         <td style={{ fontSize: 12 }}>{(e.subveiculos?.length ?? 0) > 0 ? e.subveiculos.length : '—'}</td>
                         <td>{statusBadge(e.ativo)}</td>
+                        <td>
+                          <button title="Cadeia Societária" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: '#6366f1', padding: '0 4px' }}
+                            onClick={() => setCadeiaEmpId(e.id)}>⬡</button>
+                        </td>
                         <td>{editBtn(() => abrirEdicaoEmp(e))}</td>
                       </tr>
                     )
@@ -1567,6 +1609,121 @@ export default function CarteiraPage() {
                 </>
               )}
             </div>
+          </Modal>
+        )
+      })()}
+
+      {/* ── MODAL DRIVE ─────────────────────────────────────────── */}
+      {driveClienteId !== null && (() => {
+        const c = clientes.find((x: any) => x.id === driveClienteId)
+        if (!c) return null
+        const nome = clienteNome(c.id)
+        const temPasta = !!c.folder_drive_principal_id
+        return (
+          <Modal title={`Drive — ${nome}`} onClose={() => { setDriveClienteId(null); setDriveArquivos([]) }} width={480}>
+            {!temPasta ? (
+              <div style={{ textAlign: 'center', padding: '24px 0' }}>
+                <div style={{ fontSize: 13, color: 'var(--gray-mid)', marginBottom: 16 }}>
+                  Nenhuma pasta Drive vinculada a este cliente.
+                </div>
+                <button
+                  className={styles.btnPrimary}
+                  disabled={criarPastaDrive.isPending}
+                  onClick={() => criarPastaDrive.mutate(driveClienteId)}
+                >
+                  {criarPastaDrive.isPending ? 'Criando...' : '📁 Criar pasta no Drive'}
+                </button>
+              </div>
+            ) : (
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, padding: '8px 12px', background: 'var(--gray-light, #f3f4f6)', borderRadius: 6 }}>
+                  <span style={{ fontSize: 18 }}>📁</span>
+                  <a href={c.folder_drive_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: 'var(--teal)', fontWeight: 600 }}>
+                    Abrir pasta no Drive
+                  </a>
+                </div>
+                <div style={{ marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--gray-dark)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Arquivos</span>
+                  <label style={{ cursor: 'pointer', fontSize: 12, color: 'var(--teal)', fontWeight: 600 }}>
+                    ⬆ Upload
+                    <input type="file" style={{ display: 'none' }} onChange={async e => {
+                      const f = e.target.files?.[0]; if (f) await uploadDriveFile(driveClienteId, f)
+                    }} />
+                  </label>
+                </div>
+                {driveCarregando
+                  ? <div style={{ fontSize: 12, color: 'var(--gray-mid)', padding: 12 }}>Carregando...</div>
+                  : driveArquivos.length === 0
+                    ? <div style={{ fontSize: 12, color: 'var(--gray-mid)', fontStyle: 'italic', padding: '8px 0' }}>Nenhum arquivo ainda.</div>
+                    : driveArquivos.map((f: any) => (
+                      <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--gray-border, #e5e7eb)', fontSize: 12 }}>
+                        <span style={{ flex: 1 }}>{f.name}</span>
+                        <a href={f.webViewLink} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--teal)', fontWeight: 600, whiteSpace: 'nowrap' }}>Ver</a>
+                      </div>
+                    ))
+                }
+              </div>
+            )}
+          </Modal>
+        )
+      })()}
+
+      {/* ── MODAL CADEIA SOCIETÁRIA ──────────────────────────────── */}
+      {cadeiaEmpId !== null && (() => {
+        const e = empreendimentos.find((x: any) => x.id === cadeiaEmpId)
+        if (!e) return null
+        const nodeStyle: React.CSSProperties = {
+          border: '2px solid var(--teal, #0d9488)', borderRadius: 8, padding: '10px 16px',
+          minWidth: 200, maxWidth: 260, background: 'var(--bg-card, white)',
+          textAlign: 'center', fontSize: 12,
+        }
+        const labelStyle: React.CSSProperties = {
+          fontSize: 10, fontWeight: 700, color: 'var(--teal)', textTransform: 'uppercase',
+          letterSpacing: '0.07em', marginBottom: 2,
+        }
+        const arrowStyle: React.CSSProperties = {
+          textAlign: 'center', fontSize: 18, color: 'var(--gray-mid, #9ca3af)', margin: '4px 0', lineHeight: 1,
+        }
+        const nodeBox = (label: string, nome: string | null | undefined, cnpj: string | null | undefined, borderColor?: string) => (
+          nome ? (
+            <div style={{ ...nodeStyle, ...(borderColor ? { border: `2px solid ${borderColor}` } : {}) }}>
+              <div style={{ ...labelStyle, ...(borderColor ? { color: borderColor } : {}) }}>{label}</div>
+              <div style={{ fontWeight: 700, fontSize: 13 }}>{nome}</div>
+              {cnpj && <div style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--gray-mid)' }}>{cnpj}</div>}
+            </div>
+          ) : null
+        )
+        const subvs: any[] = e.subveiculos ?? []
+        const temCadeia = e.prestadora_nome || e.nome_razao_social || e.spe_nome || subvs.length > 0
+        return (
+          <Modal title={`Cadeia Societária — ${e.nome_venda}`} onClose={() => setCadeiaEmpId(null)} width={520}>
+            {!temCadeia ? (
+              <div style={{ fontSize: 13, color: 'var(--gray-mid)', fontStyle: 'italic', padding: '24px 0', textAlign: 'center' }}>
+                Cadeia não preenchida. Edite o empreendimento para adicionar Prestadora, Veículo, SPE e Sub-veículos.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0, padding: '8px 0' }}>
+                {nodeBox('Prestadora de Serviços', e.prestadora_nome ?? 'Apex Realty', e.prestadora_cnpj, '#6366f1')}
+                {e.nome_razao_social && <div style={arrowStyle}>↓</div>}
+                {nodeBox('Veículo Imobiliário', e.nome_razao_social, e.cnpj_empreendimento)}
+                {e.spe_nome && <><div style={arrowStyle}>↓</div>{nodeBox('SPE', e.spe_nome, e.spe_cnpj, '#0891b2')}</>}
+                {subvs.length > 0 && (
+                  <>
+                    <div style={arrowStyle}>↓</div>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--gray-mid)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Sub-veículos ({subvs.length})</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
+                      {subvs.map((sv: any, i: number) => (
+                        <div key={i} style={{ ...nodeStyle, minWidth: 140, maxWidth: 180, border: '1.5px solid #a5b4fc' }}>
+                          <div style={{ ...labelStyle, color: '#6366f1' }}>{sv.tipo ?? 'Sub-veículo'}</div>
+                          <div style={{ fontWeight: 600, fontSize: 12 }}>{sv.nome}</div>
+                          {sv.cnpj && <div style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--gray-mid)' }}>{sv.cnpj}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
           </Modal>
         )
       })()}

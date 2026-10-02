@@ -1508,6 +1508,9 @@ def _run_migrations() -> None:
             "ALTER TABLE carteira_debenture_posicao ADD COLUMN IF NOT EXISTS clausulas_resgate_cautela TEXT",
             # estratégia: nome curto para o chip
             "ALTER TABLE carteira_estrategia ADD COLUMN IF NOT EXISTS nome_chip VARCHAR(60)",
+            # cliente: colunas de Drive (folder_drive_principal_id / folder_drive_url)
+            "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS folder_drive_principal_id VARCHAR(255)",
+            "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS folder_drive_url VARCHAR(500)",
         ]:
             conn.execute(text(_col))
 
