@@ -353,6 +353,7 @@ export default function CarteiraPage() {
   const [viewModeDebs, setViewModeDebs] = useState<'cliente' | 'ativo'>('cliente')
   const [viewModeFundos, setViewModeFundos] = useState<'cliente' | 'ativo'>('cliente')
   const [viewModeImob, setViewModeImob] = useState<'cliente' | 'ativo'>('cliente')
+  const [confirmPctOverride, setConfirmPctOverride] = useState<{ tipo: 'fundo' | 'deb' | 'imob', mutateFn: () => void, confirmText: string } | null>(null)
 
   const { isSuperAdmin } = useAuth()
   const qc = useQueryClient()
@@ -661,20 +662,43 @@ export default function CarteiraPage() {
     const c = clientes.find((x: any) => x.id === clienteId)
     return c ? (c.percentual_sucesso_imob ?? c.percentual_sucesso_geral ?? '') : ''
   }
+  const efetivoPctFin = (pos: any) => {
+    const stored = pos.percentual_sucesso_honor
+    if (stored != null && stored !== '') return { val: stored as number, custom: true }
+    const def = pctExitoFin(pos.cliente_id)
+    return { val: def as number | '', custom: false }
+  }
+  const efetivoPctImob = (pos: any) => {
+    const stored = pos.percentual_sucesso_honorario
+    if (stored != null && stored !== '') return { val: stored as number, custom: true }
+    const def = pctExitoImob(pos.cliente_id)
+    return { val: def as number | '', custom: false }
+  }
+  const salvarComConfirmPct = (tipo: 'fundo' | 'deb' | 'imob', mutateFn: () => void) => {
+    if (!form.faz_parte_honorarios) { mutateFn(); return }
+    const pctAtual = tipo === 'imob' ? form.percentual_sucesso_honorario : form.percentual_sucesso_honor
+    const pctDefault = tipo === 'imob' ? pctExitoImob(form.cliente_id) : pctExitoFin(form.cliente_id)
+    const isEditing = tipo === 'fundo' ? !!editandoFundoId : tipo === 'deb' ? !!editandoDebId : !!editandoImobId
+    if (isEditing && pctAtual != null && pctAtual !== '' && String(pctAtual) !== String(pctDefault)) {
+      setConfirmPctOverride({ tipo, mutateFn, confirmText: '' })
+      return
+    }
+    mutateFn()
+  }
 
   const abrirEdicaoDeb = (d: any) => {
     setForm({ ...d, faz_parte_honorarios: !!d.faz_parte_honorarios, foi_pago: !!d.foi_pago,
-      percentual_sucesso_honor: pctExitoFin(d.cliente_id) })
+      percentual_sucesso_honor: d.percentual_sucesso_honor ?? pctExitoFin(d.cliente_id) })
     setEditandoDebId(d.id); setModal('debenture')
   }
   const abrirEdicaoImob = (i: any) => {
     setForm({ ...i, faz_parte_honorarios: !!i.faz_parte_honorarios,
-      percentual_sucesso_honorario: pctExitoImob(i.cliente_id) })
+      percentual_sucesso_honorario: i.percentual_sucesso_honorario ?? pctExitoImob(i.cliente_id) })
     setEditandoImobId(i.id); setModal('imobiliario')
   }
   const abrirEdicaoFundo = (f: any) => {
     setForm({ ...f, faz_parte_honorarios: !!f.faz_parte_honorarios, tem_direito_recompra: !!f.tem_direito_recompra,
-      percentual_sucesso_honor: pctExitoFin(f.cliente_id) })
+      percentual_sucesso_honor: f.percentual_sucesso_honor ?? pctExitoFin(f.cliente_id) })
     setEditandoFundoId(f.id); setModal('fundo')
   }
 
@@ -933,6 +957,15 @@ export default function CarteiraPage() {
                         {isSuperAdmin && feeEntrada > 0 && ` · Fee: ${brl(feeEntrada)}`}
                         {isSuperAdmin && exito > 0 && ` · Êxito esp.: ${brl(exito)}`}
                       </span>
+                      {isSuperAdmin && (() => {
+                        const customFnds = fnds.filter(f => f.faz_parte_honorarios && f.percentual_sucesso_honor != null && String(f.percentual_sucesso_honor) !== String(pctExitoFin(c.id)))
+                        const customDebs = debs.filter(d => d.faz_parte_honorarios && d.percentual_sucesso_honor != null && String(d.percentual_sucesso_honor) !== String(pctExitoFin(c.id)))
+                        if (!customFnds.length && !customDebs.length) return null
+                        return <span style={{ fontSize: 11, color: '#d97706', display: 'block', marginTop: 2 }}>
+                          {customFnds.map(f => <span key={f.id} style={{ marginRight: 8 }}>⚠ {fundoNome(f.fundo_id)}: {pct(f.percentual_sucesso_honor)}*</span>)}
+                          {customDebs.map(d => <span key={d.id} style={{ marginRight: 8 }}>⚠ {emissaoNome(d.emissao_id)}: {pct(d.percentual_sucesso_honor)}*</span>)}
+                        </span>
+                      })()}
                     </div>
                     <button className={styles.btnSmall} onClick={() => window.open(`/api/carteira/cliente/${c.id}/pdf`, '_blank')}>PDF</button>
                   </div>
@@ -951,7 +984,7 @@ export default function CarteiraPage() {
                               <td style={{ textAlign: 'right' }}>{brl(d.valor_aplicado)}</td>
                               <td style={{ textAlign: 'right' }}>{d.valor_atual_estimado ? brl(d.valor_atual_estimado) : '—'}</td>
                               <td>{statusBadge(d.status_resgate)}</td>
-                              <td>{isSuperAdmin ? (d.faz_parte_honorarios ? pct(d.percentual_sucesso_honor) : '—') : '🔒'}</td>
+                              <td>{isSuperAdmin ? (() => { if (!d.faz_parte_honorarios) return '—'; const ep = efetivoPctFin(d); return ep.val !== '' ? (ep.custom ? <span title="Personalizado p/ esta posição" style={{ color: '#d97706', fontWeight: 600 }}>{pct(ep.val)}*</span> : pct(ep.val)) : '—' })() : '🔒'}</td>
                               <td><EstrategiaChips ids={d.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratDeb.mutate({ id: d.id, ids })} /></td>
                               <td style={{ whiteSpace: 'nowrap' }}>
                                 <button title="Detalhes" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#6b7280', padding: '0 3px' }} onClick={() => setDebInfoId(d.id)}>ⓘ</button>
@@ -984,7 +1017,7 @@ export default function CarteiraPage() {
                               <td style={{ textAlign: 'right' }}>{brl(i.valor_total_compromissado)}</td>
                               <td style={{ textAlign: 'right' }}>{brl(i.valor_efetivamente_investido)}</td>
                               <td>{pct(i.percentual_participacao)}</td>
-                              <td>{isSuperAdmin ? (i.faz_parte_honorarios ? pct(i.percentual_sucesso_honorario) : '—') : '🔒'}</td>
+                              <td>{isSuperAdmin ? (() => { if (!i.faz_parte_honorarios) return '—'; const ep = efetivoPctImob(i); return ep.val !== '' ? (ep.custom ? <span title="Personalizado p/ esta posição" style={{ color: '#d97706', fontWeight: 600 }}>{pct(ep.val)}*</span> : pct(ep.val)) : '—' })() : '🔒'}</td>
                               <td><EstrategiaChips ids={i.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratImob.mutate({ id: i.id, ids })} /></td>
                               <td>{editBtn(() => abrirEdicaoImob(i))}</td>
                             </tr>
@@ -1014,7 +1047,7 @@ export default function CarteiraPage() {
                               <td style={{ textAlign: 'right' }}>{f.valor_atual_estimado ? brl(f.valor_atual_estimado) : '—'}</td>
                               <td>{f.data_aplicacao ?? '—'}</td>
                               <td>{f.tem_direito_recompra ? <span className={`${styles.badge} ${styles.status_suspenso}`}>Sim</span> : '—'}</td>
-                              <td>{isSuperAdmin ? (f.faz_parte_honorarios ? pct(f.percentual_sucesso_honor) : '—') : '🔒'}</td>
+                              <td>{isSuperAdmin ? (() => { if (!f.faz_parte_honorarios) return '—'; const ep = efetivoPctFin(f); return ep.val !== '' ? (ep.custom ? <span title="Personalizado p/ esta posição" style={{ color: '#d97706', fontWeight: 600 }}>{pct(ep.val)}*</span> : pct(ep.val)) : '—' })() : '🔒'}</td>
                               <td><EstrategiaChips ids={f.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratFundo.mutate({ id: f.id, ids })} /></td>
                               <td>{editBtn(() => abrirEdicaoFundo(f))}</td>
                             </tr>
@@ -1366,7 +1399,7 @@ export default function CarteiraPage() {
                       <td style={{ textAlign: 'right' }}>{f.valor_atual_estimado ? brl(f.valor_atual_estimado) : '—'}</td>
                       <td>{f.data_aplicacao ?? '—'}</td>
                       <td>{f.tem_direito_recompra ? <span className={`${styles.badge} ${styles.status_suspenso}`}>Sim</span> : '—'}</td>
-                      <td>{isSuperAdmin ? (f.faz_parte_honorarios ? pct(f.percentual_sucesso_honor) : '—') : '🔒'}</td>
+                      <td>{isSuperAdmin ? (() => { if (!f.faz_parte_honorarios) return '—'; const ep = efetivoPctFin(f); return ep.val !== '' ? (ep.custom ? <span title="Personalizado p/ esta posição" style={{ color: '#d97706', fontWeight: 600 }}>{pct(ep.val)}*</span> : pct(ep.val)) : '—' })() : '🔒'}</td>
                       <td><EstrategiaChips ids={f.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratFundo.mutate({ id: f.id, ids })} /></td>
                       <td>{editBtn(() => abrirEdicaoFundo(f))}</td>
                     </tr>
@@ -1788,7 +1821,7 @@ export default function CarteiraPage() {
               {form.faz_parte_honorarios && fl('% Êxito', fi('percentual_sucesso_honor', 'number'))}
             </div>
           )}
-          <button className={styles.btnPrimary} onClick={() => editandoDebId ? atualizarDebenture.mutate() : salvarDebenture.mutate()} disabled={salvarDebenture.isPending || atualizarDebenture.isPending}>
+          <button className={styles.btnPrimary} onClick={() => editandoDebId ? salvarComConfirmPct('deb', () => atualizarDebenture.mutate()) : salvarDebenture.mutate()} disabled={salvarDebenture.isPending || atualizarDebenture.isPending}>
             {(salvarDebenture.isPending || atualizarDebenture.isPending) ? 'Salvando...' : 'Salvar'}
           </button>
         </Modal>
@@ -1815,7 +1848,7 @@ export default function CarteiraPage() {
             </label>
           </div>
           {form.faz_parte_honorarios && fl('% Êxito', fi('percentual_sucesso_honorario', 'number'))}
-          <button className={styles.btnPrimary} onClick={() => editandoImobId ? atualizarImobiliario.mutate() : salvarImobiliario.mutate()} disabled={salvarImobiliario.isPending || atualizarImobiliario.isPending}>
+          <button className={styles.btnPrimary} onClick={() => editandoImobId ? salvarComConfirmPct('imob', () => atualizarImobiliario.mutate()) : salvarImobiliario.mutate()} disabled={salvarImobiliario.isPending || atualizarImobiliario.isPending}>
             {(salvarImobiliario.isPending || atualizarImobiliario.isPending) ? 'Salvando...' : 'Salvar'}
           </button>
         </Modal>
@@ -1870,7 +1903,7 @@ export default function CarteiraPage() {
             </label>
           </div>
           {form.tem_direito_recompra && fl('Data vencimento recompra', fi('data_vencimento_recompra', 'date'))}
-          <button className={styles.btnPrimary} onClick={() => editandoFundoId ? atualizarFundo.mutate() : salvarFundo.mutate()} disabled={salvarFundo.isPending || atualizarFundo.isPending}>
+          <button className={styles.btnPrimary} onClick={() => editandoFundoId ? salvarComConfirmPct('fundo', () => atualizarFundo.mutate()) : salvarFundo.mutate()} disabled={salvarFundo.isPending || atualizarFundo.isPending}>
             {(salvarFundo.isPending || atualizarFundo.isPending) ? 'Salvando...' : 'Salvar'}
           </button>
         </Modal>
@@ -1883,6 +1916,34 @@ export default function CarteiraPage() {
           {fl('Nome do chip (3-4 palavras)', fi('nome_chip', 'text', 'Ex: Cons. Capital'))}
           {fl('Descrição', fta('descricao', 4))}
           <button className={styles.btnPrimary} onClick={() => editandoEstrategiaId ? atualizarEstrategia.mutate() : salvarEstrategia.mutate()} disabled={salvarEstrategia.isPending || atualizarEstrategia.isPending}>{(salvarEstrategia.isPending || atualizarEstrategia.isPending) ? 'Salvando...' : 'Salvar'}</button>
+        </Modal>
+      )}
+
+      {/* ── MODAL CONFIRM % ÊXITO OVERRIDE ──────────────────────── */}
+      {confirmPctOverride !== null && (
+        <Modal title="Confirmar % de êxito personalizado" onClose={() => setConfirmPctOverride(null)} width={420}>
+          <div style={{ fontSize: 13, marginBottom: 10 }}>
+            Você está alterando o % de êxito <strong>só para esta posição</strong>, sem afetar os demais ativos deste cliente.
+          </div>
+          <div style={{ fontSize: 13, marginBottom: 12 }}>
+            Para confirmar, digite exatamente: <strong style={{ color: '#dc2626' }}>ALTERAR % DESSE FUNDO APENAS</strong>
+          </div>
+          <input
+            type="text"
+            style={{ width: '100%', padding: '8px 10px', border: '2px solid var(--gray-border)', borderRadius: 4, fontSize: 13, marginBottom: 12, boxSizing: 'border-box' }}
+            value={confirmPctOverride.confirmText}
+            onChange={e => setConfirmPctOverride({ ...confirmPctOverride, confirmText: e.target.value })}
+            placeholder="ALTERAR % DESSE FUNDO APENAS"
+            autoFocus
+          />
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              className={styles.btnPrimary}
+              disabled={confirmPctOverride.confirmText !== 'ALTERAR % DESSE FUNDO APENAS'}
+              onClick={() => { const fn = confirmPctOverride.mutateFn; setConfirmPctOverride(null); fn() }}
+            >Confirmar alteração</button>
+            <button style={{ padding: '6px 16px', background: 'none', border: '1px solid var(--gray-border)', borderRadius: 4, cursor: 'pointer', fontSize: 13 }} onClick={() => setConfirmPctOverride(null)}>Cancelar</button>
+          </div>
         </Modal>
       )}
 
