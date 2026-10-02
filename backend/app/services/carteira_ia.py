@@ -64,6 +64,24 @@ Retorne APENAS JSON válido.""",
 
 Retorne APENAS JSON válido.""",
 
+            "emissao": """Analise esta escritura de emissão de debêntures ou termo de securitização e extraia:
+- nome_serie (ex: APEX I, BRMAPEX110)
+- numero_emissao (número inteiro)
+- emissor (nome da empresa emissora)
+- cnpj_emissor
+- indexador (CDI, IPCA, IGPM...)
+- taxa_adicional (ex: + 2% a.a.)
+- data_inicio_emissao (YYYY-MM-DD)
+- data_vencimento_previsto (YYYY-MM-DD)
+- resgate_antecipado_emissao (true/false — o documento PREVÊ resgate antecipado?)
+- resgate_antecipado_tipo (APENAS se resgate_antecipado_emissao=true: "desvinculado_lastro" se o resgate independe do recebimento do lastro/portfólio, ou "vinculado_lastro" se condicionado ao recebimento do lastro)
+- clausulas_resgate (transcreva as cláusulas relevantes sobre resgate antecipado, máx. 500 caracteres)
+- prazo_carencia_meses (número de meses de carência antes de poder solicitar resgate, 0 se não houver)
+- prazo_pgto_pos_resgate (prazo para pagamento após pedido de resgate, ex: "30 dias", "D+30")
+- tipos_garantia (descreva as garantias: alienação fiduciária, cessão de recebíveis, aval, etc.)
+
+Retorne APENAS JSON válido. Para campos não encontrados retorne null.""",
+
             "geral": """Analise este documento financeiro/investimento e extraia:
 - titulo_principal
 - data_emissao (YYYY-MM-DD)

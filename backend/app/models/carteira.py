@@ -96,8 +96,10 @@ class CarteiraDebentureadotEmissao(Base):
     prazo_carencia_meses = Column(Integer, nullable=True)
     prazo_pgto_pos_resgate = Column(String(100), nullable=True)
 
-    # Resgate Antecipado (2 flags)
+    # Resgate Antecipado
     resgate_antecipado_emissao = Column(Boolean, default=False)
+    resgate_antecipado_tipo = Column(String(50), nullable=True)  # 'vinculado_lastro' | 'desvinculado_lastro'
+    clausulas_resgate = Column(Text, nullable=True)  # texto das cláusulas identificadas pela IA
     resgate_antecipado_termo = Column(Boolean, default=False)
     notas_resgate = Column(Text, nullable=True)
 
@@ -146,6 +148,8 @@ class CarteiraDebenturePosicao(Base):
 
     # Resgate antecipado — específico desta cautela (diferente do da emissão)
     resgate_antecipado_cautela = Column(Boolean, default=False)
+    resgate_antecipado_tipo_cautela = Column(String(50), nullable=True)  # 'vinculado_lastro' | 'desvinculado_lastro'
+    clausulas_resgate_cautela = Column(Text, nullable=True)
 
     # Estratégias (múltiplas — array de IDs)
     estrategia_ids = Column(JSON, default=list)
@@ -381,6 +385,7 @@ class CarteiraEstrategia(Base):
 
     id = Column(Integer, primary_key=True)
     nome = Column(String(255), nullable=False, unique=True)
+    nome_chip = Column(String(60), nullable=True)  # label curto para o chip (3-4 palavras)
     descricao = Column(Text, nullable=True)
     criada_por = Column(Integer, nullable=True)
     data_criacao = Column(DateTime, default=datetime.now)

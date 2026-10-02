@@ -1499,8 +1499,15 @@ def _run_migrations() -> None:
             "ALTER TABLE carteira_debenture_emissao ADD COLUMN IF NOT EXISTS prazo_carencia_meses INTEGER",
             "ALTER TABLE carteira_debenture_emissao ADD COLUMN IF NOT EXISTS prazo_pgto_pos_resgate VARCHAR(100)",
             "ALTER TABLE carteira_debenture_emissao ADD COLUMN IF NOT EXISTS resgate_antecipado_emissao BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE carteira_debenture_emissao ADD COLUMN IF NOT EXISTS resgate_antecipado_tipo VARCHAR(50)",
+            "ALTER TABLE carteira_debenture_emissao ADD COLUMN IF NOT EXISTS clausulas_resgate TEXT",
             "ALTER TABLE carteira_debenture_emissao ADD COLUMN IF NOT EXISTS resgate_antecipado_termo BOOLEAN DEFAULT FALSE",
             "ALTER TABLE carteira_debenture_emissao ADD COLUMN IF NOT EXISTS tipos_garantia JSONB DEFAULT '[]'",
+            # posição: tipo do resgate antecipado da cautela + cláusulas
+            "ALTER TABLE carteira_debenture_posicao ADD COLUMN IF NOT EXISTS resgate_antecipado_tipo_cautela VARCHAR(50)",
+            "ALTER TABLE carteira_debenture_posicao ADD COLUMN IF NOT EXISTS clausulas_resgate_cautela TEXT",
+            # estratégia: nome curto para o chip
+            "ALTER TABLE carteira_estrategia ADD COLUMN IF NOT EXISTS nome_chip VARCHAR(60)",
         ]:
             conn.execute(text(_col))
 

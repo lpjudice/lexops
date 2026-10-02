@@ -128,6 +128,21 @@ def obter_emissao(emissao_id: int, db: Session = Depends(get_db)):
     return emissao
 
 
+@router.put("/emissoes/{emissao_id}")
+def atualizar_emissao(emissao_id: int, data: dict, db: Session = Depends(get_db)):
+    """Atualiza emissão de debênture"""
+    emissao = db.query(CarteiraDebentureadotEmissao).filter(
+        CarteiraDebentureadotEmissao.id == emissao_id
+    ).first()
+    if not emissao:
+        raise HTTPException(status_code=404, detail="Emissão não encontrada")
+    for key, value in data.items():
+        setattr(emissao, key, value)
+    db.commit()
+    db.refresh(emissao)
+    return emissao
+
+
 # ─────────────────────────────────────────────────────────────────
 # DEBÊNTURES - POSIÇÕES DO CLIENTE
 # ─────────────────────────────────────────────────────────────────
@@ -358,6 +373,19 @@ def listar_fundos_referencia(db: Session = Depends(get_db)):
     return fundos
 
 
+@router.put("/fundos-referencia/{fundo_id}")
+def atualizar_fundo_referencia(fundo_id: int, data: dict, db: Session = Depends(get_db)):
+    """Atualiza fundo de referência"""
+    fundo = db.query(CarteiraFundoReferencia).filter(CarteiraFundoReferencia.id == fundo_id).first()
+    if not fundo:
+        raise HTTPException(status_code=404, detail="Fundo não encontrado")
+    for key, value in data.items():
+        setattr(fundo, key, value)
+    db.commit()
+    db.refresh(fundo)
+    return fundo
+
+
 @router.post("/fundos-referencia")
 def criar_fundo_referencia(data: dict, db: Session = Depends(get_db)):
     """Cria novo fundo de referência"""
@@ -477,6 +505,19 @@ def criar_estrategia(data: dict, db: Session = Depends(get_db)):
     """Cria nova estratégia"""
     estrategia = CarteiraEstrategia(**data)
     db.add(estrategia)
+    db.commit()
+    db.refresh(estrategia)
+    return estrategia
+
+
+@router.put("/estrategias/{estrategia_id}")
+def atualizar_estrategia(estrategia_id: int, data: dict, db: Session = Depends(get_db)):
+    """Atualiza estratégia"""
+    estrategia = db.query(CarteiraEstrategia).filter(CarteiraEstrategia.id == estrategia_id).first()
+    if not estrategia:
+        raise HTTPException(status_code=404, detail="Estratégia não encontrada")
+    for key, value in data.items():
+        setattr(estrategia, key, value)
     db.commit()
     db.refresh(estrategia)
     return estrategia

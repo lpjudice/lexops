@@ -148,31 +148,42 @@ function MultiSelect({
   )
 }
 
-// ── Busca assíncrona de clientes do sistema principal — portal (escapa overflow) ─────
-function SystemClientCombo({ onSelect }: { onSelect: (c: any) => void }) {
+// ── Busca unificada: carteira (local) + sistema principal (async) — portal ──
+function UnifiedClientCombo({
+  onSelect,
+  localClientes,
+}: {
+  onSelect: (c: { nome: string; cpf?: string; email?: string; telefone?: string; tipo_pessoa?: string; cliente_uuid?: any }) => void
+  localClientes: { id: number; nome: string; cpf?: string; email?: string; telefone?: string; tipo_pessoa?: string; cliente_uuid?: any }[]
+}) {
   const [search, setSearch] = useState('')
   const [open, setOpen] = useState(false)
-  const [results, setResults] = useState<any[]>([])
+  const [sistemResults, setSistemResults] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout>>()
   const inputRef = useRef<HTMLInputElement>(null)
   const [dropStyle, setDropStyle] = useState<React.CSSProperties>({})
 
+  const localFiltered = search.length >= 2
+    ? localClientes.filter(c => c.nome.toLowerCase().includes(search.toLowerCase())).slice(0, 6)
+    : []
+
   const buscar = async (s: string) => {
-    if (s.length < 2) { setResults([]); return }
+    if (s.length < 2) { setSistemResults([]); return }
     setLoading(true)
     try {
       const r = await api.get('/clientes', { params: { busca: s, limit: 20 } })
       const data = Array.isArray(r.data) ? r.data : (r.data?.data ?? [])
-      setResults(data)
-    } catch { setResults([]) }
+      const localCpfs = new Set(localClientes.map(c => c.cpf).filter(Boolean))
+      setSistemResults(data.filter((x: any) => !localCpfs.has(x.cpf_cnpj)))
+    } catch { setSistemResults([]) }
     finally { setLoading(false) }
   }
 
   const calcStyle = () => {
     if (!inputRef.current) return
     const rect = inputRef.current.getBoundingClientRect()
-    setDropStyle({ position: 'fixed', top: rect.bottom + 2, left: rect.left, width: rect.width, zIndex: 9999, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 6, maxHeight: 240, overflowY: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,0.14)' })
+    setDropStyle({ position: 'fixed', top: rect.bottom + 2, left: rect.left, width: Math.max(rect.width, 320), zIndex: 9999, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 6, maxHeight: 320, overflowY: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,0.14)' })
   }
 
   const handleChange = (s: string) => {
@@ -184,25 +195,43 @@ function SystemClientCombo({ onSelect }: { onSelect: (c: any) => void }) {
   return (
     <>
       <input ref={inputRef} className={styles.input} value={search}
-        placeholder="Buscar no sistema principal (min. 2 letras)..."
+        placeholder="Buscar cliente por nome (carteira + sistema)..."
         onChange={e => handleChange(e.target.value)}
         onFocus={() => { if (search.length >= 2) { calcStyle(); setOpen(true) } }}
         onBlur={() => setTimeout(() => setOpen(false), 200)} />
       {open && createPortal(
         <div style={dropStyle}>
-          {loading && <div style={{ padding: '10px 14px', color: '#6b7280', fontSize: 13 }}>Buscando...</div>}
-          {!loading && search.length < 2 && <div style={{ padding: '10px 14px', color: '#6b7280', fontSize: 12 }}>Digite pelo menos 2 letras</div>}
-          {!loading && search.length >= 2 && results.length === 0 && (
+          {search.length < 2 && <div style={{ padding: '10px 14px', color: '#6b7280', fontSize: 12 }}>Digite pelo menos 2 letras</div>}
+          {localFiltered.length > 0 && (
+            <>
+              <div style={{ padding: '3px 14px', fontSize: 10, fontWeight: 700, color: '#0d9488', textTransform: 'uppercase', letterSpacing: '0.06em', background: '#f0fdfa', borderBottom: '1px solid #e5e7eb' }}>Carteira</div>
+              {localFiltered.map(c => (
+                <div key={`loc-${c.id}`}
+                  style={{ padding: '7px 14px', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f3f4f6', display: 'flex', gap: 8, alignItems: 'baseline' }}
+                  onMouseDown={() => { onSelect({ nome: c.nome, cpf: c.cpf, email: c.email, telefone: c.telefone, tipo_pessoa: c.tipo_pessoa, cliente_uuid: c.cliente_uuid }); setSearch(''); setOpen(false); setSistemResults([]) }}>
+                  <strong>{c.nome}</strong>
+                  {c.cpf && <span style={{ color: '#6b7280', fontSize: 11 }}>{c.cpf}</span>}
+                </div>
+              ))}
+            </>
+          )}
+          {loading && <div style={{ padding: '10px 14px', color: '#6b7280', fontSize: 13 }}>Buscando no sistema...</div>}
+          {!loading && sistemResults.length > 0 && (
+            <>
+              <div style={{ padding: '3px 14px', fontSize: 10, fontWeight: 700, color: '#6366f1', textTransform: 'uppercase', letterSpacing: '0.06em', background: '#f5f3ff', borderBottom: '1px solid #e5e7eb' }}>Sistema</div>
+              {sistemResults.map((c: any) => (
+                <div key={`sis-${c.id}`}
+                  style={{ padding: '7px 14px', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f3f4f6', display: 'flex', gap: 8, alignItems: 'baseline' }}
+                  onMouseDown={() => { onSelect({ nome: c.nome, cpf: c.cpf_cnpj, email: c.email, telefone: c.telefone, tipo_pessoa: c.tipo === 'PF' ? 'PF' : 'PJ', cliente_uuid: c.id }); setSearch(''); setOpen(false); setSistemResults([]) }}>
+                  <strong>{c.nome}</strong>
+                  {c.cpf_cnpj && <span style={{ color: '#6b7280', fontSize: 11 }}>{c.cpf_cnpj}</span>}
+                </div>
+              ))}
+            </>
+          )}
+          {!loading && search.length >= 2 && localFiltered.length === 0 && sistemResults.length === 0 && (
             <div style={{ padding: '10px 14px', color: '#6b7280', fontSize: 13 }}>Nenhum resultado para "{search}"</div>
           )}
-          {!loading && results.map((c: any) => (
-            <div key={c.id}
-              style={{ padding: '8px 14px', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f3f4f6', display: 'flex', gap: 10, alignItems: 'baseline' }}
-              onMouseDown={() => { onSelect(c); setSearch(''); setOpen(false); setResults([]) }}>
-              <strong>{c.nome}</strong>
-              {c.cpf_cnpj && <span style={{ color: '#6b7280', fontSize: 11 }}>{c.cpf_cnpj}</span>}
-            </div>
-          ))}
         </div>,
         document.body
       )}
@@ -237,12 +266,12 @@ function EstrategiaChips({
         {current.map((est: any) => (
           <span key={est.id}
             title={est.descricao || est.nome}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 2, background: '#f0fdfa', border: '1px solid #0d9488', borderRadius: 10, padding: '1px 7px', fontSize: 10, cursor: 'pointer', color: '#0d6b63', whiteSpace: 'nowrap' }}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 2, background: '#f0fdfa', border: '1px solid #0d9488', borderRadius: 10, padding: '1px 7px 1px 8px', fontSize: 10, cursor: 'pointer', color: '#0d6b63', whiteSpace: 'nowrap' }}
             onClick={() => setSelectedEst(est)}>
-            {est.nome}
-            <span
-              style={{ marginLeft: 1, cursor: 'pointer', fontSize: 9, color: '#6b7280', lineHeight: 1 }}
-              onMouseDown={(e) => { e.stopPropagation(); onUpdate(ids.filter(x => x !== est.id)) }}>×</span>
+            {est.nome_chip || est.nome}
+            <button
+              style={{ marginLeft: 2, cursor: 'pointer', fontSize: 13, color: '#6b7280', lineHeight: 1, background: 'none', border: 'none', padding: '0 1px', borderRadius: 2 }}
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onUpdate(ids.filter(x => x !== est.id)) }}>×</button>
           </span>
         ))}
         <button ref={btnRef}
@@ -302,6 +331,12 @@ export default function CarteiraPage() {
   const [mostrarFundosPOS, setMostrarFundosPOS] = useState(true)
   // Debênture info modal
   const [debInfoId, setDebInfoId] = useState<number | null>(null)
+  // Edit states for reference tabs
+  const [editandoEmissaoId, setEditandoEmissaoId] = useState<number | null>(null)
+  const [editandoFundoRefId, setEditandoFundoRefId] = useState<number | null>(null)
+  const [editandoEstrategiaId, setEditandoEstrategiaId] = useState<number | null>(null)
+  // Resgate antecipado modal
+  const [resgateDebId, setResgateDebId] = useState<number | null>(null)
 
   const { isSuperAdmin } = useAuth()
   const qc = useQueryClient()
@@ -310,6 +345,7 @@ export default function CarteiraPage() {
     setModal(null); setForm({})
     setEditandoClienteId(null); setEditandoEmpId(null)
     setEditandoDebId(null); setEditandoImobId(null); setEditandoFundoId(null)
+    setEditandoEmissaoId(null); setEditandoFundoRefId(null); setEditandoEstrategiaId(null)
   }
 
   // ── Render helpers ────────────────────────────────────────────────
@@ -474,6 +510,9 @@ export default function CarteiraPage() {
   const atualizarFundo = mkPut(() => `/carteira/fundos/${editandoFundoId}`, ['carteira-fundos'], numFundo)
 
   const salvarEstrategia = mk('/carteira/estrategias', ['carteira-estrategias'])
+  const atualizarEmissao = mkPut(() => `/carteira/emissoes/${editandoEmissaoId}`, ['carteira-emissoes'], ['numero_emissao'])
+  const atualizarFundoRef = mkPut(() => `/carteira/fundos-referencia/${editandoFundoRefId}`, ['carteira-fundos-ref'])
+  const atualizarEstrategia = mkPut(() => `/carteira/estrategias/${editandoEstrategiaId}`, ['carteira-estrategias'])
 
   const patchEstratDeb = useMutation({
     mutationFn: ({ id, ids }: { id: number; ids: number[] }) =>
@@ -565,6 +604,19 @@ export default function CarteiraPage() {
     setEditandoFundoId(f.id); setModal('fundo')
   }
 
+  const abrirEdicaoEmissao = (e: any) => {
+    setForm({ ...e })
+    setEditandoEmissaoId(e.id); setModal('emissao')
+  }
+  const abrirEdicaoFundoRef = (f: any) => {
+    setForm({ ...f })
+    setEditandoFundoRefId(f.id); setModal('fundo-ref')
+  }
+  const abrirEdicaoEstrategia = (e: any) => {
+    setForm({ ...e })
+    setEditandoEstrategiaId(e.id); setModal('estrategia')
+  }
+
   // ── Qualificação para clipboard ────────────────────────────────────
   const qualificacaoTexto = (c: any): string => {
     const nome = clienteNome(c.id)
@@ -594,6 +646,33 @@ export default function CarteiraPage() {
 
   // ── Helpers UI ─────────────────────────────────────────────────────
   const clienteOptions = clientes.map((c: any) => ({ value: c.id, label: clienteNome(c.id) }))
+
+  const localClientesCombos = clientes.map((c: any) => ({
+    id: c.id, nome: clienteNome(c.id), cpf: c.cpf ?? '', email: c.email ?? '',
+    telefone: c.telefone ?? '', tipo_pessoa: c.tipo_pessoa ?? 'PF', cliente_uuid: c.cliente_uuid ?? null,
+  }))
+
+  const resgateAntBadge = (d: any) => {
+    const em = emissoes.find(e => e.id === d.emissao_id)
+    const emLivre = em?.resgate_antecipado_emissao && em?.resgate_antecipado_tipo === 'desvinculado_lastro'
+    const cautelaLivre = d.resgate_antecipado_cautela && d.resgate_antecipado_tipo_cautela === 'desvinculado_lastro'
+    if (!em?.resgate_antecipado_emissao && !d.resgate_antecipado_cautela) return null
+    const bothFree = emLivre && cautelaLivre
+    const oneFree = emLivre || cautelaLivre
+    const cor = bothFree ? '#16a34a' : oneFree ? '#d97706' : '#dc2626'
+    const bg = bothFree ? '#f0fdf4' : oneFree ? '#fffbeb' : '#fef2f2'
+    const label = bothFree ? 'RA✓✓' : oneFree ? 'RA⚠' : 'RA✗'
+    const title = bothFree ? 'Resgate antecipado desvinculado do lastro — ambos documentos'
+      : oneFree ? 'Resgate antecipado: apenas um documento autoriza desvinculado do lastro'
+      : 'Resgate antecipado: nenhum documento autoriza independente do lastro'
+    return (
+      <span title={title}
+        style={{ display: 'inline-block', background: bg, color: cor, border: `1px solid ${cor}`, borderRadius: 8, padding: '1px 6px', fontSize: 9, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
+        onClick={e => { e.stopPropagation(); setResgateDebId(d.id) }}>
+        {label}
+      </span>
+    )
+  }
 
   const statusBadge = (s: string | boolean) => {
     if (s === true || s === 'Ativo' || s === 'Ativa') return <span className={`${styles.badge} ${styles.status_ativo}`}>{s === true ? 'Ativo' : s}</span>
@@ -628,9 +707,9 @@ export default function CarteiraPage() {
     <div style={{ textAlign: 'center', padding: '40px 24px', color: '#9ca3af', fontSize: 14 }}>Nenhum registro encontrado</div>
   )
 
-  // Colgroups fixos para alinhamento — Cautela|Emissão|Aplic|Atual|Status|Êxito%|Estratégia|Actions
+  // Colgroups fixos para alinhamento — Cautela|Emissão|RA|Aplic|Atual|Status|Êxito%|Estratégia|Actions
   const colsDeb = () => (
-    <colgroup><col style={{ width: 110 }} /><col /><col style={{ width: 130 }} /><col style={{ width: 130 }} /><col style={{ width: 110 }} /><col style={{ width: 65 }} /><col style={{ width: 140 }} /><col style={{ width: 72 }} /></colgroup>
+    <colgroup><col style={{ width: 110 }} /><col /><col style={{ width: 46 }} /><col style={{ width: 130 }} /><col style={{ width: 130 }} /><col style={{ width: 110 }} /><col style={{ width: 65 }} /><col style={{ width: 140 }} /><col style={{ width: 72 }} /></colgroup>
   )
   const colsImob = () => (
     <colgroup><col /><col style={{ width: 140 }} /><col style={{ width: 140 }} /><col style={{ width: 70 }} /><col style={{ width: 65 }} /><col style={{ width: 140 }} /><col style={{ width: 60 }} /></colgroup>
@@ -718,11 +797,12 @@ export default function CarteiraPage() {
                       <div className={cs.posicaoSecaoTitulo}>Debêntures ({debs.length}) · {brl(debs.reduce((s, d) => s + (d.valor_aplicado ?? 0), 0))}</div>
                       <table className={styles.table} style={{ marginBottom: 0 }}>
                         {colsDeb()}
-                        <thead><tr><th>Cautela</th><th>Emissão</th>{thR('Aplicado')}{thR('Atual')}<th>Status</th><th>{isSuperAdmin ? 'Êxito%' : '🔒'}</th><th>Estratégia</th><th /></tr></thead>
+                        <thead><tr><th>Cautela</th><th>Emissão</th><th>RA</th>{thR('Aplicado')}{thR('Atual')}<th>Status</th><th>{isSuperAdmin ? 'Êxito%' : '🔒'}</th><th>Estratégia</th><th /></tr></thead>
                         <tbody>
                           {debs.map(d => (
                             <tr key={d.id}>
                               <td>{d.numero_cautela}</td><td>{emissaoNome(d.emissao_id)}</td>
+                              <td>{resgateAntBadge(d)}</td>
                               <td style={{ textAlign: 'right' }}>{brl(d.valor_aplicado)}</td>
                               <td style={{ textAlign: 'right' }}>{d.valor_atual_estimado ? brl(d.valor_atual_estimado) : '—'}</td>
                               <td>{statusBadge(d.status_resgate)}</td>
@@ -736,6 +816,7 @@ export default function CarteiraPage() {
                           ))}
                           <tr style={{ background: 'var(--gray-light, #f8f9fa)', fontWeight: 600 }}>
                             <td colSpan={2}>Total</td>
+                            <td />
                             <td style={{ textAlign: 'right' }}>{brl(debs.reduce((s, d) => s + (d.valor_aplicado ?? 0), 0))}</td>
                             <td style={{ textAlign: 'right' }}>{brl(debs.reduce((s, d) => s + (d.valor_atual_estimado ?? d.valor_aplicado ?? 0), 0))}</td>
                             <td /><td /><td /><td />
@@ -830,11 +911,12 @@ export default function CarteiraPage() {
               </div>
               <table className={styles.table} style={{ marginBottom: 0 }}>
                 {colsDeb()}
-                <thead><tr><th>Cautela</th><th>Emissão</th>{thR('Aplicado')}{thR('Atual')}<th>Status</th><th>{isSuperAdmin ? 'Êxito%' : '🔒'}</th><th>Estratégia</th><th /></tr></thead>
+                <thead><tr><th>Cautela</th><th>Emissão</th><th>RA</th>{thR('Aplicado')}{thR('Atual')}<th>Status</th><th>{isSuperAdmin ? 'Êxito%' : '🔒'}</th><th>Estratégia</th><th /></tr></thead>
                 <tbody>
                   {g.posicoes.map((d: any) => (
                     <tr key={d.id}>
                       <td><strong>{d.numero_cautela}</strong></td><td>{emissaoNome(d.emissao_id)}</td>
+                      <td>{resgateAntBadge(d)}</td>
                       <td style={{ textAlign: 'right' }}>{brl(d.valor_aplicado)}</td>
                       <td style={{ textAlign: 'right' }}>{d.valor_atual_estimado ? brl(d.valor_atual_estimado) : '—'}</td>
                       <td>{statusBadge(d.status_resgate)}</td>
@@ -848,6 +930,7 @@ export default function CarteiraPage() {
                   ))}
                   <tr style={{ background: 'var(--gray-light, #f8f9fa)', fontWeight: 600 }}>
                     <td colSpan={2}>Total</td>
+                    <td />
                     <td style={{ textAlign: 'right' }}>{brl(g.posicoes.reduce((s: number, d: any) => s + (d.valor_aplicado ?? 0), 0))}</td>
                     <td style={{ textAlign: 'right' }}>{brl(g.posicoes.reduce((s: number, d: any) => s + (d.valor_atual_estimado ?? d.valor_aplicado ?? 0), 0))}</td>
                     <td /><td /><td /><td />
@@ -981,7 +1064,7 @@ export default function CarteiraPage() {
                         <td style={{ textAlign: 'right' }}>{isSuperAdmin ? (exito > 0 ? brl(exito) : '—') : '🔒'}</td>
                         <td>{statusBadge(c.ativo)}</td>
                         <td>
-                          <button title="Copiar qualificação" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 15, color: 'var(--gray-mid)', padding: '0 4px' }}
+                          <button title="Copiar qualificação" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: '#374151', padding: '0 4px' }}
                             onClick={() => navigator.clipboard.writeText(qualificacaoTexto(c)).then(() => alert('Qualificação copiada!')).catch(() => alert('Erro ao copiar'))}>⎘</button>
                         </td>
                         <td>{editBtn(() => abrirEdicaoCliente(c))}</td>
@@ -1000,14 +1083,15 @@ export default function CarteiraPage() {
           {addBtn('Nova Emissão', () => { setForm({ numero_emissao: 1 }); setModal('emissao') })}
           <div className={styles.tableCard}>
             <table className={styles.table}>
-              <thead><tr><th>Série</th><th>Nº</th><th>Emissor</th><th>Indexador</th><th>Vencimento</th><th>Status</th></tr></thead>
+              <thead><tr><th>Série</th><th>Nº</th><th>Emissor</th><th>Indexador</th><th>Vencimento</th><th>Status</th><th /></tr></thead>
               <tbody>
                 {emissoes.length === 0
-                  ? <tr><td colSpan={6} style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Nenhum registro</td></tr>
+                  ? <tr><td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Nenhum registro</td></tr>
                   : emissoes.map((e: any) => (
                     <tr key={e.id}><td><strong>{e.nome_serie}</strong></td><td>{e.numero_emissao}ª</td>
                       <td>{e.emissor}</td><td>{e.indexador}{e.taxa_adicional ? ` + ${e.taxa_adicional}` : ''}</td>
                       <td>{e.data_vencimento_previsto ?? '—'}</td><td>{statusBadge(e.ativo)}</td>
+                      <td>{editBtn(() => abrirEdicaoEmissao(e))}</td>
                     </tr>
                   ))}
               </tbody>
@@ -1054,12 +1138,12 @@ export default function CarteiraPage() {
           {addBtn('Novo Fundo', () => { setForm({}); setModal('fundo-ref') })}
           <div className={styles.tableCard}>
             <table className={styles.table}>
-              <thead><tr><th>Nome</th><th>CNPJ</th><th>Gestora</th><th>Tipo</th><th>Status</th></tr></thead>
+              <thead><tr><th>Nome</th><th>CNPJ</th><th>Gestora</th><th>Tipo</th><th>Status</th><th /></tr></thead>
               <tbody>
                 {fundosRef.length === 0
-                  ? <tr><td colSpan={5} style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Nenhum registro</td></tr>
+                  ? <tr><td colSpan={6} style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Nenhum registro</td></tr>
                   : fundosRef.map((f: any) => (
-                    <tr key={f.id}><td><strong>{f.nome_fundo}</strong></td><td>{f.cnpj_fundo ?? '—'}</td><td>{f.gestora ?? '—'}</td><td>{f.tipo_fundo ?? '—'}</td><td>{statusBadge(f.ativo)}</td></tr>
+                    <tr key={f.id}><td><strong>{f.nome_fundo}</strong></td><td>{f.cnpj_fundo ?? '—'}</td><td>{f.gestora ?? '—'}</td><td>{f.tipo_fundo ?? '—'}</td><td>{statusBadge(f.ativo)}</td><td>{editBtn(() => abrirEdicaoFundoRef(f))}</td></tr>
                   ))}
               </tbody>
             </table>
@@ -1073,15 +1157,17 @@ export default function CarteiraPage() {
           {addBtn('Nova Estratégia', () => { setForm({ publico: true }); setModal('estrategia') })}
           <div className={styles.tableCard}>
             <table className={styles.table}>
-              <thead><tr><th>Nome</th><th>Descrição</th><th>Usos</th><th>Status</th></tr></thead>
+              <thead><tr><th>Nome</th><th>Chip</th><th>Descrição</th><th>Usos</th><th>Status</th><th /></tr></thead>
               <tbody>
                 {estrategias.length === 0
-                  ? <tr><td colSpan={4} style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Nenhum registro</td></tr>
+                  ? <tr><td colSpan={6} style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Nenhum registro</td></tr>
                   : estrategias.map((e: any) => (
                     <tr key={e.id}>
                       <td><strong>{e.nome}</strong></td>
-                      <td style={{ maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.descricao ?? '—'}</td>
+                      <td style={{ fontSize: 12, color: '#6b7280' }}>{e.nome_chip ?? '—'}</td>
+                      <td style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.descricao ?? '—'}</td>
                       <td>{e.usuarios_count ?? 0}</td><td>{statusBadge(e.ativo)}</td>
+                      <td>{editBtn(() => abrirEdicaoEstrategia(e))}</td>
                     </tr>
                   ))}
               </tbody>
@@ -1096,16 +1182,11 @@ export default function CarteiraPage() {
       {modal === 'cliente' && (
         <Modal title={editandoClienteId ? `Editar — ${clienteNome(editandoClienteId)}` : 'Novo cliente na carteira'} onClose={closeModal} width={580}>
           <div style={{ background: 'var(--gray-light, #f8f9fa)', borderRadius: 6, padding: '10px 14px', marginBottom: 14 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Vincular a cliente do sistema ou carteira</div>
-            <div style={{ marginBottom: 6 }}>
-              <ComboSelect value={null} onChange={v => {
-                const c = clientes.find((x: any) => x.id === Number(v))
-                if (!c) return
-                const n = c.nome ?? (c.observacoes?.startsWith('[IMPORTADO XLS] ') ? c.observacoes.replace('[IMPORTADO XLS] ', '') : '')
-                setForm(f => ({ ...f, nome: n || f.nome, cpf: c.cpf ?? f.cpf, email: c.email ?? f.email, telefone: c.telefone ?? f.telefone, tipo_pessoa: c.tipo_pessoa ?? f.tipo_pessoa, cliente_uuid: c.cliente_uuid ?? f.cliente_uuid }))
-              }} options={clienteOptions} placeholder="Selecionar já cadastrado na carteira..." />
-            </div>
-            <SystemClientCombo onSelect={c => setForm(f => ({ ...f, nome: c.nome ?? f.nome, cpf: c.cpf_cnpj ?? f.cpf, email: c.email ?? f.email, telefone: c.telefone ?? f.telefone, tipo_pessoa: c.tipo === 'PF' ? 'PF' : 'PJ', cliente_uuid: c.id }))} />
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Pré-preencher de cliente existente</div>
+            <UnifiedClientCombo
+              localClientes={localClientesCombos}
+              onSelect={c => setForm(f => ({ ...f, nome: c.nome ?? f.nome, cpf: c.cpf ?? f.cpf, email: c.email ?? f.email, telefone: c.telefone ?? f.telefone, tipo_pessoa: c.tipo_pessoa ?? f.tipo_pessoa, cliente_uuid: c.cliente_uuid ?? f.cliente_uuid }))}
+            />
             {form.cliente_uuid && (
               <div style={{ fontSize: 11, color: 'var(--teal)', marginTop: 4 }}>✓ Vinculado
                 <button style={{ marginLeft: 8, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gray-mid)', fontSize: 11 }} onClick={() => inp('cliente_uuid', '')}>remover</button>
@@ -1232,7 +1313,13 @@ export default function CarteiraPage() {
 
       {/* ── MODAL EMISSÃO ────────────────────────────────────────── */}
       {modal === 'emissao' && (
-        <Modal title="Nova Emissão de Debênture" onClose={closeModal} width={540}>
+        <Modal title={editandoEmissaoId ? 'Editar Emissão' : 'Nova Emissão de Debênture'} onClose={closeModal} width={560}>
+          <div style={{ background: 'var(--gray-light, #f8f9fa)', borderRadius: 6, padding: '8px 12px', marginBottom: 10 }}>
+            <label style={{ fontSize: 12, color: 'var(--teal)', fontWeight: 600, display: 'block', marginBottom: 4 }}>Extração IA — escritura de emissão / termo de securitização:</label>
+            <input type="file" accept=".pdf,.jpg,.png,.jpeg" style={{ fontSize: 12 }}
+              onChange={e => { const f = e.target.files?.[0]; if (f) processarDocumento.mutate({ file: f, tipo: 'emissao' }) }} />
+            {processarDocumento.isPending && <span style={{ fontSize: 11, color: 'var(--teal)', marginLeft: 8 }}>Processando...</span>}
+          </div>
           {fl('Nome da Série *', fi('nome_serie', 'text', 'Ex: APEX I'))}
           {fl('Nº da Emissão *', fi('numero_emissao', 'number'))}
           {fl('Emissor *', fi('emissor'))}
@@ -1249,6 +1336,11 @@ export default function CarteiraPage() {
                 Emissão prevê resgate antecipado
               </label>
             </div>
+            {form.resgate_antecipado_emissao && fl('Tipo de resgate', fs('resgate_antecipado_tipo', [
+              { value: 'vinculado_lastro', label: 'Vinculado ao recebimento do lastro' },
+              { value: 'desvinculado_lastro', label: 'Desvinculado do recebimento do lastro' },
+            ]))}
+            {form.resgate_antecipado_emissao && fl('Cláusulas identificadas pela IA', fta('clausulas_resgate', 3))}
             {fl('Prazo carência (meses)', fi('prazo_carencia_meses', 'number', '0'))}
             {fl('Prazo pgto após pedido de saque', fi('prazo_pgto_pos_resgate', 'text', 'Ex: 30 dias'))}
           </div>
@@ -1256,7 +1348,7 @@ export default function CarteiraPage() {
             <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Garantias</div>
             {fl('Tipos de garantia', fta('tipos_garantia', 2))}
           </div>
-          <button className={styles.btnPrimary} onClick={() => salvarEmissao.mutate()} disabled={salvarEmissao.isPending}>{salvarEmissao.isPending ? 'Salvando...' : 'Salvar'}</button>
+          <button className={styles.btnPrimary} onClick={() => editandoEmissaoId ? atualizarEmissao.mutate() : salvarEmissao.mutate()} disabled={salvarEmissao.isPending || atualizarEmissao.isPending}>{(salvarEmissao.isPending || atualizarEmissao.isPending) ? 'Salvando...' : 'Salvar'}</button>
         </Modal>
       )}
 
@@ -1303,6 +1395,11 @@ export default function CarteiraPage() {
                 Termo/cautela prevê resgate antecipado
               </label>
             </div>
+            {form.resgate_antecipado_cautela && fl('Tipo de resgate (cautela)', fs('resgate_antecipado_tipo_cautela', [
+              { value: 'vinculado_lastro', label: 'Vinculado ao recebimento do lastro' },
+              { value: 'desvinculado_lastro', label: 'Desvinculado do recebimento do lastro' },
+            ]))}
+            {form.resgate_antecipado_cautela && fl('Cláusulas do termo de cautela', fta('clausulas_resgate_cautela', 3))}
           </div>
           {isSuperAdmin && (
             <div style={{ borderTop: '1px solid var(--gray-border)', margin: '10px 0', paddingTop: 10 }}>
@@ -1349,14 +1446,14 @@ export default function CarteiraPage() {
 
       {/* ── MODAL FUNDO REF ──────────────────────────────────────── */}
       {modal === 'fundo-ref' && (
-        <Modal title="Novo Fundo de Referência" onClose={closeModal} width={480}>
+        <Modal title={editandoFundoRefId ? 'Editar Fundo de Referência' : 'Novo Fundo de Referência'} onClose={closeModal} width={480}>
           {fl('Nome do Fundo *', fi('nome_fundo'))}
           {fl('CNPJ', fi('cnpj_fundo'))}
           {fl('Gestora', fi('gestora'))}
           {fl('Administradora', fi('administradora'))}
           {fl('Tipo', fi('tipo_fundo', 'text', 'FII, FIA, Multimercado...'))}
           {fl('Indexador', fi('indexador'))}
-          <button className={styles.btnPrimary} onClick={() => salvarFundoRef.mutate()} disabled={salvarFundoRef.isPending}>{salvarFundoRef.isPending ? 'Salvando...' : 'Salvar'}</button>
+          <button className={styles.btnPrimary} onClick={() => editandoFundoRefId ? atualizarFundoRef.mutate() : salvarFundoRef.mutate()} disabled={salvarFundoRef.isPending || atualizarFundoRef.isPending}>{(salvarFundoRef.isPending || atualizarFundoRef.isPending) ? 'Salvando...' : 'Salvar'}</button>
         </Modal>
       )}
 
@@ -1395,12 +1492,45 @@ export default function CarteiraPage() {
 
       {/* ── MODAL ESTRATÉGIA ─────────────────────────────────────── */}
       {modal === 'estrategia' && (
-        <Modal title="Nova Estratégia" onClose={closeModal}>
+        <Modal title={editandoEstrategiaId ? 'Editar Estratégia' : 'Nova Estratégia'} onClose={closeModal}>
           {fl('Nome *', fi('nome', 'text', 'Ex: Conservadora, ABM-PARSE'))}
+          {fl('Nome do chip (3-4 palavras)', fi('nome_chip', 'text', 'Ex: Cons. Capital'))}
           {fl('Descrição', fta('descricao', 4))}
-          <button className={styles.btnPrimary} onClick={() => salvarEstrategia.mutate()} disabled={salvarEstrategia.isPending}>{salvarEstrategia.isPending ? 'Salvando...' : 'Salvar'}</button>
+          <button className={styles.btnPrimary} onClick={() => editandoEstrategiaId ? atualizarEstrategia.mutate() : salvarEstrategia.mutate()} disabled={salvarEstrategia.isPending || atualizarEstrategia.isPending}>{(salvarEstrategia.isPending || atualizarEstrategia.isPending) ? 'Salvando...' : 'Salvar'}</button>
         </Modal>
       )}
+
+      {/* ── MODAL RESGATE ANTECIPADO ─────────────────────────────── */}
+      {resgateDebId !== null && (() => {
+        const d = debentures.find(x => x.id === resgateDebId)
+        const em = d ? emissoes.find(e => e.id === d.emissao_id) : null
+        if (!d) return null
+        const tipoLabel = (t: string | null | undefined) => t === 'desvinculado_lastro' ? 'Desvinculado do lastro (independe de pgto)' : t === 'vinculado_lastro' ? 'Vinculado ao lastro' : '—'
+        return (
+          <Modal title="Resgate Antecipado — Cláusulas contratuais" onClose={() => setResgateDebId(null)} width={520}>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--teal)', textTransform: 'uppercase', marginBottom: 6 }}>Escritura de Emissão</div>
+              <div style={{ fontSize: 12, marginBottom: 6 }}>
+                Prevê resgate antecipado: <strong>{em?.resgate_antecipado_emissao ? 'Sim' : 'Não'}</strong>
+                {em?.resgate_antecipado_tipo && <> — <strong>{tipoLabel(em.resgate_antecipado_tipo)}</strong></>}
+              </div>
+              {em?.clausulas_resgate
+                ? <div style={{ background: 'var(--gray-light, #f8f9fa)', borderRadius: 4, padding: '8px 12px', fontSize: 12, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{em.clausulas_resgate}</div>
+                : <div style={{ fontSize: 12, color: 'var(--gray-mid)', fontStyle: 'italic' }}>Cláusulas não identificadas. Faça upload via IA ao editar a emissão.</div>}
+            </div>
+            <div style={{ borderTop: '1px solid var(--gray-border)', paddingTop: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--teal)', textTransform: 'uppercase', marginBottom: 6 }}>Termo de Securitização / Cautela</div>
+              <div style={{ fontSize: 12, marginBottom: 6 }}>
+                Prevê resgate antecipado: <strong>{d.resgate_antecipado_cautela ? 'Sim' : 'Não'}</strong>
+                {d.resgate_antecipado_tipo_cautela && <> — <strong>{tipoLabel(d.resgate_antecipado_tipo_cautela)}</strong></>}
+              </div>
+              {d.clausulas_resgate_cautela
+                ? <div style={{ background: 'var(--gray-light, #f8f9fa)', borderRadius: 4, padding: '8px 12px', fontSize: 12, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{d.clausulas_resgate_cautela}</div>
+                : <div style={{ fontSize: 12, color: 'var(--gray-mid)', fontStyle: 'italic' }}>Cláusulas não identificadas. Preencha ao editar a posição.</div>}
+            </div>
+          </Modal>
+        )
+      })()}
 
       {/* ── MODAL DETALHES DEBÊNTURE ─────────────────────────────── */}
       {debInfoId !== null && (() => {
