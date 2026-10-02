@@ -25,15 +25,19 @@ from app.models.carteira import (
 )
 
 # ── Paleta ───────────────────────────────────────────────────────────────────
-DARK        = colors.HexColor('#111111')
-DARK_HDR    = colors.HexColor('#1a1a1a')
-DARK_CARD   = colors.HexColor('#1F2937')
+# Preto puro é usado só em 2 lugares do documento (pill do cliente + barra de
+# total) — todo o resto usa tons claros com acento colorido, para um visual
+# mais suave (sem blocos escuros empilhados).
+DARK        = colors.HexColor('#1F2937')   # charcoal suave — pill + barra final
+TEXT        = colors.HexColor('#111827')   # texto principal (quase-preto, não puro)
 TEAL        = colors.HexColor('#0d9488')
-TEAL_LIGHT  = colors.HexColor('#f0fdfa')
-AMBER       = colors.HexColor('#f59e0b')
-BLUE        = colors.HexColor('#3B82F6')
+TEAL_TINT   = colors.HexColor('#F0FDFA')   # header de tabela (financeiro)
+AMBER       = colors.HexColor('#d97706')
+AMBER_TINT  = colors.HexColor('#FFFBEB')   # header de tabela (imobiliário)
 GRAY_MID    = colors.HexColor('#6B7280')
-GRAY_LIGHT  = colors.HexColor('#F4F4F4')
+GRAY_BORDER = colors.HexColor('#E5E7EB')
+GRAY_ROW    = colors.HexColor('#FAFAFA')
+GRAY_TOTAL  = colors.HexColor('#F3F4F6')
 WHITE       = colors.white
 RED         = colors.HexColor('#dc2626')
 
@@ -84,11 +88,11 @@ def _header_block(nome_cliente: str, data_str: str) -> Table:
         logo_cell = logo
     except Exception:
         logo_cell = _p("PIMENTA JUDICE<br/><font size='6'>ADVOGADOS ASSOCIADOS</font>",
-                       _s('lgfb', fontSize=12, fontName='Helvetica-Bold', textColor=DARK))
+                       _s('lgfb', fontSize=12, fontName='Helvetica-Bold', textColor=TEXT))
 
     info = Table(
         [[_p("Relatorio de Carteira",
-             _s('rh1', fontSize=9, fontName='Helvetica-Bold', textColor=DARK, spaceAfter=1))],
+             _s('rh1', fontSize=9, fontName='Helvetica-Bold', textColor=TEXT, spaceAfter=1))],
          [_p(nome_cliente,
              _s('rh2', fontSize=8, fontName='Helvetica', textColor=GRAY_MID, spaceAfter=1))],
          [_p(data_str,
@@ -111,10 +115,10 @@ def _header_block(nome_cliente: str, data_str: str) -> Table:
 
 
 def _title_row(nome_cliente: str) -> Table:
-    """Título grande à esquerda + pill escuro com nome do cliente à direita."""
+    """Título grande à esquerda + pill (único bloco escuro do topo) com o nome do cliente."""
     title_cell = Table(
         [[_p("CARTEIRA DE INVESTIMENTOS",
-             _s('tt1', fontSize=15, leading=18, fontName='Helvetica-Bold', textColor=DARK))],
+             _s('tt1', fontSize=15, leading=18, fontName='Helvetica-Bold', textColor=TEXT))],
          [_p("Posicoes ativas · Relatorio consolidado",
              _s('tt2', fontSize=9, leading=11, fontName='Helvetica', textColor=GRAY_MID))]],
         colWidths=[110 * mm],
@@ -128,7 +132,7 @@ def _title_row(nome_cliente: str) -> Table:
     nome_upper = nome_cliente.upper()
     pill = Table(
         [[_p(nome_upper, _s('pill', fontSize=9, fontName='Helvetica-Bold', textColor=WHITE))]],
-        colWidths=[58 * mm],
+        colWidths=[58 * mm], cornerRadii=[10, 10, 10, 10],
     )
     pill.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, -1), DARK),
@@ -146,36 +150,30 @@ def _title_row(nome_cliente: str) -> Table:
     return t
 
 
-def _section_hdr(label: str) -> list:
-    """ALL CAPS + linha fina escura — estilo da referência."""
+def _section_hdr(label: str, accent=TEAL) -> list:
+    """ALL CAPS + linha fina colorida (teal/âmbar conforme a seção) — sem fundo escuro."""
     return [
         Spacer(1, 3 * mm),
-        _p(label, _s('sh', fontSize=8, fontName='Helvetica-Bold', textColor=DARK,
+        _p(label, _s('sh', fontSize=8, fontName='Helvetica-Bold', textColor=TEXT,
                      spaceBefore=0, spaceAfter=2, tracking=0.5)),
-        HRFlowable(width='100%', thickness=0.8, color=DARK, spaceAfter=3),
+        HRFlowable(width='100%', thickness=1, color=accent, spaceAfter=3),
     ]
 
 
-def _kpi_card(label: str, value: str, sub: str = '', dark: bool = False) -> Table:
-    bg = DARK if dark else colors.HexColor('#1F2937')
-    lbl_color = colors.HexColor('#9CA3AF')
-    val_color = WHITE
-    sub_color = colors.HexColor('#6B7280') if not dark else colors.HexColor('#9CA3AF')
-
+def _kpi_card(label: str, value: str, accent=TEAL) -> Table:
+    """Card claro com borda fina e acento colorido no topo — sem fundo escuro."""
     rows = [[_p(label, _s('kl', fontSize=7, leading=9, fontName='Helvetica-Bold',
-                           textColor=lbl_color))],
+                           textColor=GRAY_MID))],
             [_p(value, _s('kv', fontSize=13, leading=16, fontName='Helvetica-Bold',
-                           textColor=val_color))]]
-    if sub:
-        rows.append([_p(sub, _s('ks', fontSize=7, leading=9, fontName='Helvetica',
-                                 textColor=sub_color))])
+                           textColor=TEXT))]]
 
-    inner = Table(rows, colWidths=[40 * mm])
+    inner = Table(rows, colWidths=[40 * mm], cornerRadii=[5, 5, 5, 5])
     inner.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, -1), bg),
+        ('BACKGROUND', (0, 0), (-1, -1), GRAY_ROW),
+        ('BOX', (0, 0), (-1, -1), 0.5, GRAY_BORDER),
+        ('LINEABOVE', (0, 0), (-1, 0), 2.5, accent),
         ('TOPPADDING', (0, 0), (-1, -1), 7), ('BOTTOMPADDING', (0, 0), (-1, -1), 7),
         ('LEFTPADDING', (0, 0), (-1, -1), 8), ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-        ('LINEABOVE', (0, 0), (-1, 0), 2, TEAL if not dark else AMBER),
     ]))
     outer = Table([[inner]], colWidths=[42.5 * mm])
     outer.setStyle(TableStyle([
@@ -186,51 +184,55 @@ def _kpi_card(label: str, value: str, sub: str = '', dark: bool = False) -> Tabl
 
 
 def _asset_table(headers: list, rows: list, col_widths: list,
-                 teal_cols: list = None) -> Table:
-    """Tabela com header preto/branco + linhas alternadas + accent teal opcional."""
+                 accent_cols: list = None, accent=TEAL, tint=TEAL_TINT) -> Table:
+    """Tabela clara e arredondada: header com leve tingimento colorido, linhas
+    alternadas suaves, total em cinza claro — sem blocos pretos."""
     data = [headers] + rows
-    t = Table(data, colWidths=col_widths, repeatRows=1)
+    t = Table(data, colWidths=col_widths, repeatRows=1, cornerRadii=[6, 6, 6, 6])
 
     style = [
-        ('BACKGROUND', (0, 0), (-1, 0), DARK_HDR),
-        ('TEXTCOLOR', (0, 0), (-1, 0), WHITE),
+        ('BACKGROUND', (0, 0), (-1, 0), tint),
+        ('TEXTCOLOR', (0, 0), (-1, 0), TEXT),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('LINEBELOW', (0, 0), (-1, 0), 1, accent),
         ('FONTSIZE', (0, 0), (-1, -1), 8),
-        ('TOPPADDING', (0, 0), (-1, -1), 4),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-        ('LEFTPADDING', (0, 0), (-1, -1), 6),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 6),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [WHITE, GRAY_LIGHT]),
-        ('LINEBELOW', (0, 1), (-1, -2), 0.3, colors.HexColor('#e5e7eb')),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ('LEFTPADDING', (0, 0), (-1, -1), 7),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 7),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [WHITE, GRAY_ROW]),
+        ('LINEBELOW', (0, 1), (-1, -2), 0.3, GRAY_BORDER),
+        ('BOX', (0, 0), (-1, -1), 0.5, GRAY_BORDER),
         ('ALIGN', (0, 0), (0, -1), 'LEFT'),
         ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
     ]
 
-    if teal_cols:
-        for col in teal_cols:
+    if accent_cols:
+        for col in accent_cols:
             for r in range(1, len(data)):
-                style.append(('TEXTCOLOR', (col, r), (col, r), TEAL))
+                style.append(('TEXTCOLOR', (col, r), (col, r), accent))
                 style.append(('FONTNAME', (col, r), (col, r), 'Helvetica-Bold'))
 
-    # Linha de total: fundo escuro
+    # Linha de total: cinza claro, sem preto
     if rows and str(rows[-1][0]).startswith('TOTAL'):
         i = len(data) - 1
         style += [
-            ('BACKGROUND', (0, i), (-1, i), DARK_HDR),
-            ('TEXTCOLOR', (0, i), (-1, i), WHITE),
+            ('BACKGROUND', (0, i), (-1, i), GRAY_TOTAL),
+            ('TEXTCOLOR', (0, i), (-1, i), TEXT),
             ('FONTNAME', (0, i), (-1, i), 'Helvetica-Bold'),
+            ('LINEABOVE', (0, i), (-1, i), 0.75, GRAY_BORDER),
         ]
-        if teal_cols:
-            for col in teal_cols:
-                style.append(('TEXTCOLOR', (col, i), (col, i), TEAL))
+        if accent_cols:
+            for col in accent_cols:
+                style.append(('TEXTCOLOR', (col, i), (col, i), accent))
 
     t.setStyle(TableStyle(style))
     return t
 
 
 def _dark_footer_bar(total_geral: float, exito: float = 0) -> Table:
-    """Barra escura de rodapé com total em destaque (estilo INVESTIMENTO da referência)."""
+    """Barra de rodapé (2º e último bloco escuro do documento) com o total em destaque."""
     left_rows = [[_p("TOTAL APLICADO",
                       _s('fl', fontSize=7, leading=9, fontName='Helvetica-Bold',
                          textColor=colors.HexColor('#9CA3AF')))],
@@ -256,10 +258,10 @@ def _dark_footer_bar(total_geral: float, exito: float = 0) -> Table:
         "Honorarios calculados sobre valores efetivamente recuperados.<br/>"
         "Valores estimados nao constituem garantia de resultado.",
         _s('fn', fontSize=7, fontName='Helvetica',
-           textColor=colors.HexColor('#6B7280'), alignment=2)
+           textColor=colors.HexColor('#9CA3AF'), alignment=2)
     )
 
-    t = Table([[left, right]], colWidths=[85 * mm, 85 * mm])
+    t = Table([[left, right]], colWidths=[85 * mm, 85 * mm], cornerRadii=[8, 8, 8, 8])
     t.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, -1), DARK),
         ('TOPPADDING', (0, 0), (-1, -1), 10), ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
@@ -272,7 +274,7 @@ def _dark_footer_bar(total_geral: float, exito: float = 0) -> Table:
 def _bottom_footer() -> Table:
     """Linha final com nome/OAB à esquerda e contato à direita."""
     t = Table(
-        [[_p(_FOOTER_NAME, _s('fn1', fontSize=7, fontName='Helvetica-Bold', textColor=DARK)),
+        [[_p(_FOOTER_NAME, _s('fn1', fontSize=7, fontName='Helvetica-Bold', textColor=TEXT)),
           _p(_FOOTER_CONTACT, _s('fn2', fontSize=7, fontName='Helvetica',
                                   textColor=GRAY_MID, alignment=2))]],
         colWidths=[85 * mm, 85 * mm],
@@ -351,10 +353,10 @@ class CarteiraRelatoriosService:
 
         # ── 3. KPI row ────────────────────────────────────────────────────────
         kpi_row = [[
-            _kpi_card("TOTAL GERAL", _brl(total_geral), dark=True),
-            _kpi_card("IMOBILIARIO", _brl(total_imob)),
-            _kpi_card("FINANCEIRO", _brl(total_fin)),
-            _kpi_card("ATIVOS", str(n_ativos)),
+            _kpi_card("TOTAL GERAL", _brl(total_geral), accent=TEAL),
+            _kpi_card("IMOBILIARIO", _brl(total_imob), accent=AMBER),
+            _kpi_card("FINANCEIRO", _brl(total_fin), accent=TEAL),
+            _kpi_card("ATIVOS", str(n_ativos), accent=GRAY_MID),
         ]]
         kpi_table = Table(kpi_row, colWidths=[42.5 * mm] * 4)
         kpi_table.setStyle(TableStyle([
@@ -366,7 +368,7 @@ class CarteiraRelatoriosService:
 
         # ── 4. Debêntures ─────────────────────────────────────────────────────
         if debentures:
-            for el in _section_hdr(f"DEBENTURES — {len(debentures)} POSICOES  |  {_brl(total_deb)}"):
+            for el in _section_hdr(f"DEBENTURES — {len(debentures)} POSICOES  |  {_brl(total_deb)}", accent=TEAL):
                 story.append(el)
 
             rows = []
@@ -391,13 +393,13 @@ class CarteiraRelatoriosService:
                 ['CAUTELA', 'EMISSAO', 'EMISSOR', 'AQUISICAO', 'APLICADO', 'ATUAL ESTIM.', 'STATUS'],
                 rows,
                 [22*mm, 38*mm, 30*mm, 20*mm, 24*mm, 24*mm, 16*mm],
-                teal_cols=[4, 5],
+                accent_cols=[4, 5], accent=TEAL, tint=TEAL_TINT,
             ))
             story.append(Spacer(1, 5 * mm))
 
         # ── 5. Imobiliário ────────────────────────────────────────────────────
         if imobiliario:
-            for el in _section_hdr(f"IMOBILIARIO — {len(imobiliario)} POSICOES  |  {_brl(total_imob)}"):
+            for el in _section_hdr(f"IMOBILIARIO — {len(imobiliario)} POSICOES  |  {_brl(total_imob)}", accent=AMBER):
                 story.append(el)
 
             rows = []
@@ -420,13 +422,13 @@ class CarteiraRelatoriosService:
                 ['EMPREENDIMENTO', 'CIDADE', 'COMPROMETIDO', 'INVESTIDO', '% PART.'],
                 rows,
                 [55*mm, 30*mm, 30*mm, 30*mm, 25*mm],
-                teal_cols=[2, 3],
+                accent_cols=[2, 3], accent=AMBER, tint=AMBER_TINT,
             ))
             story.append(Spacer(1, 5 * mm))
 
         # ── 6. Fundos ─────────────────────────────────────────────────────────
         if fundos:
-            for el in _section_hdr(f"FUNDOS — {len(fundos)} POSICOES  |  {_brl(total_fundo)}"):
+            for el in _section_hdr(f"FUNDOS — {len(fundos)} POSICOES  |  {_brl(total_fundo)}", accent=TEAL):
                 story.append(el)
 
             rows = []
@@ -453,7 +455,7 @@ class CarteiraRelatoriosService:
                 ['FUNDO', 'GESTORA', 'APLICADO', 'ATUAL ESTIM.', '% RECUP.', 'DATA APLIC.'],
                 rows,
                 [48*mm, 28*mm, 26*mm, 26*mm, 22*mm, 20*mm],
-                teal_cols=[2, 3],
+                accent_cols=[2, 3],
             ))
             story.append(Spacer(1, 5 * mm))
 
@@ -476,7 +478,7 @@ class CarteiraRelatoriosService:
                 ['BASE DE CALCULO', 'VALOR', '% EXITO', 'HONORARIOS ESP.'],
                 hon_rows,
                 [70*mm, 35*mm, 25*mm, 40*mm],
-                teal_cols=[3],
+                accent_cols=[3],
             ))
             story.append(Spacer(1, 5 * mm))
 
