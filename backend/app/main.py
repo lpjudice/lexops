@@ -1489,6 +1489,18 @@ def _run_migrations() -> None:
             "ALTER TABLE carteira_debenture_posicao ADD COLUMN IF NOT EXISTS foi_pago BOOLEAN DEFAULT FALSE",
             "ALTER TABLE carteira_debenture_posicao ADD COLUMN IF NOT EXISTS valor_pago FLOAT",
             "ALTER TABLE carteira_debenture_posicao ADD COLUMN IF NOT EXISTS data_pagamento DATE",
+            # resgate antecipado específico da cautela (vs. o da emissão)
+            "ALTER TABLE carteira_debenture_posicao ADD COLUMN IF NOT EXISTS resgate_antecipado_cautela BOOLEAN DEFAULT FALSE",
+            # estratégias múltiplas por posição
+            "ALTER TABLE carteira_debenture_posicao ADD COLUMN IF NOT EXISTS estrategia_ids JSONB DEFAULT '[]'",
+            "ALTER TABLE carteira_imobiliario_posicao ADD COLUMN IF NOT EXISTS estrategia_ids JSONB DEFAULT '[]'",
+            "ALTER TABLE carteira_fundo_posicao ADD COLUMN IF NOT EXISTS estrategia_ids JSONB DEFAULT '[]'",
+            # emissão: campos de liquidez / garantias (adicionados ao model mas faltavam no DB)
+            "ALTER TABLE carteira_debenture_emissao ADD COLUMN IF NOT EXISTS prazo_carencia_meses INTEGER",
+            "ALTER TABLE carteira_debenture_emissao ADD COLUMN IF NOT EXISTS prazo_pgto_pos_resgate VARCHAR(100)",
+            "ALTER TABLE carteira_debenture_emissao ADD COLUMN IF NOT EXISTS resgate_antecipado_emissao BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE carteira_debenture_emissao ADD COLUMN IF NOT EXISTS resgate_antecipado_termo BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE carteira_debenture_emissao ADD COLUMN IF NOT EXISTS tipos_garantia JSONB DEFAULT '[]'",
         ]:
             conn.execute(text(_col))
 

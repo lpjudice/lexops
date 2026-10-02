@@ -144,6 +144,12 @@ class CarteiraDebenturePosicao(Base):
     # Aval de Sócios
     aval_socios = Column(JSON, default=list)
 
+    # Resgate antecipado — específico desta cautela (diferente do da emissão)
+    resgate_antecipado_cautela = Column(Boolean, default=False)
+
+    # Estratégias (múltiplas — array de IDs)
+    estrategia_ids = Column(JSON, default=list)
+
     # Administrativo
     estrategia_id = Column(Integer, ForeignKey('carteira_estrategia.id'), nullable=True)
     faz_parte_honorarios = Column(Boolean, default=False)
@@ -265,6 +271,9 @@ class CarteiraImobiliarioPosicao(Base):
     percentual_sucesso_honorario = Column(Float, nullable=True)
     observacao_honorarios = Column(Text, nullable=True)
 
+    # Estratégias (múltiplas — array de IDs)
+    estrategia_ids = Column(JSON, default=list)
+
     # Administrativo
     estrategia_id = Column(Integer, ForeignKey('carteira_estrategia.id'), nullable=True)
     folder_drive_id = Column(String(255), nullable=True)
@@ -340,6 +349,9 @@ class CarteiraFundoPosicao(Base):
     valor_base_recompra = Column(Float, nullable=True)
     status_recompra = Column(String(50), default='Aguardando')
     data_exercicio_recompra = Column(Date, nullable=True)
+
+    # Estratégias (múltiplas — array de IDs)
+    estrategia_ids = Column(JSON, default=list)
 
     # Administrativo
     faz_parte_honorarios = Column(Boolean, default=False)

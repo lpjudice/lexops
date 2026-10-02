@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '@/api/client'
 import Modal from '@/components/Modal'
+import { useAuth } from '@/contexts/AuthContext'
 import styles from './Page.module.css'
 import cs from './Carteira.module.css'
 
@@ -20,7 +22,7 @@ const TABS_POS: { key: Tab; label: string }[] = [
 ]
 const TABS_REF: { key: Tab; label: string }[] = [
   { key: 'clientes', label: 'Clientes' },
-  { key: 'emissoes', label: 'Emissões' },
+  { key: 'emissoes', label: 'Emissões DB' },
   { key: 'empreendimentos', label: 'Empreendimentos' },
   { key: 'fundos-ref', label: 'Fundos Ref.' },
   { key: 'estrategias', label: 'Estratégias' },
@@ -146,13 +148,15 @@ function MultiSelect({
   )
 }
 
-// ── Busca assíncrona de clientes do sistema principal (debounced) ─────
+// ── Busca assíncrona de clientes do sistema principal — portal (escapa overflow) ─────
 function SystemClientCombo({ onSelect }: { onSelect: (c: any) => void }) {
   const [search, setSearch] = useState('')
   const [open, setOpen] = useState(false)
   const [results, setResults] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout>>()
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [dropStyle, setDropStyle] = useState<React.CSSProperties>({})
 
   const buscar = async (s: string) => {
     if (s.length < 2) { setResults([]); return }
@@ -165,37 +169,111 @@ function SystemClientCombo({ onSelect }: { onSelect: (c: any) => void }) {
     finally { setLoading(false) }
   }
 
-  const onChange = (s: string) => {
-    setSearch(s); setOpen(true)
+  const calcStyle = () => {
+    if (!inputRef.current) return
+    const rect = inputRef.current.getBoundingClientRect()
+    setDropStyle({ position: 'fixed', top: rect.bottom + 2, left: rect.left, width: rect.width, zIndex: 9999, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 6, maxHeight: 240, overflowY: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,0.14)' })
+  }
+
+  const handleChange = (s: string) => {
+    setSearch(s); calcStyle(); setOpen(true)
     clearTimeout(timer.current)
     timer.current = setTimeout(() => buscar(s), 300)
   }
 
   return (
-    <div style={{ position: 'relative' }}>
-      <input className={styles.input} value={search}
+    <>
+      <input ref={inputRef} className={styles.input} value={search}
         placeholder="Buscar no sistema principal (min. 2 letras)..."
-        onChange={e => onChange(e.target.value)}
-        onFocus={() => { if (search.length >= 2) setOpen(true) }}
-        onBlur={() => setTimeout(() => setOpen(false), 180)} />
-      {open && (
-        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 200, background: 'var(--white)', border: '1px solid var(--gray-border)', borderRadius: 6, maxHeight: 220, overflowY: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }}>
-          {loading && <div style={{ padding: '10px 14px', color: 'var(--gray-mid)', fontSize: 13 }}>Buscando...</div>}
-          {!loading && search.length < 2 && <div style={{ padding: '10px 14px', color: 'var(--gray-mid)', fontSize: 12 }}>Digite pelo menos 2 letras</div>}
+        onChange={e => handleChange(e.target.value)}
+        onFocus={() => { if (search.length >= 2) { calcStyle(); setOpen(true) } }}
+        onBlur={() => setTimeout(() => setOpen(false), 200)} />
+      {open && createPortal(
+        <div style={dropStyle}>
+          {loading && <div style={{ padding: '10px 14px', color: '#6b7280', fontSize: 13 }}>Buscando...</div>}
+          {!loading && search.length < 2 && <div style={{ padding: '10px 14px', color: '#6b7280', fontSize: 12 }}>Digite pelo menos 2 letras</div>}
           {!loading && search.length >= 2 && results.length === 0 && (
-            <div style={{ padding: '10px 14px', color: 'var(--gray-mid)', fontSize: 13 }}>Nenhum resultado para "{search}"</div>
+            <div style={{ padding: '10px 14px', color: '#6b7280', fontSize: 13 }}>Nenhum resultado para "{search}"</div>
           )}
           {!loading && results.map((c: any) => (
             <div key={c.id}
-              style={{ padding: '8px 14px', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid var(--gray-light, #f3f4f6)', display: 'flex', gap: 10, alignItems: 'baseline' }}
+              style={{ padding: '8px 14px', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f3f4f6', display: 'flex', gap: 10, alignItems: 'baseline' }}
               onMouseDown={() => { onSelect(c); setSearch(''); setOpen(false); setResults([]) }}>
               <strong>{c.nome}</strong>
-              {c.cpf_cnpj && <span style={{ color: 'var(--gray-mid)', fontSize: 11 }}>{c.cpf_cnpj}</span>}
+              {c.cpf_cnpj && <span style={{ color: '#6b7280', fontSize: 11 }}>{c.cpf_cnpj}</span>}
             </div>
           ))}
-        </div>
+        </div>,
+        document.body
       )}
-    </div>
+    </>
+  )
+}
+
+// ── Chips de estratégia por linha de posição ──────────────────────
+function EstrategiaChips({
+  ids, estrategias, onUpdate,
+}: {
+  ids: number[]; estrategias: any[]; onUpdate: (newIds: number[]) => void
+}) {
+  const [showAdd, setShowAdd] = useState(false)
+  const [selectedEst, setSelectedEst] = useState<any | null>(null)
+  const [dropStyle, setDropStyle] = useState<React.CSSProperties>({})
+  const btnRef = useRef<HTMLButtonElement>(null)
+
+  const current = ids.map(id => estrategias.find(e => e.id === id)).filter(Boolean)
+  const available = estrategias.filter(e => !ids.includes(e.id))
+
+  const openAdd = () => {
+    if (!btnRef.current) return
+    const rect = btnRef.current.getBoundingClientRect()
+    setDropStyle({ position: 'fixed', top: rect.bottom + 2, left: rect.left, minWidth: 200, maxWidth: 300, zIndex: 9999, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 6, maxHeight: 200, overflowY: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,0.12)' })
+    setShowAdd(s => !s)
+  }
+
+  return (
+    <>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, alignItems: 'center' }}>
+        {current.map((est: any) => (
+          <span key={est.id}
+            title={est.descricao || est.nome}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 2, background: '#f0fdfa', border: '1px solid #0d9488', borderRadius: 10, padding: '1px 7px', fontSize: 10, cursor: 'pointer', color: '#0d6b63', whiteSpace: 'nowrap' }}
+            onClick={() => setSelectedEst(est)}>
+            {est.nome}
+            <span
+              style={{ marginLeft: 1, cursor: 'pointer', fontSize: 9, color: '#6b7280', lineHeight: 1 }}
+              onMouseDown={(e) => { e.stopPropagation(); onUpdate(ids.filter(x => x !== est.id)) }}>×</span>
+          </span>
+        ))}
+        <button ref={btnRef}
+          style={{ background: 'none', border: '1px dashed #d1d5db', borderRadius: 10, padding: '1px 7px', fontSize: 10, cursor: 'pointer', color: '#9ca3af', lineHeight: 1.5 }}
+          onClick={openAdd}>+</button>
+      </div>
+      {showAdd && createPortal(
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 9998 }} onClick={() => setShowAdd(false)} />
+          <div style={dropStyle}>
+            {available.length === 0
+              ? <div style={{ padding: '10px 14px', color: '#9ca3af', fontSize: 12 }}>Todas selecionadas</div>
+              : available.map((e: any) => (
+                <div key={e.id}
+                  style={{ padding: '8px 14px', cursor: 'pointer', fontSize: 12, borderBottom: '1px solid #f3f4f6', display: 'flex', flexDirection: 'column' }}
+                  onMouseDown={() => { onUpdate([...ids, e.id]); setShowAdd(false) }}>
+                  <strong>{e.nome}</strong>
+                  {e.descricao && <span style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>{e.descricao}</span>}
+                </div>
+              ))
+            }
+          </div>
+        </>,
+        document.body
+      )}
+      {selectedEst && (
+        <Modal title={selectedEst.nome} onClose={() => setSelectedEst(null)} width={380}>
+          <p style={{ fontSize: 13, lineHeight: 1.6 }}>{selectedEst.descricao || 'Sem descrição cadastrada.'}</p>
+        </Modal>
+      )}
+    </>
   )
 }
 
@@ -222,7 +300,10 @@ export default function CarteiraPage() {
   const [mostrarDebs, setMostrarDebs] = useState(true)
   const [mostrarImob, setMostrarImob] = useState(true)
   const [mostrarFundosPOS, setMostrarFundosPOS] = useState(true)
+  // Debênture info modal
+  const [debInfoId, setDebInfoId] = useState<number | null>(null)
 
+  const { isSuperAdmin } = useAuth()
   const qc = useQueryClient()
   const inp = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }))
   const closeModal = () => {
@@ -394,6 +475,22 @@ export default function CarteiraPage() {
 
   const salvarEstrategia = mk('/carteira/estrategias', ['carteira-estrategias'])
 
+  const patchEstratDeb = useMutation({
+    mutationFn: ({ id, ids }: { id: number; ids: number[] }) =>
+      api.put(`/carteira/debentures/${id}`, { estrategia_ids: ids }).then(r => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['carteira-debentures'] }),
+  })
+  const patchEstratImob = useMutation({
+    mutationFn: ({ id, ids }: { id: number; ids: number[] }) =>
+      api.put(`/carteira/imobiliario/${id}`, { estrategia_ids: ids }).then(r => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['carteira-imobiliario'] }),
+  })
+  const patchEstratFundo = useMutation({
+    mutationFn: ({ id, ids }: { id: number; ids: number[] }) =>
+      api.put(`/carteira/fundos/${id}`, { estrategia_ids: ids }).then(r => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['carteira-fundos'] }),
+  })
+
   const processarDocumento = useMutation({
     mutationFn: ({ file, tipo }: { file: File; tipo: string }) => {
       const fd = new FormData(); fd.append('file', file)
@@ -531,15 +628,15 @@ export default function CarteiraPage() {
     <div style={{ textAlign: 'center', padding: '40px 24px', color: '#9ca3af', fontSize: 14 }}>Nenhum registro encontrado</div>
   )
 
-  // Colgroups fixos para alinhamento
+  // Colgroups fixos para alinhamento — Cautela|Emissão|Aplic|Atual|Status|Êxito%|Estratégia|Actions
   const colsDeb = () => (
-    <colgroup><col style={{ width: 120 }} /><col /><col style={{ width: 145 }} /><col style={{ width: 145 }} /><col style={{ width: 120 }} /><col style={{ width: 75 }} /><col style={{ width: 60 }} /></colgroup>
+    <colgroup><col style={{ width: 110 }} /><col /><col style={{ width: 130 }} /><col style={{ width: 130 }} /><col style={{ width: 110 }} /><col style={{ width: 65 }} /><col style={{ width: 140 }} /><col style={{ width: 72 }} /></colgroup>
   )
   const colsImob = () => (
-    <colgroup><col /><col style={{ width: 150 }} /><col style={{ width: 150 }} /><col style={{ width: 75 }} /><col style={{ width: 75 }} /><col style={{ width: 60 }} /></colgroup>
+    <colgroup><col /><col style={{ width: 140 }} /><col style={{ width: 140 }} /><col style={{ width: 70 }} /><col style={{ width: 65 }} /><col style={{ width: 140 }} /><col style={{ width: 60 }} /></colgroup>
   )
   const colsFundos = () => (
-    <colgroup><col /><col style={{ width: 140 }} /><col style={{ width: 140 }} /><col style={{ width: 105 }} /><col style={{ width: 90 }} /><col style={{ width: 75 }} /><col style={{ width: 60 }} /></colgroup>
+    <colgroup><col /><col style={{ width: 130 }} /><col style={{ width: 130 }} /><col style={{ width: 95 }} /><col style={{ width: 80 }} /><col style={{ width: 65 }} /><col style={{ width: 140 }} /><col style={{ width: 60 }} /></colgroup>
   )
   const thR = (label: string) => <th style={{ textAlign: 'right' }}>{label}</th>
 
@@ -553,8 +650,8 @@ export default function CarteiraPage() {
         <div className={cs.kpiCard}><span className={cs.kpiLabel}>Total Geral</span><span className={cs.kpiValue}>{brl(kpiTotal)}</span></div>
         <div className={cs.kpiCard} style={{ borderTop: '3px solid var(--amber, #f59e0b)' }}><span className={cs.kpiLabel}>Imobiliário</span><span className={cs.kpiValue}>{brl(kpiImob)}</span></div>
         <div className={cs.kpiCard} style={{ borderTop: '3px solid var(--teal)' }}><span className={cs.kpiLabel}>Financeiro</span><span className={cs.kpiValue}>{brl(kpiFin)}</span></div>
-        <div className={cs.kpiCard}><span className={cs.kpiLabel}>Fee Entrada (esp.)</span><span className={cs.kpiValue}>{brl(kpiFeeEntrada)}</span></div>
-        <div className={cs.kpiCard}><span className={cs.kpiLabel}>Expectativa Êxito</span><span className={cs.kpiValue}>{brl(kpiExito)}</span></div>
+        <div className={cs.kpiCard}><span className={cs.kpiLabel}>Fee Entrada (esp.)</span><span className={cs.kpiValue}>{isSuperAdmin ? brl(kpiFeeEntrada) : '🔒'}</span></div>
+        <div className={cs.kpiCard}><span className={cs.kpiLabel}>Expectativa Êxito</span><span className={cs.kpiValue}>{isSuperAdmin ? brl(kpiExito) : '🔒'}</span></div>
       </div>
 
       {/* Tab Bar */}
@@ -609,8 +706,8 @@ export default function CarteiraPage() {
                       </span>
                       <span className={cs.clientePosicaoTotal}>
                         {brl(totalApl)} aplicado
-                        {feeEntrada > 0 && ` · Fee: ${brl(feeEntrada)}`}
-                        {exito > 0 && ` · Êxito esp.: ${brl(exito)}`}
+                        {isSuperAdmin && feeEntrada > 0 && ` · Fee: ${brl(feeEntrada)}`}
+                        {isSuperAdmin && exito > 0 && ` · Êxito esp.: ${brl(exito)}`}
                       </span>
                     </div>
                     <button className={styles.btnSmall} onClick={() => window.open(`/api/carteira/cliente/${c.id}/pdf`, '_blank')}>PDF</button>
@@ -621,7 +718,7 @@ export default function CarteiraPage() {
                       <div className={cs.posicaoSecaoTitulo}>Debêntures ({debs.length}) · {brl(debs.reduce((s, d) => s + (d.valor_aplicado ?? 0), 0))}</div>
                       <table className={styles.table} style={{ marginBottom: 0 }}>
                         {colsDeb()}
-                        <thead><tr><th>Cautela</th><th>Emissão</th>{thR('Aplicado')}{thR('Atual')}<th>Status</th><th>Êxito%</th><th /></tr></thead>
+                        <thead><tr><th>Cautela</th><th>Emissão</th>{thR('Aplicado')}{thR('Atual')}<th>Status</th><th>{isSuperAdmin ? 'Êxito%' : '🔒'}</th><th>Estratégia</th><th /></tr></thead>
                         <tbody>
                           {debs.map(d => (
                             <tr key={d.id}>
@@ -629,15 +726,19 @@ export default function CarteiraPage() {
                               <td style={{ textAlign: 'right' }}>{brl(d.valor_aplicado)}</td>
                               <td style={{ textAlign: 'right' }}>{d.valor_atual_estimado ? brl(d.valor_atual_estimado) : '—'}</td>
                               <td>{statusBadge(d.status_resgate)}</td>
-                              <td>{d.faz_parte_honorarios ? pct(d.percentual_sucesso_honor) : '—'}</td>
-                              <td>{editBtn(() => abrirEdicaoDeb(d))}</td>
+                              <td>{isSuperAdmin ? (d.faz_parte_honorarios ? pct(d.percentual_sucesso_honor) : '—') : '🔒'}</td>
+                              <td><EstrategiaChips ids={d.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratDeb.mutate({ id: d.id, ids })} /></td>
+                              <td style={{ whiteSpace: 'nowrap' }}>
+                                <button title="Detalhes" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#6b7280', padding: '0 3px' }} onClick={() => setDebInfoId(d.id)}>ⓘ</button>
+                                {editBtn(() => abrirEdicaoDeb(d))}
+                              </td>
                             </tr>
                           ))}
                           <tr style={{ background: 'var(--gray-light, #f8f9fa)', fontWeight: 600 }}>
                             <td colSpan={2}>Total</td>
                             <td style={{ textAlign: 'right' }}>{brl(debs.reduce((s, d) => s + (d.valor_aplicado ?? 0), 0))}</td>
                             <td style={{ textAlign: 'right' }}>{brl(debs.reduce((s, d) => s + (d.valor_atual_estimado ?? d.valor_aplicado ?? 0), 0))}</td>
-                            <td /><td /><td />
+                            <td /><td /><td /><td />
                           </tr>
                         </tbody>
                       </table>
@@ -649,7 +750,7 @@ export default function CarteiraPage() {
                       <div className={cs.posicaoSecaoTitulo}>Imobiliário ({imobs.length}) · {brl(imobs.reduce((s, i) => s + (i.valor_total_compromissado ?? 0), 0))}</div>
                       <table className={styles.table} style={{ marginBottom: 0 }}>
                         {colsImob()}
-                        <thead><tr><th>Empreendimento</th>{thR('Comprometido')}{thR('Investido')}<th>% Part.</th><th>Êxito%</th><th /></tr></thead>
+                        <thead><tr><th>Empreendimento</th>{thR('Comprometido')}{thR('Investido')}<th>% Part.</th><th>{isSuperAdmin ? 'Êxito%' : '🔒'}</th><th>Estratégia</th><th /></tr></thead>
                         <tbody>
                           {imobs.map(i => (
                             <tr key={i.id}>
@@ -657,7 +758,8 @@ export default function CarteiraPage() {
                               <td style={{ textAlign: 'right' }}>{brl(i.valor_total_compromissado)}</td>
                               <td style={{ textAlign: 'right' }}>{brl(i.valor_efetivamente_investido)}</td>
                               <td>{pct(i.percentual_participacao)}</td>
-                              <td>{i.faz_parte_honorarios ? pct(i.percentual_sucesso_honorario) : '—'}</td>
+                              <td>{isSuperAdmin ? (i.faz_parte_honorarios ? pct(i.percentual_sucesso_honorario) : '—') : '🔒'}</td>
+                              <td><EstrategiaChips ids={i.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratImob.mutate({ id: i.id, ids })} /></td>
                               <td>{editBtn(() => abrirEdicaoImob(i))}</td>
                             </tr>
                           ))}
@@ -665,7 +767,7 @@ export default function CarteiraPage() {
                             <td>Total</td>
                             <td style={{ textAlign: 'right' }}>{brl(imobs.reduce((s, i) => s + (i.valor_total_compromissado ?? 0), 0))}</td>
                             <td style={{ textAlign: 'right' }}>{brl(imobs.reduce((s, i) => s + (i.valor_efetivamente_investido ?? 0), 0))}</td>
-                            <td /><td /><td />
+                            <td /><td /><td /><td />
                           </tr>
                         </tbody>
                       </table>
@@ -677,7 +779,7 @@ export default function CarteiraPage() {
                       <div className={cs.posicaoSecaoTitulo}>Fundos ({fnds.length}) · {brl(fnds.reduce((s, f) => s + (f.valor_aplicado ?? 0), 0))}</div>
                       <table className={styles.table} style={{ marginBottom: 0 }}>
                         {colsFundos()}
-                        <thead><tr><th>Fundo</th>{thR('Aplicado')}{thR('Atual')}<th>Data</th><th>Recompra</th><th>Êxito%</th><th /></tr></thead>
+                        <thead><tr><th>Fundo</th>{thR('Aplicado')}{thR('Atual')}<th>Data</th><th>Recompra</th><th>{isSuperAdmin ? 'Êxito%' : '🔒'}</th><th>Estratégia</th><th /></tr></thead>
                         <tbody>
                           {fnds.map(f => (
                             <tr key={f.id}>
@@ -686,7 +788,8 @@ export default function CarteiraPage() {
                               <td style={{ textAlign: 'right' }}>{f.valor_atual_estimado ? brl(f.valor_atual_estimado) : '—'}</td>
                               <td>{f.data_aplicacao ?? '—'}</td>
                               <td>{f.tem_direito_recompra ? <span className={`${styles.badge} ${styles.status_suspenso}`}>Sim</span> : '—'}</td>
-                              <td>{f.faz_parte_honorarios ? pct(f.percentual_sucesso_honor) : '—'}</td>
+                              <td>{isSuperAdmin ? (f.faz_parte_honorarios ? pct(f.percentual_sucesso_honor) : '—') : '🔒'}</td>
+                              <td><EstrategiaChips ids={f.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratFundo.mutate({ id: f.id, ids })} /></td>
                               <td>{editBtn(() => abrirEdicaoFundo(f))}</td>
                             </tr>
                           ))}
@@ -694,7 +797,7 @@ export default function CarteiraPage() {
                             <td>Total</td>
                             <td style={{ textAlign: 'right' }}>{brl(fnds.reduce((s, f) => s + (f.valor_aplicado ?? 0), 0))}</td>
                             <td style={{ textAlign: 'right' }}>{brl(fnds.reduce((s, f) => s + (f.valor_atual_estimado ?? f.valor_aplicado ?? 0), 0))}</td>
-                            <td colSpan={4} />
+                            <td colSpan={5} />
                           </tr>
                         </tbody>
                       </table>
@@ -727,7 +830,7 @@ export default function CarteiraPage() {
               </div>
               <table className={styles.table} style={{ marginBottom: 0 }}>
                 {colsDeb()}
-                <thead><tr><th>Cautela</th><th>Emissão</th>{thR('Aplicado')}{thR('Atual')}<th>Status</th><th>Êxito%</th><th /></tr></thead>
+                <thead><tr><th>Cautela</th><th>Emissão</th>{thR('Aplicado')}{thR('Atual')}<th>Status</th><th>{isSuperAdmin ? 'Êxito%' : '🔒'}</th><th>Estratégia</th><th /></tr></thead>
                 <tbody>
                   {g.posicoes.map((d: any) => (
                     <tr key={d.id}>
@@ -735,15 +838,19 @@ export default function CarteiraPage() {
                       <td style={{ textAlign: 'right' }}>{brl(d.valor_aplicado)}</td>
                       <td style={{ textAlign: 'right' }}>{d.valor_atual_estimado ? brl(d.valor_atual_estimado) : '—'}</td>
                       <td>{statusBadge(d.status_resgate)}</td>
-                      <td>{d.faz_parte_honorarios ? pct(d.percentual_sucesso_honor) : '—'}</td>
-                      <td>{editBtn(() => abrirEdicaoDeb(d))}</td>
+                      <td>{isSuperAdmin ? (d.faz_parte_honorarios ? pct(d.percentual_sucesso_honor) : '—') : '🔒'}</td>
+                      <td><EstrategiaChips ids={d.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratDeb.mutate({ id: d.id, ids })} /></td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        <button title="Detalhes" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#6b7280', padding: '0 3px' }} onClick={() => setDebInfoId(d.id)}>ⓘ</button>
+                        {editBtn(() => abrirEdicaoDeb(d))}
+                      </td>
                     </tr>
                   ))}
                   <tr style={{ background: 'var(--gray-light, #f8f9fa)', fontWeight: 600 }}>
                     <td colSpan={2}>Total</td>
                     <td style={{ textAlign: 'right' }}>{brl(g.posicoes.reduce((s: number, d: any) => s + (d.valor_aplicado ?? 0), 0))}</td>
                     <td style={{ textAlign: 'right' }}>{brl(g.posicoes.reduce((s: number, d: any) => s + (d.valor_atual_estimado ?? d.valor_aplicado ?? 0), 0))}</td>
-                    <td /><td /><td />
+                    <td /><td /><td /><td />
                   </tr>
                 </tbody>
               </table>
@@ -772,7 +879,7 @@ export default function CarteiraPage() {
               </div>
               <table className={styles.table} style={{ marginBottom: 0 }}>
                 {colsImob()}
-                <thead><tr><th>Empreendimento</th>{thR('Comprometido')}{thR('Investido')}<th>% Part.</th><th>Êxito%</th><th /></tr></thead>
+                <thead><tr><th>Empreendimento</th>{thR('Comprometido')}{thR('Investido')}<th>% Part.</th><th>{isSuperAdmin ? 'Êxito%' : '🔒'}</th><th>Estratégia</th><th /></tr></thead>
                 <tbody>
                   {g.posicoes.map((i: any) => (
                     <tr key={i.id}>
@@ -780,7 +887,8 @@ export default function CarteiraPage() {
                       <td style={{ textAlign: 'right' }}>{brl(i.valor_total_compromissado)}</td>
                       <td style={{ textAlign: 'right' }}>{brl(i.valor_efetivamente_investido)}</td>
                       <td>{pct(i.percentual_participacao)}</td>
-                      <td>{i.faz_parte_honorarios ? pct(i.percentual_sucesso_honorario) : '—'}</td>
+                      <td>{isSuperAdmin ? (i.faz_parte_honorarios ? pct(i.percentual_sucesso_honorario) : '—') : '🔒'}</td>
+                      <td><EstrategiaChips ids={i.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratImob.mutate({ id: i.id, ids })} /></td>
                       <td>{editBtn(() => abrirEdicaoImob(i))}</td>
                     </tr>
                   ))}
@@ -788,7 +896,7 @@ export default function CarteiraPage() {
                     <td>Total</td>
                     <td style={{ textAlign: 'right' }}>{brl(g.posicoes.reduce((s: number, i: any) => s + (i.valor_total_compromissado ?? 0), 0))}</td>
                     <td style={{ textAlign: 'right' }}>{brl(g.posicoes.reduce((s: number, i: any) => s + (i.valor_efetivamente_investido ?? 0), 0))}</td>
-                    <td /><td /><td />
+                    <td /><td /><td /><td />
                   </tr>
                 </tbody>
               </table>
@@ -817,7 +925,7 @@ export default function CarteiraPage() {
               </div>
               <table className={styles.table} style={{ marginBottom: 0 }}>
                 {colsFundos()}
-                <thead><tr><th>Fundo</th>{thR('Aplicado')}{thR('Atual')}<th>Data</th><th>Recompra</th><th>Êxito%</th><th /></tr></thead>
+                <thead><tr><th>Fundo</th>{thR('Aplicado')}{thR('Atual')}<th>Data</th><th>Recompra</th><th>{isSuperAdmin ? 'Êxito%' : '🔒'}</th><th>Estratégia</th><th /></tr></thead>
                 <tbody>
                   {g.posicoes.map((f: any) => (
                     <tr key={f.id}>
@@ -826,7 +934,8 @@ export default function CarteiraPage() {
                       <td style={{ textAlign: 'right' }}>{f.valor_atual_estimado ? brl(f.valor_atual_estimado) : '—'}</td>
                       <td>{f.data_aplicacao ?? '—'}</td>
                       <td>{f.tem_direito_recompra ? <span className={`${styles.badge} ${styles.status_suspenso}`}>Sim</span> : '—'}</td>
-                      <td>{f.faz_parte_honorarios ? pct(f.percentual_sucesso_honor) : '—'}</td>
+                      <td>{isSuperAdmin ? (f.faz_parte_honorarios ? pct(f.percentual_sucesso_honor) : '—') : '🔒'}</td>
+                      <td><EstrategiaChips ids={f.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratFundo.mutate({ id: f.id, ids })} /></td>
                       <td>{editBtn(() => abrirEdicaoFundo(f))}</td>
                     </tr>
                   ))}
@@ -834,7 +943,7 @@ export default function CarteiraPage() {
                     <td>Total</td>
                     <td style={{ textAlign: 'right' }}>{brl(g.posicoes.reduce((s: number, f: any) => s + (f.valor_aplicado ?? 0), 0))}</td>
                     <td style={{ textAlign: 'right' }}>{brl(g.posicoes.reduce((s: number, f: any) => s + (f.valor_atual_estimado ?? f.valor_aplicado ?? 0), 0))}</td>
-                    <td colSpan={4} />
+                    <td colSpan={5} />
                   </tr>
                 </tbody>
               </table>
@@ -852,7 +961,7 @@ export default function CarteiraPage() {
           <div className={styles.tableCard}>
             <table className={styles.table}>
               <colgroup><col /><col style={{ width: 60 }} /><col style={{ width: 140 }} /><col style={{ width: 160 }} /><col style={{ width: 150 }} /><col style={{ width: 150 }} /><col style={{ width: 80 }} /><col style={{ width: 36 }} /><col style={{ width: 60 }} /></colgroup>
-              <thead><tr><th>Nome</th><th>Tipo</th><th>CPF/CNPJ</th><th>Fee entrada</th>{thR('Fee (R$ esp.)')}{thR('Êxito (R$ esp.)')}<th>Status</th><th /><th /></tr></thead>
+              <thead><tr><th>Nome</th><th>Tipo</th><th>CPF/CNPJ</th><th>{isSuperAdmin ? 'Fee entrada' : '🔒 Fee'}</th>{thR(isSuperAdmin ? 'Fee (R$ esp.)' : '🔒')}{thR(isSuperAdmin ? 'Êxito (R$ esp.)' : '🔒')}<th>Status</th><th /><th /></tr></thead>
               <tbody>
                 {clientes.length === 0
                   ? <tr><td colSpan={9} style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Nenhum registro</td></tr>
@@ -867,9 +976,9 @@ export default function CarteiraPage() {
                         <td><strong>{clienteNome(c.id)}</strong></td>
                         <td><span className={styles.badge}>{c.tipo_pessoa ?? 'PF'}</span></td>
                         <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{c.cpf ?? '—'}</td>
-                        <td>{feeLbl}</td>
-                        <td style={{ textAlign: 'right' }}>{feeEntrada > 0 ? brl(feeEntrada) : '—'}</td>
-                        <td style={{ textAlign: 'right' }}>{exito > 0 ? brl(exito) : '—'}</td>
+                        <td>{isSuperAdmin ? feeLbl : '🔒'}</td>
+                        <td style={{ textAlign: 'right' }}>{isSuperAdmin ? (feeEntrada > 0 ? brl(feeEntrada) : '—') : '🔒'}</td>
+                        <td style={{ textAlign: 'right' }}>{isSuperAdmin ? (exito > 0 ? brl(exito) : '—') : '🔒'}</td>
                         <td>{statusBadge(c.ativo)}</td>
                         <td>
                           <button title="Copiar qualificação" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 15, color: 'var(--gray-mid)', padding: '0 4px' }}
@@ -1042,29 +1151,33 @@ export default function CarteiraPage() {
           )}
           {fl('E-mail', fi('email', 'email'))}
           {fl('Telefone', fi('telefone'))}
-          <div style={{ borderTop: '1px solid var(--gray-border)', margin: '12px 0 0', paddingTop: 12 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 10 }}>Fee de entrada</div>
-            {fl('Tipo de fee', fs('pro_labore_tipo', [{ value: '', label: 'Sem fee de entrada' }, { value: 'fixo', label: 'Valor fixo (R$)' }, { value: 'percentual', label: 'Percentual do investimento (%)' }]))}
-            {form.pro_labore_tipo === 'fixo' && fl('Valor (R$)', fi('pro_labore_valor', 'number'))}
-            {form.pro_labore_tipo === 'percentual' && (
-              <>{fl('% sobre ativos imobiliários', fi('fee_imob_pct', 'number'))}
-                {fl('% sobre ativos financeiros', fi('fee_fin_pct', 'number'))}</>
-            )}
-          </div>
-          <div style={{ borderTop: '1px solid var(--gray-border)', margin: '12px 0 0', paddingTop: 12 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 10 }}>Honorários de êxito</div>
-            <div className={styles.formRow}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
-                <input type="checkbox" checked={!!form.exito_split} onChange={e => inp('exito_split', e.target.checked)} />
-                % diferente por tipo de ativo
-              </label>
+          {isSuperAdmin && (
+            <div style={{ borderTop: '1px solid var(--gray-border)', margin: '12px 0 0', paddingTop: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 10 }}>Fee de entrada</div>
+              {fl('Tipo de fee', fs('pro_labore_tipo', [{ value: '', label: 'Sem fee de entrada' }, { value: 'fixo', label: 'Valor fixo (R$)' }, { value: 'percentual', label: 'Percentual do investimento (%)' }]))}
+              {form.pro_labore_tipo === 'fixo' && fl('Valor (R$)', fi('pro_labore_valor', 'number'))}
+              {form.pro_labore_tipo === 'percentual' && (
+                <>{fl('% sobre ativos imobiliários', fi('fee_imob_pct', 'number'))}
+                  {fl('% sobre ativos financeiros', fi('fee_fin_pct', 'number'))}</>
+              )}
             </div>
-            {!form.exito_split && fl('% êxito (geral)', fi('percentual_sucesso_geral', 'number'))}
-            {form.exito_split && (
-              <>{fl('% êxito imobiliário', fi('percentual_sucesso_imob', 'number'))}
-                {fl('% êxito financeiro', fi('percentual_sucesso_fin', 'number'))}</>
-            )}
-          </div>
+          )}
+          {isSuperAdmin && (
+            <div style={{ borderTop: '1px solid var(--gray-border)', margin: '12px 0 0', paddingTop: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 10 }}>Honorários de êxito</div>
+              <div className={styles.formRow}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+                  <input type="checkbox" checked={!!form.exito_split} onChange={e => inp('exito_split', e.target.checked)} />
+                  % diferente por tipo de ativo
+                </label>
+              </div>
+              {!form.exito_split && fl('% êxito (geral)', fi('percentual_sucesso_geral', 'number'))}
+              {form.exito_split && (
+                <>{fl('% êxito imobiliário', fi('percentual_sucesso_imob', 'number'))}
+                  {fl('% êxito financeiro', fi('percentual_sucesso_fin', 'number'))}</>
+              )}
+            </div>
+          )}
           <div style={{ marginTop: 12 }}>
             {fl('Observações', fta('observacoes', 2))}
             {editandoClienteId && fl('Status', fs('ativo', [{ value: 'true', label: 'Ativo' }, { value: 'false', label: 'Inativo' }]))}
@@ -1119,7 +1232,7 @@ export default function CarteiraPage() {
 
       {/* ── MODAL EMISSÃO ────────────────────────────────────────── */}
       {modal === 'emissao' && (
-        <Modal title="Nova Emissão de Debênture" onClose={closeModal} width={520}>
+        <Modal title="Nova Emissão de Debênture" onClose={closeModal} width={540}>
           {fl('Nome da Série *', fi('nome_serie', 'text', 'Ex: APEX I'))}
           {fl('Nº da Emissão *', fi('numero_emissao', 'number'))}
           {fl('Emissor *', fi('emissor'))}
@@ -1128,6 +1241,21 @@ export default function CarteiraPage() {
           {fl('Taxa Adicional', fi('taxa_adicional', 'text', '+ 2% a.a.'))}
           {fl('Data Início', fi('data_inicio_emissao', 'date'))}
           {fl('Data Vencimento Previsto', fi('data_vencimento_previsto', 'date'))}
+          <div style={{ borderTop: '1px solid var(--gray-border)', margin: '10px 0', paddingTop: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Resgate e liquidez</div>
+            <div className={styles.formRow}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+                <input type="checkbox" checked={!!form.resgate_antecipado_emissao} onChange={e => inp('resgate_antecipado_emissao', e.target.checked)} />
+                Emissão prevê resgate antecipado
+              </label>
+            </div>
+            {fl('Prazo carência (meses)', fi('prazo_carencia_meses', 'number', '0'))}
+            {fl('Prazo pgto após pedido de saque', fi('prazo_pgto_pos_resgate', 'text', 'Ex: 30 dias'))}
+          </div>
+          <div style={{ borderTop: '1px solid var(--gray-border)', margin: '10px 0', paddingTop: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Garantias</div>
+            {fl('Tipos de garantia', fta('tipos_garantia', 2))}
+          </div>
           <button className={styles.btnPrimary} onClick={() => salvarEmissao.mutate()} disabled={salvarEmissao.isPending}>{salvarEmissao.isPending ? 'Salvando...' : 'Salvar'}</button>
         </Modal>
       )}
@@ -1171,11 +1299,21 @@ export default function CarteiraPage() {
           <div style={{ borderTop: '1px solid var(--gray-border)', margin: '10px 0', paddingTop: 10 }}>
             <div className={styles.formRow}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
-                <input type="checkbox" checked={!!form.faz_parte_honorarios} onChange={e => inp('faz_parte_honorarios', e.target.checked)} /> Faz parte de honorários de êxito
+                <input type="checkbox" checked={!!form.resgate_antecipado_cautela} onChange={e => inp('resgate_antecipado_cautela', e.target.checked)} />
+                Termo/cautela prevê resgate antecipado
               </label>
             </div>
-            {form.faz_parte_honorarios && fl('% Êxito', fi('percentual_sucesso_honor', 'number'))}
           </div>
+          {isSuperAdmin && (
+            <div style={{ borderTop: '1px solid var(--gray-border)', margin: '10px 0', paddingTop: 10 }}>
+              <div className={styles.formRow}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+                  <input type="checkbox" checked={!!form.faz_parte_honorarios} onChange={e => inp('faz_parte_honorarios', e.target.checked)} /> Faz parte de honorários de êxito
+                </label>
+              </div>
+              {form.faz_parte_honorarios && fl('% Êxito', fi('percentual_sucesso_honor', 'number'))}
+            </div>
+          )}
           <button className={styles.btnPrimary} onClick={() => editandoDebId ? atualizarDebenture.mutate() : salvarDebenture.mutate()} disabled={salvarDebenture.isPending || atualizarDebenture.isPending}>
             {(salvarDebenture.isPending || atualizarDebenture.isPending) ? 'Salvando...' : 'Salvar'}
           </button>
@@ -1263,6 +1401,45 @@ export default function CarteiraPage() {
           <button className={styles.btnPrimary} onClick={() => salvarEstrategia.mutate()} disabled={salvarEstrategia.isPending}>{salvarEstrategia.isPending ? 'Salvando...' : 'Salvar'}</button>
         </Modal>
       )}
+
+      {/* ── MODAL DETALHES DEBÊNTURE ─────────────────────────────── */}
+      {debInfoId !== null && (() => {
+        const d = debentures.find(x => x.id === debInfoId)
+        const em = d ? emissoes.find(e => e.id === d.emissao_id) : null
+        if (!d) return null
+        const sim_nao = (v: any) => v ? 'Sim' : 'Não'
+        const infoRow = (label: string, value: string | number | React.ReactNode) => (
+          <div style={{ display: 'flex', gap: 12, padding: '6px 0', borderBottom: '1px solid var(--gray-light, #f3f4f6)', fontSize: 13 }}>
+            <span style={{ minWidth: 220, color: 'var(--gray-mid)', fontSize: 12, fontWeight: 500 }}>{label}</span>
+            <span style={{ fontWeight: 500 }}>{value ?? '—'}</span>
+          </div>
+        )
+        return (
+          <Modal title={`Detalhes — ${d.numero_cautela ?? emissaoNome(d.emissao_id)}`} onClose={() => setDebInfoId(null)} width={480}>
+            <div style={{ marginBottom: 8 }}>
+              {infoRow('Emissão', emissaoNome(d.emissao_id))}
+              {infoRow('Data de aquisição', d.data_aquisicao ?? '—')}
+              {em && infoRow('Data de vencimento previsto', em.data_vencimento_previsto ?? '—')}
+              {em && infoRow('Indexador', em.indexador ? `${em.indexador}${em.taxa_adicional ? ` + ${em.taxa_adicional}` : ''}` : '—')}
+              <div style={{ borderTop: '2px solid var(--gray-border)', margin: '10px 0 6px', paddingTop: 6 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--teal)', textTransform: 'uppercase', marginBottom: 4 }}>Resgate</div>
+              </div>
+              {em && infoRow('Resgate antecipado — emissão prevê?', sim_nao(em.resgate_antecipado_emissao))}
+              {infoRow('Resgate antecipado — termo/cautela prevê?', sim_nao(d.resgate_antecipado_cautela))}
+              {em && infoRow('Prazo carência', em.prazo_carencia_meses != null ? `${em.prazo_carencia_meses} meses` : '—')}
+              {em && infoRow('Prazo pgto após pedido de saque', em.prazo_pgto_pos_resgate != null ? `${em.prazo_pgto_pos_resgate} dias` : '—')}
+              {em && em.tipos_garantia && (
+                <>
+                  <div style={{ borderTop: '2px solid var(--gray-border)', margin: '10px 0 6px', paddingTop: 6 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--teal)', textTransform: 'uppercase', marginBottom: 4 }}>Garantias</div>
+                  </div>
+                  <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{em.tipos_garantia}</div>
+                </>
+              )}
+            </div>
+          </Modal>
+        )
+      })()}
     </div>
   )
 }
