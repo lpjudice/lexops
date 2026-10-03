@@ -1194,6 +1194,7 @@ def _run_migrations() -> None:
             "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS responsavel_email VARCHAR(255)",
             "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS responsavel_telefone VARCHAR(30)",
             "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS origem_cadastro VARCHAR(30) DEFAULT 'manual'",
+            "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS nacionalidade VARCHAR(100)",
         ]:
             conn.execute(text(col_sql))
         # estado_civil pode vir com regime de bens (ex.: "casado em regime de

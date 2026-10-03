@@ -16,15 +16,20 @@ from app.config import settings
 _MODEL = "gemini-2.5-flash"
 _MIMES_OK = ("application/pdf", "image/png", "image/jpeg", "image/webp")
 
-_PROMPT = """Você é um assistente jurídico. Analise o CONTRATO em anexo e identifique \
-os CONTRATANTES — ou seja, a parte que CONTRATA os serviços (o cliente). NÃO inclua o \
-CONTRATADO/prestador (o escritório de advocacia ou advogado, tipicamente "Pimenta Júdice" \
-ou "Lucas Pimenta Júdice"). Pode haver um ou vários contratantes (ex.: marido e esposa, \
-sócios, uma empresa e seu representante).
+_PROMPT = """Você é um assistente jurídico. Analise o CONTRATO ou PROCURAÇÃO em anexo e \
+identifique os CONTRATANTES/OUTORGANTES — ou seja, a parte que CONTRATA os serviços ou \
+OUTORGA a procuração (o cliente). NÃO inclua o CONTRATADO/OUTORGADO (o escritório de \
+advocacia ou advogado, tipicamente "Pimenta Júdice" ou "Lucas Pimenta Júdice"). Pode haver \
+um ou vários contratantes (ex.: marido e esposa, sócios, uma empresa e seu representante).
 
 Para CADA contratante, extraia os campos abaixo. Não invente nada: se um campo não estiver \
 no documento, use "" (string vazia). CPF/CNPJ e telefone: mantenha só os dígitos e a \
-pontuação como aparecem no documento.
+pontuação como aparecem no documento. Procurações normalmente trazem a qualificação \
+completa da pessoa (nacionalidade, estado civil, profissão, RG, CPF, endereço) — extraia \
+todos esses campos quando constarem, são essenciais para o cadastro.
+
+Se o contratante for PESSOA JURÍDICA (PJ), extraia também os dados do REPRESENTANTE LEGAL \
+que assina em nome dela (sócio-administrador, diretor etc.), em "representante".
 
 Extraia também os dados FINANCEIROS do contrato (honorários), se constarem.
 
@@ -35,11 +40,19 @@ Responda SOMENTE com JSON válido (sem markdown), neste formato exato:
       "nome": "nome completo da pessoa física OU razão social da pessoa jurídica",
       "tipo": "PF ou PJ",
       "cpf_cnpj": "CPF (PF) ou CNPJ (PJ), como aparece no documento",
+      "rg": "RG, se constar",
+      "nacionalidade": "nacionalidade, se constar (ex.: brasileiro, brasileira)",
       "email": "e-mail, se houver",
       "telefone": "telefone, se houver",
       "endereco": "endereço completo em uma linha, se houver",
       "estado_civil": "somente para PF, se constar",
-      "profissao": "somente para PF, se constar"
+      "profissao": "somente para PF, se constar",
+      "representante": {
+        "nome": "nome do representante legal, somente se tipo=PJ e constar",
+        "cpf": "CPF do representante, se constar",
+        "email": "e-mail do representante, se constar",
+        "telefone": "telefone do representante, se constar"
+      }
     }
   ],
   "financeiro": {
@@ -55,9 +68,9 @@ Responda SOMENTE com JSON válido (sem markdown), neste formato exato:
 }
 
 Regras:
-- Um item por contratante. Se houver representante de uma PJ, o item é a PJ (tipo PJ) e, se \
-quiser, coloque o representante em "observacao" — mas NÃO crie um campo novo; apenas os \
-campos listados são aceitos.
+- Um item por contratante. Se houver representante de uma PJ, o item é a PJ (tipo PJ) e os \
+dados de quem assina por ela vão em "representante" (nunca crie um novo item na lista para o \
+representante).
 - "tipo": use "PJ" quando houver CNPJ/razão social; senão "PF".
 - Não inclua o contratado/escritório na lista.
 - Financeiro: extraia só o que está no documento; se não houver, use null/false/"". \
@@ -159,7 +172,9 @@ def extrair_contratantes(file_bytes: bytes, mime: str) -> dict:
             return {"erro": "A IA não encontrou contratantes no documento."}
 
     # Normaliza cada item: só as chaves conhecidas, strings limpas, tipo padrão PF.
-    campos = ("nome", "tipo", "cpf_cnpj", "email", "telefone", "endereco", "estado_civil", "profissao")
+    campos = ("nome", "tipo", "cpf_cnpj", "rg", "nacionalidade", "email", "telefone",
+              "endereco", "estado_civil", "profissao")
+    campos_rep = ("nome", "cpf", "email", "telefone")
     limpos = []
     for item in contratantes:
         if not isinstance(item, dict):
@@ -168,6 +183,11 @@ def extrair_contratantes(file_bytes: bytes, mime: str) -> dict:
         if not reg["nome"]:
             continue
         reg["tipo"] = "PJ" if reg["tipo"].upper() == "PJ" else "PF"
+        rep = item.get("representante")
+        if isinstance(rep, dict):
+            rep_limpo = {k: (str(rep.get(k) or "").strip()) for k in campos_rep}
+            if rep_limpo["nome"]:
+                reg["representante"] = rep_limpo
         limpos.append(reg)
 
     if not limpos:

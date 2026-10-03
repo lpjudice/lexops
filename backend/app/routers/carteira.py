@@ -879,16 +879,44 @@ def listar_documentos(cliente_id: int = Query(...), db: Session = Depends(get_db
 # ─────────────────────────────────────────────────────────────────
 
 @router.post("/criar-pasta-drive")
-def criar_pasta_drive(cliente_id: int = Query(...), db: Session = Depends(get_db)):
-    """[V1.2] Cria pasta no Google Drive para o cliente e salva o link"""
+def criar_pasta_drive(
+    cliente_id: int = Query(...),
+    usar_pasta_id: Optional[str] = Query(None, description="Reusa esta pasta já existente em vez de criar uma nova"),
+    confirmar_nova: bool = Query(False, description="Pula a checagem de pasta parecida e cria mesmo assim"),
+    db: Session = Depends(get_db),
+):
+    """[V1.2] Cria (ou reaproveita) a pasta do cliente no Google Drive.
+
+    Evita duplicar pasta de um cliente que já tem uma: se `folder_drive_principal_id`
+    já está salvo, retorna direto sem chamar o Drive. Para cliente sem pasta,
+    antes de criar verifica se já existe pasta de nome PARECIDO no Drive — se
+    achar, devolve os candidatos (status "ambiguo") para o usuário confirmar
+    se é o mesmo cliente (usar_pasta_id) ou se é para criar mesmo assim
+    (confirmar_nova=true).
+    """
     try:
         cliente = db.query(CarteiraCliente).filter(CarteiraCliente.id == cliente_id).first()
         if not cliente:
             raise HTTPException(status_code=404, detail="Cliente não encontrado")
 
-        resultado = CarteiraDriveService.criar_pasta_cliente(
-            cliente.nome or f"Cliente_{cliente_id}"
-        )
+        nome_cliente = cliente.nome or f"Cliente_{cliente_id}"
+
+        if cliente.folder_drive_principal_id and not usar_pasta_id:
+            return {
+                "status": "sucesso",
+                "folder_id": cliente.folder_drive_principal_id,
+                "folder_link": cliente.folder_drive_url,
+                "cliente_id": cliente_id,
+            }
+
+        if usar_pasta_id:
+            resultado = CarteiraDriveService.vincular_pasta_existente(nome_cliente, usar_pasta_id)
+        else:
+            if not confirmar_nova:
+                candidatos = CarteiraDriveService.buscar_pastas_similares(nome_cliente)
+                if candidatos:
+                    return {"status": "ambiguo", "candidatos": candidatos, "cliente_id": cliente_id}
+            resultado = CarteiraDriveService.criar_pasta_cliente(nome_cliente)
 
         cliente.folder_drive_principal_id = resultado['folder_id']
         cliente.folder_drive_url = resultado['folder_link']
@@ -900,6 +928,8 @@ def criar_pasta_drive(cliente_id: int = Query(...), db: Session = Depends(get_db
             "folder_link": resultado['folder_link'],
             "cliente_id": cliente_id,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

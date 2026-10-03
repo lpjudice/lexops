@@ -40,6 +40,7 @@ class Cliente(Base):
     # ── Campos Pessoa Física ────────────────────────────────────────────────────
     data_nascimento: Mapped[date | None] = mapped_column(Date)
     rg: Mapped[str | None] = mapped_column(String(30))
+    nacionalidade: Mapped[str | None] = mapped_column(String(100))
     estado_civil: Mapped[str | None] = mapped_column(String(120))
     profissao: Mapped[str | None] = mapped_column(String(150))
     # Empresas vinculadas ao CPF (texto livre, uma por linha).

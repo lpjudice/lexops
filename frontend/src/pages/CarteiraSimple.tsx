@@ -341,6 +341,7 @@ export default function CarteiraPage() {
   const [driveClienteId, setDriveClienteId] = useState<number | null>(null)
   const [driveArquivos, setDriveArquivos] = useState<any[]>([])
   const [driveCarregando, setDriveCarregando] = useState(false)
+  const [driveCandidatos, setDriveCandidatos] = useState<{ id: string; name: string; score: number }[] | null>(null)
   // Cadeia societária modal
   const [cadeiaEmpId, setCadeiaEmpId] = useState<number | null>(null)
   // KPI expand
@@ -523,7 +524,7 @@ export default function CarteiraPage() {
     mutationFn: () => {
       const p: any = { ...form }
       delete p.exito_split
-      numFields.forEach(k => { if (p[k] !== undefined && p[k] !== '') p[k] = Number(p[k]) })
+      numFields.forEach(k => { if (p[k] === '') p[k] = null; else if (p[k] !== undefined) p[k] = Number(p[k]) })
       return api.post(url, p).then(r => r.data)
     },
     onSuccess: () => { keys.forEach(k => qc.invalidateQueries({ queryKey: [k] })); closeModal() },
@@ -533,7 +534,7 @@ export default function CarteiraPage() {
     mutationFn: () => {
       const p: any = { ...form }
       delete p.exito_split
-      numFields.forEach(k => { if (p[k] !== undefined && p[k] !== '') p[k] = Number(p[k]) })
+      numFields.forEach(k => { if (p[k] === '') p[k] = null; else if (p[k] !== undefined) p[k] = Number(p[k]) })
       return api.put(urlFn(), p).then(r => r.data)
     },
     onSuccess: () => { keys.forEach(k => qc.invalidateQueries({ queryKey: [k] })); closeModal() },
@@ -611,9 +612,17 @@ export default function CarteiraPage() {
   })
 
   const criarPastaDrive = useMutation({
-    mutationFn: (clienteId: number) =>
-      api.post(`/carteira/criar-pasta-drive?cliente_id=${clienteId}`).then(r => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['carteira-clientes'] }) },
+    mutationFn: (opts: { clienteId: number; usarPastaId?: string; confirmarNova?: boolean }) => {
+      const params = new URLSearchParams({ cliente_id: String(opts.clienteId) })
+      if (opts.usarPastaId) params.set('usar_pasta_id', opts.usarPastaId)
+      if (opts.confirmarNova) params.set('confirmar_nova', 'true')
+      return api.post(`/carteira/criar-pasta-drive?${params.toString()}`).then(r => r.data)
+    },
+    onSuccess: (data) => {
+      if (data.status === 'ambiguo') { setDriveCandidatos(data.candidatos); return }
+      setDriveCandidatos(null)
+      qc.invalidateQueries({ queryKey: ['carteira-clientes'] })
+    },
     onError: (e: any) => alert(e?.response?.data?.detail || 'Erro ao criar pasta Drive'),
   })
 
@@ -803,13 +812,20 @@ export default function CarteiraPage() {
     </div>
   )
   const editBtn = (onClick: () => void) => (
-    <button style={{ background: 'none', border: '1px solid var(--gray-border)', borderRadius: 4, padding: '3px 10px', cursor: 'pointer', fontSize: 12, color: 'var(--gray-mid)' }} onClick={onClick}>Editar</button>
+    <button style={{ background: 'none', border: '1px solid var(--gray-border)', borderRadius: 4, padding: '3px 8px', cursor: 'pointer', fontSize: 11, color: 'var(--gray-mid)', whiteSpace: 'nowrap' }} onClick={onClick}>Editar</button>
   )
-  const deleteBtn = (label: string, onConfirm: () => void) => (
+  const deleteBtnOnly = (label: string, onConfirm: () => void) => (
     <button
-      style={{ background: 'none', border: '1px solid #fca5a5', borderRadius: 4, padding: '3px 10px', cursor: 'pointer', fontSize: 12, color: '#dc2626', marginLeft: 6 }}
+      title={`Excluir ${label}`}
+      style={{ background: 'none', border: '1px solid #fca5a5', borderRadius: 4, padding: '3px 7px', cursor: 'pointer', fontSize: 11, color: '#dc2626', whiteSpace: 'nowrap', lineHeight: 1 }}
       onClick={() => { if (window.confirm(`Excluir ${label}? Essa ação não pode ser desfeita.`)) onConfirm() }}
-    >Excluir</button>
+    >✕</button>
+  )
+  const rowActions = (editOnClick: () => void, deleteLabel: string, onDelete: () => void) => (
+    <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'nowrap' }}>
+      {editBtn(editOnClick)}
+      {deleteBtnOnly(deleteLabel, onDelete)}
+    </div>
   )
   const quickAddBtn = (label: string, onClick: () => void) => (
     <button style={{ background: 'none', border: '1px solid var(--teal)', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', fontSize: 11, color: 'var(--teal)', marginLeft: 6 }} onClick={onClick}>+ {label}</button>
@@ -1012,7 +1028,7 @@ export default function CarteiraPage() {
                               <td><EstrategiaChips ids={d.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratDeb.mutate({ id: d.id, ids })} /></td>
                               <td style={{ whiteSpace: 'nowrap' }}>
                                 <button title="Detalhes" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#6b7280', padding: '0 3px' }} onClick={() => setDebInfoId(d.id)}>ⓘ</button>
-                                {editBtn(() => abrirEdicaoDeb(d))}{deleteBtn(`a debênture ${d.numero_cautela ?? ''}`, () => deletarDebPos.mutate(d.id))}
+                                {rowActions(() => abrirEdicaoDeb(d), `a debênture ${d.numero_cautela ?? ''}`, () => deletarDebPos.mutate(d.id))}
                               </td>
                             </tr>
                           ))}
@@ -1043,7 +1059,7 @@ export default function CarteiraPage() {
                               <td>{pct(i.percentual_participacao)}</td>
                               <td>{isSuperAdmin ? (() => { if (!i.faz_parte_honorarios) return '—'; const ep = efetivoPctImob(i); return ep.val !== '' ? (ep.custom ? <span title="Personalizado p/ esta posição" style={{ color: '#d97706', fontWeight: 600 }}>{pct(ep.val)}*</span> : pct(ep.val)) : '—' })() : '🔒'}</td>
                               <td><EstrategiaChips ids={i.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratImob.mutate({ id: i.id, ids })} /></td>
-                              <td>{editBtn(() => abrirEdicaoImob(i))}{deleteBtn('esta posição imobiliária', () => deletarImobPos.mutate(i.id))}</td>
+                              <td>{rowActions(() => abrirEdicaoImob(i), 'esta posição imobiliária', () => deletarImobPos.mutate(i.id))}</td>
                             </tr>
                           ))}
                           <tr style={{ background: 'var(--gray-light, #f8f9fa)', fontWeight: 600 }}>
@@ -1073,7 +1089,7 @@ export default function CarteiraPage() {
                               <td>{f.tem_direito_recompra ? <span className={`${styles.badge} ${styles.status_suspenso}`}>Sim</span> : '—'}</td>
                               <td>{isSuperAdmin ? (() => { if (!f.faz_parte_honorarios) return '—'; const ep = efetivoPctFin(f); return ep.val !== '' ? (ep.custom ? <span title="Personalizado p/ esta posição" style={{ color: '#d97706', fontWeight: 600 }}>{pct(ep.val)}*</span> : pct(ep.val)) : '—' })() : '🔒'}</td>
                               <td><EstrategiaChips ids={f.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratFundo.mutate({ id: f.id, ids })} /></td>
-                              <td>{editBtn(() => abrirEdicaoFundo(f))}{deleteBtn('esta posição em fundo', () => deletarFundoPos.mutate(f.id))}</td>
+                              <td>{rowActions(() => abrirEdicaoFundo(f), 'esta posição em fundo', () => deletarFundoPos.mutate(f.id))}</td>
                             </tr>
                           ))}
                           <tr style={{ background: 'var(--gray-light, #f8f9fa)', fontWeight: 600 }}>
@@ -1264,7 +1280,7 @@ export default function CarteiraPage() {
                       <td><EstrategiaChips ids={d.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratDeb.mutate({ id: d.id, ids })} /></td>
                       <td style={{ whiteSpace: 'nowrap' }}>
                         <button title="Detalhes" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#6b7280', padding: '0 3px' }} onClick={() => setDebInfoId(d.id)}>ⓘ</button>
-                        {editBtn(() => abrirEdicaoDeb(d))}{deleteBtn(`a debênture ${d.numero_cautela ?? ''}`, () => deletarDebPos.mutate(d.id))}
+                        {rowActions(() => abrirEdicaoDeb(d), `a debênture ${d.numero_cautela ?? ''}`, () => deletarDebPos.mutate(d.id))}
                       </td>
                     </tr>
                   ))}
@@ -1339,7 +1355,7 @@ export default function CarteiraPage() {
                       <td>{pct(i.percentual_participacao)}</td>
                       <td>{isSuperAdmin ? (i.faz_parte_honorarios ? pct(i.percentual_sucesso_honorario) : '—') : '🔒'}</td>
                       <td><EstrategiaChips ids={i.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratImob.mutate({ id: i.id, ids })} /></td>
-                      <td>{editBtn(() => abrirEdicaoImob(i))}{deleteBtn('esta posição imobiliária', () => deletarImobPos.mutate(i.id))}</td>
+                      <td>{rowActions(() => abrirEdicaoImob(i), 'esta posição imobiliária', () => deletarImobPos.mutate(i.id))}</td>
                     </tr>
                   ))}
                   <tr style={{ background: 'var(--gray-light, #f8f9fa)', fontWeight: 600 }}>
@@ -1425,7 +1441,7 @@ export default function CarteiraPage() {
                       <td>{f.tem_direito_recompra ? <span className={`${styles.badge} ${styles.status_suspenso}`}>Sim</span> : '—'}</td>
                       <td>{isSuperAdmin ? (() => { if (!f.faz_parte_honorarios) return '—'; const ep = efetivoPctFin(f); return ep.val !== '' ? (ep.custom ? <span title="Personalizado p/ esta posição" style={{ color: '#d97706', fontWeight: 600 }}>{pct(ep.val)}*</span> : pct(ep.val)) : '—' })() : '🔒'}</td>
                       <td><EstrategiaChips ids={f.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratFundo.mutate({ id: f.id, ids })} /></td>
-                      <td>{editBtn(() => abrirEdicaoFundo(f))}{deleteBtn('esta posição em fundo', () => deletarFundoPos.mutate(f.id))}</td>
+                      <td>{rowActions(() => abrirEdicaoFundo(f), 'esta posição em fundo', () => deletarFundoPos.mutate(f.id))}</td>
                     </tr>
                   ))}
                   <tr style={{ background: 'var(--gray-light, #f8f9fa)', fontWeight: 600 }}>
@@ -1477,10 +1493,10 @@ export default function CarteiraPage() {
                           <button
                             title={c.folder_drive_principal_id ? 'Ver pasta Drive' : 'Criar pasta no Drive'}
                             style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 15, color: c.folder_drive_principal_id ? '#16a34a' : '#9ca3af', padding: '0 4px' }}
-                            onClick={() => { setDriveClienteId(c.id); if (c.folder_drive_principal_id) carregarArquivosDrive(c.id) }}
+                            onClick={() => { setDriveClienteId(c.id); setDriveCandidatos(null); if (c.folder_drive_principal_id) carregarArquivosDrive(c.id) }}
                           >📁</button>
                         </td>
-                        <td>{editBtn(() => abrirEdicaoCliente(c))}{deleteBtn(`o cliente ${c.nome ?? ''}`, () => deletarCliente.mutate(c.id))}</td>
+                        <td>{rowActions(() => abrirEdicaoCliente(c), `o cliente ${c.nome ?? ''}`, () => deletarCliente.mutate(c.id))}</td>
                       </tr>
                     )
                   })}
@@ -1504,7 +1520,7 @@ export default function CarteiraPage() {
                     <tr key={e.id}><td><strong>{e.nome_serie}</strong></td><td>{e.numero_emissao}ª</td>
                       <td>{e.emissor}</td><td>{e.indexador}{e.taxa_adicional ? ` + ${e.taxa_adicional}` : ''}</td>
                       <td>{e.data_vencimento_previsto ?? '—'}</td><td>{statusBadge(e.ativo)}</td>
-                      <td>{editBtn(() => abrirEdicaoEmissao(e))}{deleteBtn(`a emissão ${e.nome_serie ?? ''}`, () => deletarEmissao.mutate(e.id))}</td>
+                      <td>{rowActions(() => abrirEdicaoEmissao(e), `a emissão ${e.nome_serie ?? ''}`, () => deletarEmissao.mutate(e.id))}</td>
                     </tr>
                   ))}
               </tbody>
@@ -1539,7 +1555,7 @@ export default function CarteiraPage() {
                           <button title="Cadeia Societária" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: '#6366f1', padding: '0 4px' }}
                             onClick={() => setCadeiaEmpId(e.id)}>⬡</button>
                         </td>
-                        <td>{editBtn(() => abrirEdicaoEmp(e))}{deleteBtn(`o empreendimento ${e.nome_venda ?? ''}`, () => deletarEmp.mutate(e.id))}</td>
+                        <td>{rowActions(() => abrirEdicaoEmp(e), `o empreendimento ${e.nome_venda ?? ''}`, () => deletarEmp.mutate(e.id))}</td>
                       </tr>
                     )
                   })}
@@ -1571,7 +1587,7 @@ export default function CarteiraPage() {
                       <td>{f.gestora ?? '—'}</td>
                       <td>{f.tipo_fundo ?? '—'}</td>
                       <td>{statusBadge(f.ativo)}</td>
-                      <td>{editBtn(() => abrirEdicaoFundoRef(f))}{deleteBtn(`o fundo ${f.nome_fundo ?? ''}`, () => deletarFundoRef.mutate(f.id))}</td>
+                      <td>{rowActions(() => abrirEdicaoFundoRef(f), `o fundo ${f.nome_fundo ?? ''}`, () => deletarFundoRef.mutate(f.id))}</td>
                     </tr>
                   ))}
               </tbody>
@@ -1596,7 +1612,7 @@ export default function CarteiraPage() {
                       <td style={{ fontSize: 12, color: '#6b7280' }}>{e.nome_chip ?? '—'}</td>
                       <td style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.descricao ?? '—'}</td>
                       <td>{e.usuarios_count ?? 0}</td><td>{statusBadge(e.ativo)}</td>
-                      <td>{editBtn(() => abrirEdicaoEstrategia(e))}{deleteBtn(`a estratégia ${e.nome ?? ''}`, () => deletarEstrategia.mutate(e.id))}</td>
+                      <td>{rowActions(() => abrirEdicaoEstrategia(e), `a estratégia ${e.nome ?? ''}`, () => deletarEstrategia.mutate(e.id))}</td>
                     </tr>
                   ))}
               </tbody>
@@ -2049,19 +2065,47 @@ export default function CarteiraPage() {
         const nome = clienteNome(c.id)
         const temPasta = !!c.folder_drive_principal_id
         return (
-          <Modal title={`Drive — ${nome}`} onClose={() => { setDriveClienteId(null); setDriveArquivos([]) }} width={480}>
+          <Modal title={`Drive — ${nome}`} onClose={() => { setDriveClienteId(null); setDriveArquivos([]); setDriveCandidatos(null) }} width={480}>
             {!temPasta ? (
               <div style={{ textAlign: 'center', padding: '24px 0' }}>
-                <div style={{ fontSize: 13, color: 'var(--gray-mid)', marginBottom: 16 }}>
-                  Nenhuma pasta Drive vinculada a este cliente.
-                </div>
-                <button
-                  className={styles.btnPrimary}
-                  disabled={criarPastaDrive.isPending}
-                  onClick={() => criarPastaDrive.mutate(driveClienteId)}
-                >
-                  {criarPastaDrive.isPending ? 'Criando...' : '📁 Criar pasta no Drive'}
-                </button>
+                {driveCandidatos && driveCandidatos.length > 0 ? (
+                  <div style={{ textAlign: 'left' }}>
+                    <div style={{ fontSize: 13, color: 'var(--gray-mid)', marginBottom: 12 }}>
+                      Encontramos pasta(s) com nome parecido no Drive. É o mesmo cliente? Se for, use a pasta já existente em vez de criar uma nova.
+                    </div>
+                    {driveCandidatos.map(cand => (
+                      <div key={cand.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '8px 10px', border: '1px solid var(--gray-border)', borderRadius: 6, marginBottom: 6 }}>
+                        <span style={{ fontSize: 13 }}>{cand.name} <span style={{ fontSize: 11, color: 'var(--gray-mid)' }}>({Math.round(cand.score * 100)}% parecido)</span></span>
+                        <button
+                          style={{ background: 'none', border: '1px solid var(--teal)', color: 'var(--teal)', borderRadius: 4, padding: '4px 10px', cursor: 'pointer', fontSize: 12, whiteSpace: 'nowrap' }}
+                          disabled={criarPastaDrive.isPending}
+                          onClick={() => criarPastaDrive.mutate({ clienteId: driveClienteId, usarPastaId: cand.id })}
+                        >Usar esta pasta</button>
+                      </div>
+                    ))}
+                    <button
+                      className={styles.btnPrimary}
+                      style={{ marginTop: 8, width: '100%' }}
+                      disabled={criarPastaDrive.isPending}
+                      onClick={() => criarPastaDrive.mutate({ clienteId: driveClienteId, confirmarNova: true })}
+                    >
+                      {criarPastaDrive.isPending ? 'Criando...' : 'Nenhuma é o mesmo cliente — criar pasta nova'}
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 13, color: 'var(--gray-mid)', marginBottom: 16 }}>
+                      Nenhuma pasta Drive vinculada a este cliente.
+                    </div>
+                    <button
+                      className={styles.btnPrimary}
+                      disabled={criarPastaDrive.isPending}
+                      onClick={() => criarPastaDrive.mutate({ clienteId: driveClienteId })}
+                    >
+                      {criarPastaDrive.isPending ? 'Verificando...' : '📁 Criar pasta no Drive'}
+                    </button>
+                  </>
+                )}
               </div>
             ) : (
               <div>

@@ -1011,6 +1011,42 @@ def root_folder_id() -> str:
     return DRIVE_FOLDER_ID
 
 
+def buscar_pastas_cliente_similares(nome: str, limite: int = 5) -> list[dict]:
+    """Procura, entre as pastas-raiz de cliente já existentes no Drive, nomes
+    PARECIDOS (não idênticos) com `nome` — usado para evitar criar uma 2ª
+    pasta para o mesmo cliente quando o nome tem pequena variação (ex: nome
+    incompleto, sobrenome adicionado). Match exato já é resolvido em outro
+    lugar (_resolver_pasta_cliente) e não aparece aqui."""
+    import difflib
+    filhos = listar_filhos(DRIVE_FOLDER_ID)
+    if not filhos:
+        return []
+    alvo = _normalizar_nome_busca(nome)
+    candidatos = []
+    for item in filhos:
+        if not item.get("is_folder"):
+            continue
+        nome_pasta = item.get("name") or ""
+        comp = _normalizar_nome_busca(nome_pasta)
+        if comp == alvo:
+            continue  # match exato: já tratado pelo fluxo normal, não é "parecido"
+        score = difflib.SequenceMatcher(None, alvo, comp).ratio()
+        if score >= 0.6:
+            candidatos.append({"id": item["id"], "name": nome_pasta, "score": round(score, 2)})
+    candidatos.sort(key=lambda c: -c["score"])
+    return candidatos[:limite]
+
+
+def vincular_pasta_existente(nome_cliente: str, folder_id: str) -> str | None:
+    """Registra `folder_id` como a pasta-raiz de `nome_cliente` (reuso explícito,
+    confirmado pelo usuário) e retorna seu link. Não cria nada no Drive."""
+    nome = _normalizar_nome_criacao(nome_cliente)
+    cache_key = _normalizar_nome_busca(nome)
+    _persistir_folder_id_cliente(nome, folder_id)
+    _cache_set(DRIVE_FOLDER_ID, cache_key, folder_id)
+    return f"https://drive.google.com/drive/folders/{folder_id}"
+
+
 def listar_filhos(folder_id: str | None = None) -> list[dict] | None:
     """Lista pastas e arquivos filhos diretos de `folder_id` (raiz se None).
 

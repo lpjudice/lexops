@@ -53,6 +53,20 @@ class CarteiraDriveService:
         return google_drive.listar_arquivos(cliente_nome, SUBFOLDER)
 
     @staticmethod
+    def buscar_pastas_similares(cliente_nome: str) -> list:
+        return google_drive.buscar_pastas_cliente_similares(cliente_nome)
+
+    @staticmethod
+    def vincular_pasta_existente(cliente_nome: str, folder_id_cliente: str) -> Dict[str, Any]:
+        """Registra `folder_id_cliente` como a pasta-raiz deste cliente (reuso
+        confirmado pelo usuário, em vez de criar uma pasta nova) e retorna a
+        subpasta "Carteira" dentro dela — mesmo formato de criar_pasta_cliente."""
+        ok = google_drive.vincular_pasta_existente(cliente_nome, folder_id_cliente)
+        if not ok:
+            raise ValueError("Falha ao vincular pasta existente")
+        return CarteiraDriveService.criar_pasta_cliente(cliente_nome)
+
+    @staticmethod
     def compartilhar_com_email(cliente_nome: str, email: str, role: str = "reader") -> Dict[str, Any]:
         ok = google_drive.compartilhar_subpasta(cliente_nome, SUBFOLDER, email, role)
         if not ok:
