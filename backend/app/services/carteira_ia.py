@@ -1,9 +1,12 @@
 import base64
 import json
+import logging
 import os
 import re
 import httpx
 from typing import Dict, Any
+
+logger = logging.getLogger("app")
 
 
 def _parse_json_maybe_fenced(raw: str) -> dict:
@@ -179,12 +182,17 @@ Retorne APENAS JSON válido.""",
 
         conteudo = resultado.get("content") or []
         conteudo_resposta = conteudo[0].get("text", "{}") if conteudo else "{}"
+        stop_reason = resultado.get("stop_reason")
+        logger.info(
+            "carteira_ia[%s]: stop_reason=%s resposta=%r",
+            tipo_documento, stop_reason, conteudo_resposta[:2000],
+        )
 
         try:
             dados_extraidos = _parse_json_maybe_fenced(conteudo_resposta)
         except json.JSONDecodeError:
             motivo = ""
-            if resultado.get("stop_reason") == "max_tokens":
+            if stop_reason == "max_tokens":
                 motivo = " (resposta cortada por ser longa demais — tente enviar só as páginas relevantes)"
             erro_msg = f"A IA respondeu, mas não consegui interpretar o JSON{motivo}."
             return {
@@ -192,6 +200,16 @@ Retorne APENAS JSON válido.""",
                 "tipo": tipo_documento,
                 "modelo": "claude-sonnet-5",
                 "erro": erro_msg,
+            }
+
+        if not dados_extraidos or (isinstance(dados_extraidos, dict) and not dados_extraidos):
+            return {
+                "dados": {},
+                "tipo": tipo_documento,
+                "modelo": "claude-sonnet-5",
+                "erro": "A IA não encontrou nada para extrair neste documento. "
+                        "Confira se o PDF tem texto legível (não é só imagem escaneada "
+                        "sem OCR) e se é mesmo uma escritura/termo de emissão.",
             }
 
         return {
