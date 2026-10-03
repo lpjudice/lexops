@@ -108,7 +108,7 @@ def seed_emissoes():
             indexador=str(row.get("Indexador", "CDI")).strip(),
             taxa_adicional=str(row.get("Taxa Adicional", "")).strip() or None,
             data_vencimento_previsto=pd.to_datetime(row.get("Data Vencimento")) if pd.notna(row.get("Data Vencimento")) else None,
-            prazo_carencia_meses=int(row.get("Carência (meses)", 0)) or None,
+            prazo_carencia_dias=int(row.get("Carência (meses)", 0)) or None,
             resgate_antecipado_emissao=True,
             resgate_antecipado_termo=True,
             ativo=True,

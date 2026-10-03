@@ -1483,6 +1483,24 @@ def _run_migrations() -> None:
         ]:
             conn.execute(text(_col))
 
+        # emissão: prazo_carencia_meses nunca guardou meses de fato (valores digitados
+        # sempre foram dias, ex: 90/180/360) — o nome da coluna é que estava errado.
+        # Renomeia preservando os dados (sem reinterpretar/multiplicar nada).
+        conn.execute(text("""
+            DO $$
+            BEGIN
+              IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name='carteira_debenture_emissao' AND column_name='prazo_carencia_meses'
+              ) AND NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name='carteira_debenture_emissao' AND column_name='prazo_carencia_dias'
+              ) THEN
+                ALTER TABLE carteira_debenture_emissao RENAME COLUMN prazo_carencia_meses TO prazo_carencia_dias;
+              END IF;
+            END $$;
+        """))
+
         # Debênture: campos de resgate (resgate solicitado → resposta → pagamento)
         for _col in [
             "ALTER TABLE carteira_debenture_posicao ADD COLUMN IF NOT EXISTS data_pedido_resgate DATE",
@@ -1490,6 +1508,9 @@ def _run_migrations() -> None:
             "ALTER TABLE carteira_debenture_posicao ADD COLUMN IF NOT EXISTS foi_pago BOOLEAN DEFAULT FALSE",
             "ALTER TABLE carteira_debenture_posicao ADD COLUMN IF NOT EXISTS valor_pago FLOAT",
             "ALTER TABLE carteira_debenture_posicao ADD COLUMN IF NOT EXISTS data_pagamento DATE",
+            # comprovante do pedido de resgate (upload no Drive) + data em que o resgate foi efetivamente realizado
+            "ALTER TABLE carteira_debenture_posicao ADD COLUMN IF NOT EXISTS comprovante_resgate_url VARCHAR(500)",
+            "ALTER TABLE carteira_debenture_posicao ADD COLUMN IF NOT EXISTS data_resgate_realizado DATE",
             # resgate antecipado específico da cautela (vs. o da emissão)
             "ALTER TABLE carteira_debenture_posicao ADD COLUMN IF NOT EXISTS resgate_antecipado_cautela BOOLEAN DEFAULT FALSE",
             # estratégias múltiplas por posição
@@ -1497,7 +1518,7 @@ def _run_migrations() -> None:
             "ALTER TABLE carteira_imobiliario_posicao ADD COLUMN IF NOT EXISTS estrategia_ids JSONB DEFAULT '[]'",
             "ALTER TABLE carteira_fundo_posicao ADD COLUMN IF NOT EXISTS estrategia_ids JSONB DEFAULT '[]'",
             # emissão: campos de liquidez / garantias (adicionados ao model mas faltavam no DB)
-            "ALTER TABLE carteira_debenture_emissao ADD COLUMN IF NOT EXISTS prazo_carencia_meses INTEGER",
+            "ALTER TABLE carteira_debenture_emissao ADD COLUMN IF NOT EXISTS prazo_carencia_dias INTEGER",
             "ALTER TABLE carteira_debenture_emissao ADD COLUMN IF NOT EXISTS prazo_pgto_pos_resgate VARCHAR(100)",
             "ALTER TABLE carteira_debenture_emissao ADD COLUMN IF NOT EXISTS resgate_antecipado_emissao BOOLEAN DEFAULT FALSE",
             "ALTER TABLE carteira_debenture_emissao ADD COLUMN IF NOT EXISTS resgate_antecipado_tipo VARCHAR(50)",

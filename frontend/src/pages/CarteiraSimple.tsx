@@ -342,6 +342,10 @@ export default function CarteiraPage() {
   const [driveArquivos, setDriveArquivos] = useState<any[]>([])
   const [driveCarregando, setDriveCarregando] = useState(false)
   const [driveCandidatos, setDriveCandidatos] = useState<{ id: string; name: string; score: number }[] | null>(null)
+  // Leitura de emissão por IA com múltiplas séries no mesmo documento — cada
+  // linha já vem com os campos comuns aplicados, só os campos por-série variam.
+  const [emissaoSeries, setEmissaoSeries] = useState<any[] | null>(null)
+  const [criandoSeries, setCriandoSeries] = useState(false)
   // Cadeia societária modal
   const [cadeiaEmpId, setCadeiaEmpId] = useState<number | null>(null)
   // KPI expand
@@ -364,6 +368,7 @@ export default function CarteiraPage() {
     setEditandoClienteId(null); setEditandoEmpId(null)
     setEditandoDebId(null); setEditandoImobId(null); setEditandoFundoId(null)
     setEditandoEmissaoId(null); setEditandoFundoRefId(null); setEditandoEstrategiaId(null)
+    setEmissaoSeries(null)
   }
 
   // ── Render helpers ────────────────────────────────────────────────
@@ -447,7 +452,7 @@ export default function CarteiraPage() {
   const kpiFin = kpiDeb + kpiFundos
   const kpiTotal = kpiImob + kpiFin
   const kpiFeeEntrada = clientes.reduce((s, c) => s + calcularHonorarios(c).feeEntrada, 0)
-  const kpiExito = clientes.reduce((s, c) => s + calcularHonorarios(c).exito, 0)
+  const kpiExito = clientes.filter((c: any) => c.ativo !== false).reduce((s, c) => s + calcularHonorarios(c).exito, 0)
 
   // Breakdown de fundos por CNPJ (para card expandível)
   const fundosBreakdown = useMemo(() => {
@@ -545,7 +550,7 @@ export default function CarteiraPage() {
   const salvarCliente = mk('/carteira/clientes', ['carteira-clientes'], numC)
   const atualizarCliente = mkPut(() => `/carteira/clientes/${editandoClienteId}`, ['carteira-clientes'], numC)
 
-  const salvarEmissao = mk('/carteira/emissoes', ['carteira-emissoes'], ['numero_emissao'])
+  const salvarEmissao = mk('/carteira/emissoes', ['carteira-emissoes'], ['numero_emissao', 'prazo_carencia_dias'])
 
   const numDeb = ['cliente_id', 'emissao_id', 'valor_aplicado', 'valor_atual_estimado', 'percentual_sucesso_honor', 'numero_debentures', 'valor_pago']
   const salvarDebenture = mk('/carteira/debentures', ['carteira-debentures'], numDeb)
@@ -565,7 +570,7 @@ export default function CarteiraPage() {
   const atualizarFundo = mkPut(() => `/carteira/fundos/${editandoFundoId}`, ['carteira-fundos'], numFundo)
 
   const salvarEstrategia = mk('/carteira/estrategias', ['carteira-estrategias'])
-  const atualizarEmissao = mkPut(() => `/carteira/emissoes/${editandoEmissaoId}`, ['carteira-emissoes'], ['numero_emissao'])
+  const atualizarEmissao = mkPut(() => `/carteira/emissoes/${editandoEmissaoId}`, ['carteira-emissoes'], ['numero_emissao', 'prazo_carencia_dias'])
   const atualizarFundoRef = mkPut(() => `/carteira/fundos-referencia/${editandoFundoRefId}`, ['carteira-fundos-ref'])
   const atualizarEstrategia = mkPut(() => `/carteira/estrategias/${editandoEstrategiaId}`, ['carteira-estrategias'])
 
@@ -604,11 +609,55 @@ export default function CarteiraPage() {
       const fd = new FormData(); fd.append('file', file)
       return api.post(`/carteira/processar-documento?tipo=${tipo}`, fd).then(r => r.data)
     },
-    onSuccess: (data) => {
-      if (data.dados_extraidos) setForm(f => ({ ...f, ...data.dados_extraidos }))
+    onSuccess: (data, variables) => {
+      const extraido = data.dados_extraidos
+      if (variables.tipo === 'emissao' && extraido && Array.isArray(extraido.series)) {
+        const { comum, series } = extraido
+        if (series.length > 1) {
+          // Várias séries no mesmo documento: aplica os campos comuns em cada
+          // uma e deixa o usuário revisar/editar antes de criar todas de uma vez.
+          setEmissaoSeries(series.map((s: any) => ({ ...comum, ...s })))
+          return
+        }
+        setForm(f => ({ ...f, ...comum, ...(series[0] || {}) }))
+        alert('Documento processado! Verifique os campos preenchidos.')
+        return
+      }
+      if (extraido) setForm(f => ({ ...f, ...extraido }))
       alert('Documento processado! Verifique os campos preenchidos.')
     },
     onError: (e: any) => alert(e?.response?.data?.detail || 'Erro ao processar documento'),
+  })
+
+  const criarEmissoesEmLote = async () => {
+    if (!emissaoSeries || emissaoSeries.length === 0) return
+    setCriandoSeries(true)
+    try {
+      for (const row of emissaoSeries) {
+        const payload = { ...row }
+        if (payload.numero_emissao !== undefined && payload.numero_emissao !== '') payload.numero_emissao = Number(payload.numero_emissao)
+        if (payload.prazo_carencia_dias !== undefined && payload.prazo_carencia_dias !== '') payload.prazo_carencia_dias = Number(payload.prazo_carencia_dias)
+        else if (payload.prazo_carencia_dias === '') payload.prazo_carencia_dias = null
+        await api.post('/carteira/emissoes', payload)
+      }
+      qc.invalidateQueries({ queryKey: ['carteira-emissoes'] })
+      alert(`${emissaoSeries.length} emissões criadas com sucesso.`)
+      closeModal()
+    } catch (e: any) {
+      alert(e?.response?.data?.detail || 'Erro ao criar as emissões. Nenhuma linha pendente foi perdida — corrija e tente de novo.')
+    } finally {
+      setCriandoSeries(false)
+    }
+  }
+
+  const uploadComprovante = useMutation({
+    mutationFn: (file: File) => {
+      if (!form.cliente_id) throw new Error('Selecione o cliente antes de enviar o comprovante.')
+      const fd = new FormData(); fd.append('file', file)
+      return api.post(`/carteira/upload-para-drive?cliente_id=${form.cliente_id}`, fd).then(r => r.data)
+    },
+    onSuccess: (data) => { inp('comprovante_resgate_url', data.file_link) },
+    onError: (e: any) => alert(e?.response?.data?.detail || e?.message || 'Erro ao enviar comprovante'),
   })
 
   const criarPastaDrive = useMutation({
@@ -805,6 +854,17 @@ export default function CarteiraPage() {
     if (s === 'Resgate Solicitado') return <span className={`${styles.badge} ${styles.status_suspenso}`}>{s}</span>
     if (s === 'Resgatado') return <span className={`${styles.badge} ${styles.status_encerrado}`}>{s}</span>
     return <span className={styles.badge}>{String(s)}</span>
+  }
+  const RESGATE_LABELS: Record<string, string> = {
+    'Ativo': 'Resgate Não Solicitado',
+    'Resgate Solicitado': 'Resgate Solicitado e Negado',
+    'Resgatado': 'Resgatado',
+  }
+  const resgateStatusBadge = (s: string) => {
+    const label = RESGATE_LABELS[s] ?? s
+    if (s === 'Resgate Solicitado') return <span className={`${styles.badge} ${styles.status_suspenso}`}>{label}</span>
+    if (s === 'Resgatado') return <span className={`${styles.badge} ${styles.status_encerrado}`}>{label}</span>
+    return <span className={`${styles.badge} ${styles.status_ativo}`}>{label}</span>
   }
   const addBtn = (label: string, onClick: () => void) => (
     <div className={styles.pageHeader} style={{ marginBottom: 12 }}>
@@ -1023,7 +1083,7 @@ export default function CarteiraPage() {
                               <td>{resgateAntBadge(d)}</td>
                               <td style={{ textAlign: 'right' }}>{brl(d.valor_aplicado)}</td>
                               <td style={{ textAlign: 'right' }}>{d.valor_atual_estimado ? brl(d.valor_atual_estimado) : '—'}</td>
-                              <td>{statusBadge(d.status_resgate)}</td>
+                              <td>{resgateStatusBadge(d.status_resgate)}</td>
                               <td>{isSuperAdmin ? (() => { if (!d.faz_parte_honorarios) return '—'; const ep = efetivoPctFin(d); return ep.val !== '' ? (ep.custom ? <span title="Personalizado p/ esta posição" style={{ color: '#d97706', fontWeight: 600 }}>{pct(ep.val)}*</span> : pct(ep.val)) : '—' })() : '🔒'}</td>
                               <td><EstrategiaChips ids={d.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratDeb.mutate({ id: d.id, ids })} /></td>
                               <td style={{ whiteSpace: 'nowrap' }}>
@@ -1275,7 +1335,7 @@ export default function CarteiraPage() {
                       <td>{resgateAntBadge(d)}</td>
                       <td style={{ textAlign: 'right' }}>{brl(d.valor_aplicado)}</td>
                       <td style={{ textAlign: 'right' }}>{d.valor_atual_estimado ? brl(d.valor_atual_estimado) : '—'}</td>
-                      <td>{statusBadge(d.status_resgate)}</td>
+                      <td>{resgateStatusBadge(d.status_resgate)}</td>
                       <td>{isSuperAdmin ? (d.faz_parte_honorarios ? pct(d.percentual_sucesso_honor) : '—') : '🔒'}</td>
                       <td><EstrategiaChips ids={d.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratDeb.mutate({ id: d.id, ids })} /></td>
                       <td style={{ whiteSpace: 'nowrap' }}>
@@ -1763,42 +1823,91 @@ export default function CarteiraPage() {
 
       {/* ── MODAL EMISSÃO ────────────────────────────────────────── */}
       {modal === 'emissao' && (
-        <Modal title={editandoEmissaoId ? 'Editar Emissão' : 'Nova Emissão de Debênture'} onClose={closeModal} width={560}>
-          <div style={{ background: 'var(--gray-light, #f8f9fa)', borderRadius: 6, padding: '8px 12px', marginBottom: 10 }}>
-            <label style={{ fontSize: 12, color: 'var(--teal)', fontWeight: 600, display: 'block', marginBottom: 4 }}>Extração IA — escritura de emissão / termo de securitização:</label>
-            <input type="file" accept=".pdf,.jpg,.png,.jpeg" style={{ fontSize: 12 }}
-              onChange={e => { const f = e.target.files?.[0]; if (f) processarDocumento.mutate({ file: f, tipo: 'emissao' }) }} />
-            {processarDocumento.isPending && <span style={{ fontSize: 11, color: 'var(--teal)', marginLeft: 8 }}>Processando...</span>}
-          </div>
-          {fl('Nome da Série *', fi('nome_serie', 'text', 'Ex: APEX I'))}
-          {fl('Nº da Emissão *', fi('numero_emissao', 'number'))}
-          {fl('Emissor *', fi('emissor'))}
-          {fl('CNPJ Emissor', fi('cnpj_emissor'))}
-          {fl('Indexador', fi('indexador', 'text', 'CDI, IPCA...'))}
-          {fl('Taxa Adicional', fi('taxa_adicional', 'text', '+ 2% a.a.'))}
-          {fl('Data Início', fi('data_inicio_emissao', 'date'))}
-          {fl('Data Vencimento Previsto', fi('data_vencimento_previsto', 'date'))}
-          <div style={{ borderTop: '1px solid var(--gray-border)', margin: '10px 0', paddingTop: 10 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Resgate e liquidez</div>
-            <div className={styles.formRow}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
-                <input type="checkbox" checked={!!form.resgate_antecipado_emissao} onChange={e => inp('resgate_antecipado_emissao', e.target.checked)} />
-                Emissão prevê resgate antecipado
-              </label>
+        <Modal title={emissaoSeries ? `${emissaoSeries.length} séries lidas — revisar antes de criar` : (editandoEmissaoId ? 'Editar Emissão' : 'Nova Emissão de Debênture')} onClose={closeModal} width={emissaoSeries ? 760 : 560}>
+          {!emissaoSeries && (
+            <div style={{ background: 'var(--gray-light, #f8f9fa)', borderRadius: 6, padding: '8px 12px', marginBottom: 10 }}>
+              <label style={{ fontSize: 12, color: 'var(--teal)', fontWeight: 600, display: 'block', marginBottom: 4 }}>Extração IA — escritura de emissão / termo de securitização:</label>
+              <input type="file" accept=".pdf,.jpg,.png,.jpeg" style={{ fontSize: 12 }}
+                onChange={e => { const f = e.target.files?.[0]; if (f) processarDocumento.mutate({ file: f, tipo: 'emissao' }) }} />
+              {processarDocumento.isPending && <span style={{ fontSize: 11, color: 'var(--teal)', marginLeft: 8 }}>Processando...</span>}
             </div>
-            {form.resgate_antecipado_emissao && fl('Tipo de resgate', fs('resgate_antecipado_tipo', [
-              { value: 'vinculado_lastro', label: 'Vinculado ao recebimento do lastro' },
-              { value: 'desvinculado_lastro', label: 'Desvinculado do recebimento do lastro' },
-            ]))}
-            {form.resgate_antecipado_emissao && fl('Cláusulas identificadas pela IA', fta('clausulas_resgate', 3))}
-            {fl('Prazo carência (meses)', fi('prazo_carencia_meses', 'number', '0'))}
-            {fl('Prazo pgto após pedido de saque', fi('prazo_pgto_pos_resgate', 'text', 'Ex: 30 dias'))}
-          </div>
-          <div style={{ borderTop: '1px solid var(--gray-border)', margin: '10px 0', paddingTop: 10 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Garantias</div>
-            {fl('Tipos de garantia', fta('tipos_garantia', 2))}
-          </div>
-          <button className={styles.btnPrimary} onClick={() => editandoEmissaoId ? atualizarEmissao.mutate() : salvarEmissao.mutate()} disabled={salvarEmissao.isPending || atualizarEmissao.isPending}>{(salvarEmissao.isPending || atualizarEmissao.isPending) ? 'Salvando...' : 'Salvar'}</button>
+          )}
+
+          {emissaoSeries ? (
+            <div>
+              <div style={{ fontSize: 12, color: 'var(--gray-mid)', marginBottom: 10 }}>
+                A IA identificou {emissaoSeries.length} séries no mesmo documento. Os campos comuns (emissor, cláusulas de resgate, carência, garantias) já foram aplicados em todas — revise o nome, indexador, taxa e vencimento de cada série antes de criar.
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table className={styles.table} style={{ marginBottom: 10 }}>
+                  <thead><tr><th>Série</th><th>Nº Emissão</th><th>Indexador</th><th>Taxa</th><th>Vencimento</th><th /></tr></thead>
+                  <tbody>
+                    {emissaoSeries.map((s, idx) => (
+                      <tr key={idx}>
+                        <td><input className={styles.input} style={{ minWidth: 100 }} value={s.nome_serie ?? ''} onChange={e => setEmissaoSeries(prev => prev!.map((r, i) => i === idx ? { ...r, nome_serie: e.target.value } : r))} /></td>
+                        <td><input className={styles.input} style={{ width: 70 }} type="number" value={s.numero_emissao ?? ''} onChange={e => setEmissaoSeries(prev => prev!.map((r, i) => i === idx ? { ...r, numero_emissao: e.target.value } : r))} /></td>
+                        <td><input className={styles.input} style={{ width: 80 }} value={s.indexador ?? ''} onChange={e => setEmissaoSeries(prev => prev!.map((r, i) => i === idx ? { ...r, indexador: e.target.value } : r))} /></td>
+                        <td><input className={styles.input} style={{ width: 90 }} value={s.taxa_adicional ?? ''} onChange={e => setEmissaoSeries(prev => prev!.map((r, i) => i === idx ? { ...r, taxa_adicional: e.target.value } : r))} /></td>
+                        <td><input className={styles.input} style={{ width: 130 }} type="date" value={s.data_vencimento_previsto ?? ''} onChange={e => setEmissaoSeries(prev => prev!.map((r, i) => i === idx ? { ...r, data_vencimento_previsto: e.target.value } : r))} /></td>
+                        <td>
+                          <button style={{ background: 'none', border: '1px solid #fca5a5', color: '#dc2626', borderRadius: 4, padding: '3px 7px', cursor: 'pointer', fontSize: 11 }}
+                            onClick={() => setEmissaoSeries(prev => { const next = prev!.filter((_, i) => i !== idx); return next.length ? next : null })}>✕</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <details style={{ marginBottom: 10 }}>
+                <summary style={{ cursor: 'pointer', fontSize: 12, color: 'var(--gray-mid)' }}>Ver campos comuns aplicados a todas as séries</summary>
+                <div style={{ fontSize: 12, color: 'var(--gray-mid)', marginTop: 6, lineHeight: 1.6 }}>
+                  <div><strong>Emissor:</strong> {emissaoSeries[0]?.emissor || '—'}</div>
+                  <div><strong>Prazo carência:</strong> {emissaoSeries[0]?.prazo_carencia_dias ?? '—'} dias</div>
+                  <div><strong>Prazo pgto pós-resgate:</strong> {emissaoSeries[0]?.prazo_pgto_pos_resgate || '—'}</div>
+                  <div><strong>Cláusulas de resgate:</strong> {emissaoSeries[0]?.clausulas_resgate || '—'}</div>
+                  <div><strong>Garantias:</strong> {emissaoSeries[0]?.tipos_garantia || '—'}</div>
+                </div>
+              </details>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button style={{ padding: '8px 16px', background: 'none', border: '1px solid var(--gray-border)', borderRadius: 6, cursor: 'pointer', fontSize: 13 }} onClick={() => setEmissaoSeries(null)}>Cancelar</button>
+                <button className={styles.btnPrimary} disabled={criandoSeries} onClick={criarEmissoesEmLote}>
+                  {criandoSeries ? 'Criando...' : `Criar ${emissaoSeries.length} emissões`}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              {fl('Nome da Série *', fi('nome_serie', 'text', 'Ex: APEX I'))}
+              {fl('Nº da Emissão *', fi('numero_emissao', 'number'))}
+              {fl('Emissor *', fi('emissor'))}
+              {fl('CNPJ Emissor', fi('cnpj_emissor'))}
+              {fl('Indexador', fi('indexador', 'text', 'CDI, IPCA...'))}
+              {fl('Taxa Adicional', fi('taxa_adicional', 'text', '+ 2% a.a.'))}
+              {fl('Data Início', fi('data_inicio_emissao', 'date'))}
+              {fl('Data Vencimento Previsto', fi('data_vencimento_previsto', 'date'))}
+              <div style={{ borderTop: '1px solid var(--gray-border)', margin: '10px 0', paddingTop: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Resgate e liquidez</div>
+                <div className={styles.formRow}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+                    <input type="checkbox" checked={!!form.resgate_antecipado_emissao} onChange={e => inp('resgate_antecipado_emissao', e.target.checked)} />
+                    Emissão prevê resgate antecipado
+                  </label>
+                </div>
+                {form.resgate_antecipado_emissao && fl('Tipo de resgate', fs('resgate_antecipado_tipo', [
+                  { value: 'vinculado_lastro', label: 'Vinculado ao recebimento do lastro' },
+                  { value: 'desvinculado_lastro', label: 'Desvinculado do recebimento do lastro' },
+                ]))}
+                {form.resgate_antecipado_emissao && fl('Cláusulas identificadas pela IA', fta('clausulas_resgate', 3))}
+                {fl('Prazo carência (dias)', fi('prazo_carencia_dias', 'number', '0'))}
+                {fl('Prazo pgto após pedido de saque', fi('prazo_pgto_pos_resgate', 'text', 'Ex: 30 dias'))}
+              </div>
+              <div style={{ borderTop: '1px solid var(--gray-border)', margin: '10px 0', paddingTop: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Garantias</div>
+                {fl('Tipos de garantia', fta('tipos_garantia', 2))}
+              </div>
+              <button className={styles.btnPrimary} onClick={() => editandoEmissaoId ? atualizarEmissao.mutate() : salvarEmissao.mutate()} disabled={salvarEmissao.isPending || atualizarEmissao.isPending}>{(salvarEmissao.isPending || atualizarEmissao.isPending) ? 'Salvando...' : 'Salvar'}</button>
+            </>
+          )}
         </Modal>
       )}
 
@@ -1820,13 +1929,30 @@ export default function CarteiraPage() {
           {fl('Valor Atual Estimado (R$)', fi('valor_atual_estimado', 'number'))}
           <div style={{ borderTop: '1px solid var(--gray-border)', margin: '10px 0', paddingTop: 10 }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Resgate</div>
-            {fl('Status', fs('status_resgate', [{ value: 'Ativo', label: 'Ativo' }, { value: 'Resgate Solicitado', label: 'Resgate Solicitado' }, { value: 'Resgatado', label: 'Resgatado' }]))}
+            {fl('Status', fs('status_resgate', [
+              { value: 'Ativo', label: 'Resgate Não Solicitado' },
+              { value: 'Resgate Solicitado', label: 'Resgate Solicitado e Negado' },
+              { value: 'Resgatado', label: 'Resgatado' },
+            ]))}
             {(form.status_resgate === 'Resgate Solicitado' || form.status_resgate === 'Resgatado') && (
-              <>{fl('Data pedido de resgate', fi('data_pedido_resgate', 'date'))}
-                {fl('Resposta Rhino / emissor', fta('resposta_rhino', 2))}</>
+              <>
+                {fl('Data pedido de resgate', fi('data_pedido_resgate', 'date'))}
+                {fl('Resposta Rhino / emissor', fta('resposta_rhino', 2))}
+                {fl('Comprovante do pedido de resgate', <div>
+                  <input type="file" accept=".pdf,.jpg,.png,.jpeg" style={{ fontSize: 12 }} disabled={uploadComprovante.isPending}
+                    onChange={e => { const f = e.target.files?.[0]; if (f) uploadComprovante.mutate(f) }} />
+                  {uploadComprovante.isPending && <span style={{ fontSize: 11, color: 'var(--teal)', marginLeft: 8 }}>Enviando...</span>}
+                  {form.comprovante_resgate_url && (
+                    <div style={{ marginTop: 4 }}>
+                      <a href={form.comprovante_resgate_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: 'var(--teal)', fontWeight: 600 }}>📎 Ver comprovante enviado</a>
+                    </div>
+                  )}
+                </div>)}
+              </>
             )}
             {form.status_resgate === 'Resgatado' && (
               <>
+                {fl('Data de resgate realizado', fi('data_resgate_realizado', 'date'))}
                 <div className={styles.formRow}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
                     <input type="checkbox" checked={!!form.foi_pago} onChange={e => inp('foi_pago', e.target.checked)} /> Pagamento efetuado
@@ -2043,7 +2169,7 @@ export default function CarteiraPage() {
               </div>
               {em && infoRow('Resgate antecipado — emissão prevê?', sim_nao(em.resgate_antecipado_emissao))}
               {infoRow('Resgate antecipado — termo/cautela prevê?', sim_nao(d.resgate_antecipado_cautela))}
-              {em && infoRow('Prazo carência', em.prazo_carencia_meses != null ? `${em.prazo_carencia_meses} meses` : '—')}
+              {em && infoRow('Prazo carência', em.prazo_carencia_dias != null ? `${em.prazo_carencia_dias} dias` : '—')}
               {em && infoRow('Prazo pgto após pedido de saque', em.prazo_pgto_pos_resgate != null ? `${em.prazo_pgto_pos_resgate} dias` : '—')}
               {em && em.tipos_garantia && (
                 <>

@@ -713,6 +713,9 @@ async def processar_documento_com_ia(
             tipo
         )
 
+        if resultado.get("erro"):
+            raise HTTPException(status_code=502, detail=resultado["erro"])
+
         return {
             "status": "sucesso",
             "dados_extraidos": resultado["dados"],
@@ -721,6 +724,8 @@ async def processar_documento_com_ia(
             "modelo": resultado["modelo"],
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Erro ao processar documento: {str(e)}")
 

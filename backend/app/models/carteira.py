@@ -93,7 +93,7 @@ class CarteiraDebentureadotEmissao(Base):
     taxa_adicional = Column(String(100), nullable=True)
     data_inicio_emissao = Column(Date, nullable=True)
     data_vencimento_previsto = Column(Date, nullable=True)
-    prazo_carencia_meses = Column(Integer, nullable=True)
+    prazo_carencia_dias = Column(Integer, nullable=True)
     prazo_pgto_pos_resgate = Column(String(100), nullable=True)
 
     # Resgate Antecipado
@@ -139,6 +139,8 @@ class CarteiraDebenturePosicao(Base):
     status_resgate = Column(String(50), default='Ativo')
     data_pedido_resgate = Column(Date, nullable=True)
     resposta_rhino = Column(Text, nullable=True)
+    comprovante_resgate_url = Column(String(500), nullable=True)  # link Drive do pedido de resgate
+    data_resgate_realizado = Column(Date, nullable=True)
     foi_pago = Column(Boolean, default=False)
     valor_pago = Column(Float, nullable=True)
     data_pagamento = Column(Date, nullable=True)
