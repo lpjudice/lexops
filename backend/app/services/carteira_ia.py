@@ -7,12 +7,21 @@ from typing import Dict, Any
 
 
 def _parse_json_maybe_fenced(raw: str) -> dict:
-    """Tolera a IA devolver ```json ... ``` apesar do pedido de JSON puro."""
+    """Tolera a IA devolver ```json ... ``` ou texto solto antes/depois do JSON,
+    apesar do pedido de JSON puro."""
     raw = raw.strip()
     m = re.search(r"```(?:json)?\s*([\s\S]+?)```", raw)
     if m:
         raw = m.group(1).strip()
-    return json.loads(raw)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        # Último recurso: pega do primeiro "{" ao último "}" (cobre o caso de
+        # a IA escrever uma frase antes/depois do objeto JSON).
+        inicio, fim = raw.find("{"), raw.rfind("}")
+        if inicio != -1 and fim != -1 and fim > inicio:
+            return json.loads(raw[inicio:fim + 1])
+        raise
 
 
 class CarteiraIAService:
@@ -147,7 +156,7 @@ Retorne APENAS JSON válido.""",
                 },
                 json={
                     "model": "claude-sonnet-5",
-                    "max_tokens": 2048,
+                    "max_tokens": 4096,
                     "messages": [
                         {
                             "role": "user",
@@ -174,7 +183,16 @@ Retorne APENAS JSON válido.""",
         try:
             dados_extraidos = _parse_json_maybe_fenced(conteudo_resposta)
         except json.JSONDecodeError:
-            dados_extraidos = {"raw": conteudo_resposta, "erro": "Parse JSON falhou"}
+            motivo = ""
+            if resultado.get("stop_reason") == "max_tokens":
+                motivo = " (resposta cortada por ser longa demais — tente enviar só as páginas relevantes)"
+            erro_msg = f"A IA respondeu, mas não consegui interpretar o JSON{motivo}."
+            return {
+                "dados": {},
+                "tipo": tipo_documento,
+                "modelo": "claude-sonnet-5",
+                "erro": erro_msg,
+            }
 
         return {
             "dados": dados_extraidos,

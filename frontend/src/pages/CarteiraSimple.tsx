@@ -611,20 +611,31 @@ export default function CarteiraPage() {
     },
     onSuccess: (data, variables) => {
       const extraido = data.dados_extraidos
-      if (variables.tipo === 'emissao' && extraido && Array.isArray(extraido.series)) {
-        const { comum, series } = extraido
+      if (variables.tipo === 'emissao' && extraido && ('comum' in extraido || 'series' in extraido)) {
+        const comum = extraido.comum ?? {}
+        // A IA às vezes devolve "series" como objeto único em vez de lista de 1 — tolera os dois.
+        let series = extraido.series
+        if (series && !Array.isArray(series)) series = [series]
+        if (!Array.isArray(series) || series.length === 0) {
+          alert('A IA não encontrou nenhuma série no documento. Preencha manualmente ou tente outro arquivo.')
+          return
+        }
         if (series.length > 1) {
           // Várias séries no mesmo documento: aplica os campos comuns em cada
           // uma e deixa o usuário revisar/editar antes de criar todas de uma vez.
           setEmissaoSeries(series.map((s: any) => ({ ...comum, ...s })))
           return
         }
-        setForm(f => ({ ...f, ...comum, ...(series[0] || {}) }))
+        setForm(f => ({ ...f, ...comum, ...series[0] }))
         alert('Documento processado! Verifique os campos preenchidos.')
         return
       }
-      if (extraido) setForm(f => ({ ...f, ...extraido }))
-      alert('Documento processado! Verifique os campos preenchidos.')
+      if (extraido && Object.keys(extraido).length > 0) {
+        setForm(f => ({ ...f, ...extraido }))
+        alert('Documento processado! Verifique os campos preenchidos.')
+      } else {
+        alert('A IA processou o documento mas não retornou nenhum campo reconhecível. Tente novamente ou preencha manualmente.')
+      }
     },
     onError: (e: any) => alert(e?.response?.data?.detail || 'Erro ao processar documento'),
   })
@@ -1766,7 +1777,12 @@ export default function CarteiraPage() {
           )}
           <div style={{ marginTop: 12 }}>
             {fl('Observações', fta('observacoes', 2))}
-            {editandoClienteId && fl('Status', fs('ativo', [{ value: 'true', label: 'Ativo' }, { value: 'false', label: 'Inativo' }]))}
+            {editandoClienteId && fl('Status', (
+              <select className={styles.input} value={form.ativo === false ? 'false' : 'true'} onChange={e => inp('ativo', e.target.value === 'true')}>
+                <option value="true">Ativo</option>
+                <option value="false">Inativo</option>
+              </select>
+            ))}
           </div>
           <button className={styles.btnPrimary} onClick={() => editandoClienteId ? atualizarCliente.mutate() : salvarCliente.mutate()} disabled={salvarCliente.isPending || atualizarCliente.isPending}>
             {(salvarCliente.isPending || atualizarCliente.isPending) ? 'Salvando...' : 'Salvar'}
