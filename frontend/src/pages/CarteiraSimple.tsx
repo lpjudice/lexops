@@ -607,7 +607,9 @@ export default function CarteiraPage() {
   const processarDocumento = useMutation({
     mutationFn: ({ file, tipo }: { file: File; tipo: string }) => {
       const fd = new FormData(); fd.append('file', file)
-      return api.post(`/carteira/processar-documento?tipo=${tipo}`, fd).then(r => r.data)
+      // Leitura de escritura/termo inteiro pela IA pode passar bem do timeout
+      // padrão de 30s do client — o backend já tem seu próprio teto de 120s.
+      return api.post(`/carteira/processar-documento?tipo=${tipo}`, fd, { timeout: 150000 }).then(r => r.data)
     },
     onSuccess: (data, variables) => {
       const extraido = data.dados_extraidos
@@ -637,7 +639,10 @@ export default function CarteiraPage() {
         alert('A IA processou o documento mas não retornou nenhum campo reconhecível. Tente novamente ou preencha manualmente.')
       }
     },
-    onError: (e: any) => alert(e?.response?.data?.detail || 'Erro ao processar documento'),
+    onError: (e: any) => {
+      if (e?.code === 'ECONNABORTED') { alert('A leitura demorou demais e o navegador desistiu antes da IA terminar. Tente um arquivo menor (só as páginas relevantes) ou tente de novo.'); return }
+      alert(e?.response?.data?.detail || 'Erro ao processar documento')
+    },
   })
 
   const criarEmissoesEmLote = async () => {

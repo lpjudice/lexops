@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, desc, func
+from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 from datetime import date, datetime
 import json
@@ -68,12 +69,26 @@ def obter_cliente(cliente_id: int, db: Session = Depends(get_db)):
     return cliente
 
 
+def _normalizar_cpf_vazio(data: dict) -> dict:
+    """cpf é UNIQUE — '' não é "sem CPF" pro Postgres (só NULL é), então duas
+    linhas com cpf='' colidem na constraint. Normaliza '' para None antes de
+    gravar (clientes importados do XLS costumam vir sem CPF)."""
+    if data.get("cpf") == "":
+        data = {**data, "cpf": None}
+    return data
+
+
 @router.post("/clientes")
 def criar_cliente(data: dict, db: Session = Depends(get_db)):
     """Cria novo cliente na carteira"""
+    data = _normalizar_cpf_vazio(data)
     cliente = CarteiraCliente(**data)
     db.add(cliente)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Já existe um cliente cadastrado com esse CPF/CNPJ.")
     db.refresh(cliente)
 
     try:
@@ -97,10 +112,15 @@ def atualizar_cliente(cliente_id: int, data: dict, db: Session = Depends(get_db)
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
 
+    data = _normalizar_cpf_vazio(data)
     for key, value in data.items():
         setattr(cliente, key, value)
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Já existe um cliente cadastrado com esse CPF/CNPJ.")
     db.refresh(cliente)
     return cliente
 
