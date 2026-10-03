@@ -105,6 +105,19 @@ def atualizar_cliente(cliente_id: int, data: dict, db: Session = Depends(get_db)
     return cliente
 
 
+@router.delete("/clientes/{cliente_id}")
+def deletar_cliente(cliente_id: int, db: Session = Depends(get_db)):
+    """Deleta cliente (apenas se sem posições vinculadas)"""
+    cliente = db.query(CarteiraCliente).filter(CarteiraCliente.id == cliente_id).first()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+    if cliente.debentures or cliente.imobiliarios or cliente.fundos:
+        raise HTTPException(status_code=400, detail="Cliente possui posições vinculadas (debêntures/imobiliário/fundos) — remova-as antes de excluir")
+    db.delete(cliente)
+    db.commit()
+    return {"ok": True}
+
+
 # ─────────────────────────────────────────────────────────────────
 # DEBÊNTURES - EMISSÕES (Referência)
 # ─────────────────────────────────────────────────────────────────
@@ -152,6 +165,21 @@ def atualizar_emissao(emissao_id: int, data: dict, db: Session = Depends(get_db)
     db.commit()
     db.refresh(emissao)
     return emissao
+
+
+@router.delete("/emissoes/{emissao_id}")
+def deletar_emissao(emissao_id: int, db: Session = Depends(get_db)):
+    """Deleta emissão (apenas se sem posições de debêntures vinculadas)"""
+    emissao = db.query(CarteiraDebentureadotEmissao).filter(
+        CarteiraDebentureadotEmissao.id == emissao_id
+    ).first()
+    if not emissao:
+        raise HTTPException(status_code=404, detail="Emissão não encontrada")
+    if emissao.posicoes:
+        raise HTTPException(status_code=400, detail="Emissão possui posições de debêntures vinculadas — remova-as antes de excluir")
+    db.delete(emissao)
+    db.commit()
+    return {"ok": True}
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -371,6 +399,19 @@ def atualizar_imobiliario(posicao_id: int, data: dict, db: Session = Depends(get
     return posicao
 
 
+@router.delete("/imobiliario/{posicao_id}")
+def deletar_imobiliario(posicao_id: int, db: Session = Depends(get_db)):
+    """Deleta uma posição imobiliária"""
+    posicao = db.query(CarteiraImobiliarioPosicao).filter(
+        CarteiraImobiliarioPosicao.id == posicao_id
+    ).first()
+    if not posicao:
+        raise HTTPException(status_code=404, detail="Posição não encontrada")
+    db.delete(posicao)
+    db.commit()
+    return {"ok": True}
+
+
 # ─────────────────────────────────────────────────────────────────
 # FUNDOS - REFERÊNCIAS
 # ─────────────────────────────────────────────────────────────────
@@ -405,6 +446,19 @@ def criar_fundo_referencia(data: dict, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(fundo)
     return fundo
+
+
+@router.delete("/fundos-referencia/{fundo_id}")
+def deletar_fundo_referencia(fundo_id: int, db: Session = Depends(get_db)):
+    """Deleta fundo de referência (apenas se sem posições vinculadas)"""
+    fundo = db.query(CarteiraFundoReferencia).filter(CarteiraFundoReferencia.id == fundo_id).first()
+    if not fundo:
+        raise HTTPException(status_code=404, detail="Fundo não encontrado")
+    if fundo.posicoes:
+        raise HTTPException(status_code=400, detail="Fundo possui posições vinculadas — remova-as antes de excluir")
+    db.delete(fundo)
+    db.commit()
+    return {"ok": True}
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -484,6 +538,19 @@ def atualizar_fundo(posicao_id: int, data: dict, db: Session = Depends(get_db)):
     return posicao
 
 
+@router.delete("/fundos/{posicao_id}")
+def deletar_fundo(posicao_id: int, db: Session = Depends(get_db)):
+    """Deleta uma posição em fundo"""
+    posicao = db.query(CarteiraFundoPosicao).filter(
+        CarteiraFundoPosicao.id == posicao_id
+    ).first()
+    if not posicao:
+        raise HTTPException(status_code=404, detail="Posição não encontrada")
+    db.delete(posicao)
+    db.commit()
+    return {"ok": True}
+
+
 # ─────────────────────────────────────────────────────────────────
 # ESTRATÉGIAS
 # ─────────────────────────────────────────────────────────────────
@@ -532,6 +599,21 @@ def atualizar_estrategia(estrategia_id: int, data: dict, db: Session = Depends(g
     db.commit()
     db.refresh(estrategia)
     return estrategia
+
+
+@router.delete("/estrategias/{estrategia_id}")
+def deletar_estrategia(estrategia_id: int, db: Session = Depends(get_db)):
+    """Deleta estratégia (se não estiver vinculada a nenhuma posição)"""
+    estrategia = db.query(CarteiraEstrategia).filter(CarteiraEstrategia.id == estrategia_id).first()
+    if not estrategia:
+        raise HTTPException(status_code=404, detail="Estratégia não encontrada")
+    try:
+        db.delete(estrategia)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Estratégia vinculada a posições — remova-a dos ativos antes de excluir")
+    return {"ok": True}
 
 
 @router.get("/estrategias/busca/{termo}")
