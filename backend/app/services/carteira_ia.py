@@ -146,7 +146,7 @@ Retorne APENAS JSON válido.""",
                     "anthropic-version": "2023-06-01",
                 },
                 json={
-                    "model": "claude-3-5-sonnet-20241022",
+                    "model": "claude-sonnet-5",
                     "max_tokens": 2048,
                     "messages": [
                         {
@@ -164,7 +164,7 @@ Retorne APENAS JSON válido.""",
             return {
                 "dados": {},
                 "tipo": tipo_documento,
-                "modelo": "claude-3-5-sonnet",
+                "modelo": "claude-sonnet-5",
                 "erro": f"Erro da IA ({response.status_code}): {erro_msg}",
             }
 
@@ -179,7 +179,7 @@ Retorne APENAS JSON válido.""",
         return {
             "dados": dados_extraidos,
             "tipo": tipo_documento,
-            "modelo": "claude-3-5-sonnet",
+            "modelo": "claude-sonnet-5",
             "tokens_usados": resultado.get("usage", {}).get("output_tokens", 0),
         }
 
