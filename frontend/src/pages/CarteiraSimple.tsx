@@ -352,6 +352,9 @@ export default function CarteiraPage() {
   // KPI expand
   const [expandFundos, setExpandFundos] = useState(false)
   const [expandImob, setExpandImob] = useState(false)
+  const [detalheKpi, setDetalheKpi] = useState<'fee' | 'exito' | null>(null)
+  const [detalheBusca, setDetalheBusca] = useState('')
+  const [detalheExpandidos, setDetalheExpandidos] = useState<Set<number>>(new Set())
   // Posição — modo de visualização
   const [viewModePosicao, setViewModePosicao] = useState<'cliente' | 'ativo'>('cliente')
   const [filtroAtivoEmissao, setFiltroAtivoEmissao] = useState('')
@@ -464,6 +467,54 @@ export default function CarteiraPage() {
       exito += (i.valor_total_compromissado ?? 0) * (pct / 100)
     }
     return { totalGeral, totalFin, totalImob, feeEntrada, exito }
+  }
+
+  // Detalhamento item a item por cliente, pros popups de Fee Entrada / Expectativa Êxito.
+  type DetalheItem = { tipo: string; nome: string; valor: number; pct: number; resultado: number }
+  const detalharCliente = (c: any, modo: 'fee' | 'exito'): DetalheItem[] => {
+    const debs = debentures.filter(d => d.cliente_id === c.id)
+    const imobs = imobiliario.filter(i => i.cliente_id === c.id)
+    const fnds = fundos.filter(f => f.cliente_id === c.id)
+    const pctFinPadrao = c.percentual_sucesso_fin ?? c.percentual_sucesso_geral ?? 0
+    const pctImobPadrao = c.percentual_sucesso_imob ?? c.percentual_sucesso_geral ?? 0
+    const items: DetalheItem[] = []
+
+    if (modo === 'exito') {
+      for (const d of debs) {
+        const pct = d.percentual_sucesso_honor ?? pctFinPadrao
+        const valor = d.valor_aplicado ?? 0
+        items.push({ tipo: 'Financeiro · Debênture', nome: `${emissaoNome(d.emissao_id)} (${d.numero_cautela})`, valor, pct, resultado: valor * pct / 100 })
+      }
+      for (const f of fnds) {
+        const ref = fundosRef.find((r: any) => r.id === f.fundo_id)
+        const queda = ref?.percentual_credito_recuperavel
+        const base = (f.valor_aplicado ?? 0) * (queda != null ? (1 - queda / 100) : 1)
+        const pct = f.percentual_sucesso_honor ?? pctFinPadrao
+        items.push({ tipo: 'Financeiro · Fundo', nome: fundoNome(f.fundo_id), valor: f.valor_aplicado ?? 0, pct, resultado: base * pct / 100 })
+      }
+      for (const i of imobs) {
+        const pct = i.percentual_sucesso_honorario ?? pctImobPadrao
+        const valor = i.valor_total_compromissado ?? 0
+        items.push({ tipo: 'Imobiliário', nome: empreendimentoNome(i.empreendimento_id), valor, pct, resultado: valor * pct / 100 })
+      }
+    } else if (c.pro_labore_tipo === 'percentual') {
+      for (const d of debs) {
+        const valor = d.valor_aplicado ?? 0
+        const pct = c.fee_fin_pct ?? 0
+        items.push({ tipo: 'Financeiro · Debênture', nome: `${emissaoNome(d.emissao_id)} (${d.numero_cautela})`, valor, pct, resultado: valor * pct / 100 })
+      }
+      for (const f of fnds) {
+        const valor = f.valor_aplicado ?? 0
+        const pct = c.fee_fin_pct ?? 0
+        items.push({ tipo: 'Financeiro · Fundo', nome: fundoNome(f.fundo_id), valor, pct, resultado: valor * pct / 100 })
+      }
+      for (const i of imobs) {
+        const valor = i.valor_total_compromissado ?? 0
+        const pct = c.fee_imob_pct ?? 0
+        items.push({ tipo: 'Imobiliário', nome: empreendimentoNome(i.empreendimento_id), valor, pct, resultado: valor * pct / 100 })
+      }
+    }
+    return items
   }
 
   const kpiImob = imobiliario.reduce((s, i) => s + (i.valor_total_compromissado ?? 0), 0)
@@ -988,8 +1039,12 @@ export default function CarteiraPage() {
           <span className={cs.kpiLabel}>Fundos {expandFundos ? '▴' : '▾'}</span>
           <span className={cs.kpiValue}>{brl(kpiFundos)}</span>
         </div>
-        <div className={cs.kpiCard}><span className={cs.kpiLabel}>Fee Entrada (esp.)</span><span className={cs.kpiValue}>{isSuperAdmin ? brl(kpiFeeEntrada) : '🔒'}</span></div>
-        <div className={cs.kpiCard}><span className={cs.kpiLabel}>Expectativa Êxito</span><span className={cs.kpiValue}>{isSuperAdmin ? brl(kpiExito) : '🔒'}</span></div>
+        <div className={cs.kpiCard} style={{ cursor: isSuperAdmin ? 'pointer' : undefined }} onClick={() => isSuperAdmin && setDetalheKpi('fee')}>
+          <span className={cs.kpiLabel}>Fee Entrada (esp.)</span><span className={cs.kpiValue}>{isSuperAdmin ? brl(kpiFeeEntrada) : '🔒'}</span>
+        </div>
+        <div className={cs.kpiCard} style={{ cursor: isSuperAdmin ? 'pointer' : undefined }} onClick={() => isSuperAdmin && setDetalheKpi('exito')}>
+          <span className={cs.kpiLabel}>Expectativa Êxito</span><span className={cs.kpiValue}>{isSuperAdmin ? brl(kpiExito) : '🔒'}</span>
+        </div>
       </div>
 
       {/* Breakdown expandível — Imobiliário por empreendimento */}
@@ -2317,6 +2372,77 @@ export default function CarteiraPage() {
                 }
               </div>
             )}
+          </Modal>
+        )
+      })()}
+
+      {/* ── MODAL DETALHE KPI (Fee Entrada / Expectativa Êxito) ─────── */}
+      {detalheKpi !== null && (() => {
+        const titulo = detalheKpi === 'fee' ? 'Fee de Entrada — detalhamento por cliente' : 'Expectativa de Êxito — detalhamento por cliente'
+        const pctLabel = detalheKpi === 'fee' ? '% fee' : '% êxito'
+        const fecharModal = () => { setDetalheKpi(null); setDetalheBusca(''); setDetalheExpandidos(new Set()) }
+        const linhas = clientes
+          .filter((c: any) => detalheKpi === 'exito' ? c.ativo !== false : true)
+          .map((c: any) => ({ cliente: c, valor: calcularHonorarios(c)[detalheKpi === 'fee' ? 'feeEntrada' : 'exito'] }))
+          .filter((x: any) => x.valor > 0)
+          .filter((x: any) => filtrarPorNome(clienteNome(x.cliente.id), detalheBusca))
+          .sort((a: any, b: any) => b.valor - a.valor)
+        const totalFiltrado = linhas.reduce((s: number, x: any) => s + x.valor, 0)
+        return (
+          <Modal title={titulo} onClose={fecharModal} width={760}>
+            <input className={styles.input} style={{ width: '100%', marginBottom: 10 }} placeholder="Filtrar por nome..." value={detalheBusca} onChange={e => setDetalheBusca(e.target.value)} />
+            <div style={{ fontSize: 13, color: 'var(--gray-mid)', marginBottom: 10 }}>
+              {linhas.length} cliente(s) · Total: <strong style={{ color: 'var(--teal)' }}>{brl(totalFiltrado)}</strong>
+            </div>
+            <div style={{ maxHeight: '62vh', overflowY: 'auto' }}>
+              {linhas.length === 0 ? (
+                <div style={{ textAlign: 'center', color: '#9ca3af', padding: 24, fontSize: 13 }}>Nenhum cliente encontrado.</div>
+              ) : linhas.map(({ cliente: c, valor }: any) => {
+                const aberto = detalheExpandidos.has(c.id)
+                const items = detalharCliente(c, detalheKpi)
+                return (
+                  <div key={c.id} style={{ border: '1px solid var(--gray-border)', borderRadius: 8, marginBottom: 8, overflow: 'hidden' }}>
+                    <div
+                      style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', cursor: 'pointer', background: aberto ? 'var(--gray-light, #f8f9fa)' : 'transparent' }}
+                      onClick={() => setDetalheExpandidos(prev => {
+                        const next = new Set(prev)
+                        if (next.has(c.id)) next.delete(c.id); else next.add(c.id)
+                        return next
+                      })}
+                    >
+                      <span style={{ fontWeight: 600, fontSize: 13 }}>{aberto ? '▾' : '▸'} {clienteNome(c.id)}</span>
+                      <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 13, color: 'var(--teal)' }}>{brl(valor)}</span>
+                    </div>
+                    {aberto && (
+                      <div style={{ padding: '0 12px 10px' }}>
+                        {items.length === 0 ? (
+                          <div style={{ fontSize: 12, color: 'var(--gray-mid)', padding: '6px 0' }}>
+                            {detalheKpi === 'fee' && c.pro_labore_tipo === 'fixo'
+                              ? `Fee fixo: ${brl(c.pro_labore_valor ?? 0)} (valor único do cliente, não vinculado a ativos específicos).`
+                              : 'Sem itens.'}
+                          </div>
+                        ) : (
+                          <table className={styles.table} style={{ marginBottom: 0 }}>
+                            <thead><tr><th>Ativo</th><th>Item</th>{thR('Valor aplicado')}<th>{pctLabel}</th>{thR('Valor (R$)')}</tr></thead>
+                            <tbody>
+                              {items.map((it, idx) => (
+                                <tr key={idx}>
+                                  <td style={{ fontSize: 11, color: 'var(--gray-mid)' }}>{it.tipo}</td>
+                                  <td style={{ fontSize: 12 }}>{it.nome}</td>
+                                  <td style={{ textAlign: 'right', fontSize: 12 }}>{brl(it.valor)}</td>
+                                  <td style={{ fontSize: 12 }}>{it.pct.toFixed(1)}%</td>
+                                  <td style={{ textAlign: 'right', fontSize: 12, fontWeight: 600 }}>{brl(it.resultado)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           </Modal>
         )
       })()}
