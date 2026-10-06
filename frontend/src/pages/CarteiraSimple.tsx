@@ -439,11 +439,30 @@ export default function CarteiraPage() {
     if (c.pro_labore_tipo === 'fixo') feeEntrada = c.pro_labore_valor ?? 0
     else if (c.pro_labore_tipo === 'percentual')
       feeEntrada = totalImob * ((c.fee_imob_pct ?? 0) / 100) + totalFin * ((c.fee_fin_pct ?? 0) / 100)
+
+    // Êxito: soma posição a posição, usando o % EFETIVO de cada uma (o
+    // override "ALTERAR % DESSE FUNDO APENAS" daquela posição, ou — se não
+    // houver override — o % padrão do cliente). Antes aplicava um único %
+    // do cliente sobre o total agregado, então editar o % de uma posição
+    // específica nunca mudava a soma — só o % de cliente fazia diferença.
+    const pctFinPadrao = c.percentual_sucesso_fin ?? c.percentual_sucesso_geral ?? 0
+    const pctImobPadrao = c.percentual_sucesso_imob ?? c.percentual_sucesso_geral ?? 0
     let exito = 0
-    if (c.percentual_sucesso_imob || c.percentual_sucesso_fin)
-      exito = totalImob * ((c.percentual_sucesso_imob ?? 0) / 100) + totalFin * ((c.percentual_sucesso_fin ?? 0) / 100)
-    else if (c.percentual_sucesso_geral)
-      exito = totalGeral * ((c.percentual_sucesso_geral ?? 0) / 100)
+    for (const d of debs) {
+      const pct = d.percentual_sucesso_honor ?? pctFinPadrao
+      exito += (d.valor_aplicado ?? 0) * (pct / 100)
+    }
+    for (const f of fnds) {
+      const ref = fundosRef.find((r: any) => r.id === f.fundo_id)
+      const queda = ref?.percentual_credito_recuperavel
+      const base = (f.valor_aplicado ?? 0) * (queda != null ? (1 - queda / 100) : 1)
+      const pct = f.percentual_sucesso_honor ?? pctFinPadrao
+      exito += base * (pct / 100)
+    }
+    for (const i of imobs) {
+      const pct = i.percentual_sucesso_honorario ?? pctImobPadrao
+      exito += (i.valor_total_compromissado ?? 0) * (pct / 100)
+    }
     return { totalGeral, totalFin, totalImob, feeEntrada, exito }
   }
 
