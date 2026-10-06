@@ -325,6 +325,7 @@ export default function CarteiraPage() {
   const [filtroClienteImob, setFiltroClienteImob] = useState('')
   const [filtroClienteFundos, setFiltroClienteFundos] = useState('')
   const [filtroClientePos, setFiltroClientePos] = useState('')
+  const [filtroClienteRef, setFiltroClienteRef] = useState('')
   // Filtro tipo de ativo em Posição por Cliente
   const [mostrarDebs, setMostrarDebs] = useState(true)
   const [mostrarImob, setMostrarImob] = useState(true)
@@ -563,7 +564,7 @@ export default function CarteiraPage() {
   const salvarImobiliario = mk('/carteira/imobiliario', ['carteira-imobiliario'], numImob)
   const atualizarImobiliario = mkPut(() => `/carteira/imobiliario/${editandoImobId}`, ['carteira-imobiliario'], numImob)
 
-  const salvarFundoRef = mk('/carteira/fundos-referencia', ['carteira-fundos-ref'])
+  const salvarFundoRef = mk('/carteira/fundos-referencia', ['carteira-fundos-ref'], ['percentual_credito_recuperavel'])
 
   const numFundo = ['cliente_id', 'fundo_id', 'valor_aplicado', 'valor_atual_estimado', 'percentual_sucesso_honor']
   const salvarFundo = mk('/carteira/fundos', ['carteira-fundos'], numFundo)
@@ -571,7 +572,7 @@ export default function CarteiraPage() {
 
   const salvarEstrategia = mk('/carteira/estrategias', ['carteira-estrategias'])
   const atualizarEmissao = mkPut(() => `/carteira/emissoes/${editandoEmissaoId}`, ['carteira-emissoes'], ['numero_emissao', 'prazo_carencia_dias'])
-  const atualizarFundoRef = mkPut(() => `/carteira/fundos-referencia/${editandoFundoRefId}`, ['carteira-fundos-ref'])
+  const atualizarFundoRef = mkPut(() => `/carteira/fundos-referencia/${editandoFundoRefId}`, ['carteira-fundos-ref'], ['percentual_credito_recuperavel'])
   const atualizarEstrategia = mkPut(() => `/carteira/estrategias/${editandoEstrategiaId}`, ['carteira-estrategias'])
 
   const mkDelete = (urlFn: (id: number) => string, keys: string[]) => useMutation({
@@ -1536,17 +1537,18 @@ export default function CarteiraPage() {
       {/* ══ CLIENTES (referência) ══════════════════════════════════ */}
       {tab === 'clientes' && (
         <>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
-            <span /><button className={styles.btnPrimary} onClick={() => { setForm({ pro_labore_tipo: '', tipo_pessoa: 'PF', exito_split: false }); setEditandoClienteId(null); setModal('cliente') }}>+ Novo Cliente</button>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 10 }}>
+            <input className={styles.input} style={{ width: 240 }} placeholder="Filtrar por nome..." value={filtroClienteRef} onChange={e => setFiltroClienteRef(e.target.value)} />
+            <button className={styles.btnPrimary} onClick={() => { setForm({ pro_labore_tipo: '', tipo_pessoa: 'PF', exito_split: false }); setEditandoClienteId(null); setModal('cliente') }}>+ Novo Cliente</button>
           </div>
           <div className={styles.tableCard}>
             <table className={styles.table}>
               <colgroup><col /><col style={{ width: 60 }} /><col style={{ width: 140 }} /><col style={{ width: 160 }} /><col style={{ width: 150 }} /><col style={{ width: 150 }} /><col style={{ width: 80 }} /><col style={{ width: 36 }} /><col style={{ width: 36 }} /><col style={{ width: 60 }} /></colgroup>
               <thead><tr><th>Nome</th><th>Tipo</th><th>CPF/CNPJ</th><th>{isSuperAdmin ? 'Fee entrada' : '🔒 Fee'}</th>{thR(isSuperAdmin ? 'Fee (R$ esp.)' : '🔒')}{thR(isSuperAdmin ? 'Êxito (R$ esp.)' : '🔒')}<th>Status</th><th /><th title="Drive" /></tr></thead>
               <tbody>
-                {clientes.length === 0
+                {clientes.filter((c: any) => filtrarPorNome(clienteNome(c.id), filtroClienteRef)).length === 0
                   ? <tr><td colSpan={10} style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Nenhum registro</td></tr>
-                  : clientes.map((c: any) => {
+                  : clientes.filter((c: any) => filtrarPorNome(clienteNome(c.id), filtroClienteRef)).map((c: any) => {
                     const { feeEntrada, exito } = calcularHonorarios(c)
                     const feeLbl = c.pro_labore_tipo === 'fixo' ? brl(c.pro_labore_valor)
                       : c.pro_labore_tipo === 'percentual'

@@ -3,6 +3,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, desc, func
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import Float, Integer
 from typing import List, Optional
 from datetime import date, datetime
 import json
@@ -28,6 +29,22 @@ from app.services.carteira_relatorios import CarteiraRelatoriosService
 from app.services.carteira_drive import CarteiraDriveService
 
 router = APIRouter(prefix="/carteira", tags=["carteira"])
+
+
+def _limpar_numericos_vazios(model_cls, data: dict) -> dict:
+    """Converte '' para None nos campos Float/Integer do model antes de
+    criar/atualizar. O frontend manda '' pra campo numérico deixado em
+    branco (next de ??''), e Postgres rejeita '' num tipo numérico
+    (DataError: invalid input syntax for type double precision/integer).
+    Defesa genérica pra não ter que caçar campo por campo cada vez que um
+    formulário novo (ou um campo novo num existente) esquece de marcar o
+    campo como numérico no lado do cliente."""
+    cols = {c.name: c.type for c in model_cls.__table__.columns}
+    out = dict(data)
+    for k, v in list(out.items()):
+        if v == "" and k in cols and isinstance(cols[k], (Float, Integer)):
+            out[k] = None
+    return out
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -81,7 +98,7 @@ def _normalizar_cpf_vazio(data: dict) -> dict:
 @router.post("/clientes")
 def criar_cliente(data: dict, db: Session = Depends(get_db)):
     """Cria novo cliente na carteira"""
-    data = _normalizar_cpf_vazio(data)
+    data = _normalizar_cpf_vazio(_limpar_numericos_vazios(CarteiraCliente, data))
     cliente = CarteiraCliente(**data)
     db.add(cliente)
     try:
@@ -112,7 +129,7 @@ def atualizar_cliente(cliente_id: int, data: dict, db: Session = Depends(get_db)
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
 
-    data = _normalizar_cpf_vazio(data)
+    data = _normalizar_cpf_vazio(_limpar_numericos_vazios(CarteiraCliente, data))
     for key, value in data.items():
         setattr(cliente, key, value)
 
@@ -154,6 +171,7 @@ def listar_emissoes(db: Session = Depends(get_db)):
 @router.post("/emissoes")
 def criar_emissao(data: dict, db: Session = Depends(get_db)):
     """Cria nova emissão de debênture"""
+    data = _limpar_numericos_vazios(CarteiraDebentureadotEmissao, data)
     emissao = CarteiraDebentureadotEmissao(**data)
     db.add(emissao)
     db.commit()
@@ -180,6 +198,7 @@ def atualizar_emissao(emissao_id: int, data: dict, db: Session = Depends(get_db)
     ).first()
     if not emissao:
         raise HTTPException(status_code=404, detail="Emissão não encontrada")
+    data = _limpar_numericos_vazios(CarteiraDebentureadotEmissao, data)
     for key, value in data.items():
         setattr(emissao, key, value)
     db.commit()
@@ -244,6 +263,7 @@ def listar_debentures(
 @router.post("/debentures")
 def criar_debenture(data: dict, db: Session = Depends(get_db)):
     """Cria nova posição de debênture para cliente"""
+    data = _limpar_numericos_vazios(CarteiraDebenturePosicao, data)
     posicao = CarteiraDebenturePosicao(**data)
     db.add(posicao)
     db.commit()
@@ -271,6 +291,7 @@ def atualizar_debenture(posicao_id: int, data: dict, db: Session = Depends(get_d
     if not posicao:
         raise HTTPException(status_code=404, detail="Posição não encontrada")
 
+    data = _limpar_numericos_vazios(CarteiraDebenturePosicao, data)
     for key, value in data.items():
         setattr(posicao, key, value)
 
@@ -310,6 +331,7 @@ def listar_empreendimentos(db: Session = Depends(get_db)):
 @router.post("/empreendimentos")
 def criar_empreendimento(data: dict, db: Session = Depends(get_db)):
     """Cria novo empreendimento"""
+    data = _limpar_numericos_vazios(CarteiraImobiliarioEmpreendimento, data)
     empreendimento = CarteiraImobiliarioEmpreendimento(**data)
     db.add(empreendimento)
     db.commit()
@@ -325,6 +347,7 @@ def atualizar_empreendimento(emp_id: int, data: dict, db: Session = Depends(get_
     ).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Empreendimento não encontrado")
+    data = _limpar_numericos_vazios(CarteiraImobiliarioEmpreendimento, data)
     for key, value in data.items():
         setattr(emp, key, value)
     db.commit()
@@ -383,6 +406,7 @@ def listar_imobiliario(
 @router.post("/imobiliario")
 def criar_imobiliario(data: dict, db: Session = Depends(get_db)):
     """Cria nova posição imobiliária para cliente"""
+    data = _limpar_numericos_vazios(CarteiraImobiliarioPosicao, data)
     posicao = CarteiraImobiliarioPosicao(**data)
     db.add(posicao)
     db.commit()
@@ -410,6 +434,7 @@ def atualizar_imobiliario(posicao_id: int, data: dict, db: Session = Depends(get
     if not posicao:
         raise HTTPException(status_code=404, detail="Posição não encontrada")
 
+    data = _limpar_numericos_vazios(CarteiraImobiliarioPosicao, data)
     for key, value in data.items():
         setattr(posicao, key, value)
 
@@ -451,6 +476,7 @@ def atualizar_fundo_referencia(fundo_id: int, data: dict, db: Session = Depends(
     fundo = db.query(CarteiraFundoReferencia).filter(CarteiraFundoReferencia.id == fundo_id).first()
     if not fundo:
         raise HTTPException(status_code=404, detail="Fundo não encontrado")
+    data = _limpar_numericos_vazios(CarteiraFundoReferencia, data)
     for key, value in data.items():
         setattr(fundo, key, value)
     db.commit()
@@ -461,6 +487,7 @@ def atualizar_fundo_referencia(fundo_id: int, data: dict, db: Session = Depends(
 @router.post("/fundos-referencia")
 def criar_fundo_referencia(data: dict, db: Session = Depends(get_db)):
     """Cria novo fundo de referência"""
+    data = _limpar_numericos_vazios(CarteiraFundoReferencia, data)
     fundo = CarteiraFundoReferencia(**data)
     db.add(fundo)
     db.commit()
@@ -522,6 +549,7 @@ def listar_fundos(
 @router.post("/fundos")
 def criar_fundo(data: dict, db: Session = Depends(get_db)):
     """Cria nova posição em fundo para cliente"""
+    data = _limpar_numericos_vazios(CarteiraFundoPosicao, data)
     posicao = CarteiraFundoPosicao(**data)
     db.add(posicao)
     db.commit()
@@ -549,6 +577,7 @@ def atualizar_fundo(posicao_id: int, data: dict, db: Session = Depends(get_db)):
     if not posicao:
         raise HTTPException(status_code=404, detail="Posição não encontrada")
 
+    data = _limpar_numericos_vazios(CarteiraFundoPosicao, data)
     for key, value in data.items():
         setattr(posicao, key, value)
 
@@ -601,6 +630,7 @@ def listar_estrategias(
 @router.post("/estrategias")
 def criar_estrategia(data: dict, db: Session = Depends(get_db)):
     """Cria nova estratégia"""
+    data = _limpar_numericos_vazios(CarteiraEstrategia, data)
     estrategia = CarteiraEstrategia(**data)
     db.add(estrategia)
     db.commit()
@@ -614,6 +644,7 @@ def atualizar_estrategia(estrategia_id: int, data: dict, db: Session = Depends(g
     estrategia = db.query(CarteiraEstrategia).filter(CarteiraEstrategia.id == estrategia_id).first()
     if not estrategia:
         raise HTTPException(status_code=404, detail="Estratégia não encontrada")
+    data = _limpar_numericos_vazios(CarteiraEstrategia, data)
     for key, value in data.items():
         setattr(estrategia, key, value)
     db.commit()
