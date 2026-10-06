@@ -407,7 +407,7 @@ class CarteiraRelatoriosService:
                 emp = emp_map.get(i.empreendimento_id)
                 rows.append([
                     emp.nome_venda if emp else f"#{i.empreendimento_id}",
-                    emp.cidade if emp and emp.cidade else '-',
+                    emp.localizacao if emp and emp.localizacao else '-',
                     _brl(i.valor_total_compromissado),
                     _brl(i.valor_efetivamente_investido) if i.valor_efetivamente_investido else '-',
                     _pct(i.percentual_participacao),
@@ -419,7 +419,7 @@ class CarteiraRelatoriosService:
                 '',
             ])
             story.append(_asset_table(
-                ['EMPREENDIMENTO', 'CIDADE', 'COMPROMETIDO', 'INVESTIDO', '% PART.'],
+                ['EMPREENDIMENTO', 'LOCALIZACAO', 'COMPROMETIDO', 'INVESTIDO', '% PART.'],
                 rows,
                 [55*mm, 30*mm, 30*mm, 30*mm, 25*mm],
                 accent_cols=[2, 3], accent=AMBER, tint=AMBER_TINT,
