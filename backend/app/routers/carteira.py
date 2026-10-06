@@ -47,6 +47,39 @@ def _limpar_numericos_vazios(model_cls, data: dict) -> dict:
     return out
 
 
+_CAMPO_LABEL = {
+    "cpf": "CPF/CNPJ", "nome": "Nome", "data_aplicacao": "Data de Aplicação",
+    "valor_aplicado": "Valor Aplicado", "data_aquisicao": "Data de Aquisição",
+    "numero_cautela": "Nº Cautela", "valor_total_compromissado": "Valor Total Comprometido",
+    "nome_fundo": "Nome do Fundo", "nome_venda": "Nome do projeto",
+    "nome_serie": "Nome da Série", "numero_emissao": "Nº da Emissão",
+    "emissor": "Emissor", "cliente_id": "Cliente", "fundo_id": "Fundo",
+    "emissao_id": "Emissão", "empreendimento_id": "Empreendimento",
+}
+
+
+def _commit_amigavel(db: Session, contexto: str = "registro") -> None:
+    """Commita a sessão; se faltar um campo obrigatório (NOT NULL) ou colidir
+    com um valor único já cadastrado, devolve uma mensagem legível em vez do
+    500 cru do Postgres. Sem isso, esquecer um campo marcado com "*" no
+    formulário (ex: Data de Aplicação) trava com um erro sem explicação
+    nenhuma pro usuário."""
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        orig = getattr(e, "orig", None)
+        diag = getattr(orig, "diag", None)
+        coluna = getattr(diag, "column_name", None)
+        if coluna:
+            label = _CAMPO_LABEL.get(coluna, coluna)
+            raise HTTPException(status_code=400, detail=f'O campo "{label}" é obrigatório e não foi preenchido.')
+        constraint = (getattr(diag, "constraint_name", None) or "").lower()
+        if "cpf" in constraint:
+            raise HTTPException(status_code=400, detail="Já existe um cliente cadastrado com esse CPF/CNPJ.")
+        raise HTTPException(status_code=400, detail=f"Não foi possível salvar o {contexto}: valor duplicado ou inválido.")
+
+
 # ─────────────────────────────────────────────────────────────────
 # CLIENTES
 # ─────────────────────────────────────────────────────────────────
@@ -101,11 +134,7 @@ def criar_cliente(data: dict, db: Session = Depends(get_db)):
     data = _normalizar_cpf_vazio(_limpar_numericos_vazios(CarteiraCliente, data))
     cliente = CarteiraCliente(**data)
     db.add(cliente)
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=400, detail="Já existe um cliente cadastrado com esse CPF/CNPJ.")
+    _commit_amigavel(db, "cliente")
     db.refresh(cliente)
 
     try:
@@ -133,11 +162,7 @@ def atualizar_cliente(cliente_id: int, data: dict, db: Session = Depends(get_db)
     for key, value in data.items():
         setattr(cliente, key, value)
 
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=400, detail="Já existe um cliente cadastrado com esse CPF/CNPJ.")
+    _commit_amigavel(db, "cliente")
     db.refresh(cliente)
     return cliente
 
@@ -174,7 +199,7 @@ def criar_emissao(data: dict, db: Session = Depends(get_db)):
     data = _limpar_numericos_vazios(CarteiraDebentureadotEmissao, data)
     emissao = CarteiraDebentureadotEmissao(**data)
     db.add(emissao)
-    db.commit()
+    _commit_amigavel(db, "emissão")
     db.refresh(emissao)
     return emissao
 
@@ -201,7 +226,7 @@ def atualizar_emissao(emissao_id: int, data: dict, db: Session = Depends(get_db)
     data = _limpar_numericos_vazios(CarteiraDebentureadotEmissao, data)
     for key, value in data.items():
         setattr(emissao, key, value)
-    db.commit()
+    _commit_amigavel(db, "emissão")
     db.refresh(emissao)
     return emissao
 
@@ -266,7 +291,7 @@ def criar_debenture(data: dict, db: Session = Depends(get_db)):
     data = _limpar_numericos_vazios(CarteiraDebenturePosicao, data)
     posicao = CarteiraDebenturePosicao(**data)
     db.add(posicao)
-    db.commit()
+    _commit_amigavel(db, "posição de debênture")
     db.refresh(posicao)
     return posicao
 
@@ -296,7 +321,7 @@ def atualizar_debenture(posicao_id: int, data: dict, db: Session = Depends(get_d
         setattr(posicao, key, value)
 
     posicao.data_atualizacao = datetime.now()
-    db.commit()
+    _commit_amigavel(db, "posição de debênture")
     db.refresh(posicao)
     return posicao
 
@@ -334,7 +359,7 @@ def criar_empreendimento(data: dict, db: Session = Depends(get_db)):
     data = _limpar_numericos_vazios(CarteiraImobiliarioEmpreendimento, data)
     empreendimento = CarteiraImobiliarioEmpreendimento(**data)
     db.add(empreendimento)
-    db.commit()
+    _commit_amigavel(db, "empreendimento")
     db.refresh(empreendimento)
     return empreendimento
 
@@ -350,7 +375,7 @@ def atualizar_empreendimento(emp_id: int, data: dict, db: Session = Depends(get_
     data = _limpar_numericos_vazios(CarteiraImobiliarioEmpreendimento, data)
     for key, value in data.items():
         setattr(emp, key, value)
-    db.commit()
+    _commit_amigavel(db, "empreendimento")
     db.refresh(emp)
     return emp
 
@@ -409,7 +434,7 @@ def criar_imobiliario(data: dict, db: Session = Depends(get_db)):
     data = _limpar_numericos_vazios(CarteiraImobiliarioPosicao, data)
     posicao = CarteiraImobiliarioPosicao(**data)
     db.add(posicao)
-    db.commit()
+    _commit_amigavel(db, "posição imobiliária")
     db.refresh(posicao)
     return posicao
 
@@ -439,7 +464,7 @@ def atualizar_imobiliario(posicao_id: int, data: dict, db: Session = Depends(get
         setattr(posicao, key, value)
 
     posicao.data_atualizacao = datetime.now()
-    db.commit()
+    _commit_amigavel(db, "posição imobiliária")
     db.refresh(posicao)
     return posicao
 
@@ -479,7 +504,7 @@ def atualizar_fundo_referencia(fundo_id: int, data: dict, db: Session = Depends(
     data = _limpar_numericos_vazios(CarteiraFundoReferencia, data)
     for key, value in data.items():
         setattr(fundo, key, value)
-    db.commit()
+    _commit_amigavel(db, "fundo de referência")
     db.refresh(fundo)
     return fundo
 
@@ -490,7 +515,7 @@ def criar_fundo_referencia(data: dict, db: Session = Depends(get_db)):
     data = _limpar_numericos_vazios(CarteiraFundoReferencia, data)
     fundo = CarteiraFundoReferencia(**data)
     db.add(fundo)
-    db.commit()
+    _commit_amigavel(db, "fundo de referência")
     db.refresh(fundo)
     return fundo
 
@@ -552,7 +577,7 @@ def criar_fundo(data: dict, db: Session = Depends(get_db)):
     data = _limpar_numericos_vazios(CarteiraFundoPosicao, data)
     posicao = CarteiraFundoPosicao(**data)
     db.add(posicao)
-    db.commit()
+    _commit_amigavel(db, "posição em fundo")
     db.refresh(posicao)
     return posicao
 
@@ -582,7 +607,7 @@ def atualizar_fundo(posicao_id: int, data: dict, db: Session = Depends(get_db)):
         setattr(posicao, key, value)
 
     posicao.data_atualizacao = datetime.now()
-    db.commit()
+    _commit_amigavel(db, "posição em fundo")
     db.refresh(posicao)
     return posicao
 
@@ -633,7 +658,7 @@ def criar_estrategia(data: dict, db: Session = Depends(get_db)):
     data = _limpar_numericos_vazios(CarteiraEstrategia, data)
     estrategia = CarteiraEstrategia(**data)
     db.add(estrategia)
-    db.commit()
+    _commit_amigavel(db, "estratégia")
     db.refresh(estrategia)
     return estrategia
 
@@ -647,7 +672,7 @@ def atualizar_estrategia(estrategia_id: int, data: dict, db: Session = Depends(g
     data = _limpar_numericos_vazios(CarteiraEstrategia, data)
     for key, value in data.items():
         setattr(estrategia, key, value)
-    db.commit()
+    _commit_amigavel(db, "estratégia")
     db.refresh(estrategia)
     return estrategia
 

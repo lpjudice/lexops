@@ -1192,10 +1192,13 @@ export default function CarteiraPage() {
                 {label} · {brl(total)}
               </div>
             )
-            const clienteRow = (clienteId: number, valor: number) => (
+            const clienteRow = (clienteId: number, valor: number, onEdit?: () => void, onDelete?: () => void, deleteLabel?: string) => (
               <div key={clienteId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 10px', background: 'var(--gray-light, #f3f4f6)', borderRadius: 4, marginBottom: 3 }}>
                 <span style={{ fontSize: 12 }}>{clienteNome(clienteId)}</span>
-                <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{brl(valor)}</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{brl(valor)}</span>
+                  {onEdit && onDelete && rowActions(onEdit, deleteLabel ?? 'este registro', onDelete)}
+                </span>
               </div>
             )
             return (
@@ -1227,7 +1230,7 @@ export default function CarteiraPage() {
                             <span className={cs.clientePosicaoTotal}>{brl(total)} · {debs.length} posições</span>
                           </div>
                           <div style={{ padding: '6px 0 4px' }}>
-                            {debs.map((d: any) => clienteRow(d.cliente_id, d.valor_aplicado ?? 0))}
+                            {debs.map((d: any) => clienteRow(d.cliente_id, d.valor_aplicado ?? 0, () => abrirEdicaoDeb(d), () => deletarDebPos.mutate(d.id), `a debênture ${d.numero_cautela ?? ''}`))}
                           </div>
                         </div>
                       )
@@ -1252,7 +1255,7 @@ export default function CarteiraPage() {
                             <span className={cs.clientePosicaoTotal}>{brl(total)} · {imobs.length} posições</span>
                           </div>
                           <div style={{ padding: '6px 0 4px' }}>
-                            {imobs.map((i: any) => clienteRow(i.cliente_id, i.valor_total_compromissado ?? 0))}
+                            {imobs.map((i: any) => clienteRow(i.cliente_id, i.valor_total_compromissado ?? 0, () => abrirEdicaoImob(i), () => deletarImobPos.mutate(i.id), 'esta posição imobiliária'))}
                           </div>
                         </div>
                       )
@@ -1285,7 +1288,7 @@ export default function CarteiraPage() {
                             </span>
                           </div>
                           <div style={{ padding: '6px 0 4px' }}>
-                            {fnds.map((f: any) => clienteRow(f.cliente_id, f.valor_aplicado ?? 0))}
+                            {fnds.map((f: any) => clienteRow(f.cliente_id, f.valor_aplicado ?? 0, () => abrirEdicaoFundo(f), () => deletarFundoPos.mutate(f.id), 'esta posição em fundo'))}
                           </div>
                         </div>
                       )
@@ -1328,7 +1331,10 @@ export default function CarteiraPage() {
                     {debs.map((d: any) => (
                       <div key={d.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 10px', background: 'var(--gray-light, #f3f4f6)', borderRadius: 4, marginBottom: 3 }}>
                         <span style={{ fontSize: 12 }}>{clienteNome(d.cliente_id)}</span>
-                        <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{brl(d.valor_aplicado ?? 0)}</span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{brl(d.valor_aplicado ?? 0)}</span>
+                          {rowActions(() => abrirEdicaoDeb(d), `a debênture ${d.numero_cautela ?? ''}`, () => deletarDebPos.mutate(d.id))}
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -1406,7 +1412,10 @@ export default function CarteiraPage() {
                     {imobs.map((i: any) => (
                       <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 10px', background: 'var(--gray-light, #f3f4f6)', borderRadius: 4, marginBottom: 3 }}>
                         <span style={{ fontSize: 12 }}>{clienteNome(i.cliente_id)}</span>
-                        <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{brl(i.valor_total_compromissado ?? 0)}</span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{brl(i.valor_total_compromissado ?? 0)}</span>
+                          {rowActions(() => abrirEdicaoImob(i), 'esta posição imobiliária', () => deletarImobPos.mutate(i.id))}
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -1483,7 +1492,10 @@ export default function CarteiraPage() {
                     {fnds.map((f: any) => (
                       <div key={f.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 10px', background: 'var(--gray-light, #f3f4f6)', borderRadius: 4, marginBottom: 3 }}>
                         <span style={{ fontSize: 12 }}>{clienteNome(f.cliente_id)}</span>
-                        <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{brl(f.valor_aplicado ?? 0)}</span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{brl(f.valor_aplicado ?? 0)}</span>
+                          {rowActions(() => abrirEdicaoFundo(f), 'esta posição em fundo', () => deletarFundoPos.mutate(f.id))}
+                        </span>
                       </div>
                     ))}
                   </div>
