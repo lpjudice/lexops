@@ -46,6 +46,14 @@ function maskCPFCNPJ(v: string): string {
     .replace(/(\d{4})(\d{1,2})$/, '$1-$2')
 }
 
+// O ClickSign rejeita (422 "utilize nome e sobrenome") qualquer signatário
+// cadastrado com uma palavra só — comum quando se digita manualmente às pressas
+// em vez de puxar de um cliente já cadastrado. Barra isso aqui pra não descobrir
+// só depois de clicar "Enviar para assinatura".
+function nomeCompletoValido(nome: string): boolean {
+  return nome.trim().split(/\s+/).filter(Boolean).length >= 2
+}
+
 function isoToPortugues(iso: string): string {
   if (!iso) return ''
   const meses = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro']
@@ -1292,7 +1300,7 @@ export default function ContratosPage() {
 
                       {c.status === 'rascunho' && (
                         <div className={cs.sigForm}>
-                          <input className={styles.input} placeholder="Nome"
+                          <input className={styles.input} placeholder="Nome completo (nome e sobrenome)"
                             value={sf.nome}
                             onChange={(e) => setSigForms({ ...sigForms, [c.id]: { ...sf, nome: e.target.value } })} />
                           <input className={styles.input} placeholder="Email" type="email"
@@ -1309,13 +1317,19 @@ export default function ContratosPage() {
                             value={sf.data_nascimento ?? ''}
                             onChange={(e) => setSigForms({ ...sigForms, [c.id]: { ...sf, data_nascimento: e.target.value } })} />
                           <button className={styles.btnPrimary}
-                            disabled={!sf.nome || !sf.email}
+                            disabled={!sf.nome || !sf.email || !nomeCompletoValido(sf.nome)}
+                            title={sf.nome && !nomeCompletoValido(sf.nome) ? 'O ClickSign exige nome e sobrenome — só um nome não é aceito' : undefined}
                             onClick={() => adicionarSig.mutate({
                               id: c.id,
                               data: { ...sf, cpf: sf.cpf?.trim() || undefined, data_nascimento: sf.data_nascimento?.trim() || undefined },
                             })}>
                             + Adicionar
                           </button>
+                          {sf.nome && !nomeCompletoValido(sf.nome) && (
+                            <span style={{ fontSize: 11, color: '#b91c1c' }}>
+                              ⚠ Digite nome e sobrenome — o ClickSign recusa só um nome
+                            </span>
+                          )}
                         </div>
                       )}
                     </div>
