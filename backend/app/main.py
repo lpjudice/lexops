@@ -1538,6 +1538,34 @@ def _run_migrations() -> None:
         ]:
             conn.execute(text(_col))
 
+        # Auditoria (quem registrou/alterou + quando) em todas as tabelas da Carteira —
+        # criado_por/atualizado_por (nome do usuário autenticado) + data_atualizacao onde
+        # ainda não existia. Sem tabela de log separada: fica embutido no próprio registro.
+        for _col in [
+            "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS data_atualizacao TIMESTAMP",
+            "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS criado_por VARCHAR(150)",
+            "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS atualizado_por VARCHAR(150)",
+            "ALTER TABLE carteira_debenture_emissao ADD COLUMN IF NOT EXISTS data_atualizacao TIMESTAMP",
+            "ALTER TABLE carteira_debenture_emissao ADD COLUMN IF NOT EXISTS criado_por VARCHAR(150)",
+            "ALTER TABLE carteira_debenture_emissao ADD COLUMN IF NOT EXISTS atualizado_por VARCHAR(150)",
+            "ALTER TABLE carteira_debenture_posicao ADD COLUMN IF NOT EXISTS criado_por VARCHAR(150)",
+            "ALTER TABLE carteira_debenture_posicao ADD COLUMN IF NOT EXISTS atualizado_por VARCHAR(150)",
+            "ALTER TABLE carteira_imobiliario_empreendimento ADD COLUMN IF NOT EXISTS data_atualizacao TIMESTAMP",
+            "ALTER TABLE carteira_imobiliario_empreendimento ADD COLUMN IF NOT EXISTS criado_por VARCHAR(150)",
+            "ALTER TABLE carteira_imobiliario_empreendimento ADD COLUMN IF NOT EXISTS atualizado_por VARCHAR(150)",
+            "ALTER TABLE carteira_imobiliario_posicao ADD COLUMN IF NOT EXISTS criado_por VARCHAR(150)",
+            "ALTER TABLE carteira_imobiliario_posicao ADD COLUMN IF NOT EXISTS atualizado_por VARCHAR(150)",
+            "ALTER TABLE carteira_fundo_referencia ADD COLUMN IF NOT EXISTS data_atualizacao TIMESTAMP",
+            "ALTER TABLE carteira_fundo_referencia ADD COLUMN IF NOT EXISTS criado_por VARCHAR(150)",
+            "ALTER TABLE carteira_fundo_referencia ADD COLUMN IF NOT EXISTS atualizado_por VARCHAR(150)",
+            "ALTER TABLE carteira_fundo_posicao ADD COLUMN IF NOT EXISTS criado_por VARCHAR(150)",
+            "ALTER TABLE carteira_fundo_posicao ADD COLUMN IF NOT EXISTS atualizado_por VARCHAR(150)",
+            "ALTER TABLE carteira_estrategia ADD COLUMN IF NOT EXISTS data_atualizacao TIMESTAMP",
+            "ALTER TABLE carteira_estrategia ADD COLUMN IF NOT EXISTS criado_por VARCHAR(150)",
+            "ALTER TABLE carteira_estrategia ADD COLUMN IF NOT EXISTS atualizado_por VARCHAR(150)",
+        ]:
+            conn.execute(text(_col))
+
         conn.commit()
 
 

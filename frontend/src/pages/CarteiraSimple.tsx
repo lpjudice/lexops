@@ -596,10 +596,16 @@ export default function CarteiraPage() {
   // ── Mutations ─────────────────────────────────────────────────────
   // exito_split é um toggle só de UI (decide mostrar % geral ou % dividido),
   // não existe como coluna no backend — nunca deve ir no payload.
+  // Campos de auditoria (criado_por/atualizado_por/data_*) são geridos pelo
+  // servidor — abrirEdicaoX espalha o registro inteiro em form, então sem
+  // isso eles viajariam de volta no payload com o valor ANTIGO e o
+  // onupdate do SQLAlchemy ficaria "congelado" no valor que o cliente mandou.
+  const CAMPOS_AUDITORIA = ['criado_por', 'atualizado_por', 'data_criacao', 'data_atualizacao', 'data_cadastro']
+  const limparPayload = (p: any) => { delete p.exito_split; CAMPOS_AUDITORIA.forEach(k => delete p[k]) }
   const mk = (url: string, keys: string[], numFields: string[] = []) => useMutation({
     mutationFn: () => {
       const p: any = { ...form }
-      delete p.exito_split
+      limparPayload(p)
       numFields.forEach(k => { if (p[k] === '') p[k] = null; else if (p[k] !== undefined) p[k] = Number(p[k]) })
       return api.post(url, p).then(r => r.data)
     },
@@ -609,7 +615,7 @@ export default function CarteiraPage() {
   const mkPut = (urlFn: () => string, keys: string[], numFields: string[] = []) => useMutation({
     mutationFn: () => {
       const p: any = { ...form }
-      delete p.exito_split
+      limparPayload(p)
       numFields.forEach(k => { if (p[k] === '') p[k] = null; else if (p[k] !== undefined) p[k] = Number(p[k]) })
       return api.put(urlFn(), p).then(r => r.data)
     },
@@ -806,6 +812,8 @@ export default function CarteiraPage() {
       percentual_sucesso_imob: c.percentual_sucesso_imob ?? '', percentual_sucesso_fin: c.percentual_sucesso_fin ?? '',
       exito_split: !!(c.percentual_sucesso_imob || c.percentual_sucesso_fin),
       cliente_uuid: c.cliente_uuid ?? '', observacoes: c.observacoes ?? '', ativo: c.ativo ?? true,
+      criado_por: c.criado_por, atualizado_por: c.atualizado_por,
+      data_criacao: c.data_cadastro, data_atualizacao: c.data_atualizacao,
     })
     setEditandoClienteId(c.id); setModal('cliente')
   }
@@ -814,7 +822,9 @@ export default function CarteiraPage() {
       prestadora_cnpj: e.prestadora_cnpj ?? '', nome_razao_social: e.nome_razao_social ?? '',
       cnpj_empreendimento: e.cnpj_empreendimento ?? '', spe_nome: e.spe_nome ?? '', spe_cnpj: e.spe_cnpj ?? '',
       subveiculos: e.subveiculos ?? [], tipo_desenvolvimento: e.tipo_desenvolvimento ?? '',
-      localizacao: e.localizacao ?? '', descricao: e.descricao ?? '', ativo: e.ativo })
+      localizacao: e.localizacao ?? '', descricao: e.descricao ?? '', ativo: e.ativo,
+      criado_por: e.criado_por, atualizado_por: e.atualizado_por,
+      data_criacao: e.data_criacao, data_atualizacao: e.data_atualizacao })
     setEditandoEmpId(e.id); setModal('empreendimento')
   }
   const pctExitoFin = (clienteId: number) => {
@@ -968,8 +978,33 @@ export default function CarteiraPage() {
       onClick={() => { if (window.confirm(`Excluir ${label}? Essa ação não pode ser desfeita.`)) onConfirm() }}
     >✕</button>
   )
-  const rowActions = (editOnClick: () => void, deleteLabel: string, onDelete: () => void) => (
+  // Auditoria (quem registrou/alterou + quando) — sem coluna nova na tabela,
+  // só um ícone discreto com tooltip ao lado de Editar/Excluir.
+  const fmtDataHora = (iso?: string | null) => {
+    if (!iso) return null
+    const d = new Date(iso)
+    if (isNaN(d.getTime())) return null
+    return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+  }
+  const auditoriaTexto = (rec: any) => {
+    if (!rec) return ''
+    const partes: string[] = []
+    const criadoEm = fmtDataHora(rec.data_criacao ?? rec.data_cadastro)
+    if (rec.criado_por || criadoEm) partes.push(`Criado por ${rec.criado_por ?? '—'}${criadoEm ? ` em ${criadoEm}` : ''}`)
+    const atualEm = fmtDataHora(rec.data_atualizacao)
+    if (rec.atualizado_por || atualEm) partes.push(`Última alteração por ${rec.atualizado_por ?? '—'}${atualEm ? ` em ${atualEm}` : ''}`)
+    return partes.join(' · ') || 'Sem informação de auditoria'
+  }
+  const auditIcon = (rec: any) => (
+    <span title={auditoriaTexto(rec)} style={{ fontSize: 11, color: 'var(--gray-mid)', cursor: 'help', padding: '0 2px', lineHeight: 1 }}>ℹ</span>
+  )
+  const auditCaption = (editing: boolean) => {
+    if (!editing || (!form.criado_por && !form.atualizado_por)) return null
+    return <div style={{ fontSize: 10, color: 'var(--gray-mid)', margin: '8px 0 4px', lineHeight: 1.4 }}>{auditoriaTexto(form)}</div>
+  }
+  const rowActions = (editOnClick: () => void, deleteLabel: string, onDelete: () => void, rec?: any) => (
     <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'nowrap' }}>
+      {rec && auditIcon(rec)}
       {editBtn(editOnClick)}
       {deleteBtnOnly(deleteLabel, onDelete)}
     </div>
@@ -1179,7 +1214,7 @@ export default function CarteiraPage() {
                               <td><EstrategiaChips ids={d.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratDeb.mutate({ id: d.id, ids })} /></td>
                               <td style={{ whiteSpace: 'nowrap' }}>
                                 <button title="Detalhes" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#6b7280', padding: '0 3px' }} onClick={() => setDebInfoId(d.id)}>ⓘ</button>
-                                {rowActions(() => abrirEdicaoDeb(d), `a debênture ${d.numero_cautela ?? ''}`, () => deletarDebPos.mutate(d.id))}
+                                {rowActions(() => abrirEdicaoDeb(d), `a debênture ${d.numero_cautela ?? ''}`, () => deletarDebPos.mutate(d.id), d)}
                               </td>
                             </tr>
                           ))}
@@ -1210,7 +1245,7 @@ export default function CarteiraPage() {
                               <td>{pct(i.percentual_participacao)}</td>
                               <td>{isSuperAdmin ? (() => { if (!i.faz_parte_honorarios) return '—'; const ep = efetivoPctImob(i); return ep.val !== '' ? (ep.custom ? <span title="Personalizado p/ esta posição" style={{ color: '#d97706', fontWeight: 600 }}>{pct(ep.val)}*</span> : pct(ep.val)) : '—' })() : '🔒'}</td>
                               <td><EstrategiaChips ids={i.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratImob.mutate({ id: i.id, ids })} /></td>
-                              <td>{rowActions(() => abrirEdicaoImob(i), 'esta posição imobiliária', () => deletarImobPos.mutate(i.id))}</td>
+                              <td>{rowActions(() => abrirEdicaoImob(i), 'esta posição imobiliária', () => deletarImobPos.mutate(i.id), i)}</td>
                             </tr>
                           ))}
                           <tr style={{ background: 'var(--gray-light, #f8f9fa)', fontWeight: 600 }}>
@@ -1240,7 +1275,7 @@ export default function CarteiraPage() {
                               <td>{f.tem_direito_recompra ? <span className={`${styles.badge} ${styles.status_suspenso}`}>Sim</span> : '—'}</td>
                               <td>{isSuperAdmin ? (() => { if (!f.faz_parte_honorarios) return '—'; const ep = efetivoPctFin(f); return ep.val !== '' ? (ep.custom ? <span title="Personalizado p/ esta posição" style={{ color: '#d97706', fontWeight: 600 }}>{pct(ep.val)}*</span> : pct(ep.val)) : '—' })() : '🔒'}</td>
                               <td><EstrategiaChips ids={f.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratFundo.mutate({ id: f.id, ids })} /></td>
-                              <td>{rowActions(() => abrirEdicaoFundo(f), 'esta posição em fundo', () => deletarFundoPos.mutate(f.id))}</td>
+                              <td>{rowActions(() => abrirEdicaoFundo(f), 'esta posição em fundo', () => deletarFundoPos.mutate(f.id), f)}</td>
                             </tr>
                           ))}
                           <tr style={{ background: 'var(--gray-light, #f8f9fa)', fontWeight: 600 }}>
@@ -1266,12 +1301,12 @@ export default function CarteiraPage() {
                 {label} · {brl(total)}
               </div>
             )
-            const clienteRow = (clienteId: number, valor: number, onEdit?: () => void, onDelete?: () => void, deleteLabel?: string) => (
+            const clienteRow = (clienteId: number, valor: number, onEdit?: () => void, onDelete?: () => void, deleteLabel?: string, rec?: any) => (
               <div key={clienteId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 10px', background: 'var(--gray-light, #f3f4f6)', borderRadius: 4, marginBottom: 3 }}>
                 <span style={{ fontSize: 12 }}>{clienteNome(clienteId)}</span>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{brl(valor)}</span>
-                  {onEdit && onDelete && rowActions(onEdit, deleteLabel ?? 'este registro', onDelete)}
+                  {onEdit && onDelete && rowActions(onEdit, deleteLabel ?? 'este registro', onDelete, rec)}
                 </span>
               </div>
             )
@@ -1304,7 +1339,7 @@ export default function CarteiraPage() {
                             <span className={cs.clientePosicaoTotal}>{brl(total)} · {debs.length} posições</span>
                           </div>
                           <div style={{ padding: '6px 0 4px' }}>
-                            {debs.map((d: any) => clienteRow(d.cliente_id, d.valor_aplicado ?? 0, () => abrirEdicaoDeb(d), () => deletarDebPos.mutate(d.id), `a debênture ${d.numero_cautela ?? ''}`))}
+                            {debs.map((d: any) => clienteRow(d.cliente_id, d.valor_aplicado ?? 0, () => abrirEdicaoDeb(d), () => deletarDebPos.mutate(d.id), `a debênture ${d.numero_cautela ?? ''}`, d))}
                           </div>
                         </div>
                       )
@@ -1329,7 +1364,7 @@ export default function CarteiraPage() {
                             <span className={cs.clientePosicaoTotal}>{brl(total)} · {imobs.length} posições</span>
                           </div>
                           <div style={{ padding: '6px 0 4px' }}>
-                            {imobs.map((i: any) => clienteRow(i.cliente_id, i.valor_total_compromissado ?? 0, () => abrirEdicaoImob(i), () => deletarImobPos.mutate(i.id), 'esta posição imobiliária'))}
+                            {imobs.map((i: any) => clienteRow(i.cliente_id, i.valor_total_compromissado ?? 0, () => abrirEdicaoImob(i), () => deletarImobPos.mutate(i.id), 'esta posição imobiliária', i))}
                           </div>
                         </div>
                       )
@@ -1362,7 +1397,7 @@ export default function CarteiraPage() {
                             </span>
                           </div>
                           <div style={{ padding: '6px 0 4px' }}>
-                            {fnds.map((f: any) => clienteRow(f.cliente_id, f.valor_aplicado ?? 0, () => abrirEdicaoFundo(f), () => deletarFundoPos.mutate(f.id), 'esta posição em fundo'))}
+                            {fnds.map((f: any) => clienteRow(f.cliente_id, f.valor_aplicado ?? 0, () => abrirEdicaoFundo(f), () => deletarFundoPos.mutate(f.id), 'esta posição em fundo', f))}
                           </div>
                         </div>
                       )
@@ -1407,7 +1442,7 @@ export default function CarteiraPage() {
                         <span style={{ fontSize: 12 }}>{clienteNome(d.cliente_id)}</span>
                         <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{brl(d.valor_aplicado ?? 0)}</span>
-                          {rowActions(() => abrirEdicaoDeb(d), `a debênture ${d.numero_cautela ?? ''}`, () => deletarDebPos.mutate(d.id))}
+                          {rowActions(() => abrirEdicaoDeb(d), `a debênture ${d.numero_cautela ?? ''}`, () => deletarDebPos.mutate(d.id), d)}
                         </span>
                       </div>
                     ))}
@@ -1437,7 +1472,7 @@ export default function CarteiraPage() {
                       <td><EstrategiaChips ids={d.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratDeb.mutate({ id: d.id, ids })} /></td>
                       <td style={{ whiteSpace: 'nowrap' }}>
                         <button title="Detalhes" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#6b7280', padding: '0 3px' }} onClick={() => setDebInfoId(d.id)}>ⓘ</button>
-                        {rowActions(() => abrirEdicaoDeb(d), `a debênture ${d.numero_cautela ?? ''}`, () => deletarDebPos.mutate(d.id))}
+                        {rowActions(() => abrirEdicaoDeb(d), `a debênture ${d.numero_cautela ?? ''}`, () => deletarDebPos.mutate(d.id), d)}
                       </td>
                     </tr>
                   ))}
@@ -1488,7 +1523,7 @@ export default function CarteiraPage() {
                         <span style={{ fontSize: 12 }}>{clienteNome(i.cliente_id)}</span>
                         <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{brl(i.valor_total_compromissado ?? 0)}</span>
-                          {rowActions(() => abrirEdicaoImob(i), 'esta posição imobiliária', () => deletarImobPos.mutate(i.id))}
+                          {rowActions(() => abrirEdicaoImob(i), 'esta posição imobiliária', () => deletarImobPos.mutate(i.id), i)}
                         </span>
                       </div>
                     ))}
@@ -1515,7 +1550,7 @@ export default function CarteiraPage() {
                       <td>{pct(i.percentual_participacao)}</td>
                       <td>{isSuperAdmin ? (i.faz_parte_honorarios ? pct(i.percentual_sucesso_honorario) : '—') : '🔒'}</td>
                       <td><EstrategiaChips ids={i.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratImob.mutate({ id: i.id, ids })} /></td>
-                      <td>{rowActions(() => abrirEdicaoImob(i), 'esta posição imobiliária', () => deletarImobPos.mutate(i.id))}</td>
+                      <td>{rowActions(() => abrirEdicaoImob(i), 'esta posição imobiliária', () => deletarImobPos.mutate(i.id), i)}</td>
                     </tr>
                   ))}
                   <tr style={{ background: 'var(--gray-light, #f8f9fa)', fontWeight: 600 }}>
@@ -1568,7 +1603,7 @@ export default function CarteiraPage() {
                         <span style={{ fontSize: 12 }}>{clienteNome(f.cliente_id)}</span>
                         <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{brl(f.valor_aplicado ?? 0)}</span>
-                          {rowActions(() => abrirEdicaoFundo(f), 'esta posição em fundo', () => deletarFundoPos.mutate(f.id))}
+                          {rowActions(() => abrirEdicaoFundo(f), 'esta posição em fundo', () => deletarFundoPos.mutate(f.id), f)}
                         </span>
                       </div>
                     ))}
@@ -1604,7 +1639,7 @@ export default function CarteiraPage() {
                       <td>{f.tem_direito_recompra ? <span className={`${styles.badge} ${styles.status_suspenso}`}>Sim</span> : '—'}</td>
                       <td>{isSuperAdmin ? (() => { if (!f.faz_parte_honorarios) return '—'; const ep = efetivoPctFin(f); return ep.val !== '' ? (ep.custom ? <span title="Personalizado p/ esta posição" style={{ color: '#d97706', fontWeight: 600 }}>{pct(ep.val)}*</span> : pct(ep.val)) : '—' })() : '🔒'}</td>
                       <td><EstrategiaChips ids={f.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratFundo.mutate({ id: f.id, ids })} /></td>
-                      <td>{rowActions(() => abrirEdicaoFundo(f), 'esta posição em fundo', () => deletarFundoPos.mutate(f.id))}</td>
+                      <td>{rowActions(() => abrirEdicaoFundo(f), 'esta posição em fundo', () => deletarFundoPos.mutate(f.id), f)}</td>
                     </tr>
                   ))}
                   <tr style={{ background: 'var(--gray-light, #f8f9fa)', fontWeight: 600 }}>
@@ -1660,7 +1695,7 @@ export default function CarteiraPage() {
                             onClick={() => { setDriveClienteId(c.id); setDriveCandidatos(null); if (c.folder_drive_principal_id) carregarArquivosDrive(c.id) }}
                           >📁</button>
                         </td>
-                        <td>{rowActions(() => abrirEdicaoCliente(c), `o cliente ${c.nome ?? ''}`, () => deletarCliente.mutate(c.id))}</td>
+                        <td>{rowActions(() => abrirEdicaoCliente(c), `o cliente ${c.nome ?? ''}`, () => deletarCliente.mutate(c.id), c)}</td>
                       </tr>
                     )
                   })}
@@ -1684,7 +1719,7 @@ export default function CarteiraPage() {
                     <tr key={e.id}><td><strong>{e.nome_serie}</strong></td><td>{e.numero_emissao}ª</td>
                       <td>{e.emissor}</td><td>{e.indexador}{e.taxa_adicional ? ` + ${e.taxa_adicional}` : ''}</td>
                       <td>{e.data_vencimento_previsto ?? '—'}</td><td>{statusBadge(e.ativo)}</td>
-                      <td>{rowActions(() => abrirEdicaoEmissao(e), `a emissão ${e.nome_serie ?? ''}`, () => deletarEmissao.mutate(e.id))}</td>
+                      <td>{rowActions(() => abrirEdicaoEmissao(e), `a emissão ${e.nome_serie ?? ''}`, () => deletarEmissao.mutate(e.id), e)}</td>
                     </tr>
                   ))}
               </tbody>
@@ -1719,7 +1754,7 @@ export default function CarteiraPage() {
                           <button title="Cadeia Societária" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: '#6366f1', padding: '0 4px' }}
                             onClick={() => setCadeiaEmpId(e.id)}>⬡</button>
                         </td>
-                        <td>{rowActions(() => abrirEdicaoEmp(e), `o empreendimento ${e.nome_venda ?? ''}`, () => deletarEmp.mutate(e.id))}</td>
+                        <td>{rowActions(() => abrirEdicaoEmp(e), `o empreendimento ${e.nome_venda ?? ''}`, () => deletarEmp.mutate(e.id), e)}</td>
                       </tr>
                     )
                   })}
@@ -1751,7 +1786,7 @@ export default function CarteiraPage() {
                       <td>{f.gestora ?? '—'}</td>
                       <td>{f.tipo_fundo ?? '—'}</td>
                       <td>{statusBadge(f.ativo)}</td>
-                      <td>{rowActions(() => abrirEdicaoFundoRef(f), `o fundo ${f.nome_fundo ?? ''}`, () => deletarFundoRef.mutate(f.id))}</td>
+                      <td>{rowActions(() => abrirEdicaoFundoRef(f), `o fundo ${f.nome_fundo ?? ''}`, () => deletarFundoRef.mutate(f.id), f)}</td>
                     </tr>
                   ))}
               </tbody>
@@ -1776,7 +1811,7 @@ export default function CarteiraPage() {
                       <td style={{ fontSize: 12, color: '#6b7280' }}>{e.nome_chip ?? '—'}</td>
                       <td style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.descricao ?? '—'}</td>
                       <td>{e.usuarios_count ?? 0}</td><td>{statusBadge(e.ativo)}</td>
-                      <td>{rowActions(() => abrirEdicaoEstrategia(e), `a estratégia ${e.nome ?? ''}`, () => deletarEstrategia.mutate(e.id))}</td>
+                      <td>{rowActions(() => abrirEdicaoEstrategia(e), `a estratégia ${e.nome ?? ''}`, () => deletarEstrategia.mutate(e.id), e)}</td>
                     </tr>
                   ))}
               </tbody>
@@ -1877,6 +1912,7 @@ export default function CarteiraPage() {
               </select>
             ))}
           </div>
+          {auditCaption(!!editandoClienteId)}
           <button className={styles.btnPrimary} onClick={() => editandoClienteId ? atualizarCliente.mutate() : salvarCliente.mutate()} disabled={salvarCliente.isPending || atualizarCliente.isPending}>
             {(salvarCliente.isPending || atualizarCliente.isPending) ? 'Salvando...' : 'Salvar'}
           </button>
@@ -1924,6 +1960,7 @@ export default function CarteiraPage() {
           {fl('Tipo desenvolvimento', fi('tipo_desenvolvimento'))}
           {fl('Localização', fi('localizacao'))}
           {fl('Descrição', fta('descricao', 2))}
+          {auditCaption(!!editandoEmpId)}
           <button className={styles.btnPrimary} onClick={() => editandoEmpId ? atualizarEmpreendimento.mutate() : salvarEmpreendimento.mutate()} disabled={salvarEmpreendimento.isPending || atualizarEmpreendimento.isPending}>
             {(salvarEmpreendimento.isPending || atualizarEmpreendimento.isPending) ? 'Salvando...' : 'Salvar'}
           </button>
@@ -2014,6 +2051,7 @@ export default function CarteiraPage() {
                 <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Garantias</div>
                 {fl('Tipos de garantia', fta('tipos_garantia', 2))}
               </div>
+              {auditCaption(!!editandoEmissaoId)}
               <button className={styles.btnPrimary} onClick={() => editandoEmissaoId ? atualizarEmissao.mutate() : salvarEmissao.mutate()} disabled={salvarEmissao.isPending || atualizarEmissao.isPending}>{(salvarEmissao.isPending || atualizarEmissao.isPending) ? 'Salvando...' : 'Salvar'}</button>
             </>
           )}
@@ -2096,6 +2134,7 @@ export default function CarteiraPage() {
               {form.faz_parte_honorarios && fl('% Êxito', fi('percentual_sucesso_honor', 'number'))}
             </div>
           )}
+          {auditCaption(!!editandoDebId)}
           <button className={styles.btnPrimary} onClick={() => editandoDebId ? salvarComConfirmPct('deb', () => atualizarDebenture.mutate()) : salvarDebenture.mutate()} disabled={salvarDebenture.isPending || atualizarDebenture.isPending}>
             {(salvarDebenture.isPending || atualizarDebenture.isPending) ? 'Salvando...' : 'Salvar'}
           </button>
@@ -2123,6 +2162,7 @@ export default function CarteiraPage() {
             </label>
           </div>
           {form.faz_parte_honorarios && fl('% Êxito', fi('percentual_sucesso_honorario', 'number'))}
+          {auditCaption(!!editandoImobId)}
           <button className={styles.btnPrimary} onClick={() => editandoImobId ? salvarComConfirmPct('imob', () => atualizarImobiliario.mutate()) : salvarImobiliario.mutate()} disabled={salvarImobiliario.isPending || atualizarImobiliario.isPending}>
             {(salvarImobiliario.isPending || atualizarImobiliario.isPending) ? 'Salvando...' : 'Salvar'}
           </button>
@@ -2147,6 +2187,7 @@ export default function CarteiraPage() {
               Percentual de perda estimada. Ex: 70 → 70% perdido, 30% recuperável. Usado no cálculo de expectativa futura.
             </div>
           </div>)}
+          {auditCaption(!!editandoFundoRefId)}
           <button className={styles.btnPrimary} onClick={() => editandoFundoRefId ? atualizarFundoRef.mutate() : salvarFundoRef.mutate()} disabled={salvarFundoRef.isPending || atualizarFundoRef.isPending}>{(salvarFundoRef.isPending || atualizarFundoRef.isPending) ? 'Salvando...' : 'Salvar'}</button>
         </Modal>
       )}
@@ -2178,6 +2219,7 @@ export default function CarteiraPage() {
             </label>
           </div>
           {form.tem_direito_recompra && fl('Data vencimento recompra', fi('data_vencimento_recompra', 'date'))}
+          {auditCaption(!!editandoFundoId)}
           <button className={styles.btnPrimary} onClick={() => editandoFundoId ? salvarComConfirmPct('fundo', () => atualizarFundo.mutate()) : salvarFundo.mutate()} disabled={salvarFundo.isPending || atualizarFundo.isPending}>
             {(salvarFundo.isPending || atualizarFundo.isPending) ? 'Salvando...' : 'Salvar'}
           </button>
@@ -2190,6 +2232,7 @@ export default function CarteiraPage() {
           {fl('Nome *', fi('nome', 'text', 'Ex: Conservadora, ABM-PARSE'))}
           {fl('Nome do chip (3-4 palavras)', fi('nome_chip', 'text', 'Ex: Cons. Capital'))}
           {fl('Descrição', fta('descricao', 4))}
+          {auditCaption(!!editandoEstrategiaId)}
           <button className={styles.btnPrimary} onClick={() => editandoEstrategiaId ? atualizarEstrategia.mutate() : salvarEstrategia.mutate()} disabled={salvarEstrategia.isPending || atualizarEstrategia.isPending}>{(salvarEstrategia.isPending || atualizarEstrategia.isPending) ? 'Salvando...' : 'Salvar'}</button>
         </Modal>
       )}
