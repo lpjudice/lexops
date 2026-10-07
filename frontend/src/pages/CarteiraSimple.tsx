@@ -996,7 +996,11 @@ export default function CarteiraPage() {
     return partes.join(' · ') || 'Sem informação de auditoria'
   }
   const auditIcon = (rec: any) => (
-    <span title={auditoriaTexto(rec)} style={{ fontSize: 11, color: 'var(--gray-mid)', cursor: 'help', padding: '0 2px', lineHeight: 1 }}>ℹ</span>
+    <span
+      title={auditoriaTexto(rec)}
+      style={{ fontSize: 11, color: 'var(--gray-mid)', cursor: 'pointer', padding: '0 2px', lineHeight: 1 }}
+      onClick={() => alert(auditoriaTexto(rec))}
+    >ℹ</span>
   )
   const auditCaption = (editing: boolean) => {
     if (!editing || (!form.criado_por && !form.atualizado_por)) return null
