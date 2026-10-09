@@ -988,12 +988,27 @@ export default function CarteiraPage() {
   }
   const auditoriaTexto = (rec: any) => {
     if (!rec) return ''
-    const partes: string[] = []
     const criadoEm = fmtDataHora(rec.data_criacao ?? rec.data_cadastro)
-    if (rec.criado_por || criadoEm) partes.push(`Criado por ${rec.criado_por ?? '—'}${criadoEm ? ` em ${criadoEm}` : ''}`)
     const atualEm = fmtDataHora(rec.data_atualizacao)
-    if (rec.atualizado_por || atualEm) partes.push(`Última alteração por ${rec.atualizado_por ?? '—'}${atualEm ? ` em ${atualEm}` : ''}`)
-    return partes.join(' · ') || 'Sem informação de auditoria'
+    const criadoPor: string | null = rec.criado_por || null
+    const atualizadoPor: string | null = rec.atualizado_por || null
+    if (!criadoEm && !atualEm) return 'Sem informação de auditoria'
+
+    // Registros de antes dessa feature (ex: importação em massa) não têm
+    // usuário gravado — isso é esperado, não é bug. Deixa claro o motivo em
+    // vez de mostrar um "—" que parece erro.
+    const clausula = (por: string | null, em: string | null) =>
+      por ? `${por}${em ? ` em ${em}` : ''}` : (em ? `${em} (anterior ao controle de usuário)` : '')
+
+    // Nunca editado desde a criação: uma linha só, não duas iguais.
+    if (criadoEm === atualEm && criadoPor === atualizadoPor) {
+      return `Criado por ${clausula(criadoPor, criadoEm)}`
+    }
+
+    const partes: string[] = []
+    if (criadoEm || criadoPor) partes.push(`Criado por ${clausula(criadoPor, criadoEm)}`)
+    if (atualEm || atualizadoPor) partes.push(`Última alteração por ${clausula(atualizadoPor, atualEm)}`)
+    return partes.join(' · ')
   }
   const auditIcon = (rec: any) => (
     <span
