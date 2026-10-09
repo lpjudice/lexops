@@ -160,7 +160,7 @@ function UnifiedClientCombo({
   const [open, setOpen] = useState(false)
   const [sistemResults, setSistemResults] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
-  const timer = useRef<ReturnType<typeof setTimeout>>()
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const inputRef = useRef<HTMLInputElement>(null)
   const [dropStyle, setDropStyle] = useState<React.CSSProperties>({})
 
