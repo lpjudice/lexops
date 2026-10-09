@@ -298,6 +298,11 @@ export const autosIa = {
   relerPeca: (pecaId: string) =>
     api.post<Peca>(`/autos-ia/pecas/${pecaId}/reler`).then((r) => r.data),
 
+  enviarAlertaTeste: (casoId: string) =>
+    api.post<{ enviado: boolean; email?: boolean; telegram?: boolean; documentos?: number; protocolos?: number; motivo?: string }>(
+      `/autos-ia/casos/${casoId}/alerta-teste`,
+    ).then((r) => r.data),
+
   relerPendentes: (casoId: string) =>
     api.post<Caso>(`/autos-ia/casos/${casoId}/reler-pendentes`).then((r) => r.data),
 

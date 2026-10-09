@@ -204,6 +204,13 @@ class AutosIAPeca(Base):
     # na listagem, entra na busca e é filtro no grafo.
     advogado_responsavel: Mapped[str | None] = mapped_column(String(255))
 
+    # Controle dos alertas de "novo andamento/documento" (Telegram e e-mail) depois
+    # de cada sincronização agendada. NULL = ainda não alertada naquele canal; um
+    # canal que falha continua pendente e é tentado de novo na próxima rodada,
+    # sem repetir o que o outro canal já enviou.
+    alerta_telegram_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    alerta_email_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pendente_resumo")
     # pendente_resumo | resumida | erro
     erro_mensagem: Mapped[str | None] = mapped_column(Text)

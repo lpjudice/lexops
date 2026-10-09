@@ -93,8 +93,15 @@ def _sync_autos_ia_processos() -> None:
                 from app.services.andamentos_auth import load_session as load_session_bot
                 session_data = load_session_bot()
             logger.info("Autos IA: sincronizando %d caso(s) vinculados a processo", len(casos))
-            for caso in casos:
+            # ids lidos ANTES: depois de cada sincronização (commits) os atributos do
+            # objeto expiram e relê-los numa sessão com conexão caída lança erro.
+            caso_ids = [c.id for c in casos]
+            for caso, caso_id in zip(casos, caso_ids):
                 sincronizar_caso_jusbr(db, caso, session_data)
+                # Peças novas (e já resumidas) → alerta por Telegram e e-mail. Nunca
+                # lança; falha de envio não afeta a sincronização nem o próximo caso.
+                from app.services.autos_ia.alertas import enviar_alertas_pos_sync
+                enviar_alertas_pos_sync(caso_id)
         finally:
             db.close()
     except Exception as exc:

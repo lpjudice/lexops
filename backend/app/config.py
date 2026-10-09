@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     # Grupo dedicado pro push diário (cron 19h BRT). Crie o grupo, adicione o
     # bot, mande qualquer mensagem e pegue o chat_id do log.
     andamentos_push_chat_id: str = ""
+    # Autos IA: alerta de "novo andamento/documento" depois de cada sincronização
+    # agendada (Telegram no mesmo grupo acima + e-mail). Desliga com
+    # AUTOS_IA_ALERTA_ATIVO=false sem precisar de deploy de código.
+    autos_ia_alerta_ativo: bool = True
+    autos_ia_alerta_email: str = "pj@pimentajudice.com.br"
     # IDs de usuários autorizados a operar o bot em DM (separados por vírgula).
     telegram_allowed_user_ids: str = ""
     # IDs de grupos cujos membros são automaticamente autorizados (separados por vírgula).

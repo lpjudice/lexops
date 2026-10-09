@@ -802,6 +802,15 @@ def listar_documentos_drive(
     return resultado
 
 
+@router.post("/casos/{caso_id}/alerta-teste")
+def enviar_alerta_teste_endpoint(caso_id: uuid.UUID, ultimas: int = 5, db: Session = Depends(get_db)):
+    """Dispara o alerta de "novo andamento" (e-mail + Telegram) com os últimos
+    protocolos do caso, só pra conferir o visual e a entrega. Não marca nada como
+    enviado — os alertas reais seguem normalmente depois da próxima sincronização."""
+    from app.services.autos_ia.alertas import enviar_alerta_teste
+    return enviar_alerta_teste(db, _get_caso(db, caso_id), ultimas=ultimas)
+
+
 @router.get("/casos/{caso_id}/advogados-responsaveis", response_model=list[str])
 def listar_advogados_responsaveis(caso_id: uuid.UUID, db: Session = Depends(get_db)):
     """Nomes de advogado já usados nas anotações deste caso — alimenta a

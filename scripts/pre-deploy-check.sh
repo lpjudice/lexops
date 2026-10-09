@@ -56,6 +56,19 @@ if not bad:
 sys.exit(1 if bad else 0)
 EOF
 
+# 4) Frontend: o build do Docker roda `tsc -b` — erro de tipo (de qualquer chat) aborta o deploy.
+if [ -d frontend/node_modules ]; then
+  tsc_out=$(cd frontend && npx --no-install tsc -b 2>&1)
+  if [ $? -eq 0 ]; then
+    ok "frontend: tsc -b sem erros (o build do Docker passa)"
+  else
+    falha "frontend: tsc -b FALHA — o build do deploy vai abortar:"
+    echo "$tsc_out" | grep -E "error TS" | head -8
+  fi
+else
+  echo "⚠️  frontend/node_modules ausente — typecheck pulado (rode 'npm ci' em frontend/ pra checar; o build do Docker roda o tsc)"
+fi
+
 echo
 if [ "$erro" -ne 0 ]; then
   echo "⛔ NÃO FAÇA DEPLOY. Corrija acima e rode de novo."
