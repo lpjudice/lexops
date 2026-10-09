@@ -188,7 +188,8 @@ export default function AutosIACasoPage() {
       }
       const partes = [r.email ? 'e-mail' : null, r.telegram ? 'Telegram' : null].filter(Boolean).join(' e ')
       const falhou = [!r.email ? 'e-mail' : null, !r.telegram ? 'Telegram' : null].filter(Boolean).join(' e ')
-      alert(`Alerta de teste enviado por ${partes} (${r.documentos} documento(s) em ${r.protocolos} protocolo(s)).` +
+      const dest = r.email && r.destinatarios?.length ? `\nE-mail para: ${r.destinatarios.join(', ')}.` : ''
+      alert(`Alerta de teste enviado por ${partes} (${r.documentos} documento(s) em ${r.protocolos} protocolo(s) + ${r.movimentos ?? 0} movimento(s)).${dest}` +
         (falhou ? `\n\nAtenção: o envio por ${falhou} falhou — confira a configuração.` : ''))
     },
     onError: (e: any) => alert(`Erro ao enviar o alerta de teste: ${e?.response?.data?.detail || e?.message}`),
@@ -390,7 +391,7 @@ export default function AutosIACasoPage() {
                         className={pageStyles.btnSmall}
                         disabled={alertaTeste.isPending}
                         onClick={() => {
-                          if (window.confirm('Enviar agora um ALERTA DE TESTE (e-mail para pj@pimentajudice.com.br + Telegram) com os últimos protocolos deste caso? Serve só pra conferir o visual e a entrega — não marca nada como enviado.')) {
+                          if (window.confirm('Enviar agora um ALERTA DE TESTE (e-mail para os destinatários configurados + Telegram) com os últimos andamentos deste caso? Serve só pra conferir o visual e a entrega — não marca nada como enviado.')) {
                             alertaTeste.mutate()
                           }
                         }}

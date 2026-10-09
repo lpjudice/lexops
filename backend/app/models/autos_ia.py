@@ -204,13 +204,6 @@ class AutosIAPeca(Base):
     # na listagem, entra na busca e é filtro no grafo.
     advogado_responsavel: Mapped[str | None] = mapped_column(String(255))
 
-    # Controle dos alertas de "novo andamento/documento" (Telegram e e-mail) depois
-    # de cada sincronização agendada. NULL = ainda não alertada naquele canal; um
-    # canal que falha continua pendente e é tentado de novo na próxima rodada,
-    # sem repetir o que o outro canal já enviou.
-    alerta_telegram_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    alerta_email_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pendente_resumo")
     # pendente_resumo | resumida | erro
     erro_mensagem: Mapped[str | None] = mapped_column(Text)
@@ -288,3 +281,21 @@ class AutosIAPerguntaFaq(Base):
     )
 
     caso: Mapped["AutosIACaso"] = relationship(back_populates="perguntas_faq")
+
+
+class AutosIAAlertaConfig(Base):
+    """Configuração única (id=1) dos alertas de novo andamento do Autos IA.
+
+    Destinatários do e-mail = usuário(s) master (super_admin) + `emails_extras`.
+    `inicio_alertas_em` é o momento em que o recurso foi ligado: só andamentos criados
+    depois dele são alertados, então o histórico anterior nunca vira spam."""
+
+    __tablename__ = "autos_ia_alerta_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    emails_extras: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
+    inicio_alertas_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    atualizado_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

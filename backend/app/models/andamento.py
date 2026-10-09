@@ -44,6 +44,12 @@ class AndamentoProcesso(Base):
     # Flag separada do `notificado` (Telegram) — cada canal marca seu próprio
     # envio, senão um push "rouba" o andamento do outro.
     notificado_whatsapp: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Alerta "novo andamento" do Autos IA (Telegram/e-mail, depois de cada sincronização).
+    # NULL = ainda não avisado naquele canal. Um por canal: o que falha é tentado de novo
+    # na próxima rodada sem repetir o que o outro canal já mandou. Flags próprias, para
+    # não interferir no `notificado` do push diário das 19h.
+    alerta_autos_ia_telegram_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    alerta_autos_ia_email_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Documento salvo com o erro do repositório PDPJ ("Codex") no lugar do binário.
     # Marcado pela faxina/reparo (app.services.codex_repair); some ao rebaixar o doc.
     codex_erro: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)

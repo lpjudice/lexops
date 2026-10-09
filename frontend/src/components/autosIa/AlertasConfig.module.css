@@ -1,0 +1,55 @@
+.card {
+  background: var(--white);
+  border: 1px solid var(--gray-border);
+  border-radius: 12px;
+  margin-bottom: 18px;
+  overflow: hidden;
+}
+.head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 16px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  color: var(--dark);
+}
+.head:hover { background: var(--light); }
+.titulo { font-size: 14px; font-weight: 700; }
+.resumo { font-size: 12px; color: var(--gray-mid); flex: 1; }
+.chevron { color: var(--gray-mid); font-size: 12px; }
+.pillOn, .pillOff {
+  font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px; flex-shrink: 0;
+}
+.pillOn { background: #dcfce7; color: #166534; }
+.pillOff { background: #fee2e2; color: #991b1b; }
+
+.corpo { padding: 4px 16px 16px; border-top: 1px solid var(--gray-border); display: flex; flex-direction: column; gap: 14px; }
+.explica { font-size: 12.5px; color: var(--gray-mid); line-height: 1.5; margin: 12px 0 0; }
+.label { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--gray-mid); margin-bottom: 7px; display: block; }
+
+.switchRow { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; cursor: pointer; width: fit-content; }
+.switch { position: relative; width: 38px; height: 22px; flex-shrink: 0; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; inset: 0; background: #cbd5d5; border-radius: 22px; transition: .15s; }
+.slider::before { content: ''; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .15s; }
+.switch input:checked + .slider { background: var(--teal); }
+.switch input:checked + .slider::before { transform: translateX(16px); }
+.switch input:disabled + .slider { opacity: .6; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 4px 10px; border-radius: 999px; background: var(--light); color: var(--dark); border: 1px solid var(--gray-border); }
+.chipPadrao { background: #e0e7ff; border-color: #c7d2fe; color: #3730a3; font-weight: 600; }
+.chipSub { font-size: 10px; opacity: .75; font-weight: 500; }
+.chipX { border: none; background: none; cursor: pointer; color: var(--gray-mid); font-size: 13px; line-height: 1; padding: 0; }
+.chipX:hover { color: #b91c1c; }
+
+.addRow { display: flex; gap: 8px; margin-top: 8px; max-width: 460px; }
+.addInput { flex: 1; min-width: 0; font-family: inherit; font-size: 13px; padding: 7px 10px; border: 1px solid var(--gray-border); border-radius: 8px; background: var(--light); color: var(--dark); }
+.addInput:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
+.erro { font-size: 12px; color: #b91c1c; margin-top: 6px; }
+.nota { font-size: 12px; color: var(--gray-mid); }

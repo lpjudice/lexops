@@ -1,23 +1,30 @@
-"""Alerta de novo andamento/documento do Autos IA — Telegram + e-mail.
+"""Alerta de novo andamento do Autos IA — Telegram + e-mail.
 
-Roda logo depois de cada sincronização agendada do caso (7h10, 13h10 e 19h10 BRT,
-ver scheduler._sync_autos_ia_processos). Nesse ponto as peças novas já foram
-importadas E resumidas (importar_andamentos_pendentes só retorna depois do
-resumo), então o alerta já sai com "quem protocolou" e o resumo curto.
+Dispara logo depois de CADA sincronização do caso: as 3 automáticas do dia (7h10,
+13h10 e 19h10 BRT, ver scheduler._sync_autos_ia_processos) e também o "Sincronizar
+agora" manual. Nesse ponto as peças novas já foram importadas e resumidas
+(importar_andamentos_pendentes só retorna depois do resumo), então o alerta sai com
+"quem protocolou" e o resumo curto.
 
-- Telegram: 1 mensagem por processo no MESMO bot/grupo do push diário de
-  andamentos (andamentos_push), com o botão "Ver andamentos" que já existe
-  (callback `apv:proc:<processo_id>`) — de lá sai a opção de baixar os documentos,
-  exatamente como no push das 19h. Andamentos que o push das 19h já avisou não
-  são repetidos (e os avisados aqui não são repetidos pelo push das 19h).
-- E-mail: lista dos documentos protocolados, agrupados por protocolo (petição +
-  anexos), com resumo de ~2 linhas por protocolo.
+O que avisa — tudo que é andamento novo do processo:
+- documento com peça no Autos IA: agrupado por protocolo (petição + anexos), com
+  tipo, quem protocolou e resumo de ~2 linhas (decisões em destaque);
+- movimento sem peça (ex.: "Conclusos para despacho", disponibilização): linha
+  própria, mesmo sem nenhum documento novo.
 
-Controle de "já alertei": AutosIAPeca.alerta_telegram_em / alerta_email_em, um por
-canal. Um canal que falha continua pendente e é tentado de novo na próxima
-rodada, sem reenviar o que o outro canal já mandou. A migração marca todo o
-histórico como já alertado, e peças de andamentos com data antiga (> 14 dias)
-também são só marcadas, sem envio — importação em lote não pode virar spam.
+Canais:
+- Telegram: 1 mensagem por processo no MESMO bot/grupo do push diário de andamentos,
+  com o botão "Ver andamentos" que já existe (callback `apv:proc:<processo_id>`) — de
+  lá sai a opção de baixar os documentos, como no push das 19h. O que o push das 19h
+  já avisou não é repetido (e o push das 19h não repete o que foi avisado aqui).
+- E-mail: lista agrupada por dia, para o(s) usuário(s) master (super_admin) + os
+  e-mails extras cadastrados em AutosIAAlertaConfig.
+
+Controle de "já avisei": AndamentoProcesso.alerta_autos_ia_telegram_em/_email_em, um
+por canal — um canal que falha continua pendente e é tentado de novo na próxima
+rodada, sem reenviar o que o outro já mandou. Só andamentos criados depois de
+AutosIAAlertaConfig.inicio_alertas_em entram; andamentos de data antiga (> 14 dias)
+são só marcados, sem envio — importação retroativa não pode virar spam.
 """
 from __future__ import annotations
 
@@ -25,6 +32,7 @@ import asyncio
 import html
 import logging
 import re
+import threading
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -34,19 +42,21 @@ from sqlalchemy.orm import Session, defer
 from app.config import settings
 from app.database import SessionLocal
 from app.models.andamento import AndamentoProcesso
-from app.models.autos_ia import AutosIACaso, AutosIAPeca
+from app.models.autos_ia import AutosIAAlertaConfig, AutosIACaso, AutosIAPeca
 from app.models.cliente import Cliente
 from app.models.processo import Processo
+from app.models.usuario import Usuario
 
 logger = logging.getLogger(__name__)
 
 _BRT = ZoneInfo("America/Sao_Paulo")
 # Mesma regra do push diário: andamento com data mais antiga que isso é histórico
-# retroativo (ex.: backfill de um caso novo) — só marca como alertado, não envia.
+# retroativo (ex.: backfill de um caso novo) — só marca como avisado, não envia.
 JANELA_DIAS = 14
 MAX_RESUMO_CHARS = 260
 MAX_ANEXOS_EMAIL = 6
-MAX_GRUPOS_TELEGRAM = 6
+MAX_LINHAS_TELEGRAM = 7
+MAX_EMAILS_EXTRAS = 10
 
 NOME_TIPO = {
     "peticao": "Petição", "decisao": "Decisão", "despacho": "Despacho", "certidao": "Certidão",
@@ -57,7 +67,13 @@ COR_TIPO = {
     "peticao": "#2a78d6", "decisao": "#eb6834", "despacho": "#1baf7a", "certidao": "#eda100",
     "oficio": "#e87ba4", "recurso": "#008300", "documento": "#4a3aa7", "outro": "#e34948",
 }
+COR_MOVIMENTO = "#6b7280"
 _DIAS_SEMANA = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"]
+_EMAIL_RE = re.compile(r"^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$")
+
+# Uma rodada de alerta por vez: a sincronização agendada e um "Sincronizar agora"
+# manual podem terminar juntas — sem isso as duas leriam a mesma fila de pendentes.
+_LOCK = threading.Lock()
 
 
 # ── Modelo (snapshot sem vínculo com a sessão do banco) ──────────────────────
@@ -74,8 +90,6 @@ class ItemPeca:
     lida: bool
     drive_link: str | None
     arquivo_nome: str | None
-    andamento_id: object
-    andamento_notificado: bool
     ordem: int = 0  # pagina_inicio, pra manter a ordem dos autos dentro do protocolo
 
 
@@ -90,6 +104,19 @@ class Grupo:
 
 
 @dataclass
+class Movimento:
+    """Andamento novo que não virou peça (sem documento lido): movimento puro ou
+    documento que ainda não foi importado."""
+    andamento_id: object
+    titulo: str
+    descricao: str
+    data: date | None
+    hora: str | None
+    drive_link: str | None
+    tem_arquivo: bool
+
+
+@dataclass
 class AlertaCaso:
     caso_id: object
     caso_nome: str
@@ -99,11 +126,20 @@ class AlertaCaso:
     local: str  # "TJES · 1ª Vara · Vitória"
     materia: str | None
     grupos: list[Grupo]
+    movimentos: list[Movimento] = field(default_factory=list)
     teste: bool = False
 
     @property
     def total_docs(self) -> int:
         return sum(g.total_docs for g in self.grupos)
+
+    @property
+    def total_movimentos(self) -> int:
+        return len(self.movimentos)
+
+    @property
+    def total_itens(self) -> int:
+        return self.total_docs + self.total_movimentos
 
     @property
     def total_decisoes(self) -> int:
@@ -118,7 +154,7 @@ def _limpar_markdown(texto: str) -> str:
 
 
 def resumo_curto(texto: str | None, max_chars: int = MAX_RESUMO_CHARS) -> str:
-    """Até 2 frases do resumo, limitado a ~260 caracteres (≈ 2 linhas no e-mail),
+    """Até 2 frases do texto, limitado a ~260 caracteres (≈ 2 linhas no e-mail),
     cortando em fronteira de palavra."""
     limpo = _limpar_markdown(texto or "")
     if not limpo:
@@ -162,6 +198,53 @@ def _md(s: str | None) -> str:
     return re.sub(r"([_*`\[])", r"\\\1", s or "")
 
 
+# ── Configuração (interruptor + destinatários) ───────────────────────────────
+
+def obter_config(db: Session) -> AutosIAAlertaConfig:
+    """Linha única de configuração. A migração a cria; aqui só garante que exista
+    (ambientes montados por create_all)."""
+    cfg = db.query(AutosIAAlertaConfig).filter(AutosIAAlertaConfig.id == 1).first()
+    if cfg is None:
+        cfg = AutosIAAlertaConfig(id=1, ativo=True, emails_extras=[])
+        db.add(cfg)
+        db.commit()
+        db.refresh(cfg)
+    return cfg
+
+
+def emails_master(db: Session) -> list[str]:
+    """E-mail(s) do(s) usuário(s) master (super_admin ativo) — destinatário padrão."""
+    linhas = db.query(Usuario.email).filter(Usuario.role == "super_admin", Usuario.ativo.is_(True)).order_by(Usuario.created_at).all()
+    return [e.strip().lower() for (e,) in linhas if e]
+
+
+def destinatarios_email(db: Session, cfg: AutosIAAlertaConfig | None = None) -> list[str]:
+    cfg = cfg or obter_config(db)
+    vistos: list[str] = []
+    for e in [*emails_master(db), *(cfg.emails_extras or [])]:
+        e = (e or "").strip().lower()
+        if e and e not in vistos:
+            vistos.append(e)
+    return vistos
+
+
+def normalizar_emails_extras(emails: list[str]) -> list[str]:
+    """Valida, normaliza (minúsculas) e remove duplicados. Lança ValueError com mensagem
+    pronta pra tela se algum endereço for inválido."""
+    saida: list[str] = []
+    for bruto in emails or []:
+        e = (bruto or "").strip().lower()
+        if not e:
+            continue
+        if not _EMAIL_RE.match(e) or len(e) > 254:
+            raise ValueError(f"E-mail inválido: {bruto.strip()[:80]}")
+        if e not in saida:
+            saida.append(e)
+    if len(saida) > MAX_EMAILS_EXTRAS:
+        raise ValueError(f"No máximo {MAX_EMAILS_EXTRAS} e-mails extras.")
+    return saida
+
+
 # ── Coleta ───────────────────────────────────────────────────────────────────
 
 def _item(peca: AutosIAPeca, andamento: AndamentoProcesso) -> ItemPeca:
@@ -181,9 +264,21 @@ def _item(peca: AutosIAPeca, andamento: AndamentoProcesso) -> ItemPeca:
         lida=lida,
         drive_link=andamento.arquivo_drive_link,
         arquivo_nome=andamento.arquivo_nome,
-        andamento_id=andamento.id,
-        andamento_notificado=bool(andamento.notificado),
         ordem=peca.pagina_inicio or 0,
+    )
+
+
+def _movimento(andamento: AndamentoProcesso) -> Movimento:
+    titulo = (andamento.tipo or "").strip() or (andamento.descricao or "Movimento").strip()
+    descricao = resumo_curto(andamento.descricao) if (andamento.tipo or "").strip() else ""
+    return Movimento(
+        andamento_id=andamento.id,
+        titulo=titulo[:160],
+        descricao=descricao,
+        data=andamento.data_andamento,
+        hora=_hora_brt(andamento.protocolado_em),
+        drive_link=andamento.arquivo_drive_link,
+        tem_arquivo=bool(andamento.arquivo_nome or andamento.arquivo_drive_link),
     )
 
 
@@ -196,14 +291,23 @@ def _pares_do_caso(db: Session, caso_id):
     )
 
 
-def _montar_alerta(db: Session, caso: AutosIACaso, pares: list[tuple[AutosIAPeca, AndamentoProcesso]], teste: bool = False) -> AlertaCaso | None:
-    """Agrupa as peças por protocolo (petição + anexos), como na aba Documentos."""
-    if not pares:
+def _montar_alerta(db: Session, caso: AutosIACaso, andamentos: list[AndamentoProcesso], teste: bool = False) -> AlertaCaso | None:
+    """Agrupa por protocolo (petição + anexos, como na aba Documentos) os andamentos que
+    têm peça; os que não têm viram `movimentos`."""
+    if not andamentos:
         return None
-    por_id = {p.id: (p, a) for p, a in pares}
+    por_andamento = {a.id: a for a in andamentos}
+    pecas = (
+        db.query(AutosIAPeca).options(defer(AutosIAPeca.texto_md))
+        .filter(AutosIAPeca.caso_id == caso.id, AutosIAPeca.andamento_id.in_(list(por_andamento)))
+        .all()
+    )
+    com_peca = {p.andamento_id for p in pecas}
+    pares = [(p, por_andamento[p.andamento_id]) for p in pecas]
+    movimentos = [_movimento(a) for a in andamentos if a.id not in com_peca]
 
-    # Principal de cada peça. Se só um ANEXO é novo e o pai não está na lista,
-    # busca o pai pra ter o cabeçalho do protocolo.
+    por_id = {p.id: (p, a) for p, a in pares}
+    # Se só um ANEXO é novo e o pai não está na lista, busca o pai pro cabeçalho do protocolo.
     pais_faltando = {p.peca_pai_id for p, _ in pares if p.peca_pai_id and p.peca_pai_id not in por_id}
     pais: dict = {}
     if pais_faltando:
@@ -222,7 +326,6 @@ def _montar_alerta(db: Session, caso: AutosIACaso, pares: list[tuple[AutosIAPeca
         grupo = grupos[raiz_id]
         if peca.id != grupo.principal.id:
             grupo.anexos.append(_item(peca, andamento))
-
     for g in grupos.values():
         g.anexos.sort(key=lambda i: i.ordem)
 
@@ -231,6 +334,7 @@ def _montar_alerta(db: Session, caso: AutosIACaso, pares: list[tuple[AutosIAPeca
         key=lambda g: (g.principal.data or date.min, g.principal.hora or "", g.principal.ordem),
         reverse=True,  # mais novo primeiro, como a aba Documentos
     )
+    movimentos.sort(key=lambda m: (m.data or date.min, m.hora or ""), reverse=True)
 
     processo = db.query(Processo).filter(Processo.id == caso.processo_id).first() if caso.processo_id else None
     cliente = None
@@ -242,39 +346,55 @@ def _montar_alerta(db: Session, caso: AutosIACaso, pares: list[tuple[AutosIAPeca
     return AlertaCaso(
         caso_id=caso.id, caso_nome=caso.nome, processo_id=caso.processo_id, cliente=cliente,
         cnj=getattr(processo, "numero_cnj", None) or caso.numero_processo, local=local,
-        materia=getattr(processo, "materia", None), grupos=ordenados, teste=teste,
+        materia=getattr(processo, "materia", None), grupos=ordenados, movimentos=movimentos, teste=teste,
     )
 
 
 # ── Telegram ─────────────────────────────────────────────────────────────────
 
+def _quando(d: date | None, hora: str | None) -> str:
+    return (d.strftime("%d/%m") if d else "—") + (f" {hora}" if hora else "")
+
+
 def montar_texto_telegram(alerta: AlertaCaso) -> str:
-    n_prot = len(alerta.grupos)
     cab = "🧪 *TESTE — Autos IA*" if alerta.teste else "🆕 *Autos IA — novo andamento*"
-    linhas = [cab]
-    linhas.append(f"⚖️ *{_md(alerta.cliente or alerta.caso_nome)}*")
+    linhas = [cab, f"⚖️ *{_md(alerta.cliente or alerta.caso_nome)}*"]
     if alerta.cnj:
         linhas.append(f"📋 `{alerta.cnj}`")
     if alerta.local:
         linhas.append(f"🏛️ {_md(alerta.local)}")
-    resumo_qtd = f"📨 {alerta.total_docs} documento(s) em {n_prot} protocolo(s)"
+    partes = []
+    if alerta.grupos:
+        partes.append(f"📨 {alerta.total_docs} documento(s) em {len(alerta.grupos)} protocolo(s)")
+    if alerta.movimentos:
+        partes.append(f"🔹 {alerta.total_movimentos} movimento(s)")
     if alerta.total_decisoes:
-        resumo_qtd += f" · ⚠️ {alerta.total_decisoes} decisão(ões)"
-    linhas.append(resumo_qtd)
+        partes.append(f"⚠️ {alerta.total_decisoes} decisão(ões)")
+    linhas.append(" · ".join(partes))
     linhas.append("")
 
-    for g in alerta.grupos[:MAX_GRUPOS_TELEGRAM]:
-        p = g.principal
-        quando = (p.data.strftime("%d/%m") if p.data else "—") + (f" {p.hora}" if p.hora else "")
-        quem = f" · {_md(p.autor)}" if p.autor else ""
-        extra = f" (+{len(g.anexos)} anexo(s))" if g.anexos else ""
-        linhas.append(f"• *{quando}* — {NOME_TIPO.get(p.tipo, 'Outro')}{quem}{extra}")
-        linhas.append(f"  {_md(p.titulo[:120])}")
-        if p.resumo:
-            linhas.append(f"  _{_md(resumo_curto(p.resumo, 150))}_")
-    restantes = len(alerta.grupos) - MAX_GRUPOS_TELEGRAM
+    # Documentos e movimentos misturados do mais novo para o mais antigo.
+    entradas = [(g.principal.data or date.min, g.principal.hora or "", "g", g) for g in alerta.grupos]
+    entradas += [(m.data or date.min, m.hora or "", "m", m) for m in alerta.movimentos]
+    entradas.sort(key=lambda e: (e[0], e[1]), reverse=True)
+    for _, _, tipo, obj in entradas[:MAX_LINHAS_TELEGRAM]:
+        if tipo == "g":
+            p = obj.principal
+            quem = f" · {_md(p.autor)}" if p.autor else ""
+            extra = f" (+{len(obj.anexos)} anexo(s))" if obj.anexos else ""
+            linhas.append(f"• *{_quando(p.data, p.hora)}* — {NOME_TIPO.get(p.tipo, 'Outro')}{quem}{extra}")
+            linhas.append(f"  {_md(p.titulo[:120])}")
+            if p.resumo:
+                linhas.append(f"  _{_md(resumo_curto(p.resumo, 150))}_")
+        else:
+            anexo = " 📎" if obj.tem_arquivo else ""
+            linhas.append(f"• *{_quando(obj.data, obj.hora)}* — 🔹 Movimento{anexo}")
+            linhas.append(f"  {_md(obj.titulo[:140])}")
+            if obj.descricao:
+                linhas.append(f"  _{_md(resumo_curto(obj.descricao, 130))}_")
+    restantes = len(entradas) - MAX_LINHAS_TELEGRAM
     if restantes > 0:
-        linhas.append(f"… e mais {restantes} protocolo(s) — veja no botão abaixo.")
+        linhas.append(f"… e mais {restantes} item(ns) — veja no botão abaixo.")
     return "\n".join(linhas)[:3900]
 
 
@@ -290,7 +410,7 @@ async def _enviar_telegram_async(alerta: AlertaCaso) -> bool:
 
     texto = montar_texto_telegram(alerta)
     botoes = [[InlineKeyboardButton(
-        text=f"📋 Ver andamentos e baixar documentos ({alerta.total_docs})",
+        text=f"📋 Ver andamentos e baixar documentos ({alerta.total_itens})",
         callback_data=f"apv:proc:{alerta.processo_id}",  # fluxo que já existe no bot (documentos via Drive)
     )]]
     url = _url_app(alerta.caso_id)
@@ -320,11 +440,10 @@ def enviar_telegram(alerta: AlertaCaso) -> bool:
 
 # ── E-mail ───────────────────────────────────────────────────────────────────
 
-def _badge(tipo: str) -> str:
-    cor = COR_TIPO.get(tipo, "#6b7280")
+def _badge(texto: str, cor: str) -> str:
     return (
         f'<span style="display:inline-block;background:{cor};color:#ffffff;font-size:10px;font-weight:700;'
-        f'letter-spacing:.4px;text-transform:uppercase;padding:2px 8px;border-radius:10px;">{_esc(NOME_TIPO.get(tipo, "Outro"))}</span>'
+        f'letter-spacing:.4px;text-transform:uppercase;padding:2px 8px;border-radius:10px;">{_esc(texto)}</span>'
     )
 
 
@@ -367,10 +486,27 @@ def _bloco_grupo(g: Grupo) -> str:
     return f"""
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 10px;background:#ffffff;border:1px solid #e5e7eb;border-left:4px solid {cor};border-radius:8px;">
   <tr><td style="padding:12px 14px;">
-    <div style="margin-bottom:4px;">{hora}{_badge(p.tipo)} &nbsp;{quem}</div>
+    <div style="margin-bottom:4px;">{hora}{_badge(NOME_TIPO.get(p.tipo, "Outro"), cor)} &nbsp;{quem}</div>
     <div style="font-size:14px;font-weight:700;color:#111827;line-height:1.35;">{_esc(p.titulo[:160])}{link_principal}</div>
-    <div style="font-size:13px;color:{cor_resumo};line-height:1.45;margin-top:4px;">{_esc(p.resumo or resumo)}{nota_nao_lida}</div>
+    <div style="font-size:13px;color:{cor_resumo};line-height:1.45;margin-top:4px;">{_esc(resumo)}{nota_nao_lida}</div>
     {linhas_anexos}
+  </td></tr>
+</table>"""
+
+
+def _bloco_movimento(m: Movimento) -> str:
+    hora = f'<span style="font-size:12px;font-weight:700;color:#374151;">{_esc(m.hora)}</span> &nbsp;' if m.hora else ""
+    link = (
+        f'&nbsp;<a href="{_esc(m.drive_link)}" style="color:#2a78d6;font-size:12px;font-weight:700;text-decoration:none;">📎 abrir ↗</a>'
+        if m.drive_link else (' <span style="font-size:12px;">📎</span>' if m.tem_arquivo else "")
+    )
+    desc = f'<div style="font-size:13px;color:#4b5563;line-height:1.45;margin-top:3px;">{_esc(m.descricao)}</div>' if m.descricao else ""
+    return f"""
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 8px;background:#ffffff;border:1px solid #e5e7eb;border-left:4px solid {COR_MOVIMENTO};border-radius:8px;">
+  <tr><td style="padding:9px 14px;">
+    <div style="margin-bottom:2px;">{hora}{_badge("Movimento", COR_MOVIMENTO)}</div>
+    <div style="font-size:13px;font-weight:700;color:#1f2937;line-height:1.35;">{_esc(m.titulo)}{link}</div>
+    {desc}
   </td></tr>
 </table>"""
 
@@ -378,23 +514,34 @@ def _bloco_grupo(g: Grupo) -> str:
 def montar_email(alerta: AlertaCaso) -> tuple[str, str]:
     """(assunto, html). Layout em tabelas com CSS inline — é o que os clientes de
     e-mail renderizam de forma confiável (Gmail/Outlook/Apple Mail)."""
-    n_prot = len(alerta.grupos)
     prefixo = "[TESTE] " if alerta.teste else ""
-    assunto = f"{prefixo}Autos IA · {alerta.total_docs} novo(s) documento(s) — {alerta.cliente or alerta.caso_nome}"
+    partes = []
+    if alerta.grupos:
+        partes.append(f"{alerta.total_docs} novo(s) documento(s)")
+    if alerta.movimentos:
+        partes.append(f"{alerta.total_movimentos} movimento(s)")
+    assunto = f"{prefixo}Autos IA · {' e '.join(partes)} — {alerta.cliente or alerta.caso_nome}"
     if alerta.total_decisoes:
         assunto += f" · {alerta.total_decisoes} decisão(ões)"
 
     por_dia: dict = {}
     for g in alerta.grupos:
-        por_dia.setdefault(g.principal.data, []).append(g)
+        por_dia.setdefault(g.principal.data, {"g": [], "m": []})["g"].append(g)
+    for m in alerta.movimentos:
+        por_dia.setdefault(m.data, {"g": [], "m": []})["m"].append(m)
     secoes = []
-    for dia, grupos in por_dia.items():
+    for dia in sorted(por_dia, key=lambda d: d or date.min, reverse=True):
+        blocos = "".join(_bloco_grupo(g) for g in por_dia[dia]["g"]) + "".join(_bloco_movimento(m) for m in por_dia[dia]["m"])
         secoes.append(
             f'<div style="font-size:12px;font-weight:700;color:#1f4e4f;text-transform:uppercase;letter-spacing:.5px;'
-            f'margin:18px 0 8px;">{_esc(_data_extenso(dia))}</div>' + "".join(_bloco_grupo(g) for g in grupos)
+            f'margin:18px 0 8px;">{_esc(_data_extenso(dia))}</div>' + blocos
         )
 
-    chips = [f"<b>{alerta.total_docs}</b> documento(s)", f"<b>{n_prot}</b> protocolo(s)"]
+    chips = []
+    if alerta.grupos:
+        chips += [f"<b>{alerta.total_docs}</b> documento(s)", f"<b>{len(alerta.grupos)}</b> protocolo(s)"]
+    if alerta.movimentos:
+        chips.append(f"<b>{alerta.total_movimentos}</b> movimento(s)")
     if alerta.total_decisoes:
         chips.append(f'<b style="color:#eb6834;">{alerta.total_decisoes}</b> decisão(ões)')
     chips_html = " &nbsp;·&nbsp; ".join(chips)
@@ -405,7 +552,7 @@ def montar_email(alerta: AlertaCaso) -> tuple[str, str]:
     ) if url else ""
     faixa_teste = (
         '<div style="background:#fef3c7;color:#92400e;font-size:12px;font-weight:700;padding:8px 14px;text-align:center;">'
-        "E-MAIL DE TESTE — com as últimas peças do caso; nada foi marcado como enviado.</div>"
+        "E-MAIL DE TESTE — com os últimos andamentos do caso; nada foi marcado como enviado.</div>"
     ) if alerta.teste else ""
     local = f'<div style="font-size:12px;color:#cfe3e3;margin-top:2px;">{_esc(alerta.local)}</div>' if alerta.local else ""
     cnj = f'<div style="font-size:12px;color:#cfe3e3;margin-top:6px;font-family:Consolas,Menlo,monospace;">{_esc(alerta.cnj)}</div>' if alerta.cnj else ""
@@ -414,7 +561,7 @@ def montar_email(alerta: AlertaCaso) -> tuple[str, str]:
     corpo = f"""<!doctype html>
 <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;padding:0;background:#eef1f1;font-family:Arial,Helvetica,sans-serif;color:#1f2933;">
-<div style="display:none;max-height:0;overflow:hidden;opacity:0;">{_esc(f"{alerta.total_docs} documento(s) novo(s) em {alerta.caso_nome}")}</div>
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;">{_esc(f"{alerta.total_itens} novo(s) andamento(s) em {alerta.caso_nome}")}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f1;">
 <tr><td align="center" style="padding:22px 10px;">
   <table role="presentation" width="680" cellpadding="0" cellspacing="0" style="width:100%;max-width:680px;">
@@ -443,15 +590,14 @@ def montar_email(alerta: AlertaCaso) -> tuple[str, str]:
     return assunto, corpo
 
 
-def enviar_email(alerta: AlertaCaso) -> bool:
-    destino = (settings.autos_ia_alerta_email or "").strip()
-    if not destino:
-        logger.warning("Autos IA alerta: e-mail de destino não configurado — pulando.")
+def enviar_email(alerta: AlertaCaso, destinatarios: list[str]) -> bool:
+    if not destinatarios:
+        logger.warning("Autos IA alerta: nenhum e-mail de destino (sem usuário master e sem extras) — pulando.")
         return False
     try:
         from app.services.email_service import _send_via_gmail_oauth
         assunto, corpo = montar_email(alerta)
-        _send_via_gmail_oauth(destino, assunto, corpo)
+        _send_via_gmail_oauth(", ".join(destinatarios), assunto, corpo)
         return True
     except Exception:
         logger.exception("Autos IA alerta: falha ao enviar e-mail (caso %s)", alerta.caso_id)
@@ -460,27 +606,25 @@ def enviar_email(alerta: AlertaCaso) -> bool:
 
 # ── Orquestração ─────────────────────────────────────────────────────────────
 
-def _marcar(peca_ids: list, *, telegram: bool = False, email: bool = False, andamentos_notificados: list | None = None) -> None:
+def _marcar(andamento_ids: list, *, telegram: bool = False, email: bool = False, notificado_19h: bool = False) -> None:
     """Grava os controles numa sessão curta e própria (a de leitura pode ter ficado
     parada durante o envio de rede)."""
-    if not peca_ids and not andamentos_notificados:
+    if not andamento_ids:
         return
     agora = datetime.now(timezone.utc)
+    campos: dict = {}
+    if telegram:
+        campos[AndamentoProcesso.alerta_autos_ia_telegram_em] = agora
+    if email:
+        campos[AndamentoProcesso.alerta_autos_ia_email_em] = agora
+    if notificado_19h:
+        # Evita o push das 19h repetir no Telegram o que este alerta já avisou.
+        campos[AndamentoProcesso.notificado] = True
+    if not campos:
+        return
     db = SessionLocal()
     try:
-        if peca_ids:
-            campos = {}
-            if telegram:
-                campos[AutosIAPeca.alerta_telegram_em] = agora
-            if email:
-                campos[AutosIAPeca.alerta_email_em] = agora
-            if campos:
-                db.query(AutosIAPeca).filter(AutosIAPeca.id.in_(peca_ids)).update(campos, synchronize_session=False)
-        if andamentos_notificados:
-            # Evita o push das 19h repetir no Telegram o que este alerta já avisou.
-            db.query(AndamentoProcesso).filter(AndamentoProcesso.id.in_(andamentos_notificados)).update(
-                {AndamentoProcesso.notificado: True}, synchronize_session=False
-            )
+        db.query(AndamentoProcesso).filter(AndamentoProcesso.id.in_(andamento_ids)).update(campos, synchronize_session=False)
         db.commit()
     except Exception:
         db.rollback()
@@ -490,93 +634,98 @@ def _marcar(peca_ids: list, *, telegram: bool = False, email: bool = False, anda
 
 
 def enviar_alertas_pos_sync(caso_id) -> dict:
-    """Ponto de entrada do agendador. Nunca lança. Retorna um resumo (pra log/teste)."""
-    resumo = {"telegram": 0, "email": 0, "silenciadas": 0}
-    if not settings.autos_ia_alerta_ativo:
+    """Ponto de entrada (agendador e "Sincronizar agora"). Nunca lança. Retorna um
+    resumo (pra log/teste)."""
+    resumo = {"telegram": 0, "email": 0, "silenciados": 0}
+    if not _LOCK.acquire(blocking=False):
+        logger.info("Autos IA alerta: outra rodada em andamento — esta fica pro próximo ciclo.")
         return resumo
     try:
         db = SessionLocal()
         try:
+            cfg = obter_config(db)
+            if not cfg.ativo:
+                return resumo
             caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
             if not caso or not caso.processo_id:
                 return resumo
             corte = date.today() - timedelta(days=JANELA_DIAS)
 
-            def _pendentes(coluna):
-                return _pares_do_caso(db, caso.id).filter(coluna.is_(None)).all()
+            base = db.query(AndamentoProcesso).filter(
+                AndamentoProcesso.processo_id == caso.processo_id,
+                AndamentoProcesso.created_at >= cfg.inicio_alertas_em,
+            )
+            pend_email = base.filter(AndamentoProcesso.alerta_autos_ia_email_em.is_(None)).all()
+            pend_tel = base.filter(AndamentoProcesso.alerta_autos_ia_telegram_em.is_(None)).all()
 
-            # Peças sem andamento de origem (upload manual) nunca alertam — e as de
-            # data antiga só são marcadas (importação retroativa, não "novidade").
-            sem_origem = [
-                p.id for p in db.query(AutosIAPeca).options(defer(AutosIAPeca.texto_md)).filter(
-                    AutosIAPeca.caso_id == caso.id, AutosIAPeca.andamento_id.is_(None),
-                    (AutosIAPeca.alerta_telegram_em.is_(None)) | (AutosIAPeca.alerta_email_em.is_(None)),
-                ).all()
-            ]
-            pend_email = _pendentes(AutosIAPeca.alerta_email_em)
-            pend_tel = _pendentes(AutosIAPeca.alerta_telegram_em)
-
-            def _recente(par):
-                a = par[1]
+            def _recente(a: AndamentoProcesso) -> bool:
                 ref = a.data_andamento or (a.protocolado_em.date() if a.protocolado_em else None)
                 return ref is None or ref >= corte
 
-            antigas_email = [p.id for p, a in pend_email if not _recente((p, a))]
-            antigas_tel = [p.id for p, a in pend_tel if not _recente((p, a))]
-            email_recentes = [par for par in pend_email if _recente(par)]
-            tel_recentes = [par for par in pend_tel if _recente(par)]
+            antigos_email = [a.id for a in pend_email if not _recente(a)]
+            antigos_tel = [a.id for a in pend_tel if not _recente(a)]
+            email_recentes = [a for a in pend_email if _recente(a)]
+            tel_recentes = [a for a in pend_tel if _recente(a)]
             # Telegram: o que o push das 19h já avisou não repete.
-            tel_ja_avisadas = [p.id for p, a in tel_recentes if a.notificado]
-            tel_novas = [par for par in tel_recentes if not par[1].notificado]
+            tel_ja_avisados = [a.id for a in tel_recentes if a.notificado]
+            tel_novos = [a for a in tel_recentes if not a.notificado]
 
             alerta_email = _montar_alerta(db, caso, email_recentes)
-            alerta_tel = _montar_alerta(db, caso, tel_novas)
+            alerta_tel = _montar_alerta(db, caso, tel_novos)
+            destinatarios = destinatarios_email(db, cfg)
         finally:
             db.close()
 
-        _marcar(sem_origem, telegram=True, email=True)
-        _marcar(antigas_email, email=True)
-        _marcar(antigas_tel, telegram=True)
-        _marcar(tel_ja_avisadas, telegram=True)
-        resumo["silenciadas"] = len(sem_origem) + len(antigas_email) + len(antigas_tel)
+        _marcar(antigos_email, email=True)
+        _marcar(antigos_tel, telegram=True)
+        _marcar(tel_ja_avisados, telegram=True)
+        resumo["silenciados"] = len(antigos_email) + len(antigos_tel)
 
-        if alerta_email:
-            if enviar_email(alerta_email):
-                _marcar([p.id for p, _ in email_recentes], email=True)
-                resumo["email"] = alerta_email.total_docs
-        if alerta_tel:
-            if enviar_telegram(alerta_tel):
-                _marcar(
-                    [p.id for p, _ in tel_novas], telegram=True,
-                    andamentos_notificados=list({a.id for _, a in tel_novas}),
-                )
-                resumo["telegram"] = alerta_tel.total_docs
+        if alerta_email and enviar_email(alerta_email, destinatarios):
+            _marcar([a.id for a in email_recentes], email=True)
+            resumo["email"] = alerta_email.total_itens
+        if alerta_tel and enviar_telegram(alerta_tel):
+            _marcar([a.id for a in tel_novos], telegram=True, notificado_19h=True)
+            resumo["telegram"] = alerta_tel.total_itens
         if resumo["email"] or resumo["telegram"]:
-            logger.info("Autos IA alerta caso %s: e-mail=%s doc(s), telegram=%s doc(s)", caso_id, resumo["email"], resumo["telegram"])
+            logger.info("Autos IA alerta caso %s: e-mail=%s item(ns), telegram=%s item(ns)", caso_id, resumo["email"], resumo["telegram"])
     except Exception:
         logger.exception("Autos IA alerta: falha inesperada (caso %s) — a sincronização não é afetada", caso_id)
+    finally:
+        _LOCK.release()
     return resumo
 
 
 def enviar_alerta_teste(db: Session, caso: AutosIACaso, ultimas: int = 5) -> dict:
-    """Manda um alerta (e-mail + Telegram) com os `ultimas` protocolos mais recentes do
-    caso, só pra conferir o visual e a entrega. Não altera nenhum controle de envio."""
-    pares = (
+    """Manda um alerta (e-mail + Telegram) com os `ultimas` protocolos e os `ultimas` movimentos
+    mais recentes do caso, só pra conferir o visual e a entrega. Não altera nenhum controle
+    de envio e ignora o interruptor (é um teste explícito)."""
+    n = max(1, min(ultimas, 15))
+    principais = (
         _pares_do_caso(db, caso.id)
         .filter(AutosIAPeca.peca_pai_id.is_(None))
         .order_by(AndamentoProcesso.data_andamento.desc().nullslast(), AndamentoProcesso.protocolado_em.desc().nullslast())
-        .limit(max(1, min(ultimas, 15)))
-        .all()
+        .limit(n).all()
     )
-    ids_principais = [p.id for p, _ in pares]
+    ids_principais = [p.id for p, _ in principais]
+    andamentos = [a for _, a in principais]
     if ids_principais:
-        anexos = (
-            _pares_do_caso(db, caso.id).filter(AutosIAPeca.peca_pai_id.in_(ids_principais)).all()
+        andamentos += [a for _, a in _pares_do_caso(db, caso.id).filter(AutosIAPeca.peca_pai_id.in_(ids_principais)).all()]
+    if caso.processo_id:
+        com_peca = {x for (x,) in db.query(AutosIAPeca.andamento_id).filter(AutosIAPeca.caso_id == caso.id, AutosIAPeca.andamento_id.isnot(None)).all()}
+        movs = (
+            db.query(AndamentoProcesso).filter(AndamentoProcesso.processo_id == caso.processo_id)
+            .order_by(AndamentoProcesso.data_andamento.desc().nullslast(), AndamentoProcesso.protocolado_em.desc().nullslast())
+            .limit(n * 4).all()
         )
-        pares = pares + anexos
-    alerta = _montar_alerta(db, caso, pares, teste=True)
+        andamentos += [a for a in movs if a.id not in com_peca][:n]
+    alerta = _montar_alerta(db, caso, andamentos, teste=True)
     if not alerta:
-        return {"enviado": False, "motivo": "O caso ainda não tem peças vindas do jus.br."}
-    ok_email = enviar_email(alerta)
+        return {"enviado": False, "motivo": "O caso ainda não tem andamentos vindos do jus.br."}
+    destinatarios = destinatarios_email(db)
+    ok_email = enviar_email(alerta, destinatarios)
     ok_tel = enviar_telegram(alerta)
-    return {"enviado": ok_email or ok_tel, "email": ok_email, "telegram": ok_tel, "documentos": alerta.total_docs, "protocolos": len(alerta.grupos)}
+    return {
+        "enviado": ok_email or ok_tel, "email": ok_email, "telegram": ok_tel, "destinatarios": destinatarios,
+        "documentos": alerta.total_docs, "protocolos": len(alerta.grupos), "movimentos": alerta.total_movimentos,
+    }

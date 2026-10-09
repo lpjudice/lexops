@@ -17,7 +17,7 @@ from app.dependencies import get_current_user
 from app.models.andamento import AndamentoProcesso
 from app.models.autos_ia import AutosIACaso, AutosIADocumento, AutosIAPeca, AutosIAPerguntaFaq, AutosIAReferencia
 from app.schemas.autos_ia import (
-    CasoCreate, CasoOut, CasoResumo, CasoUpdate, DocumentoDriveAnexoOut, DocumentoDriveOut, DocumentoOut,
+    AlertaConfigOut, AlertaConfigUpdate, CasoCreate, CasoOut, CasoResumo, CasoUpdate, DocumentoDriveAnexoOut, DocumentoDriveOut, DocumentoOut,
     EstimativaImportacaoOut, FaqPerguntaCreate, FaqPerguntaOut, GrafoAresta, GrafoNo, GrafoOut, PecaAnotacaoUpdate,
     PecaDetalheOut, PecaOut, PecaTipoUpdate,
 )
@@ -288,6 +288,9 @@ def _executar_sync_em_background(caso_id: uuid.UUID) -> None:
         caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
         if caso:
             sincronizar_caso_jusbr(db, caso, _carregar_sessao_jusbr())
+            # Mesmo alerta (Telegram + e-mail) das sincronizações automáticas. Nunca lança.
+            from app.services.autos_ia.alertas import enviar_alertas_pos_sync
+            enviar_alertas_pos_sync(caso_id)
     except Exception as exc:
         logger.exception("Autos IA: sincronização do caso %s travou de forma inesperada", caso_id)
         _forcar_status_erro(caso_id, f"Interrompida por um erro inesperado: {exc}")
@@ -800,6 +803,30 @@ def listar_documentos_drive(
         )
         resultado.append(item)
     return resultado
+
+
+@router.get("/alertas/config", response_model=AlertaConfigOut)
+def obter_config_alertas(db: Session = Depends(get_db)):
+    """Interruptor e destinatários dos alertas de novo andamento (global, vale pra todos os casos)."""
+    from app.services.autos_ia import alertas
+    cfg = alertas.obter_config(db)
+    return AlertaConfigOut(ativo=cfg.ativo, email_padrao=alertas.emails_master(db), emails_extras=list(cfg.emails_extras or []))
+
+
+@router.put("/alertas/config", response_model=AlertaConfigOut)
+def atualizar_config_alertas(data: AlertaConfigUpdate, db: Session = Depends(get_db)):
+    from app.services.autos_ia import alertas
+    cfg = alertas.obter_config(db)
+    if data.ativo is not None:
+        cfg.ativo = data.ativo
+    if data.emails_extras is not None:
+        try:
+            cfg.emails_extras = alertas.normalizar_emails_extras(data.emails_extras)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+    db.commit()
+    db.refresh(cfg)
+    return AlertaConfigOut(ativo=cfg.ativo, email_padrao=alertas.emails_master(db), emails_extras=list(cfg.emails_extras or []))
 
 
 @router.post("/casos/{caso_id}/alerta-teste")
