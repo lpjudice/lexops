@@ -122,7 +122,7 @@ def _janela(dias: int) -> date:
     return date.today() - timedelta(days=dias)
 
 
-FONTES_VALIDAS = {"insights", "publicacoes", "andamentos", "pecas", "teses", "evergreen"}
+FONTES_VALIDAS = {"insights", "publicacoes", "andamentos", "pecas", "teses", "informativo_stj", "evergreen"}
 
 
 def coletar_contexto_semana(db: Session, fontes: set[str] | None = None) -> dict:
@@ -132,6 +132,7 @@ def coletar_contexto_semana(db: Session, fontes: set[str] | None = None) -> dict
     desselecionar 'insights' para forçar o Agente a buscar em outras fontes."""
     on = fontes if fontes else FONTES_VALIDAS
     ctx: dict = {"publicacoes": [], "andamentos": [], "pecas": [], "teses": [], "insights": [],
+                 "informativo_stj": [],
                  "evergreen": EVERGREEN_TEMAS if "evergreen" in on else []}
 
     # Publicações (Diário/DJEN/Recorte) dos últimos 7 dias
@@ -190,6 +191,22 @@ def coletar_contexto_semana(db: Session, fontes: set[str] | None = None) -> dict
         except Exception as exc:  # pragma: no cover
             logger.warning("[ig] falha ao coletar teses: %s", exc)
 
+    # Informativo STJ — julgados destacados (área/keyword do usuário) já com resumo de IA
+    if "informativo_stj" in on:
+        try:
+            from app.services.scraping_informativo_stj import listar_candidatos
+
+            for c in listar_candidatos(db)[:15]:
+                ctx["informativo_stj"].append({
+                    "item_id": c["item_id"],
+                    "titulo": c["titulo"],
+                    "ramo": c["ramo_direito"],
+                    "tema_central": c.get("tema_central") or "",
+                    "ratio": c.get("ratio_decidendi") or "",
+                })
+        except Exception as exc:  # pragma: no cover
+            logger.warning("[ig] falha ao coletar Informativo STJ: %s", exc)
+
     # Insights do site (Pílulas Jurídicas) — hoje pode vir vazio; resiliente
     if "insights" in on:
         try:
@@ -246,6 +263,8 @@ def _resumir_contexto(ctx: dict) -> str:
           lambda t: f"{t.get('titulo')}: {t.get('trecho', '')}")
     bloco("Pílulas Jurídicas / Insights do site (fonte editorial rica)", ctx.get("insights", []),
           lambda i: f"[{i.get('area') or '—'}] {i.get('assunto') or ''}: {i.get('resumo', '')}")
+    bloco("Julgados destacados do Informativo STJ (gancho jurisprudencial forte)", ctx.get("informativo_stj", []),
+          lambda j: f"[{j.get('ramo')}] {j.get('titulo')}: {j.get('tema_central') or j.get('ratio') or ''}")
 
     partes.append("\n### Temas evergreen (use quando não houver novidade forte):")
     for tema in ctx.get("evergreen", [])[:15]:
@@ -370,6 +389,8 @@ def _classificar_fonte(ctx: dict) -> str:
     """Fonte 'dominante' da rodada (para rotular a sugestão)."""
     if ctx.get("insights"):
         return "insight"
+    if ctx.get("informativo_stj"):
+        return "informativo_stj"
     if ctx.get("publicacoes"):
         return "publicacao"
     if ctx.get("andamentos"):
