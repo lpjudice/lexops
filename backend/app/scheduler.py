@@ -390,6 +390,23 @@ def _sync_diarios_monitorados() -> None:
         logger.warning("Scheduler: falha na sincronização automática do Diário Oficial: %s", exc)
 
 
+def _sync_informativo_stj() -> None:
+    try:
+        from app.database import SessionLocal
+        from app.services import ia_informativo_stj, scraping_informativo_stj
+
+        db = SessionLocal()
+        try:
+            resultado = scraping_informativo_stj.sincronizar_novas_edicoes(db)
+            logger.info("Scheduler: Informativo STJ sincronizado — %s", resultado)
+            ia_resultado = ia_informativo_stj.processar_pendentes(db)
+            logger.info("Scheduler: Informativo STJ resumos IA — %s", ia_resultado)
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.warning("Scheduler: falha na sincronização automática do Informativo STJ: %s", exc)
+
+
 def _enviar_lembretes_reembolso() -> None:
     try:
         from app.database import SessionLocal
@@ -865,6 +882,13 @@ def start_scheduler() -> None:
         _sync_diarios_monitorados,
         trigger=CronTrigger(day_of_week="mon-fri", hour=8, minute=0),
         id="sync_diario_monitorado",
+        replace_existing=True,
+    )
+    # Informativo de Jurisprudência do STJ: semanal, segunda 12h (STJ publica de manhã).
+    scheduler.add_job(
+        _sync_informativo_stj,
+        trigger=CronTrigger(day_of_week="mon", hour=12, minute=0, timezone="America/Sao_Paulo"),
+        id="sync_informativo_stj",
         replace_existing=True,
     )
     # Recorte Digital OAB (Diário 2 via Gmail): 07h/09h/11h/15h seg-sex.

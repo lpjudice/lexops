@@ -1,0 +1,130 @@
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.25rem;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.headerTitle {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--teal);
+}
+
+.headerActions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--gray-border);
+  background: var(--white);
+  color: var(--dark);
+  border-radius: var(--radius-btn);
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.btn:hover { border-color: var(--teal); color: var(--teal); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btnPrimary {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: var(--white);
+}
+.btnPrimary:hover { background: #009d82; color: var(--white); }
+
+.btnGhost {
+  border: none;
+  background: transparent;
+  color: var(--gray-mid);
+  font-size: 12px;
+  padding: 4px 10px;
+}
+.btnGhost:hover { color: var(--teal); }
+
+.grid {
+  display: grid;
+  gap: 12px;
+}
+
+.card {
+  background: var(--white);
+  border: 1px solid var(--gray-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: 16px 20px;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.card:hover { box-shadow: var(--shadow-card-hover); }
+
+.cardTop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cardNumero {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--dark);
+}
+
+.cardData {
+  font-size: 12px;
+  color: var(--gray-mid);
+}
+
+.cardMeta {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 100px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.badgeDestacado {
+  background: var(--teal-light);
+  color: var(--teal);
+}
+
+.badgeNeutro {
+  background: var(--light);
+  color: var(--gray-mid);
+}
+
+.badgeErro {
+  background: #fdecea;
+  color: #c0392b;
+}
+
+.empty {
+  text-align: center;
+  color: var(--gray-mid);
+  padding: 3rem 0;
+  font-size: 14px;
+}
