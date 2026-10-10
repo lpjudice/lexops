@@ -436,7 +436,11 @@ def ler_contratantes(contrato_id: uuid.UUID, db: Session = Depends(get_db)):
 
 # Limites das colunas de `clientes` (evita StringDataRightTruncation → 500 no commit).
 # `endereco` é TEXT (sem limite). Mantido em sincronia com models/cliente.py.
-_CLIENTE_MAXLEN = {"cpf_cnpj": 18, "email": 255, "telefone": 30, "estado_civil": 120, "profissao": 150}
+_CLIENTE_MAXLEN = {
+    "cpf_cnpj": 18, "email": 255, "telefone": 30, "estado_civil": 120, "profissao": 150,
+    "rg": 30, "nacionalidade": 100,
+    "responsavel_nome": 255, "responsavel_cpf": 18, "responsavel_email": 255, "responsavel_telefone": 30,
+}
 
 
 def _cap(campo: str, valor: str) -> str:
@@ -445,17 +449,30 @@ def _cap(campo: str, valor: str) -> str:
 
 
 def _preencher_vazios(cli, dados: dict, db: Session) -> None:
-    """Preenche apenas os campos VAZIOS do cliente a partir de `dados` (merge não-destrutivo)."""
+    """Preenche apenas os campos VAZIOS do cliente a partir de `dados` (merge não-destrutivo).
+    Cobre a qualificação completa que procurações normalmente trazem (RG, nacionalidade,
+    estado civil, profissão, endereço) e, para PJ, os dados do representante legal."""
     from app.models.cliente import Cliente
     cpf = _cap("cpf_cnpj", (dados.get("cpf_cnpj") or "").strip())
     if not cli.cpf_cnpj and cpf:
         ja = db.query(Cliente).filter(Cliente.cpf_cnpj == cpf, Cliente.id != cli.id).first()
         if not ja:
             cli.cpf_cnpj = cpf
-    for campo in ("email", "telefone", "endereco", "estado_civil", "profissao"):
+    for campo in ("email", "telefone", "endereco", "estado_civil", "profissao", "rg", "nacionalidade"):
         valor = (dados.get(campo) or "").strip()
         if valor and not getattr(cli, campo, None):
             setattr(cli, campo, _cap(campo, valor))
+
+    rep = dados.get("representante")
+    if isinstance(rep, dict):
+        mapa = {
+            "nome": "responsavel_nome", "cpf": "responsavel_cpf",
+            "email": "responsavel_email", "telefone": "responsavel_telefone",
+        }
+        for campo_rep, campo_cli in mapa.items():
+            valor = (rep.get(campo_rep) or "").strip()
+            if valor and not getattr(cli, campo_cli, None):
+                setattr(cli, campo_cli, _cap(campo_cli, valor))
 
 
 def _parse_date(s: str | None):

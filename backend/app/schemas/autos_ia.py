@@ -229,3 +229,15 @@ class FaqPerguntaOut(BaseModel):
     criado_em: datetime
 
     model_config = {"from_attributes": True}
+
+
+class AlertaConfigOut(BaseModel):
+    ativo: bool
+    # Destinatário padrão: usuário(s) master do sistema (não editável aqui).
+    email_padrao: list[str]
+    emails_extras: list[str]
+
+
+class AlertaConfigUpdate(BaseModel):
+    ativo: bool | None = None
+    emails_extras: list[str] | None = None

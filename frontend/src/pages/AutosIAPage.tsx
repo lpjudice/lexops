@@ -5,6 +5,7 @@ import { autosIa } from '../api/autosIa'
 import type { CasoResumo } from '../api/autosIa'
 import ProcessoCombobox from '../components/autosIa/ProcessoCombobox'
 import Modal from '../components/Modal'
+import AlertasConfig from '../components/autosIa/AlertasConfig'
 import styles from './Page.module.css'
 
 const CONFIRMACAO_EXCLUSAO = 'DELETAR'
@@ -76,6 +77,8 @@ export default function AutosIAPage() {
           {showForm ? 'Cancelar' : '+ Novo caso'}
         </button>
       </div>
+
+      <AlertasConfig />
 
       {showForm && (
         <form

@@ -111,6 +111,13 @@ export interface PecaDetalhe extends Peca {
   texto_md: string
 }
 
+export interface ConfigAlertas {
+  ativo: boolean
+  /** Usuário(s) master do sistema — recebe sempre, não editável aqui. */
+  email_padrao: string[]
+  emails_extras: string[]
+}
+
 export interface DocumentoDriveAnexo {
   id: string
   tipo: TipoPeca
@@ -297,6 +304,20 @@ export const autosIa = {
 
   relerPeca: (pecaId: string) =>
     api.post<Peca>(`/autos-ia/pecas/${pecaId}/reler`).then((r) => r.data),
+
+  obterConfigAlertas: () =>
+    api.get<ConfigAlertas>('/autos-ia/alertas/config').then((r) => r.data),
+
+  atualizarConfigAlertas: (data: { ativo?: boolean; emails_extras?: string[] }) =>
+    api.put<ConfigAlertas>('/autos-ia/alertas/config', data).then((r) => r.data),
+
+  enviarAlertaTeste: (casoId: string) =>
+    api.post<{
+      enviado: boolean; email?: boolean; telegram?: boolean; documentos?: number; protocolos?: number
+      movimentos?: number; destinatarios?: string[]; motivo?: string
+    }>(
+      `/autos-ia/casos/${casoId}/alerta-teste`,
+    ).then((r) => r.data),
 
   relerPendentes: (casoId: string) =>
     api.post<Caso>(`/autos-ia/casos/${casoId}/reler-pendentes`).then((r) => r.data),

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '@/api/client'
@@ -325,6 +325,7 @@ export default function CarteiraPage() {
   const [filtroClienteImob, setFiltroClienteImob] = useState('')
   const [filtroClienteFundos, setFiltroClienteFundos] = useState('')
   const [filtroClientePos, setFiltroClientePos] = useState('')
+  const [filtroClienteRef, setFiltroClienteRef] = useState('')
   // Filtro tipo de ativo em Posição por Cliente
   const [mostrarDebs, setMostrarDebs] = useState(true)
   const [mostrarImob, setMostrarImob] = useState(true)
@@ -341,8 +342,27 @@ export default function CarteiraPage() {
   const [driveClienteId, setDriveClienteId] = useState<number | null>(null)
   const [driveArquivos, setDriveArquivos] = useState<any[]>([])
   const [driveCarregando, setDriveCarregando] = useState(false)
+  const [driveCandidatos, setDriveCandidatos] = useState<{ id: string; name: string; score: number }[] | null>(null)
+  // Leitura de emissão por IA com múltiplas séries no mesmo documento — cada
+  // linha já vem com os campos comuns aplicados, só os campos por-série variam.
+  const [emissaoSeries, setEmissaoSeries] = useState<any[] | null>(null)
+  const [criandoSeries, setCriandoSeries] = useState(false)
   // Cadeia societária modal
   const [cadeiaEmpId, setCadeiaEmpId] = useState<number | null>(null)
+  // KPI expand
+  const [expandFundos, setExpandFundos] = useState(false)
+  const [expandImob, setExpandImob] = useState(false)
+  const [detalheKpi, setDetalheKpi] = useState<'fee' | 'exito' | null>(null)
+  const [detalheBusca, setDetalheBusca] = useState('')
+  const [detalheExpandidos, setDetalheExpandidos] = useState<Set<number>>(new Set())
+  // Posição — modo de visualização
+  const [viewModePosicao, setViewModePosicao] = useState<'cliente' | 'ativo'>('cliente')
+  const [filtroAtivoEmissao, setFiltroAtivoEmissao] = useState('')
+  const [filtroAtivoFundo, setFiltroAtivoFundo] = useState('')
+  const [viewModeDebs, setViewModeDebs] = useState<'cliente' | 'ativo'>('cliente')
+  const [viewModeFundos, setViewModeFundos] = useState<'cliente' | 'ativo'>('cliente')
+  const [viewModeImob, setViewModeImob] = useState<'cliente' | 'ativo'>('cliente')
+  const [confirmPctOverride, setConfirmPctOverride] = useState<{ tipo: 'fundo' | 'deb' | 'imob', mutateFn: () => void, confirmText: string } | null>(null)
 
   const { isSuperAdmin } = useAuth()
   const qc = useQueryClient()
@@ -352,6 +372,7 @@ export default function CarteiraPage() {
     setEditandoClienteId(null); setEditandoEmpId(null)
     setEditandoDebId(null); setEditandoImobId(null); setEditandoFundoId(null)
     setEditandoEmissaoId(null); setEditandoFundoRefId(null); setEditandoEstrategiaId(null)
+    setEmissaoSeries(null)
   }
 
   // ── Render helpers ────────────────────────────────────────────────
@@ -407,26 +428,126 @@ export default function CarteiraPage() {
     const debs = debentures.filter(d => d.cliente_id === c.id)
     const imobs = imobiliario.filter(i => i.cliente_id === c.id)
     const fnds = fundos.filter(f => f.cliente_id === c.id)
-    const totalFin = [...debs, ...fnds].reduce((s, p) => s + (p.valor_aplicado ?? 0), 0)
+    const totalDebValue = debs.reduce((s, d) => s + (d.valor_aplicado ?? 0), 0)
+    // Para fundos com % queda, usa apenas a parcela recuperável no cálculo de êxito
+    const totalFundValue = fnds.reduce((s, f) => {
+      const ref = fundosRef.find((r: any) => r.id === f.fundo_id)
+      const queda = ref?.percentual_credito_recuperavel
+      return s + (f.valor_aplicado ?? 0) * (queda != null ? (1 - queda / 100) : 1)
+    }, 0)
+    const totalFin = totalDebValue + totalFundValue
     const totalImob = imobs.reduce((s, p) => s + (p.valor_total_compromissado ?? 0), 0)
     const totalGeral = totalFin + totalImob
     let feeEntrada = 0
     if (c.pro_labore_tipo === 'fixo') feeEntrada = c.pro_labore_valor ?? 0
     else if (c.pro_labore_tipo === 'percentual')
       feeEntrada = totalImob * ((c.fee_imob_pct ?? 0) / 100) + totalFin * ((c.fee_fin_pct ?? 0) / 100)
+
+    // Êxito: soma posição a posição, usando o % EFETIVO de cada uma (o
+    // override "ALTERAR % DESSE FUNDO APENAS" daquela posição, ou — se não
+    // houver override — o % padrão do cliente). Antes aplicava um único %
+    // do cliente sobre o total agregado, então editar o % de uma posição
+    // específica nunca mudava a soma — só o % de cliente fazia diferença.
+    const pctFinPadrao = c.percentual_sucesso_fin ?? c.percentual_sucesso_geral ?? 0
+    const pctImobPadrao = c.percentual_sucesso_imob ?? c.percentual_sucesso_geral ?? 0
     let exito = 0
-    if (c.percentual_sucesso_imob || c.percentual_sucesso_fin)
-      exito = totalImob * ((c.percentual_sucesso_imob ?? 0) / 100) + totalFin * ((c.percentual_sucesso_fin ?? 0) / 100)
-    else if (c.percentual_sucesso_geral)
-      exito = totalGeral * ((c.percentual_sucesso_geral ?? 0) / 100)
+    for (const d of debs) {
+      const pct = d.percentual_sucesso_honor ?? pctFinPadrao
+      exito += (d.valor_aplicado ?? 0) * (pct / 100)
+    }
+    for (const f of fnds) {
+      const ref = fundosRef.find((r: any) => r.id === f.fundo_id)
+      const queda = ref?.percentual_credito_recuperavel
+      const base = (f.valor_aplicado ?? 0) * (queda != null ? (1 - queda / 100) : 1)
+      const pct = f.percentual_sucesso_honor ?? pctFinPadrao
+      exito += base * (pct / 100)
+    }
+    for (const i of imobs) {
+      const pct = i.percentual_sucesso_honorario ?? pctImobPadrao
+      exito += (i.valor_total_compromissado ?? 0) * (pct / 100)
+    }
     return { totalGeral, totalFin, totalImob, feeEntrada, exito }
   }
 
+  // Detalhamento item a item por cliente, pros popups de Fee Entrada / Expectativa Êxito.
+  type DetalheItem = { tipo: string; nome: string; valor: number; pct: number; resultado: number }
+  const detalharCliente = (c: any, modo: 'fee' | 'exito'): DetalheItem[] => {
+    const debs = debentures.filter(d => d.cliente_id === c.id)
+    const imobs = imobiliario.filter(i => i.cliente_id === c.id)
+    const fnds = fundos.filter(f => f.cliente_id === c.id)
+    const pctFinPadrao = c.percentual_sucesso_fin ?? c.percentual_sucesso_geral ?? 0
+    const pctImobPadrao = c.percentual_sucesso_imob ?? c.percentual_sucesso_geral ?? 0
+    const items: DetalheItem[] = []
+
+    if (modo === 'exito') {
+      for (const d of debs) {
+        const pct = d.percentual_sucesso_honor ?? pctFinPadrao
+        const valor = d.valor_aplicado ?? 0
+        items.push({ tipo: 'Financeiro · Debênture', nome: `${emissaoNome(d.emissao_id)} (${d.numero_cautela})`, valor, pct, resultado: valor * pct / 100 })
+      }
+      for (const f of fnds) {
+        const ref = fundosRef.find((r: any) => r.id === f.fundo_id)
+        const queda = ref?.percentual_credito_recuperavel
+        const base = (f.valor_aplicado ?? 0) * (queda != null ? (1 - queda / 100) : 1)
+        const pct = f.percentual_sucesso_honor ?? pctFinPadrao
+        items.push({ tipo: 'Financeiro · Fundo', nome: fundoNome(f.fundo_id), valor: f.valor_aplicado ?? 0, pct, resultado: base * pct / 100 })
+      }
+      for (const i of imobs) {
+        const pct = i.percentual_sucesso_honorario ?? pctImobPadrao
+        const valor = i.valor_total_compromissado ?? 0
+        items.push({ tipo: 'Imobiliário', nome: empreendimentoNome(i.empreendimento_id), valor, pct, resultado: valor * pct / 100 })
+      }
+    } else if (c.pro_labore_tipo === 'percentual') {
+      for (const d of debs) {
+        const valor = d.valor_aplicado ?? 0
+        const pct = c.fee_fin_pct ?? 0
+        items.push({ tipo: 'Financeiro · Debênture', nome: `${emissaoNome(d.emissao_id)} (${d.numero_cautela})`, valor, pct, resultado: valor * pct / 100 })
+      }
+      for (const f of fnds) {
+        const valor = f.valor_aplicado ?? 0
+        const pct = c.fee_fin_pct ?? 0
+        items.push({ tipo: 'Financeiro · Fundo', nome: fundoNome(f.fundo_id), valor, pct, resultado: valor * pct / 100 })
+      }
+      for (const i of imobs) {
+        const valor = i.valor_total_compromissado ?? 0
+        const pct = c.fee_imob_pct ?? 0
+        items.push({ tipo: 'Imobiliário', nome: empreendimentoNome(i.empreendimento_id), valor, pct, resultado: valor * pct / 100 })
+      }
+    }
+    return items
+  }
+
   const kpiImob = imobiliario.reduce((s, i) => s + (i.valor_total_compromissado ?? 0), 0)
-  const kpiFin = [...debentures, ...fundos].reduce((s, p) => s + (p.valor_aplicado ?? 0), 0)
+  const kpiDeb  = debentures.reduce((s, d) => s + (d.valor_aplicado ?? 0), 0)
+  const kpiFundos = fundos.reduce((s, f) => s + (f.valor_aplicado ?? 0), 0)
+  const kpiFin = kpiDeb + kpiFundos
   const kpiTotal = kpiImob + kpiFin
   const kpiFeeEntrada = clientes.reduce((s, c) => s + calcularHonorarios(c).feeEntrada, 0)
-  const kpiExito = clientes.reduce((s, c) => s + calcularHonorarios(c).exito, 0)
+  const kpiExito = clientes.filter((c: any) => c.ativo !== false).reduce((s, c) => s + calcularHonorarios(c).exito, 0)
+
+  // Breakdown de fundos por CNPJ (para card expandível)
+  const fundosBreakdown = useMemo(() => {
+    const byCnpj: Record<string, { nome: string; total: number; pctRisco: number | null }> = {}
+    for (const f of fundos) {
+      const ref = fundosRef.find((r: any) => r.id === f.fundo_id)
+      const key = ref?.cnpj_fundo ?? `sem-cnpj-${f.fundo_id}`
+      if (!byCnpj[key]) byCnpj[key] = { nome: ref?.nome_fundo ?? `Fundo ${f.fundo_id}`, total: 0, pctRisco: ref?.percentual_credito_recuperavel ?? null }
+      byCnpj[key].total += (f.valor_aplicado ?? 0)
+    }
+    return Object.values(byCnpj).sort((a, b) => b.total - a.total)
+  }, [fundos, fundosRef])
+
+  // Breakdown de imobiliário por empreendimento (para card expandível)
+  const imobBreakdown = useMemo(() => {
+    const byEmp: Record<string, { nome: string; total: number }> = {}
+    for (const i of imobiliario) {
+      const emp = empreendimentos.find((e: any) => e.id === i.empreendimento_id)
+      const key = String(i.empreendimento_id ?? 'sem-emp')
+      if (!byEmp[key]) byEmp[key] = { nome: emp?.nome_venda ?? `Empreendimento ${i.empreendimento_id}`, total: 0 }
+      byEmp[key].total += (i.valor_total_compromissado ?? 0)
+    }
+    return Object.values(byEmp).sort((a, b) => b.total - a.total)
+  }, [imobiliario, empreendimentos])
 
   // ── CNPJ duplicado em empreendimentos ──────────────────────────────
   const cnpjCount: Record<string, number> = {}
@@ -473,10 +594,19 @@ export default function CarteiraPage() {
     .sort((a: any, b: any) => clienteNome(a.id).localeCompare(clienteNome(b.id), 'pt-BR'))
 
   // ── Mutations ─────────────────────────────────────────────────────
+  // exito_split é um toggle só de UI (decide mostrar % geral ou % dividido),
+  // não existe como coluna no backend — nunca deve ir no payload.
+  // Campos de auditoria (criado_por/atualizado_por/data_*) são geridos pelo
+  // servidor — abrirEdicaoX espalha o registro inteiro em form, então sem
+  // isso eles viajariam de volta no payload com o valor ANTIGO e o
+  // onupdate do SQLAlchemy ficaria "congelado" no valor que o cliente mandou.
+  const CAMPOS_AUDITORIA = ['criado_por', 'atualizado_por', 'data_criacao', 'data_atualizacao', 'data_cadastro']
+  const limparPayload = (p: any) => { delete p.exito_split; CAMPOS_AUDITORIA.forEach(k => delete p[k]) }
   const mk = (url: string, keys: string[], numFields: string[] = []) => useMutation({
     mutationFn: () => {
-      const p = { ...form }
-      numFields.forEach(k => { if (p[k] !== undefined && p[k] !== '') p[k] = Number(p[k]) })
+      const p: any = { ...form }
+      limparPayload(p)
+      numFields.forEach(k => { if (p[k] === '') p[k] = null; else if (p[k] !== undefined) p[k] = Number(p[k]) })
       return api.post(url, p).then(r => r.data)
     },
     onSuccess: () => { keys.forEach(k => qc.invalidateQueries({ queryKey: [k] })); closeModal() },
@@ -484,8 +614,9 @@ export default function CarteiraPage() {
   })
   const mkPut = (urlFn: () => string, keys: string[], numFields: string[] = []) => useMutation({
     mutationFn: () => {
-      const p = { ...form }
-      numFields.forEach(k => { if (p[k] !== undefined && p[k] !== '') p[k] = Number(p[k]) })
+      const p: any = { ...form }
+      limparPayload(p)
+      numFields.forEach(k => { if (p[k] === '') p[k] = null; else if (p[k] !== undefined) p[k] = Number(p[k]) })
       return api.put(urlFn(), p).then(r => r.data)
     },
     onSuccess: () => { keys.forEach(k => qc.invalidateQueries({ queryKey: [k] })); closeModal() },
@@ -496,7 +627,7 @@ export default function CarteiraPage() {
   const salvarCliente = mk('/carteira/clientes', ['carteira-clientes'], numC)
   const atualizarCliente = mkPut(() => `/carteira/clientes/${editandoClienteId}`, ['carteira-clientes'], numC)
 
-  const salvarEmissao = mk('/carteira/emissoes', ['carteira-emissoes'], ['numero_emissao'])
+  const salvarEmissao = mk('/carteira/emissoes', ['carteira-emissoes'], ['numero_emissao', 'prazo_carencia_dias'])
 
   const numDeb = ['cliente_id', 'emissao_id', 'valor_aplicado', 'valor_atual_estimado', 'percentual_sucesso_honor', 'numero_debentures', 'valor_pago']
   const salvarDebenture = mk('/carteira/debentures', ['carteira-debentures'], numDeb)
@@ -509,16 +640,30 @@ export default function CarteiraPage() {
   const salvarImobiliario = mk('/carteira/imobiliario', ['carteira-imobiliario'], numImob)
   const atualizarImobiliario = mkPut(() => `/carteira/imobiliario/${editandoImobId}`, ['carteira-imobiliario'], numImob)
 
-  const salvarFundoRef = mk('/carteira/fundos-referencia', ['carteira-fundos-ref'])
+  const salvarFundoRef = mk('/carteira/fundos-referencia', ['carteira-fundos-ref'], ['percentual_credito_recuperavel'])
 
   const numFundo = ['cliente_id', 'fundo_id', 'valor_aplicado', 'valor_atual_estimado', 'percentual_sucesso_honor']
   const salvarFundo = mk('/carteira/fundos', ['carteira-fundos'], numFundo)
   const atualizarFundo = mkPut(() => `/carteira/fundos/${editandoFundoId}`, ['carteira-fundos'], numFundo)
 
   const salvarEstrategia = mk('/carteira/estrategias', ['carteira-estrategias'])
-  const atualizarEmissao = mkPut(() => `/carteira/emissoes/${editandoEmissaoId}`, ['carteira-emissoes'], ['numero_emissao'])
-  const atualizarFundoRef = mkPut(() => `/carteira/fundos-referencia/${editandoFundoRefId}`, ['carteira-fundos-ref'])
+  const atualizarEmissao = mkPut(() => `/carteira/emissoes/${editandoEmissaoId}`, ['carteira-emissoes'], ['numero_emissao', 'prazo_carencia_dias'])
+  const atualizarFundoRef = mkPut(() => `/carteira/fundos-referencia/${editandoFundoRefId}`, ['carteira-fundos-ref'], ['percentual_credito_recuperavel'])
   const atualizarEstrategia = mkPut(() => `/carteira/estrategias/${editandoEstrategiaId}`, ['carteira-estrategias'])
+
+  const mkDelete = (urlFn: (id: number) => string, keys: string[]) => useMutation({
+    mutationFn: (id: number) => api.delete(urlFn(id)).then(r => r.data),
+    onSuccess: () => keys.forEach(k => qc.invalidateQueries({ queryKey: [k] })),
+    onError: (e: any) => alert(e?.response?.data?.detail || 'Erro ao excluir'),
+  })
+  const deletarCliente = mkDelete(id => `/carteira/clientes/${id}`, ['carteira-clientes'])
+  const deletarEmissao = mkDelete(id => `/carteira/emissoes/${id}`, ['carteira-emissoes'])
+  const deletarDebPos = mkDelete(id => `/carteira/debentures/${id}`, ['carteira-debentures'])
+  const deletarEmp = mkDelete(id => `/carteira/empreendimentos/${id}`, ['carteira-empreendimentos'])
+  const deletarImobPos = mkDelete(id => `/carteira/imobiliario/${id}`, ['carteira-imobiliario'])
+  const deletarFundoRef = mkDelete(id => `/carteira/fundos-referencia/${id}`, ['carteira-fundos-ref'])
+  const deletarFundoPos = mkDelete(id => `/carteira/fundos/${id}`, ['carteira-fundos'])
+  const deletarEstrategia = mkDelete(id => `/carteira/estrategias/${id}`, ['carteira-estrategias'])
 
   const patchEstratDeb = useMutation({
     mutationFn: ({ id, ids }: { id: number; ids: number[] }) =>
@@ -539,19 +684,87 @@ export default function CarteiraPage() {
   const processarDocumento = useMutation({
     mutationFn: ({ file, tipo }: { file: File; tipo: string }) => {
       const fd = new FormData(); fd.append('file', file)
-      return api.post(`/carteira/processar-documento?tipo=${tipo}`, fd).then(r => r.data)
+      // Leitura de escritura/termo inteiro pela IA pode passar bem do timeout
+      // padrão de 30s do client — o backend já tem seu próprio teto de 120s.
+      return api.post(`/carteira/processar-documento?tipo=${tipo}`, fd, { timeout: 150000 }).then(r => r.data)
     },
-    onSuccess: (data) => {
-      if (data.dados_extraidos) setForm(f => ({ ...f, ...data.dados_extraidos }))
-      alert('Documento processado! Verifique os campos preenchidos.')
+    onSuccess: (data, variables) => {
+      const extraido = data.dados_extraidos
+      if (variables.tipo === 'emissao' && extraido && ('comum' in extraido || 'series' in extraido)) {
+        const comum = extraido.comum ?? {}
+        // A IA às vezes devolve "series" como objeto único em vez de lista de 1 — tolera os dois.
+        let series = extraido.series
+        if (series && !Array.isArray(series)) series = [series]
+        if (!Array.isArray(series) || series.length === 0) {
+          alert('A IA não encontrou nenhuma série no documento. Preencha manualmente ou tente outro arquivo.')
+          return
+        }
+        if (series.length > 1) {
+          // Várias séries no mesmo documento: aplica os campos comuns em cada
+          // uma e deixa o usuário revisar/editar antes de criar todas de uma vez.
+          setEmissaoSeries(series.map((s: any) => ({ ...comum, ...s })))
+          return
+        }
+        setForm(f => ({ ...f, ...comum, ...series[0] }))
+        alert('Documento processado! Verifique os campos preenchidos.')
+        return
+      }
+      if (extraido && Object.keys(extraido).length > 0) {
+        setForm(f => ({ ...f, ...extraido }))
+        alert('Documento processado! Verifique os campos preenchidos.')
+      } else {
+        alert('A IA processou o documento mas não retornou nenhum campo reconhecível. Tente novamente ou preencha manualmente.')
+      }
     },
-    onError: (e: any) => alert(e?.response?.data?.detail || 'Erro ao processar documento'),
+    onError: (e: any) => {
+      if (e?.code === 'ECONNABORTED') { alert('A leitura demorou demais e o navegador desistiu antes da IA terminar. Tente um arquivo menor (só as páginas relevantes) ou tente de novo.'); return }
+      alert(e?.response?.data?.detail || 'Erro ao processar documento')
+    },
+  })
+
+  const criarEmissoesEmLote = async () => {
+    if (!emissaoSeries || emissaoSeries.length === 0) return
+    setCriandoSeries(true)
+    try {
+      for (const row of emissaoSeries) {
+        const payload = { ...row }
+        if (payload.numero_emissao !== undefined && payload.numero_emissao !== '') payload.numero_emissao = Number(payload.numero_emissao)
+        if (payload.prazo_carencia_dias !== undefined && payload.prazo_carencia_dias !== '') payload.prazo_carencia_dias = Number(payload.prazo_carencia_dias)
+        else if (payload.prazo_carencia_dias === '') payload.prazo_carencia_dias = null
+        await api.post('/carteira/emissoes', payload)
+      }
+      qc.invalidateQueries({ queryKey: ['carteira-emissoes'] })
+      alert(`${emissaoSeries.length} emissões criadas com sucesso.`)
+      closeModal()
+    } catch (e: any) {
+      alert(e?.response?.data?.detail || 'Erro ao criar as emissões. Nenhuma linha pendente foi perdida — corrija e tente de novo.')
+    } finally {
+      setCriandoSeries(false)
+    }
+  }
+
+  const uploadComprovante = useMutation({
+    mutationFn: (file: File) => {
+      if (!form.cliente_id) throw new Error('Selecione o cliente antes de enviar o comprovante.')
+      const fd = new FormData(); fd.append('file', file)
+      return api.post(`/carteira/upload-para-drive?cliente_id=${form.cliente_id}`, fd).then(r => r.data)
+    },
+    onSuccess: (data) => { inp('comprovante_resgate_url', data.file_link) },
+    onError: (e: any) => alert(e?.response?.data?.detail || e?.message || 'Erro ao enviar comprovante'),
   })
 
   const criarPastaDrive = useMutation({
-    mutationFn: (clienteId: number) =>
-      api.post(`/carteira/criar-pasta-drive?cliente_id=${clienteId}`).then(r => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['carteira-clientes'] }) },
+    mutationFn: (opts: { clienteId: number; usarPastaId?: string; confirmarNova?: boolean }) => {
+      const params = new URLSearchParams({ cliente_id: String(opts.clienteId) })
+      if (opts.usarPastaId) params.set('usar_pasta_id', opts.usarPastaId)
+      if (opts.confirmarNova) params.set('confirmar_nova', 'true')
+      return api.post(`/carteira/criar-pasta-drive?${params.toString()}`).then(r => r.data)
+    },
+    onSuccess: (data) => {
+      if (data.status === 'ambiguo') { setDriveCandidatos(data.candidatos); return }
+      setDriveCandidatos(null)
+      qc.invalidateQueries({ queryKey: ['carteira-clientes'] })
+    },
     onError: (e: any) => alert(e?.response?.data?.detail || 'Erro ao criar pasta Drive'),
   })
 
@@ -599,6 +812,8 @@ export default function CarteiraPage() {
       percentual_sucesso_imob: c.percentual_sucesso_imob ?? '', percentual_sucesso_fin: c.percentual_sucesso_fin ?? '',
       exito_split: !!(c.percentual_sucesso_imob || c.percentual_sucesso_fin),
       cliente_uuid: c.cliente_uuid ?? '', observacoes: c.observacoes ?? '', ativo: c.ativo ?? true,
+      criado_por: c.criado_por, atualizado_por: c.atualizado_por,
+      data_criacao: c.data_cadastro, data_atualizacao: c.data_atualizacao,
     })
     setEditandoClienteId(c.id); setModal('cliente')
   }
@@ -607,7 +822,9 @@ export default function CarteiraPage() {
       prestadora_cnpj: e.prestadora_cnpj ?? '', nome_razao_social: e.nome_razao_social ?? '',
       cnpj_empreendimento: e.cnpj_empreendimento ?? '', spe_nome: e.spe_nome ?? '', spe_cnpj: e.spe_cnpj ?? '',
       subveiculos: e.subveiculos ?? [], tipo_desenvolvimento: e.tipo_desenvolvimento ?? '',
-      localizacao: e.localizacao ?? '', descricao: e.descricao ?? '', ativo: e.ativo })
+      localizacao: e.localizacao ?? '', descricao: e.descricao ?? '', ativo: e.ativo,
+      criado_por: e.criado_por, atualizado_por: e.atualizado_por,
+      data_criacao: e.data_criacao, data_atualizacao: e.data_atualizacao })
     setEditandoEmpId(e.id); setModal('empreendimento')
   }
   const pctExitoFin = (clienteId: number) => {
@@ -618,20 +835,43 @@ export default function CarteiraPage() {
     const c = clientes.find((x: any) => x.id === clienteId)
     return c ? (c.percentual_sucesso_imob ?? c.percentual_sucesso_geral ?? '') : ''
   }
+  const efetivoPctFin = (pos: any) => {
+    const stored = pos.percentual_sucesso_honor
+    if (stored != null && stored !== '') return { val: stored as number, custom: true }
+    const def = pctExitoFin(pos.cliente_id)
+    return { val: def as number | '', custom: false }
+  }
+  const efetivoPctImob = (pos: any) => {
+    const stored = pos.percentual_sucesso_honorario
+    if (stored != null && stored !== '') return { val: stored as number, custom: true }
+    const def = pctExitoImob(pos.cliente_id)
+    return { val: def as number | '', custom: false }
+  }
+  const salvarComConfirmPct = (tipo: 'fundo' | 'deb' | 'imob', mutateFn: () => void) => {
+    if (!form.faz_parte_honorarios) { mutateFn(); return }
+    const pctAtual = tipo === 'imob' ? form.percentual_sucesso_honorario : form.percentual_sucesso_honor
+    const pctDefault = tipo === 'imob' ? pctExitoImob(form.cliente_id) : pctExitoFin(form.cliente_id)
+    const isEditing = tipo === 'fundo' ? !!editandoFundoId : tipo === 'deb' ? !!editandoDebId : !!editandoImobId
+    if (isEditing && pctAtual != null && pctAtual !== '' && String(pctAtual) !== String(pctDefault)) {
+      setConfirmPctOverride({ tipo, mutateFn, confirmText: '' })
+      return
+    }
+    mutateFn()
+  }
 
   const abrirEdicaoDeb = (d: any) => {
     setForm({ ...d, faz_parte_honorarios: !!d.faz_parte_honorarios, foi_pago: !!d.foi_pago,
-      percentual_sucesso_honor: pctExitoFin(d.cliente_id) })
+      percentual_sucesso_honor: d.percentual_sucesso_honor ?? pctExitoFin(d.cliente_id) })
     setEditandoDebId(d.id); setModal('debenture')
   }
   const abrirEdicaoImob = (i: any) => {
     setForm({ ...i, faz_parte_honorarios: !!i.faz_parte_honorarios,
-      percentual_sucesso_honorario: pctExitoImob(i.cliente_id) })
+      percentual_sucesso_honorario: i.percentual_sucesso_honorario ?? pctExitoImob(i.cliente_id) })
     setEditandoImobId(i.id); setModal('imobiliario')
   }
   const abrirEdicaoFundo = (f: any) => {
     setForm({ ...f, faz_parte_honorarios: !!f.faz_parte_honorarios, tem_direito_recompra: !!f.tem_direito_recompra,
-      percentual_sucesso_honor: pctExitoFin(f.cliente_id) })
+      percentual_sucesso_honor: f.percentual_sucesso_honor ?? pctExitoFin(f.cliente_id) })
     setEditandoFundoId(f.id); setModal('fundo')
   }
 
@@ -712,13 +952,81 @@ export default function CarteiraPage() {
     if (s === 'Resgatado') return <span className={`${styles.badge} ${styles.status_encerrado}`}>{s}</span>
     return <span className={styles.badge}>{String(s)}</span>
   }
+  const RESGATE_LABELS: Record<string, string> = {
+    'Ativo': 'Resgate Não Solicitado',
+    'Resgate Solicitado': 'Resgate Solicitado e Negado',
+    'Resgatado': 'Resgatado',
+  }
+  const resgateStatusBadge = (s: string) => {
+    const label = RESGATE_LABELS[s] ?? s
+    if (s === 'Resgate Solicitado') return <span className={`${styles.badge} ${styles.status_suspenso}`}>{label}</span>
+    if (s === 'Resgatado') return <span className={`${styles.badge} ${styles.status_encerrado}`}>{label}</span>
+    return <span className={`${styles.badge} ${styles.status_ativo}`}>{label}</span>
+  }
   const addBtn = (label: string, onClick: () => void) => (
     <div className={styles.pageHeader} style={{ marginBottom: 12 }}>
       <span /><button className={styles.btnPrimary} onClick={onClick}>+ {label}</button>
     </div>
   )
   const editBtn = (onClick: () => void) => (
-    <button style={{ background: 'none', border: '1px solid var(--gray-border)', borderRadius: 4, padding: '3px 10px', cursor: 'pointer', fontSize: 12, color: 'var(--gray-mid)' }} onClick={onClick}>Editar</button>
+    <button style={{ background: 'none', border: '1px solid var(--gray-border)', borderRadius: 4, padding: '3px 8px', cursor: 'pointer', fontSize: 11, color: 'var(--gray-mid)', whiteSpace: 'nowrap' }} onClick={onClick}>Editar</button>
+  )
+  const deleteBtnOnly = (label: string, onConfirm: () => void) => (
+    <button
+      title={`Excluir ${label}`}
+      style={{ background: 'none', border: '1px solid #fca5a5', borderRadius: 4, padding: '3px 7px', cursor: 'pointer', fontSize: 11, color: '#dc2626', whiteSpace: 'nowrap', lineHeight: 1 }}
+      onClick={() => { if (window.confirm(`Excluir ${label}? Essa ação não pode ser desfeita.`)) onConfirm() }}
+    >✕</button>
+  )
+  // Auditoria (quem registrou/alterou + quando) — sem coluna nova na tabela,
+  // só um ícone discreto com tooltip ao lado de Editar/Excluir.
+  const fmtDataHora = (iso?: string | null) => {
+    if (!iso) return null
+    const d = new Date(iso)
+    if (isNaN(d.getTime())) return null
+    return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+  }
+  const auditoriaTexto = (rec: any) => {
+    if (!rec) return ''
+    const criadoEm = fmtDataHora(rec.data_criacao ?? rec.data_cadastro)
+    const atualEm = fmtDataHora(rec.data_atualizacao)
+    const criadoPor: string | null = rec.criado_por || null
+    const atualizadoPor: string | null = rec.atualizado_por || null
+    if (!criadoEm && !atualEm) return 'Sem informação de auditoria'
+
+    // Registros de antes dessa feature (ex: importação em massa) não têm
+    // usuário gravado — isso é esperado, não é bug. Deixa claro o motivo em
+    // vez de mostrar um "—" que parece erro.
+    const clausula = (por: string | null, em: string | null) =>
+      por ? `${por}${em ? ` em ${em}` : ''}` : (em ? `${em} (anterior ao controle de usuário)` : '')
+
+    // Nunca editado desde a criação: uma linha só, não duas iguais.
+    if (criadoEm === atualEm && criadoPor === atualizadoPor) {
+      return `Criado por ${clausula(criadoPor, criadoEm)}`
+    }
+
+    const partes: string[] = []
+    if (criadoEm || criadoPor) partes.push(`Criado por ${clausula(criadoPor, criadoEm)}`)
+    if (atualEm || atualizadoPor) partes.push(`Última alteração por ${clausula(atualizadoPor, atualEm)}`)
+    return partes.join(' · ')
+  }
+  const auditIcon = (rec: any) => (
+    <span
+      title={auditoriaTexto(rec)}
+      style={{ fontSize: 11, color: 'var(--gray-mid)', cursor: 'pointer', padding: '0 2px', lineHeight: 1 }}
+      onClick={() => alert(auditoriaTexto(rec))}
+    >ℹ</span>
+  )
+  const auditCaption = (editing: boolean) => {
+    if (!editing || (!form.criado_por && !form.atualizado_por)) return null
+    return <div style={{ fontSize: 10, color: 'var(--gray-mid)', margin: '8px 0 4px', lineHeight: 1.4 }}>{auditoriaTexto(form)}</div>
+  }
+  const rowActions = (editOnClick: () => void, deleteLabel: string, onDelete: () => void, rec?: any) => (
+    <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'nowrap' }}>
+      {rec && auditIcon(rec)}
+      {editBtn(editOnClick)}
+      {deleteBtnOnly(deleteLabel, onDelete)}
+    </div>
   )
   const quickAddBtn = (label: string, onClick: () => void) => (
     <button style={{ background: 'none', border: '1px solid var(--teal)', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', fontSize: 11, color: 'var(--teal)', marginLeft: 6 }} onClick={onClick}>+ {label}</button>
@@ -750,19 +1058,83 @@ export default function CarteiraPage() {
   )
   const thR = (label: string) => <th style={{ textAlign: 'right' }}>{label}</th>
 
+  const viewToggle = (mode: 'cliente' | 'ativo', setMode: (v: 'cliente' | 'ativo') => void) => (
+    <div style={{ display: 'flex', border: '1px solid var(--gray-border)', borderRadius: 6, overflow: 'hidden', fontSize: 12, marginLeft: 'auto', flexShrink: 0 }}>
+      <button style={{ padding: '4px 12px', background: mode === 'cliente' ? 'var(--teal)' : 'transparent', color: mode === 'cliente' ? 'white' : 'var(--gray-mid)', border: 'none', cursor: 'pointer' }} onClick={() => setMode('cliente')}>Por Cliente</button>
+      <button style={{ padding: '4px 12px', background: mode === 'ativo' ? 'var(--teal)' : 'transparent', color: mode === 'ativo' ? 'white' : 'var(--gray-mid)', border: 'none', cursor: 'pointer' }} onClick={() => setMode('ativo')}>Por Ativo</button>
+    </div>
+  )
+
+  const atvClienteRow = (clienteId: number, valor: number) => (
+    <div key={clienteId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 10px', background: 'var(--gray-light, #f3f4f6)', borderRadius: 4, marginBottom: 3 }}>
+      <span style={{ fontSize: 12 }}>{clienteNome(clienteId)}</span>
+      <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{brl(valor)}</span>
+    </div>
+  )
+
   return (
     <div style={{ padding: '24px 28px' }}>
       <div className={styles.pageHeader}><h1 className={styles.pageTitle}>Carteira</h1></div>
 
       {/* KPI Cards */}
-      <div className={cs.kpiGrid} style={{ gridTemplateColumns: 'repeat(6, 1fr)' }}>
+      <div className={cs.kpiGrid} style={{ gridTemplateColumns: 'repeat(7, 1fr)' }}>
         <div className={cs.kpiCard}><span className={cs.kpiLabel}>Clientes</span><span className={cs.kpiValue}>{clientes.length}</span></div>
         <div className={cs.kpiCard}><span className={cs.kpiLabel}>Total Geral</span><span className={cs.kpiValue}>{brl(kpiTotal)}</span></div>
-        <div className={cs.kpiCard} style={{ borderTop: '3px solid var(--amber, #f59e0b)' }}><span className={cs.kpiLabel}>Imobiliário</span><span className={cs.kpiValue}>{brl(kpiImob)}</span></div>
-        <div className={cs.kpiCard} style={{ borderTop: '3px solid var(--teal)' }}><span className={cs.kpiLabel}>Financeiro</span><span className={cs.kpiValue}>{brl(kpiFin)}</span></div>
-        <div className={cs.kpiCard}><span className={cs.kpiLabel}>Fee Entrada (esp.)</span><span className={cs.kpiValue}>{isSuperAdmin ? brl(kpiFeeEntrada) : '🔒'}</span></div>
-        <div className={cs.kpiCard}><span className={cs.kpiLabel}>Expectativa Êxito</span><span className={cs.kpiValue}>{isSuperAdmin ? brl(kpiExito) : '🔒'}</span></div>
+        <div className={cs.kpiCard} style={{ borderTop: '3px solid var(--amber, #f59e0b)', cursor: 'pointer' }}
+          onClick={() => setExpandImob(v => !v)}>
+          <span className={cs.kpiLabel}>Imobiliário {expandImob ? '▴' : '▾'}</span>
+          <span className={cs.kpiValue}>{brl(kpiImob)}</span>
+        </div>
+        <div className={cs.kpiCard} style={{ borderTop: '3px solid var(--teal)' }}>
+          <span className={cs.kpiLabel}>Debêntures</span><span className={cs.kpiValue}>{brl(kpiDeb)}</span>
+        </div>
+        <div className={cs.kpiCard} style={{ borderTop: '3px solid #3b82f6', cursor: 'pointer' }}
+          onClick={() => setExpandFundos(v => !v)}>
+          <span className={cs.kpiLabel}>Fundos {expandFundos ? '▴' : '▾'}</span>
+          <span className={cs.kpiValue}>{brl(kpiFundos)}</span>
+        </div>
+        <div className={cs.kpiCard} style={{ cursor: isSuperAdmin ? 'pointer' : undefined }} onClick={() => isSuperAdmin && setDetalheKpi('fee')}>
+          <span className={cs.kpiLabel}>Fee Entrada (esp.)</span><span className={cs.kpiValue}>{isSuperAdmin ? brl(kpiFeeEntrada) : '🔒'}</span>
+        </div>
+        <div className={cs.kpiCard} style={{ cursor: isSuperAdmin ? 'pointer' : undefined }} onClick={() => isSuperAdmin && setDetalheKpi('exito')}>
+          <span className={cs.kpiLabel}>Expectativa Êxito</span><span className={cs.kpiValue}>{isSuperAdmin ? brl(kpiExito) : '🔒'}</span>
+        </div>
       </div>
+
+      {/* Breakdown expandível — Imobiliário por empreendimento */}
+      {expandImob && (
+        <div style={{ background: 'var(--bg-card, white)', border: '1px solid var(--gray-border, #e5e7eb)', borderRadius: 8, padding: '12px 16px', marginBottom: 12, display: 'flex', flexWrap: 'wrap', gap: '6px 24px' }}>
+          {imobBreakdown.length === 0
+            ? <span style={{ fontSize: 12, color: 'var(--gray-mid)' }}>Sem posições imobiliárias</span>
+            : imobBreakdown.map(r => (
+              <div key={r.nome} style={{ fontSize: 12, display: 'flex', gap: 8 }}>
+                <span style={{ color: 'var(--amber, #f59e0b)', fontWeight: 600 }}>▪</span>
+                <span>{r.nome}</span>
+                <span style={{ fontWeight: 700 }}>{brl(r.total)}</span>
+              </div>
+            ))}
+        </div>
+      )}
+
+      {/* Breakdown expandível — Fundos por CNPJ */}
+      {expandFundos && (
+        <div style={{ background: 'var(--bg-card, white)', border: '1px solid var(--gray-border, #e5e7eb)', borderRadius: 8, padding: '12px 16px', marginBottom: 12, display: 'flex', flexWrap: 'wrap', gap: '6px 24px' }}>
+          {fundosBreakdown.length === 0
+            ? <span style={{ fontSize: 12, color: 'var(--gray-mid)' }}>Sem posições em fundos</span>
+            : fundosBreakdown.map(r => (
+              <div key={r.nome} style={{ fontSize: 12, display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                <span style={{ color: '#3b82f6', fontWeight: 600 }}>▪</span>
+                <span>{r.nome}</span>
+                <span style={{ fontWeight: 700 }}>{brl(r.total)}</span>
+                {r.pctRisco != null && (
+                  <span style={{ fontSize: 11, color: '#dc2626', background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: 4, padding: '0 5px' }}>
+                    {r.pctRisco}% queda · {brl(r.total * (1 - r.pctRisco / 100))} recup.
+                  </span>
+                )}
+              </div>
+            ))}
+        </div>
+      )}
 
       {/* Tab Bar */}
       <div className={cs.tabBar}>
@@ -781,7 +1153,9 @@ export default function CarteiraPage() {
         <>
           <div style={{ display: 'flex', gap: 12, marginBottom: 14, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-              <input className={styles.input} style={{ width: 220 }} placeholder="Filtrar por cliente..." value={filtroClientePos} onChange={e => setFiltroClientePos(e.target.value)} />
+              {viewModePosicao === 'cliente' && (
+                <input className={styles.input} style={{ width: 220 }} placeholder="Filtrar por cliente..." value={filtroClientePos} onChange={e => setFiltroClientePos(e.target.value)} />
+              )}
               <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, cursor: 'pointer' }}>
                 <input type="checkbox" checked={mostrarDebs} onChange={e => setMostrarDebs(e.target.checked)} style={{ accentColor: 'var(--teal)' }} /> Debêntures
               </label>
@@ -792,8 +1166,17 @@ export default function CarteiraPage() {
                 <input type="checkbox" checked={mostrarFundosPOS} onChange={e => setMostrarFundosPOS(e.target.checked)} style={{ accentColor: 'var(--blue, #3b82f6)' }} /> Fundos
               </label>
             </div>
-            <button className={styles.btnSmall} onClick={exportarXlsx}>Exportar XLSX</button>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <div style={{ display: 'flex', border: '1px solid var(--gray-border)', borderRadius: 6, overflow: 'hidden', fontSize: 12 }}>
+                <button style={{ padding: '4px 12px', background: viewModePosicao === 'cliente' ? 'var(--teal)' : 'transparent', color: viewModePosicao === 'cliente' ? 'white' : 'var(--gray-mid)', border: 'none', cursor: 'pointer' }}
+                  onClick={() => setViewModePosicao('cliente')}>Por Cliente</button>
+                <button style={{ padding: '4px 12px', background: viewModePosicao === 'ativo' ? 'var(--teal)' : 'transparent', color: viewModePosicao === 'ativo' ? 'white' : 'var(--gray-mid)', border: 'none', cursor: 'pointer' }}
+                  onClick={() => setViewModePosicao('ativo')}>Por Ativo</button>
+              </div>
+              <button className={styles.btnSmall} onClick={exportarXlsx}>Exportar XLSX</button>
+            </div>
           </div>
+          <div style={{ display: viewModePosicao === 'ativo' ? 'none' : undefined }}>
           {clientesAtivos.length === 0
             ? emptyGroup()
             : clientesAtivos.map((c: any) => {
@@ -819,6 +1202,15 @@ export default function CarteiraPage() {
                         {isSuperAdmin && feeEntrada > 0 && ` · Fee: ${brl(feeEntrada)}`}
                         {isSuperAdmin && exito > 0 && ` · Êxito esp.: ${brl(exito)}`}
                       </span>
+                      {isSuperAdmin && (() => {
+                        const customFnds = fnds.filter(f => f.faz_parte_honorarios && f.percentual_sucesso_honor != null && String(f.percentual_sucesso_honor) !== String(pctExitoFin(c.id)))
+                        const customDebs = debs.filter(d => d.faz_parte_honorarios && d.percentual_sucesso_honor != null && String(d.percentual_sucesso_honor) !== String(pctExitoFin(c.id)))
+                        if (!customFnds.length && !customDebs.length) return null
+                        return <span style={{ fontSize: 11, color: '#d97706', display: 'block', marginTop: 2 }}>
+                          {customFnds.map(f => <span key={f.id} style={{ marginRight: 8 }}>⚠ {fundoNome(f.fundo_id)}: {pct(f.percentual_sucesso_honor)}*</span>)}
+                          {customDebs.map(d => <span key={d.id} style={{ marginRight: 8 }}>⚠ {emissaoNome(d.emissao_id)}: {pct(d.percentual_sucesso_honor)}*</span>)}
+                        </span>
+                      })()}
                     </div>
                     <button className={styles.btnSmall} onClick={() => window.open(`/api/carteira/cliente/${c.id}/pdf`, '_blank')}>PDF</button>
                   </div>
@@ -836,12 +1228,12 @@ export default function CarteiraPage() {
                               <td>{resgateAntBadge(d)}</td>
                               <td style={{ textAlign: 'right' }}>{brl(d.valor_aplicado)}</td>
                               <td style={{ textAlign: 'right' }}>{d.valor_atual_estimado ? brl(d.valor_atual_estimado) : '—'}</td>
-                              <td>{statusBadge(d.status_resgate)}</td>
-                              <td>{isSuperAdmin ? (d.faz_parte_honorarios ? pct(d.percentual_sucesso_honor) : '—') : '🔒'}</td>
+                              <td>{resgateStatusBadge(d.status_resgate)}</td>
+                              <td>{isSuperAdmin ? (() => { if (!d.faz_parte_honorarios) return '—'; const ep = efetivoPctFin(d); return ep.val !== '' ? (ep.custom ? <span title="Personalizado p/ esta posição" style={{ color: '#d97706', fontWeight: 600 }}>{pct(ep.val)}*</span> : pct(ep.val)) : '—' })() : '🔒'}</td>
                               <td><EstrategiaChips ids={d.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratDeb.mutate({ id: d.id, ids })} /></td>
                               <td style={{ whiteSpace: 'nowrap' }}>
                                 <button title="Detalhes" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#6b7280', padding: '0 3px' }} onClick={() => setDebInfoId(d.id)}>ⓘ</button>
-                                {editBtn(() => abrirEdicaoDeb(d))}
+                                {rowActions(() => abrirEdicaoDeb(d), `a debênture ${d.numero_cautela ?? ''}`, () => deletarDebPos.mutate(d.id), d)}
                               </td>
                             </tr>
                           ))}
@@ -870,9 +1262,9 @@ export default function CarteiraPage() {
                               <td style={{ textAlign: 'right' }}>{brl(i.valor_total_compromissado)}</td>
                               <td style={{ textAlign: 'right' }}>{brl(i.valor_efetivamente_investido)}</td>
                               <td>{pct(i.percentual_participacao)}</td>
-                              <td>{isSuperAdmin ? (i.faz_parte_honorarios ? pct(i.percentual_sucesso_honorario) : '—') : '🔒'}</td>
+                              <td>{isSuperAdmin ? (() => { if (!i.faz_parte_honorarios) return '—'; const ep = efetivoPctImob(i); return ep.val !== '' ? (ep.custom ? <span title="Personalizado p/ esta posição" style={{ color: '#d97706', fontWeight: 600 }}>{pct(ep.val)}*</span> : pct(ep.val)) : '—' })() : '🔒'}</td>
                               <td><EstrategiaChips ids={i.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratImob.mutate({ id: i.id, ids })} /></td>
-                              <td>{editBtn(() => abrirEdicaoImob(i))}</td>
+                              <td>{rowActions(() => abrirEdicaoImob(i), 'esta posição imobiliária', () => deletarImobPos.mutate(i.id), i)}</td>
                             </tr>
                           ))}
                           <tr style={{ background: 'var(--gray-light, #f8f9fa)', fontWeight: 600 }}>
@@ -900,9 +1292,9 @@ export default function CarteiraPage() {
                               <td style={{ textAlign: 'right' }}>{f.valor_atual_estimado ? brl(f.valor_atual_estimado) : '—'}</td>
                               <td>{f.data_aplicacao ?? '—'}</td>
                               <td>{f.tem_direito_recompra ? <span className={`${styles.badge} ${styles.status_suspenso}`}>Sim</span> : '—'}</td>
-                              <td>{isSuperAdmin ? (f.faz_parte_honorarios ? pct(f.percentual_sucesso_honor) : '—') : '🔒'}</td>
+                              <td>{isSuperAdmin ? (() => { if (!f.faz_parte_honorarios) return '—'; const ep = efetivoPctFin(f); return ep.val !== '' ? (ep.custom ? <span title="Personalizado p/ esta posição" style={{ color: '#d97706', fontWeight: 600 }}>{pct(ep.val)}*</span> : pct(ep.val)) : '—' })() : '🔒'}</td>
                               <td><EstrategiaChips ids={f.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratFundo.mutate({ id: f.id, ids })} /></td>
-                              <td>{editBtn(() => abrirEdicaoFundo(f))}</td>
+                              <td>{rowActions(() => abrirEdicaoFundo(f), 'esta posição em fundo', () => deletarFundoPos.mutate(f.id), f)}</td>
                             </tr>
                           ))}
                           <tr style={{ background: 'var(--gray-light, #f8f9fa)', fontWeight: 600 }}>
@@ -919,6 +1311,121 @@ export default function CarteiraPage() {
               )
             })
           }
+          </div>
+
+          {/* ── VISUALIZAÇÃO POR ATIVO ─────────────────────────────── */}
+          {viewModePosicao === 'ativo' && (() => {
+            const sectionTitle = (label: string, total: number, cor: string) => (
+              <div style={{ fontWeight: 700, fontSize: 13, color: cor, borderBottom: `2px solid ${cor}`, paddingBottom: 4, marginBottom: 10, marginTop: 16 }}>
+                {label} · {brl(total)}
+              </div>
+            )
+            const clienteRow = (clienteId: number, valor: number, onEdit?: () => void, onDelete?: () => void, deleteLabel?: string, rec?: any) => (
+              <div key={clienteId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 10px', background: 'var(--gray-light, #f3f4f6)', borderRadius: 4, marginBottom: 3 }}>
+                <span style={{ fontSize: 12 }}>{clienteNome(clienteId)}</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{brl(valor)}</span>
+                  {onEdit && onDelete && rowActions(onEdit, deleteLabel ?? 'este registro', onDelete, rec)}
+                </span>
+              </div>
+            )
+            return (
+              <div>
+                {/* Filtros por ativo */}
+                <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+                  {mostrarDebs && (
+                    <input className={styles.input} style={{ width: 200 }} placeholder="Filtrar emissão..." value={filtroAtivoEmissao} onChange={e => setFiltroAtivoEmissao(e.target.value)} />
+                  )}
+                  {mostrarFundosPOS && (
+                    <input className={styles.input} style={{ width: 200 }} placeholder="Filtrar fundo..." value={filtroAtivoFundo} onChange={e => setFiltroAtivoFundo(e.target.value)} />
+                  )}
+                </div>
+
+                {mostrarDebs && (() => {
+                  const byEmissao: Record<number, any[]> = {}
+                  for (const d of debentures) { if (!byEmissao[d.emissao_id]) byEmissao[d.emissao_id] = []; byEmissao[d.emissao_id].push(d) }
+                  let entries = Object.entries(byEmissao).sort((a, b) => b[1].reduce((s: number, d: any) => s + (d.valor_aplicado ?? 0), 0) - a[1].reduce((s: number, d: any) => s + (d.valor_aplicado ?? 0), 0))
+                  if (filtroAtivoEmissao) entries = entries.filter(([id]) => emissaoNome(Number(id)).toLowerCase().includes(filtroAtivoEmissao.toLowerCase()))
+                  if (!entries.length) return null
+                  return (<>
+                    {sectionTitle('Debêntures', debentures.reduce((s, d) => s + (d.valor_aplicado ?? 0), 0), 'var(--teal)')}
+                    {entries.map(([emissaoId, debs]) => {
+                      const total = debs.reduce((s: number, d: any) => s + (d.valor_aplicado ?? 0), 0)
+                      return (
+                        <div key={emissaoId} className={cs.clientePosicaoCard} style={{ marginBottom: 10 }}>
+                          <div className={cs.clientePosicaoHeader}>
+                            <span className={cs.clientePosicaoNome}>{emissaoNome(Number(emissaoId))}</span>
+                            <span className={cs.clientePosicaoTotal}>{brl(total)} · {debs.length} posições</span>
+                          </div>
+                          <div style={{ padding: '6px 0 4px' }}>
+                            {debs.map((d: any) => clienteRow(d.cliente_id, d.valor_aplicado ?? 0, () => abrirEdicaoDeb(d), () => deletarDebPos.mutate(d.id), `a debênture ${d.numero_cautela ?? ''}`, d))}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </>)
+                })()}
+
+                {mostrarImob && (() => {
+                  const byEmp: Record<number, any[]> = {}
+                  for (const i of imobiliario) { if (!byEmp[i.empreendimento_id]) byEmp[i.empreendimento_id] = []; byEmp[i.empreendimento_id].push(i) }
+                  const entries = Object.entries(byEmp).sort((a, b) => b[1].reduce((s: number, i: any) => s + (i.valor_total_compromissado ?? 0), 0) - a[1].reduce((s: number, i: any) => s + (i.valor_total_compromissado ?? 0), 0))
+                  if (!entries.length) return null
+                  return (<>
+                    {sectionTitle('Imobiliário', imobiliario.reduce((s, i) => s + (i.valor_total_compromissado ?? 0), 0), 'var(--amber, #f59e0b)')}
+                    {entries.map(([empId, imobs]) => {
+                      const emp = empreendimentos.find((x: any) => x.id === Number(empId))
+                      const total = imobs.reduce((s: number, i: any) => s + (i.valor_total_compromissado ?? 0), 0)
+                      return (
+                        <div key={empId} className={cs.clientePosicaoCard} style={{ marginBottom: 10 }}>
+                          <div className={cs.clientePosicaoHeader}>
+                            <span className={cs.clientePosicaoNome}>{emp?.nome_venda ?? `Empreendimento ${empId}`}</span>
+                            <span className={cs.clientePosicaoTotal}>{brl(total)} · {imobs.length} posições</span>
+                          </div>
+                          <div style={{ padding: '6px 0 4px' }}>
+                            {imobs.map((i: any) => clienteRow(i.cliente_id, i.valor_total_compromissado ?? 0, () => abrirEdicaoImob(i), () => deletarImobPos.mutate(i.id), 'esta posição imobiliária', i))}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </>)
+                })()}
+
+                {mostrarFundosPOS && (() => {
+                  const byFundo: Record<number, any[]> = {}
+                  for (const f of fundos) { if (!byFundo[f.fundo_id]) byFundo[f.fundo_id] = []; byFundo[f.fundo_id].push(f) }
+                  let entries = Object.entries(byFundo).sort((a, b) => b[1].reduce((s: number, f: any) => s + (f.valor_aplicado ?? 0), 0) - a[1].reduce((s: number, f: any) => s + (f.valor_aplicado ?? 0), 0))
+                  if (filtroAtivoFundo) entries = entries.filter(([id]) => {
+                    const r = fundosRef.find((x: any) => x.id === Number(id))
+                    return (r?.nome_fundo ?? '').toLowerCase().includes(filtroAtivoFundo.toLowerCase())
+                  })
+                  if (!entries.length) return null
+                  return (<>
+                    {sectionTitle('Fundos', fundos.reduce((s, f) => s + (f.valor_aplicado ?? 0), 0), '#3b82f6')}
+                    {entries.map(([fundoId, fnds]) => {
+                      const ref = fundosRef.find((r: any) => r.id === Number(fundoId))
+                      const total = fnds.reduce((s: number, f: any) => s + (f.valor_aplicado ?? 0), 0)
+                      const pctRecup = ref?.percentual_credito_recuperavel
+                      return (
+                        <div key={fundoId} className={cs.clientePosicaoCard} style={{ marginBottom: 10 }}>
+                          <div className={cs.clientePosicaoHeader}>
+                            <span className={cs.clientePosicaoNome}>{ref?.nome_fundo ?? `Fundo ${fundoId}`}</span>
+                            <span className={cs.clientePosicaoTotal}>
+                              {brl(total)} · {fnds.length} posições
+                              {pctRecup != null && <span style={{ fontSize: 11, color: '#dc2626', background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: 4, padding: '0 5px', marginLeft: 6 }}>{pctRecup}% queda · {brl(total * (1 - pctRecup / 100))} recup.</span>}
+                            </span>
+                          </div>
+                          <div style={{ padding: '6px 0 4px' }}>
+                            {fnds.map((f: any) => clienteRow(f.cliente_id, f.valor_aplicado ?? 0, () => abrirEdicaoFundo(f), () => deletarFundoPos.mutate(f.id), 'esta posição em fundo', f))}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </>)
+                })()}
+              </div>
+            )
+          })()}
         </>
       )}
 
@@ -931,10 +1438,39 @@ export default function CarteiraPage() {
             <div style={{ width: 260 }}>
               <MultiSelect values={filtroDebEmissoes} onChange={setFiltroDebEmissoes}
                 options={emissoes.map(e => ({ value: e.id, label: `${e.nome_serie} — ${e.emissor}` }))} placeholder="Todas as emissões" />
-            </div></>,
+            </div>
+            {viewToggle(viewModeDebs, setViewModeDebs)}</>,
             filtroClienteDeb, setFiltroClienteDeb,
           )}
-          {clientesComDeb.length === 0 ? emptyGroup() : clientesComDeb.map(g => (
+          {viewModeDebs === 'ativo' && (() => {
+            const byEmissao: Record<number, any[]> = {}
+            for (const d of debsFiltradas) { if (!byEmissao[d.emissao_id]) byEmissao[d.emissao_id] = []; byEmissao[d.emissao_id].push(d) }
+            const entries = Object.entries(byEmissao).sort((a, b) => b[1].reduce((s: number, d: any) => s + (d.valor_aplicado ?? 0), 0) - a[1].reduce((s: number, d: any) => s + (d.valor_aplicado ?? 0), 0))
+            if (!entries.length) return emptyGroup()
+            return (<div>{entries.map(([emissaoId, debs]) => {
+              const total = debs.reduce((s: number, d: any) => s + (d.valor_aplicado ?? 0), 0)
+              return (
+                <div key={emissaoId} className={cs.clientePosicaoCard} style={{ marginBottom: 10 }}>
+                  <div className={cs.clientePosicaoHeader}>
+                    <span className={cs.clientePosicaoNome}>{emissaoNome(Number(emissaoId))}</span>
+                    <span className={cs.clientePosicaoTotal}>{brl(total)} · {debs.length} posições</span>
+                  </div>
+                  <div style={{ padding: '6px 0 4px' }}>
+                    {debs.map((d: any) => (
+                      <div key={d.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 10px', background: 'var(--gray-light, #f3f4f6)', borderRadius: 4, marginBottom: 3 }}>
+                        <span style={{ fontSize: 12 }}>{clienteNome(d.cliente_id)}</span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{brl(d.valor_aplicado ?? 0)}</span>
+                          {rowActions(() => abrirEdicaoDeb(d), `a debênture ${d.numero_cautela ?? ''}`, () => deletarDebPos.mutate(d.id), d)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}</div>)
+          })()}
+          {viewModeDebs === 'cliente' && (clientesComDeb.length === 0 ? emptyGroup() : clientesComDeb.map(g => (
             <div key={g.id} className={cs.clienteFundoGroup}>
               <div className={cs.clienteFundoNome} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: 12 }}>
                 <span>{g.nome}</span>
@@ -950,12 +1486,12 @@ export default function CarteiraPage() {
                       <td>{resgateAntBadge(d)}</td>
                       <td style={{ textAlign: 'right' }}>{brl(d.valor_aplicado)}</td>
                       <td style={{ textAlign: 'right' }}>{d.valor_atual_estimado ? brl(d.valor_atual_estimado) : '—'}</td>
-                      <td>{statusBadge(d.status_resgate)}</td>
+                      <td>{resgateStatusBadge(d.status_resgate)}</td>
                       <td>{isSuperAdmin ? (d.faz_parte_honorarios ? pct(d.percentual_sucesso_honor) : '—') : '🔒'}</td>
                       <td><EstrategiaChips ids={d.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratDeb.mutate({ id: d.id, ids })} /></td>
                       <td style={{ whiteSpace: 'nowrap' }}>
                         <button title="Detalhes" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#6b7280', padding: '0 3px' }} onClick={() => setDebInfoId(d.id)}>ⓘ</button>
-                        {editBtn(() => abrirEdicaoDeb(d))}
+                        {rowActions(() => abrirEdicaoDeb(d), `a debênture ${d.numero_cautela ?? ''}`, () => deletarDebPos.mutate(d.id), d)}
                       </td>
                     </tr>
                   ))}
@@ -969,7 +1505,7 @@ export default function CarteiraPage() {
                 </tbody>
               </table>
             </div>
-          ))}
+          )))}
         </>
       )}
 
@@ -982,10 +1518,40 @@ export default function CarteiraPage() {
             <div style={{ width: 280 }}>
               <MultiSelect values={filtroImobEmps} onChange={setFiltroImobEmps}
                 options={empreendimentos.map(e => ({ value: e.id, label: e.nome_venda }))} placeholder="Todos" />
-            </div></>,
+            </div>
+            {viewToggle(viewModeImob, setViewModeImob)}</>,
             filtroClienteImob, setFiltroClienteImob,
           )}
-          {clientesComImob.length === 0 ? emptyGroup() : clientesComImob.map(g => (
+          {viewModeImob === 'ativo' && (() => {
+            const byEmp: Record<number, any[]> = {}
+            for (const i of imobFiltrado) { if (!byEmp[i.empreendimento_id]) byEmp[i.empreendimento_id] = []; byEmp[i.empreendimento_id].push(i) }
+            const entries = Object.entries(byEmp).sort((a, b) => b[1].reduce((s: number, i: any) => s + (i.valor_total_compromissado ?? 0), 0) - a[1].reduce((s: number, i: any) => s + (i.valor_total_compromissado ?? 0), 0))
+            if (!entries.length) return emptyGroup()
+            return (<div>{entries.map(([empId, imobs]) => {
+              const emp = empreendimentos.find((x: any) => x.id === Number(empId))
+              const total = imobs.reduce((s: number, i: any) => s + (i.valor_total_compromissado ?? 0), 0)
+              return (
+                <div key={empId} className={cs.clientePosicaoCard} style={{ marginBottom: 10 }}>
+                  <div className={cs.clientePosicaoHeader}>
+                    <span className={cs.clientePosicaoNome}>{emp?.nome_venda ?? `Empreendimento ${empId}`}</span>
+                    <span className={cs.clientePosicaoTotal}>{brl(total)} · {imobs.length} posições</span>
+                  </div>
+                  <div style={{ padding: '6px 0 4px' }}>
+                    {imobs.map((i: any) => (
+                      <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 10px', background: 'var(--gray-light, #f3f4f6)', borderRadius: 4, marginBottom: 3 }}>
+                        <span style={{ fontSize: 12 }}>{clienteNome(i.cliente_id)}</span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{brl(i.valor_total_compromissado ?? 0)}</span>
+                          {rowActions(() => abrirEdicaoImob(i), 'esta posição imobiliária', () => deletarImobPos.mutate(i.id), i)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}</div>)
+          })()}
+          {viewModeImob === 'cliente' && (clientesComImob.length === 0 ? emptyGroup() : clientesComImob.map(g => (
             <div key={g.id} className={cs.clienteFundoGroup}>
               <div className={cs.clienteFundoNome} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: 12 }}>
                 <span>{g.nome}</span>
@@ -1003,7 +1569,7 @@ export default function CarteiraPage() {
                       <td>{pct(i.percentual_participacao)}</td>
                       <td>{isSuperAdmin ? (i.faz_parte_honorarios ? pct(i.percentual_sucesso_honorario) : '—') : '🔒'}</td>
                       <td><EstrategiaChips ids={i.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratImob.mutate({ id: i.id, ids })} /></td>
-                      <td>{editBtn(() => abrirEdicaoImob(i))}</td>
+                      <td>{rowActions(() => abrirEdicaoImob(i), 'esta posição imobiliária', () => deletarImobPos.mutate(i.id), i)}</td>
                     </tr>
                   ))}
                   <tr style={{ background: 'var(--gray-light, #f8f9fa)', fontWeight: 600 }}>
@@ -1015,7 +1581,7 @@ export default function CarteiraPage() {
                 </tbody>
               </table>
             </div>
-          ))}
+          )))}
         </>
       )}
 
@@ -1028,10 +1594,44 @@ export default function CarteiraPage() {
             <div style={{ width: 260 }}>
               <MultiSelect values={filtroFundosFundos} onChange={setFiltroFundosFundos}
                 options={fundosRef.map(f => ({ value: f.id, label: f.nome_fundo }))} placeholder="Todos" />
-            </div></>,
+            </div>
+            {viewToggle(viewModeFundos, setViewModeFundos)}</>,
             filtroClienteFundos, setFiltroClienteFundos,
           )}
-          {clientesComFundos.length === 0 ? emptyGroup() : clientesComFundos.map(g => (
+          {viewModeFundos === 'ativo' && (() => {
+            const byFundo: Record<number, any[]> = {}
+            for (const f of fundosFiltrados) { if (!byFundo[f.fundo_id]) byFundo[f.fundo_id] = []; byFundo[f.fundo_id].push(f) }
+            const entries = Object.entries(byFundo).sort((a, b) => b[1].reduce((s: number, f: any) => s + (f.valor_aplicado ?? 0), 0) - a[1].reduce((s: number, f: any) => s + (f.valor_aplicado ?? 0), 0))
+            if (!entries.length) return emptyGroup()
+            return (<div>{entries.map(([fundoId, fnds]) => {
+              const ref = fundosRef.find((r: any) => r.id === Number(fundoId))
+              const total = fnds.reduce((s: number, f: any) => s + (f.valor_aplicado ?? 0), 0)
+              const queda = ref?.percentual_credito_recuperavel
+              return (
+                <div key={fundoId} className={cs.clientePosicaoCard} style={{ marginBottom: 10 }}>
+                  <div className={cs.clientePosicaoHeader}>
+                    <span className={cs.clientePosicaoNome}>
+                      {ref?.nome_fundo ?? `Fundo ${fundoId}`}
+                      {queda != null && <span style={{ fontSize: 11, color: '#dc2626', background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: 4, padding: '0 5px', marginLeft: 6 }}>{queda}% queda · {brl(total * (1 - queda / 100))} recup.</span>}
+                    </span>
+                    <span className={cs.clientePosicaoTotal}>{brl(total)} aplicado</span>
+                  </div>
+                  <div style={{ padding: '6px 0 4px' }}>
+                    {fnds.map((f: any) => (
+                      <div key={f.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 10px', background: 'var(--gray-light, #f3f4f6)', borderRadius: 4, marginBottom: 3 }}>
+                        <span style={{ fontSize: 12 }}>{clienteNome(f.cliente_id)}</span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{brl(f.valor_aplicado ?? 0)}</span>
+                          {rowActions(() => abrirEdicaoFundo(f), 'esta posição em fundo', () => deletarFundoPos.mutate(f.id), f)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}</div>)
+          })()}
+          {viewModeFundos === 'cliente' && (clientesComFundos.length === 0 ? emptyGroup() : clientesComFundos.map(g => (
             <div key={g.id} className={cs.clienteFundoGroup}>
               <div className={cs.clienteFundoNome} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: 12 }}>
                 <span>{g.nome}</span>
@@ -1043,14 +1643,22 @@ export default function CarteiraPage() {
                 <tbody>
                   {g.posicoes.map((f: any) => (
                     <tr key={f.id}>
-                      <td><strong>{fundoNome(f.fundo_id)}</strong></td>
+                      <td>
+                        <strong>{fundoNome(f.fundo_id)}</strong>
+                        {(() => {
+                          const ref = fundosRef.find((r: any) => r.id === f.fundo_id)
+                          return ref?.percentual_credito_recuperavel != null
+                            ? <span style={{ fontSize: 10, background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', borderRadius: 3, padding: '1px 5px', marginLeft: 6, whiteSpace: 'nowrap' }}>{ref.percentual_credito_recuperavel}% queda</span>
+                            : null
+                        })()}
+                      </td>
                       <td style={{ textAlign: 'right' }}>{brl(f.valor_aplicado)}</td>
                       <td style={{ textAlign: 'right' }}>{f.valor_atual_estimado ? brl(f.valor_atual_estimado) : '—'}</td>
                       <td>{f.data_aplicacao ?? '—'}</td>
                       <td>{f.tem_direito_recompra ? <span className={`${styles.badge} ${styles.status_suspenso}`}>Sim</span> : '—'}</td>
-                      <td>{isSuperAdmin ? (f.faz_parte_honorarios ? pct(f.percentual_sucesso_honor) : '—') : '🔒'}</td>
+                      <td>{isSuperAdmin ? (() => { if (!f.faz_parte_honorarios) return '—'; const ep = efetivoPctFin(f); return ep.val !== '' ? (ep.custom ? <span title="Personalizado p/ esta posição" style={{ color: '#d97706', fontWeight: 600 }}>{pct(ep.val)}*</span> : pct(ep.val)) : '—' })() : '🔒'}</td>
                       <td><EstrategiaChips ids={f.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratFundo.mutate({ id: f.id, ids })} /></td>
-                      <td>{editBtn(() => abrirEdicaoFundo(f))}</td>
+                      <td>{rowActions(() => abrirEdicaoFundo(f), 'esta posição em fundo', () => deletarFundoPos.mutate(f.id), f)}</td>
                     </tr>
                   ))}
                   <tr style={{ background: 'var(--gray-light, #f8f9fa)', fontWeight: 600 }}>
@@ -1062,24 +1670,25 @@ export default function CarteiraPage() {
                 </tbody>
               </table>
             </div>
-          ))}
+          )))}
         </>
       )}
 
       {/* ══ CLIENTES (referência) ══════════════════════════════════ */}
       {tab === 'clientes' && (
         <>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
-            <span /><button className={styles.btnPrimary} onClick={() => { setForm({ pro_labore_tipo: '', tipo_pessoa: 'PF', exito_split: false }); setEditandoClienteId(null); setModal('cliente') }}>+ Novo Cliente</button>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 10 }}>
+            <input className={styles.input} style={{ width: 240 }} placeholder="Filtrar por nome..." value={filtroClienteRef} onChange={e => setFiltroClienteRef(e.target.value)} />
+            <button className={styles.btnPrimary} onClick={() => { setForm({ pro_labore_tipo: '', tipo_pessoa: 'PF', exito_split: false }); setEditandoClienteId(null); setModal('cliente') }}>+ Novo Cliente</button>
           </div>
           <div className={styles.tableCard}>
             <table className={styles.table}>
               <colgroup><col /><col style={{ width: 60 }} /><col style={{ width: 140 }} /><col style={{ width: 160 }} /><col style={{ width: 150 }} /><col style={{ width: 150 }} /><col style={{ width: 80 }} /><col style={{ width: 36 }} /><col style={{ width: 36 }} /><col style={{ width: 60 }} /></colgroup>
               <thead><tr><th>Nome</th><th>Tipo</th><th>CPF/CNPJ</th><th>{isSuperAdmin ? 'Fee entrada' : '🔒 Fee'}</th>{thR(isSuperAdmin ? 'Fee (R$ esp.)' : '🔒')}{thR(isSuperAdmin ? 'Êxito (R$ esp.)' : '🔒')}<th>Status</th><th /><th title="Drive" /></tr></thead>
               <tbody>
-                {clientes.length === 0
+                {clientes.filter((c: any) => filtrarPorNome(clienteNome(c.id), filtroClienteRef)).length === 0
                   ? <tr><td colSpan={10} style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Nenhum registro</td></tr>
-                  : clientes.map((c: any) => {
+                  : clientes.filter((c: any) => filtrarPorNome(clienteNome(c.id), filtroClienteRef)).map((c: any) => {
                     const { feeEntrada, exito } = calcularHonorarios(c)
                     const feeLbl = c.pro_labore_tipo === 'fixo' ? brl(c.pro_labore_valor)
                       : c.pro_labore_tipo === 'percentual'
@@ -1102,10 +1711,10 @@ export default function CarteiraPage() {
                           <button
                             title={c.folder_drive_principal_id ? 'Ver pasta Drive' : 'Criar pasta no Drive'}
                             style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 15, color: c.folder_drive_principal_id ? '#16a34a' : '#9ca3af', padding: '0 4px' }}
-                            onClick={() => { setDriveClienteId(c.id); if (c.folder_drive_principal_id) carregarArquivosDrive(c.id) }}
+                            onClick={() => { setDriveClienteId(c.id); setDriveCandidatos(null); if (c.folder_drive_principal_id) carregarArquivosDrive(c.id) }}
                           >📁</button>
                         </td>
-                        <td>{editBtn(() => abrirEdicaoCliente(c))}</td>
+                        <td>{rowActions(() => abrirEdicaoCliente(c), `o cliente ${c.nome ?? ''}`, () => deletarCliente.mutate(c.id), c)}</td>
                       </tr>
                     )
                   })}
@@ -1129,7 +1738,7 @@ export default function CarteiraPage() {
                     <tr key={e.id}><td><strong>{e.nome_serie}</strong></td><td>{e.numero_emissao}ª</td>
                       <td>{e.emissor}</td><td>{e.indexador}{e.taxa_adicional ? ` + ${e.taxa_adicional}` : ''}</td>
                       <td>{e.data_vencimento_previsto ?? '—'}</td><td>{statusBadge(e.ativo)}</td>
-                      <td>{editBtn(() => abrirEdicaoEmissao(e))}</td>
+                      <td>{rowActions(() => abrirEdicaoEmissao(e), `a emissão ${e.nome_serie ?? ''}`, () => deletarEmissao.mutate(e.id), e)}</td>
                     </tr>
                   ))}
               </tbody>
@@ -1164,7 +1773,7 @@ export default function CarteiraPage() {
                           <button title="Cadeia Societária" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: '#6366f1', padding: '0 4px' }}
                             onClick={() => setCadeiaEmpId(e.id)}>⬡</button>
                         </td>
-                        <td>{editBtn(() => abrirEdicaoEmp(e))}</td>
+                        <td>{rowActions(() => abrirEdicaoEmp(e), `o empreendimento ${e.nome_venda ?? ''}`, () => deletarEmp.mutate(e.id), e)}</td>
                       </tr>
                     )
                   })}
@@ -1185,7 +1794,19 @@ export default function CarteiraPage() {
                 {fundosRef.length === 0
                   ? <tr><td colSpan={6} style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Nenhum registro</td></tr>
                   : fundosRef.map((f: any) => (
-                    <tr key={f.id}><td><strong>{f.nome_fundo}</strong></td><td>{f.cnpj_fundo ?? '—'}</td><td>{f.gestora ?? '—'}</td><td>{f.tipo_fundo ?? '—'}</td><td>{statusBadge(f.ativo)}</td><td>{editBtn(() => abrirEdicaoFundoRef(f))}</td></tr>
+                    <tr key={f.id}>
+                      <td>
+                        <strong>{f.nome_fundo}</strong>
+                        {f.percentual_credito_recuperavel != null && (
+                          <span style={{ fontSize: 10, background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', borderRadius: 3, padding: '1px 5px', marginLeft: 6, whiteSpace: 'nowrap' }}>{f.percentual_credito_recuperavel}% queda</span>
+                        )}
+                      </td>
+                      <td>{f.cnpj_fundo ?? '—'}</td>
+                      <td>{f.gestora ?? '—'}</td>
+                      <td>{f.tipo_fundo ?? '—'}</td>
+                      <td>{statusBadge(f.ativo)}</td>
+                      <td>{rowActions(() => abrirEdicaoFundoRef(f), `o fundo ${f.nome_fundo ?? ''}`, () => deletarFundoRef.mutate(f.id), f)}</td>
+                    </tr>
                   ))}
               </tbody>
             </table>
@@ -1209,7 +1830,7 @@ export default function CarteiraPage() {
                       <td style={{ fontSize: 12, color: '#6b7280' }}>{e.nome_chip ?? '—'}</td>
                       <td style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.descricao ?? '—'}</td>
                       <td>{e.usuarios_count ?? 0}</td><td>{statusBadge(e.ativo)}</td>
-                      <td>{editBtn(() => abrirEdicaoEstrategia(e))}</td>
+                      <td>{rowActions(() => abrirEdicaoEstrategia(e), `a estratégia ${e.nome ?? ''}`, () => deletarEstrategia.mutate(e.id), e)}</td>
                     </tr>
                   ))}
               </tbody>
@@ -1303,8 +1924,14 @@ export default function CarteiraPage() {
           )}
           <div style={{ marginTop: 12 }}>
             {fl('Observações', fta('observacoes', 2))}
-            {editandoClienteId && fl('Status', fs('ativo', [{ value: 'true', label: 'Ativo' }, { value: 'false', label: 'Inativo' }]))}
+            {editandoClienteId && fl('Status', (
+              <select className={styles.input} value={form.ativo === false ? 'false' : 'true'} onChange={e => inp('ativo', e.target.value === 'true')}>
+                <option value="true">Ativo</option>
+                <option value="false">Inativo</option>
+              </select>
+            ))}
           </div>
+          {auditCaption(!!editandoClienteId)}
           <button className={styles.btnPrimary} onClick={() => editandoClienteId ? atualizarCliente.mutate() : salvarCliente.mutate()} disabled={salvarCliente.isPending || atualizarCliente.isPending}>
             {(salvarCliente.isPending || atualizarCliente.isPending) ? 'Salvando...' : 'Salvar'}
           </button>
@@ -1327,10 +1954,10 @@ export default function CarteiraPage() {
           <div style={{ borderTop: '1px solid var(--gray-border)', margin: '10px 0', paddingTop: 10 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
               <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Sub-veículos ({(form.subveiculos ?? []).length})</span>
-              <button className={styles.btnSmall} onClick={() => inp('subveiculos', [...(form.subveiculos ?? []), { nome: '', cnpj: '', tipo: 'SCP' }])}>+ Adicionar</button>
+              <button className={styles.btnSmall} onClick={() => inp('subveiculos', [...(form.subveiculos ?? []), { nome: '', cnpj: '', tipo: 'SCP', camada: 'spe' }])}>+ Adicionar</button>
             </div>
             {(form.subveiculos ?? []).map((sv: any, idx: number) => (
-              <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 120px 32px', gap: 6, marginBottom: 6, alignItems: 'end' }}>
+              <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 90px 110px 32px', gap: 6, marginBottom: 6, alignItems: 'end' }}>
                 <div><label style={{ fontSize: 11, color: 'var(--gray-mid)' }}>Nome</label>
                   <input className={styles.input} value={sv.nome} placeholder="Nome" onChange={e => { const s = [...form.subveiculos]; s[idx] = { ...sv, nome: e.target.value }; inp('subveiculos', s) }} /></div>
                 <div><label style={{ fontSize: 11, color: 'var(--gray-mid)' }}>CNPJ</label>
@@ -1338,6 +1965,11 @@ export default function CarteiraPage() {
                 <div><label style={{ fontSize: 11, color: 'var(--gray-mid)' }}>Tipo</label>
                   <select className={styles.input} value={sv.tipo} onChange={e => { const s = [...form.subveiculos]; s[idx] = { ...sv, tipo: e.target.value }; inp('subveiculos', s) }}>
                     <option value="SCP">SCP</option><option value="SPE">SPE</option><option value="Cota">Cota</option><option value="Outro">Outro</option>
+                  </select></div>
+                <div><label style={{ fontSize: 11, color: 'var(--gray-mid)' }}>Vinculado a</label>
+                  <select className={styles.input} value={sv.camada ?? 'spe'} onChange={e => { const s = [...form.subveiculos]; s[idx] = { ...sv, camada: e.target.value }; inp('subveiculos', s) }}>
+                    <option value="veiculo">Veículo</option>
+                    <option value="spe">SPE</option>
                   </select></div>
                 <button style={{ background: 'none', border: '1px solid var(--red, #ef4444)', color: 'var(--red, #ef4444)', borderRadius: 4, padding: '4px 8px', cursor: 'pointer', fontSize: 12 }}
                   onClick={() => inp('subveiculos', form.subveiculos.filter((_: any, i: number) => i !== idx))}>✕</button>
@@ -1347,6 +1979,7 @@ export default function CarteiraPage() {
           {fl('Tipo desenvolvimento', fi('tipo_desenvolvimento'))}
           {fl('Localização', fi('localizacao'))}
           {fl('Descrição', fta('descricao', 2))}
+          {auditCaption(!!editandoEmpId)}
           <button className={styles.btnPrimary} onClick={() => editandoEmpId ? atualizarEmpreendimento.mutate() : salvarEmpreendimento.mutate()} disabled={salvarEmpreendimento.isPending || atualizarEmpreendimento.isPending}>
             {(salvarEmpreendimento.isPending || atualizarEmpreendimento.isPending) ? 'Salvando...' : 'Salvar'}
           </button>
@@ -1355,42 +1988,92 @@ export default function CarteiraPage() {
 
       {/* ── MODAL EMISSÃO ────────────────────────────────────────── */}
       {modal === 'emissao' && (
-        <Modal title={editandoEmissaoId ? 'Editar Emissão' : 'Nova Emissão de Debênture'} onClose={closeModal} width={560}>
-          <div style={{ background: 'var(--gray-light, #f8f9fa)', borderRadius: 6, padding: '8px 12px', marginBottom: 10 }}>
-            <label style={{ fontSize: 12, color: 'var(--teal)', fontWeight: 600, display: 'block', marginBottom: 4 }}>Extração IA — escritura de emissão / termo de securitização:</label>
-            <input type="file" accept=".pdf,.jpg,.png,.jpeg" style={{ fontSize: 12 }}
-              onChange={e => { const f = e.target.files?.[0]; if (f) processarDocumento.mutate({ file: f, tipo: 'emissao' }) }} />
-            {processarDocumento.isPending && <span style={{ fontSize: 11, color: 'var(--teal)', marginLeft: 8 }}>Processando...</span>}
-          </div>
-          {fl('Nome da Série *', fi('nome_serie', 'text', 'Ex: APEX I'))}
-          {fl('Nº da Emissão *', fi('numero_emissao', 'number'))}
-          {fl('Emissor *', fi('emissor'))}
-          {fl('CNPJ Emissor', fi('cnpj_emissor'))}
-          {fl('Indexador', fi('indexador', 'text', 'CDI, IPCA...'))}
-          {fl('Taxa Adicional', fi('taxa_adicional', 'text', '+ 2% a.a.'))}
-          {fl('Data Início', fi('data_inicio_emissao', 'date'))}
-          {fl('Data Vencimento Previsto', fi('data_vencimento_previsto', 'date'))}
-          <div style={{ borderTop: '1px solid var(--gray-border)', margin: '10px 0', paddingTop: 10 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Resgate e liquidez</div>
-            <div className={styles.formRow}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
-                <input type="checkbox" checked={!!form.resgate_antecipado_emissao} onChange={e => inp('resgate_antecipado_emissao', e.target.checked)} />
-                Emissão prevê resgate antecipado
-              </label>
+        <Modal title={emissaoSeries ? `${emissaoSeries.length} séries lidas — revisar antes de criar` : (editandoEmissaoId ? 'Editar Emissão' : 'Nova Emissão de Debênture')} onClose={closeModal} width={emissaoSeries ? 760 : 560}>
+          {!emissaoSeries && (
+            <div style={{ background: 'var(--gray-light, #f8f9fa)', borderRadius: 6, padding: '8px 12px', marginBottom: 10 }}>
+              <label style={{ fontSize: 12, color: 'var(--teal)', fontWeight: 600, display: 'block', marginBottom: 4 }}>Extração IA — escritura de emissão / termo de securitização:</label>
+              <input type="file" accept=".pdf,.jpg,.png,.jpeg" style={{ fontSize: 12 }}
+                onChange={e => { const f = e.target.files?.[0]; if (f) processarDocumento.mutate({ file: f, tipo: 'emissao' }) }} />
+              {processarDocumento.isPending && <span style={{ fontSize: 11, color: 'var(--teal)', marginLeft: 8 }}>Processando...</span>}
             </div>
-            {form.resgate_antecipado_emissao && fl('Tipo de resgate', fs('resgate_antecipado_tipo', [
-              { value: 'vinculado_lastro', label: 'Vinculado ao recebimento do lastro' },
-              { value: 'desvinculado_lastro', label: 'Desvinculado do recebimento do lastro' },
-            ]))}
-            {form.resgate_antecipado_emissao && fl('Cláusulas identificadas pela IA', fta('clausulas_resgate', 3))}
-            {fl('Prazo carência (meses)', fi('prazo_carencia_meses', 'number', '0'))}
-            {fl('Prazo pgto após pedido de saque', fi('prazo_pgto_pos_resgate', 'text', 'Ex: 30 dias'))}
-          </div>
-          <div style={{ borderTop: '1px solid var(--gray-border)', margin: '10px 0', paddingTop: 10 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Garantias</div>
-            {fl('Tipos de garantia', fta('tipos_garantia', 2))}
-          </div>
-          <button className={styles.btnPrimary} onClick={() => editandoEmissaoId ? atualizarEmissao.mutate() : salvarEmissao.mutate()} disabled={salvarEmissao.isPending || atualizarEmissao.isPending}>{(salvarEmissao.isPending || atualizarEmissao.isPending) ? 'Salvando...' : 'Salvar'}</button>
+          )}
+
+          {emissaoSeries ? (
+            <div>
+              <div style={{ fontSize: 12, color: 'var(--gray-mid)', marginBottom: 10 }}>
+                A IA identificou {emissaoSeries.length} séries no mesmo documento. Os campos comuns (emissor, cláusulas de resgate, carência, garantias) já foram aplicados em todas — revise o nome, indexador, taxa e vencimento de cada série antes de criar.
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table className={styles.table} style={{ marginBottom: 10 }}>
+                  <thead><tr><th>Série</th><th>Nº Emissão</th><th>Indexador</th><th>Taxa</th><th>Vencimento</th><th /></tr></thead>
+                  <tbody>
+                    {emissaoSeries.map((s, idx) => (
+                      <tr key={idx}>
+                        <td><input className={styles.input} style={{ minWidth: 100 }} value={s.nome_serie ?? ''} onChange={e => setEmissaoSeries(prev => prev!.map((r, i) => i === idx ? { ...r, nome_serie: e.target.value } : r))} /></td>
+                        <td><input className={styles.input} style={{ width: 70 }} type="number" value={s.numero_emissao ?? ''} onChange={e => setEmissaoSeries(prev => prev!.map((r, i) => i === idx ? { ...r, numero_emissao: e.target.value } : r))} /></td>
+                        <td><input className={styles.input} style={{ width: 80 }} value={s.indexador ?? ''} onChange={e => setEmissaoSeries(prev => prev!.map((r, i) => i === idx ? { ...r, indexador: e.target.value } : r))} /></td>
+                        <td><input className={styles.input} style={{ width: 90 }} value={s.taxa_adicional ?? ''} onChange={e => setEmissaoSeries(prev => prev!.map((r, i) => i === idx ? { ...r, taxa_adicional: e.target.value } : r))} /></td>
+                        <td><input className={styles.input} style={{ width: 130 }} type="date" value={s.data_vencimento_previsto ?? ''} onChange={e => setEmissaoSeries(prev => prev!.map((r, i) => i === idx ? { ...r, data_vencimento_previsto: e.target.value } : r))} /></td>
+                        <td>
+                          <button style={{ background: 'none', border: '1px solid #fca5a5', color: '#dc2626', borderRadius: 4, padding: '3px 7px', cursor: 'pointer', fontSize: 11 }}
+                            onClick={() => setEmissaoSeries(prev => { const next = prev!.filter((_, i) => i !== idx); return next.length ? next : null })}>✕</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <details style={{ marginBottom: 10 }}>
+                <summary style={{ cursor: 'pointer', fontSize: 12, color: 'var(--gray-mid)' }}>Ver campos comuns aplicados a todas as séries</summary>
+                <div style={{ fontSize: 12, color: 'var(--gray-mid)', marginTop: 6, lineHeight: 1.6 }}>
+                  <div><strong>Emissor:</strong> {emissaoSeries[0]?.emissor || '—'}</div>
+                  <div><strong>Prazo carência:</strong> {emissaoSeries[0]?.prazo_carencia_dias ?? '—'} dias</div>
+                  <div><strong>Prazo pgto pós-resgate:</strong> {emissaoSeries[0]?.prazo_pgto_pos_resgate || '—'}</div>
+                  <div><strong>Cláusulas de resgate:</strong> {emissaoSeries[0]?.clausulas_resgate || '—'}</div>
+                  <div><strong>Garantias:</strong> {emissaoSeries[0]?.tipos_garantia || '—'}</div>
+                </div>
+              </details>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button style={{ padding: '8px 16px', background: 'none', border: '1px solid var(--gray-border)', borderRadius: 6, cursor: 'pointer', fontSize: 13 }} onClick={() => setEmissaoSeries(null)}>Cancelar</button>
+                <button className={styles.btnPrimary} disabled={criandoSeries} onClick={criarEmissoesEmLote}>
+                  {criandoSeries ? 'Criando...' : `Criar ${emissaoSeries.length} emissões`}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              {fl('Nome da Série *', fi('nome_serie', 'text', 'Ex: APEX I'))}
+              {fl('Nº da Emissão *', fi('numero_emissao', 'number'))}
+              {fl('Emissor *', fi('emissor'))}
+              {fl('CNPJ Emissor', fi('cnpj_emissor'))}
+              {fl('Indexador', fi('indexador', 'text', 'CDI, IPCA...'))}
+              {fl('Taxa Adicional', fi('taxa_adicional', 'text', '+ 2% a.a.'))}
+              {fl('Data Início', fi('data_inicio_emissao', 'date'))}
+              {fl('Data Vencimento Previsto', fi('data_vencimento_previsto', 'date'))}
+              <div style={{ borderTop: '1px solid var(--gray-border)', margin: '10px 0', paddingTop: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Resgate e liquidez</div>
+                <div className={styles.formRow}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+                    <input type="checkbox" checked={!!form.resgate_antecipado_emissao} onChange={e => inp('resgate_antecipado_emissao', e.target.checked)} />
+                    Emissão prevê resgate antecipado
+                  </label>
+                </div>
+                {form.resgate_antecipado_emissao && fl('Tipo de resgate', fs('resgate_antecipado_tipo', [
+                  { value: 'vinculado_lastro', label: 'Vinculado ao recebimento do lastro' },
+                  { value: 'desvinculado_lastro', label: 'Desvinculado do recebimento do lastro' },
+                ]))}
+                {form.resgate_antecipado_emissao && fl('Cláusulas identificadas pela IA', fta('clausulas_resgate', 3))}
+                {fl('Prazo carência (dias)', fi('prazo_carencia_dias', 'number', '0'))}
+                {fl('Prazo pgto após pedido de saque', fi('prazo_pgto_pos_resgate', 'text', 'Ex: 30 dias'))}
+              </div>
+              <div style={{ borderTop: '1px solid var(--gray-border)', margin: '10px 0', paddingTop: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Garantias</div>
+                {fl('Tipos de garantia', fta('tipos_garantia', 2))}
+              </div>
+              {auditCaption(!!editandoEmissaoId)}
+              <button className={styles.btnPrimary} onClick={() => editandoEmissaoId ? atualizarEmissao.mutate() : salvarEmissao.mutate()} disabled={salvarEmissao.isPending || atualizarEmissao.isPending}>{(salvarEmissao.isPending || atualizarEmissao.isPending) ? 'Salvando...' : 'Salvar'}</button>
+            </>
+          )}
         </Modal>
       )}
 
@@ -1412,13 +2095,30 @@ export default function CarteiraPage() {
           {fl('Valor Atual Estimado (R$)', fi('valor_atual_estimado', 'number'))}
           <div style={{ borderTop: '1px solid var(--gray-border)', margin: '10px 0', paddingTop: 10 }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Resgate</div>
-            {fl('Status', fs('status_resgate', [{ value: 'Ativo', label: 'Ativo' }, { value: 'Resgate Solicitado', label: 'Resgate Solicitado' }, { value: 'Resgatado', label: 'Resgatado' }]))}
+            {fl('Status', fs('status_resgate', [
+              { value: 'Ativo', label: 'Resgate Não Solicitado' },
+              { value: 'Resgate Solicitado', label: 'Resgate Solicitado e Negado' },
+              { value: 'Resgatado', label: 'Resgatado' },
+            ]))}
             {(form.status_resgate === 'Resgate Solicitado' || form.status_resgate === 'Resgatado') && (
-              <>{fl('Data pedido de resgate', fi('data_pedido_resgate', 'date'))}
-                {fl('Resposta Rhino / emissor', fta('resposta_rhino', 2))}</>
+              <>
+                {fl('Data pedido de resgate', fi('data_pedido_resgate', 'date'))}
+                {fl('Resposta Rhino / emissor', fta('resposta_rhino', 2))}
+                {fl('Comprovante do pedido de resgate', <div>
+                  <input type="file" accept=".pdf,.jpg,.png,.jpeg" style={{ fontSize: 12 }} disabled={uploadComprovante.isPending}
+                    onChange={e => { const f = e.target.files?.[0]; if (f) uploadComprovante.mutate(f) }} />
+                  {uploadComprovante.isPending && <span style={{ fontSize: 11, color: 'var(--teal)', marginLeft: 8 }}>Enviando...</span>}
+                  {form.comprovante_resgate_url && (
+                    <div style={{ marginTop: 4 }}>
+                      <a href={form.comprovante_resgate_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: 'var(--teal)', fontWeight: 600 }}>📎 Ver comprovante enviado</a>
+                    </div>
+                  )}
+                </div>)}
+              </>
             )}
             {form.status_resgate === 'Resgatado' && (
               <>
+                {fl('Data de resgate realizado', fi('data_resgate_realizado', 'date'))}
                 <div className={styles.formRow}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
                     <input type="checkbox" checked={!!form.foi_pago} onChange={e => inp('foi_pago', e.target.checked)} /> Pagamento efetuado
@@ -1453,7 +2153,8 @@ export default function CarteiraPage() {
               {form.faz_parte_honorarios && fl('% Êxito', fi('percentual_sucesso_honor', 'number'))}
             </div>
           )}
-          <button className={styles.btnPrimary} onClick={() => editandoDebId ? atualizarDebenture.mutate() : salvarDebenture.mutate()} disabled={salvarDebenture.isPending || atualizarDebenture.isPending}>
+          {auditCaption(!!editandoDebId)}
+          <button className={styles.btnPrimary} onClick={() => editandoDebId ? salvarComConfirmPct('deb', () => atualizarDebenture.mutate()) : salvarDebenture.mutate()} disabled={salvarDebenture.isPending || atualizarDebenture.isPending}>
             {(salvarDebenture.isPending || atualizarDebenture.isPending) ? 'Salvando...' : 'Salvar'}
           </button>
         </Modal>
@@ -1480,7 +2181,8 @@ export default function CarteiraPage() {
             </label>
           </div>
           {form.faz_parte_honorarios && fl('% Êxito', fi('percentual_sucesso_honorario', 'number'))}
-          <button className={styles.btnPrimary} onClick={() => editandoImobId ? atualizarImobiliario.mutate() : salvarImobiliario.mutate()} disabled={salvarImobiliario.isPending || atualizarImobiliario.isPending}>
+          {auditCaption(!!editandoImobId)}
+          <button className={styles.btnPrimary} onClick={() => editandoImobId ? salvarComConfirmPct('imob', () => atualizarImobiliario.mutate()) : salvarImobiliario.mutate()} disabled={salvarImobiliario.isPending || atualizarImobiliario.isPending}>
             {(salvarImobiliario.isPending || atualizarImobiliario.isPending) ? 'Salvando...' : 'Salvar'}
           </button>
         </Modal>
@@ -1495,6 +2197,16 @@ export default function CarteiraPage() {
           {fl('Administradora', fi('administradora'))}
           {fl('Tipo', fi('tipo_fundo', 'text', 'FII, FIA, Multimercado...'))}
           {fl('Indexador', fi('indexador'))}
+          {fl('% de Queda', <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {fi('percentual_credito_recuperavel', 'number', 'Ex: 70')}
+              <span style={{ fontSize: 11, color: 'var(--gray-mid)', whiteSpace: 'nowrap' }}>% perdido do valor aplicado</span>
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--gray-mid)', marginTop: 4, lineHeight: 1.4 }}>
+              Percentual de perda estimada. Ex: 70 → 70% perdido, 30% recuperável. Usado no cálculo de expectativa futura.
+            </div>
+          </div>)}
+          {auditCaption(!!editandoFundoRefId)}
           <button className={styles.btnPrimary} onClick={() => editandoFundoRefId ? atualizarFundoRef.mutate() : salvarFundoRef.mutate()} disabled={salvarFundoRef.isPending || atualizarFundoRef.isPending}>{(salvarFundoRef.isPending || atualizarFundoRef.isPending) ? 'Salvando...' : 'Salvar'}</button>
         </Modal>
       )}
@@ -1526,7 +2238,8 @@ export default function CarteiraPage() {
             </label>
           </div>
           {form.tem_direito_recompra && fl('Data vencimento recompra', fi('data_vencimento_recompra', 'date'))}
-          <button className={styles.btnPrimary} onClick={() => editandoFundoId ? atualizarFundo.mutate() : salvarFundo.mutate()} disabled={salvarFundo.isPending || atualizarFundo.isPending}>
+          {auditCaption(!!editandoFundoId)}
+          <button className={styles.btnPrimary} onClick={() => editandoFundoId ? salvarComConfirmPct('fundo', () => atualizarFundo.mutate()) : salvarFundo.mutate()} disabled={salvarFundo.isPending || atualizarFundo.isPending}>
             {(salvarFundo.isPending || atualizarFundo.isPending) ? 'Salvando...' : 'Salvar'}
           </button>
         </Modal>
@@ -1538,7 +2251,36 @@ export default function CarteiraPage() {
           {fl('Nome *', fi('nome', 'text', 'Ex: Conservadora, ABM-PARSE'))}
           {fl('Nome do chip (3-4 palavras)', fi('nome_chip', 'text', 'Ex: Cons. Capital'))}
           {fl('Descrição', fta('descricao', 4))}
+          {auditCaption(!!editandoEstrategiaId)}
           <button className={styles.btnPrimary} onClick={() => editandoEstrategiaId ? atualizarEstrategia.mutate() : salvarEstrategia.mutate()} disabled={salvarEstrategia.isPending || atualizarEstrategia.isPending}>{(salvarEstrategia.isPending || atualizarEstrategia.isPending) ? 'Salvando...' : 'Salvar'}</button>
+        </Modal>
+      )}
+
+      {/* ── MODAL CONFIRM % ÊXITO OVERRIDE ──────────────────────── */}
+      {confirmPctOverride !== null && (
+        <Modal title="Confirmar % de êxito personalizado" onClose={() => setConfirmPctOverride(null)} width={420}>
+          <div style={{ fontSize: 13, marginBottom: 10 }}>
+            Você está alterando o % de êxito <strong>só para esta posição</strong>, sem afetar os demais ativos deste cliente.
+          </div>
+          <div style={{ fontSize: 13, marginBottom: 12 }}>
+            Para confirmar, digite exatamente: <strong style={{ color: '#dc2626' }}>ALTERAR % DESSE FUNDO APENAS</strong>
+          </div>
+          <input
+            type="text"
+            style={{ width: '100%', padding: '8px 10px', border: '2px solid var(--gray-border)', borderRadius: 4, fontSize: 13, marginBottom: 12, boxSizing: 'border-box' }}
+            value={confirmPctOverride.confirmText}
+            onChange={e => setConfirmPctOverride({ ...confirmPctOverride, confirmText: e.target.value })}
+            placeholder="ALTERAR % DESSE FUNDO APENAS"
+            autoFocus
+          />
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              className={styles.btnPrimary}
+              disabled={confirmPctOverride.confirmText !== 'ALTERAR % DESSE FUNDO APENAS'}
+              onClick={() => { const fn = confirmPctOverride.mutateFn; setConfirmPctOverride(null); fn() }}
+            >Confirmar alteração</button>
+            <button style={{ padding: '6px 16px', background: 'none', border: '1px solid var(--gray-border)', borderRadius: 4, cursor: 'pointer', fontSize: 13 }} onClick={() => setConfirmPctOverride(null)}>Cancelar</button>
+          </div>
         </Modal>
       )}
 
@@ -1598,7 +2340,7 @@ export default function CarteiraPage() {
               </div>
               {em && infoRow('Resgate antecipado — emissão prevê?', sim_nao(em.resgate_antecipado_emissao))}
               {infoRow('Resgate antecipado — termo/cautela prevê?', sim_nao(d.resgate_antecipado_cautela))}
-              {em && infoRow('Prazo carência', em.prazo_carencia_meses != null ? `${em.prazo_carencia_meses} meses` : '—')}
+              {em && infoRow('Prazo carência', em.prazo_carencia_dias != null ? `${em.prazo_carencia_dias} dias` : '—')}
               {em && infoRow('Prazo pgto após pedido de saque', em.prazo_pgto_pos_resgate != null ? `${em.prazo_pgto_pos_resgate} dias` : '—')}
               {em && em.tipos_garantia && (
                 <>
@@ -1620,19 +2362,47 @@ export default function CarteiraPage() {
         const nome = clienteNome(c.id)
         const temPasta = !!c.folder_drive_principal_id
         return (
-          <Modal title={`Drive — ${nome}`} onClose={() => { setDriveClienteId(null); setDriveArquivos([]) }} width={480}>
+          <Modal title={`Drive — ${nome}`} onClose={() => { setDriveClienteId(null); setDriveArquivos([]); setDriveCandidatos(null) }} width={480}>
             {!temPasta ? (
               <div style={{ textAlign: 'center', padding: '24px 0' }}>
-                <div style={{ fontSize: 13, color: 'var(--gray-mid)', marginBottom: 16 }}>
-                  Nenhuma pasta Drive vinculada a este cliente.
-                </div>
-                <button
-                  className={styles.btnPrimary}
-                  disabled={criarPastaDrive.isPending}
-                  onClick={() => criarPastaDrive.mutate(driveClienteId)}
-                >
-                  {criarPastaDrive.isPending ? 'Criando...' : '📁 Criar pasta no Drive'}
-                </button>
+                {driveCandidatos && driveCandidatos.length > 0 ? (
+                  <div style={{ textAlign: 'left' }}>
+                    <div style={{ fontSize: 13, color: 'var(--gray-mid)', marginBottom: 12 }}>
+                      Encontramos pasta(s) com nome parecido no Drive. É o mesmo cliente? Se for, use a pasta já existente em vez de criar uma nova.
+                    </div>
+                    {driveCandidatos.map(cand => (
+                      <div key={cand.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '8px 10px', border: '1px solid var(--gray-border)', borderRadius: 6, marginBottom: 6 }}>
+                        <span style={{ fontSize: 13 }}>{cand.name} <span style={{ fontSize: 11, color: 'var(--gray-mid)' }}>({Math.round(cand.score * 100)}% parecido)</span></span>
+                        <button
+                          style={{ background: 'none', border: '1px solid var(--teal)', color: 'var(--teal)', borderRadius: 4, padding: '4px 10px', cursor: 'pointer', fontSize: 12, whiteSpace: 'nowrap' }}
+                          disabled={criarPastaDrive.isPending}
+                          onClick={() => criarPastaDrive.mutate({ clienteId: driveClienteId, usarPastaId: cand.id })}
+                        >Usar esta pasta</button>
+                      </div>
+                    ))}
+                    <button
+                      className={styles.btnPrimary}
+                      style={{ marginTop: 8, width: '100%' }}
+                      disabled={criarPastaDrive.isPending}
+                      onClick={() => criarPastaDrive.mutate({ clienteId: driveClienteId, confirmarNova: true })}
+                    >
+                      {criarPastaDrive.isPending ? 'Criando...' : 'Nenhuma é o mesmo cliente — criar pasta nova'}
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 13, color: 'var(--gray-mid)', marginBottom: 16 }}>
+                      Nenhuma pasta Drive vinculada a este cliente.
+                    </div>
+                    <button
+                      className={styles.btnPrimary}
+                      disabled={criarPastaDrive.isPending}
+                      onClick={() => criarPastaDrive.mutate({ clienteId: driveClienteId })}
+                    >
+                      {criarPastaDrive.isPending ? 'Verificando...' : '📁 Criar pasta no Drive'}
+                    </button>
+                  </>
+                )}
               </div>
             ) : (
               <div>
@@ -1668,60 +2438,158 @@ export default function CarteiraPage() {
         )
       })()}
 
+      {/* ── MODAL DETALHE KPI (Fee Entrada / Expectativa Êxito) ─────── */}
+      {detalheKpi !== null && (() => {
+        const titulo = detalheKpi === 'fee' ? 'Fee de Entrada — detalhamento por cliente' : 'Expectativa de Êxito — detalhamento por cliente'
+        const pctLabel = detalheKpi === 'fee' ? '% fee' : '% êxito'
+        const fecharModal = () => { setDetalheKpi(null); setDetalheBusca(''); setDetalheExpandidos(new Set()) }
+        const linhas = clientes
+          .filter((c: any) => detalheKpi === 'exito' ? c.ativo !== false : true)
+          .map((c: any) => ({ cliente: c, valor: calcularHonorarios(c)[detalheKpi === 'fee' ? 'feeEntrada' : 'exito'] }))
+          .filter((x: any) => x.valor > 0)
+          .filter((x: any) => filtrarPorNome(clienteNome(x.cliente.id), detalheBusca))
+          .sort((a: any, b: any) => b.valor - a.valor)
+        const totalFiltrado = linhas.reduce((s: number, x: any) => s + x.valor, 0)
+        return (
+          <Modal title={titulo} onClose={fecharModal} width={760}>
+            <input className={styles.input} style={{ width: '100%', marginBottom: 10 }} placeholder="Filtrar por nome..." value={detalheBusca} onChange={e => setDetalheBusca(e.target.value)} />
+            <div style={{ fontSize: 13, color: 'var(--gray-mid)', marginBottom: 10 }}>
+              {linhas.length} cliente(s) · Total: <strong style={{ color: 'var(--teal)' }}>{brl(totalFiltrado)}</strong>
+            </div>
+            <div style={{ maxHeight: '62vh', overflowY: 'auto' }}>
+              {linhas.length === 0 ? (
+                <div style={{ textAlign: 'center', color: '#9ca3af', padding: 24, fontSize: 13 }}>Nenhum cliente encontrado.</div>
+              ) : linhas.map(({ cliente: c, valor }: any) => {
+                const aberto = detalheExpandidos.has(c.id)
+                const items = detalharCliente(c, detalheKpi)
+                return (
+                  <div key={c.id} style={{ border: '1px solid var(--gray-border)', borderRadius: 8, marginBottom: 8, overflow: 'hidden' }}>
+                    <div
+                      style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', cursor: 'pointer', background: aberto ? 'var(--gray-light, #f8f9fa)' : 'transparent' }}
+                      onClick={() => setDetalheExpandidos(prev => {
+                        const next = new Set(prev)
+                        if (next.has(c.id)) next.delete(c.id); else next.add(c.id)
+                        return next
+                      })}
+                    >
+                      <span style={{ fontWeight: 600, fontSize: 13 }}>{aberto ? '▾' : '▸'} {clienteNome(c.id)}</span>
+                      <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 13, color: 'var(--teal)' }}>{brl(valor)}</span>
+                    </div>
+                    {aberto && (
+                      <div style={{ padding: '0 12px 10px' }}>
+                        {items.length === 0 ? (
+                          <div style={{ fontSize: 12, color: 'var(--gray-mid)', padding: '6px 0' }}>
+                            {detalheKpi === 'fee' && c.pro_labore_tipo === 'fixo'
+                              ? `Fee fixo: ${brl(c.pro_labore_valor ?? 0)} (valor único do cliente, não vinculado a ativos específicos).`
+                              : 'Sem itens.'}
+                          </div>
+                        ) : (
+                          <table className={styles.table} style={{ marginBottom: 0 }}>
+                            <thead><tr><th>Ativo</th><th>Item</th>{thR('Valor aplicado')}<th>{pctLabel}</th>{thR('Valor (R$)')}</tr></thead>
+                            <tbody>
+                              {items.map((it, idx) => (
+                                <tr key={idx}>
+                                  <td style={{ fontSize: 11, color: 'var(--gray-mid)' }}>{it.tipo}</td>
+                                  <td style={{ fontSize: 12 }}>{it.nome}</td>
+                                  <td style={{ textAlign: 'right', fontSize: 12 }}>{brl(it.valor)}</td>
+                                  <td style={{ fontSize: 12 }}>{it.pct.toFixed(1)}%</td>
+                                  <td style={{ textAlign: 'right', fontSize: 12, fontWeight: 600 }}>{brl(it.resultado)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </Modal>
+        )
+      })()}
+
       {/* ── MODAL CADEIA SOCIETÁRIA ──────────────────────────────── */}
       {cadeiaEmpId !== null && (() => {
         const e = empreendimentos.find((x: any) => x.id === cadeiaEmpId)
         if (!e) return null
-        const nodeStyle: React.CSSProperties = {
-          border: '2px solid var(--teal, #0d9488)', borderRadius: 8, padding: '10px 16px',
-          minWidth: 200, maxWidth: 260, background: 'var(--bg-card, white)',
-          textAlign: 'center', fontSize: 12,
-        }
-        const labelStyle: React.CSSProperties = {
-          fontSize: 10, fontWeight: 700, color: 'var(--teal)', textTransform: 'uppercase',
-          letterSpacing: '0.07em', marginBottom: 2,
-        }
-        const arrowStyle: React.CSSProperties = {
-          textAlign: 'center', fontSize: 18, color: 'var(--gray-mid, #9ca3af)', margin: '4px 0', lineHeight: 1,
-        }
-        const nodeBox = (label: string, nome: string | null | undefined, cnpj: string | null | undefined, borderColor?: string) => (
-          nome ? (
-            <div style={{ ...nodeStyle, ...(borderColor ? { border: `2px solid ${borderColor}` } : {}) }}>
-              <div style={{ ...labelStyle, ...(borderColor ? { color: borderColor } : {}) }}>{label}</div>
-              <div style={{ fontWeight: 700, fontSize: 13 }}>{nome}</div>
-              {cnpj && <div style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--gray-mid)' }}>{cnpj}</div>}
-            </div>
-          ) : null
-        )
         const subvs: any[] = e.subveiculos ?? []
-        const temCadeia = e.prestadora_nome || e.nome_razao_social || e.spe_nome || subvs.length > 0
+        const svVeiculo = subvs.filter(sv => (sv.camada ?? 'spe') === 'veiculo')
+        const svSpe = subvs.filter(sv => (sv.camada ?? 'spe') === 'spe')
+
+        const nodeBase: React.CSSProperties = {
+          border: '2px solid var(--teal, #0d9488)', borderRadius: 8, padding: '8px 14px',
+          minWidth: 180, background: 'var(--bg-card, white)', textAlign: 'center', fontSize: 12,
+        }
+        const lbl: React.CSSProperties = {
+          fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 2,
+        }
+        const nodeBox = (label: string, nome: string, cnpj?: string | null, color = 'var(--teal)') => (
+          <div style={{ ...nodeBase, border: `2px solid ${color}` }}>
+            <div style={{ ...lbl, color }}>{label}</div>
+            <div style={{ fontWeight: 700, fontSize: 13 }}>{nome}</div>
+            {cnpj && <div style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--gray-mid)' }}>{cnpj}</div>}
+          </div>
+        )
+        const miniBox = (sv: any) => (
+          <div key={sv.nome} style={{ ...nodeBase, border: '1.5px solid #818cf8', minWidth: 120, padding: '6px 10px' }}>
+            <div style={{ ...lbl, color: '#6366f1' }}>{sv.tipo ?? 'Sub-veículo'}</div>
+            <div style={{ fontWeight: 600, fontSize: 11 }}>{sv.nome}</div>
+            {sv.cnpj && <div style={{ fontFamily: 'monospace', fontSize: 9, color: 'var(--gray-mid)' }}>{sv.cnpj}</div>}
+          </div>
+        )
+        const arrow = <div style={{ textAlign: 'center', fontSize: 18, color: '#9ca3af', lineHeight: 1, margin: '3px 0' }}>↓</div>
+        const branchRow = (items: any[]) => items.length === 0 ? null : (
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-start', paddingLeft: 8, alignItems: 'center' }}>
+            <span style={{ fontSize: 12, color: '#9ca3af' }}>└→</span>
+            {items.map((sv: any, i: number) => <React.Fragment key={i}>{miniBox(sv)}</React.Fragment>)}
+          </div>
+        )
+
+        const temCadeia = e.nome_razao_social || e.spe_nome || subvs.length > 0
+
         return (
-          <Modal title={`Cadeia Societária — ${e.nome_venda}`} onClose={() => setCadeiaEmpId(null)} width={520}>
+          <Modal title={`Cadeia Societária — ${e.nome_venda}`} onClose={() => setCadeiaEmpId(null)} width={560}>
             {!temCadeia ? (
               <div style={{ fontSize: 13, color: 'var(--gray-mid)', fontStyle: 'italic', padding: '24px 0', textAlign: 'center' }}>
-                Cadeia não preenchida. Edite o empreendimento para adicionar Prestadora, Veículo, SPE e Sub-veículos.
+                Cadeia não preenchida. Edite o empreendimento para adicionar Veículo, SPE e Sub-veículos.
               </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0, padding: '8px 0' }}>
-                {nodeBox('Prestadora de Serviços', e.prestadora_nome ?? 'Apex Realty', e.prestadora_cnpj, '#6366f1')}
-                {e.nome_razao_social && <div style={arrowStyle}>↓</div>}
-                {nodeBox('Veículo Imobiliário', e.nome_razao_social, e.cnpj_empreendimento)}
-                {e.spe_nome && <><div style={arrowStyle}>↓</div>{nodeBox('SPE', e.spe_nome, e.spe_cnpj, '#0891b2')}</>}
-                {subvs.length > 0 && (
-                  <>
-                    <div style={arrowStyle}>↓</div>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--gray-mid)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Sub-veículos ({subvs.length})</div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
-                      {subvs.map((sv: any, i: number) => (
-                        <div key={i} style={{ ...nodeStyle, minWidth: 140, maxWidth: 180, border: '1.5px solid #a5b4fc' }}>
-                          <div style={{ ...labelStyle, color: '#6366f1' }}>{sv.tipo ?? 'Sub-veículo'}</div>
-                          <div style={{ fontWeight: 600, fontSize: 12 }}>{sv.nome}</div>
-                          {sv.cnpj && <div style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--gray-mid)' }}>{sv.cnpj}</div>}
-                        </div>
-                      ))}
+              <div style={{ padding: '8px 0' }}>
+                {/* Prestadora — contrato de serviço, fora da estrutura societária */}
+                {(e.prestadora_nome || e.prestadora_cnpj) && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18, padding: '7px 14px', border: '2px dashed #818cf8', borderRadius: 8, background: 'rgba(99,102,241,0.04)', fontSize: 12 }}>
+                    <div>
+                      <div style={{ fontSize: 9, fontWeight: 700, color: '#6366f1', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Prestadora de Serviços (contrato)</div>
+                      <div style={{ fontWeight: 700, fontSize: 13 }}>{e.prestadora_nome ?? '—'}</div>
+                      {e.prestadora_cnpj && <div style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--gray-mid)' }}>{e.prestadora_cnpj}</div>}
                     </div>
-                  </>
+                    <div style={{ marginLeft: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                      <span style={{ fontSize: 10, color: '#818cf8', borderTop: '1px dashed #818cf8', paddingTop: 2, whiteSpace: 'nowrap' }}>contrato de serviço</span>
+                    </div>
+                  </div>
                 )}
+
+                {/* Estrutura societária vertical */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {e.nome_razao_social && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {nodeBox('Veículo Imobiliário', e.nome_razao_social, e.cnpj_empreendimento)}
+                      {branchRow(svVeiculo)}
+                    </div>
+                  )}
+                  {e.spe_nome && e.nome_razao_social && arrow}
+                  {e.spe_nome && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {nodeBox('SPE', e.spe_nome, e.spe_cnpj, '#0891b2')}
+                      {branchRow(svSpe)}
+                    </div>
+                  )}
+                  {/* Sub-veículos sem camada explícita, ligados ao último nó */}
+                  {subvs.filter(sv => !sv.camada && sv.camada !== 'veiculo' && sv.camada !== 'spe').length > 0 && (
+                    branchRow(subvs.filter(sv => !sv.camada))
+                  )}
+                </div>
               </div>
             )}
           </Modal>

@@ -179,6 +179,22 @@ export default function AutosIACasoPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['autos-ia', 'caso', casoId] }),
   })
 
+  const alertaTeste = useMutation({
+    mutationFn: () => autosIa.enviarAlertaTeste(casoId!),
+    onSuccess: (r) => {
+      if (!r.enviado) {
+        alert(r.motivo || 'Não foi possível enviar o alerta de teste (Telegram e e-mail não configurados ou falharam — veja os logs).')
+        return
+      }
+      const partes = [r.email ? 'e-mail' : null, r.telegram ? 'Telegram' : null].filter(Boolean).join(' e ')
+      const falhou = [!r.email ? 'e-mail' : null, !r.telegram ? 'Telegram' : null].filter(Boolean).join(' e ')
+      const dest = r.email && r.destinatarios?.length ? `\nE-mail para: ${r.destinatarios.join(', ')}.` : ''
+      alert(`Alerta de teste enviado por ${partes} (${r.documentos} documento(s) em ${r.protocolos} protocolo(s) + ${r.movimentos ?? 0} movimento(s)).${dest}` +
+        (falhou ? `\n\nAtenção: o envio por ${falhou} falhou — confira a configuração.` : ''))
+    },
+    onError: (e: any) => alert(`Erro ao enviar o alerta de teste: ${e?.response?.data?.detail || e?.message}`),
+  })
+
   const deletarCaso = useMutation({
     mutationFn: () => autosIa.deletarCaso(casoId!),
     onSuccess: () => navigate('/autos-ia'),
@@ -370,6 +386,18 @@ export default function AutosIACasoPage() {
                         title='Baixa de novo do Drive + resume de novo TODAS as peças com falha de leitura registrada — uma de cada vez'
                       >
                         {relerPendentes.isPending ? 'Relendo pendentes...' : 'Reler pendentes'}
+                      </button>
+                      <button
+                        className={pageStyles.btnSmall}
+                        disabled={alertaTeste.isPending}
+                        onClick={() => {
+                          if (window.confirm('Enviar agora um ALERTA DE TESTE (e-mail para os destinatários configurados + Telegram) com os últimos andamentos deste caso? Serve só pra conferir o visual e a entrega — não marca nada como enviado.')) {
+                            alertaTeste.mutate()
+                          }
+                        }}
+                        title="Manda um exemplo do alerta de novo andamento (e-mail + Telegram) com os últimos protocolos do caso"
+                      >
+                        {alertaTeste.isPending ? 'Enviando teste...' : 'Testar alerta'}
                       </button>
                     </>
                   )}

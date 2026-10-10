@@ -66,6 +66,9 @@ class CarteiraCliente(Base):
 
     # Administrativo
     data_cadastro = Column(DateTime, default=datetime.now)
+    data_atualizacao = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    criado_por = Column(String(150), nullable=True)      # nome do usuário que criou o registro
+    atualizado_por = Column(String(150), nullable=True)  # nome do usuário da última alteração
     ativo = Column(Boolean, default=True)
     observacoes = Column(Text, nullable=True)
 
@@ -93,7 +96,7 @@ class CarteiraDebentureadotEmissao(Base):
     taxa_adicional = Column(String(100), nullable=True)
     data_inicio_emissao = Column(Date, nullable=True)
     data_vencimento_previsto = Column(Date, nullable=True)
-    prazo_carencia_meses = Column(Integer, nullable=True)
+    prazo_carencia_dias = Column(Integer, nullable=True)
     prazo_pgto_pos_resgate = Column(String(100), nullable=True)
 
     # Resgate Antecipado
@@ -107,6 +110,9 @@ class CarteiraDebentureadotEmissao(Base):
     tipos_garantia = Column(JSON, default=list)
     observacoes_gerais = Column(Text, nullable=True)
     data_criacao = Column(DateTime, default=datetime.now)
+    data_atualizacao = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    criado_por = Column(String(150), nullable=True)
+    atualizado_por = Column(String(150), nullable=True)
     ativo = Column(Boolean, default=True)
 
     # Relacionamentos
@@ -139,6 +145,8 @@ class CarteiraDebenturePosicao(Base):
     status_resgate = Column(String(50), default='Ativo')
     data_pedido_resgate = Column(Date, nullable=True)
     resposta_rhino = Column(Text, nullable=True)
+    comprovante_resgate_url = Column(String(500), nullable=True)  # link Drive do pedido de resgate
+    data_resgate_realizado = Column(Date, nullable=True)
     foi_pago = Column(Boolean, default=False)
     valor_pago = Column(Float, nullable=True)
     data_pagamento = Column(Date, nullable=True)
@@ -164,6 +172,8 @@ class CarteiraDebenturePosicao(Base):
     observacoes = Column(Text, nullable=True)
     data_criacao = Column(DateTime, default=datetime.now)
     data_atualizacao = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    criado_por = Column(String(150), nullable=True)
+    atualizado_por = Column(String(150), nullable=True)
 
     # Relacionamentos
     cliente = relationship("CarteiraCliente", back_populates="debentures")
@@ -206,6 +216,9 @@ class CarteiraImobiliarioEmpreendimento(Base):
     valor_total_empreendimento = Column(Float, nullable=True)
     descricao = Column(Text, nullable=True)
     data_criacao = Column(DateTime, default=datetime.now)
+    data_atualizacao = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    criado_por = Column(String(150), nullable=True)
+    atualizado_por = Column(String(150), nullable=True)
     ativo = Column(Boolean, default=True)
 
     # Relacionamentos
@@ -286,6 +299,8 @@ class CarteiraImobiliarioPosicao(Base):
     observacoes = Column(Text, nullable=True)
     data_criacao = Column(DateTime, default=datetime.now)
     data_atualizacao = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    criado_por = Column(String(150), nullable=True)
+    atualizado_por = Column(String(150), nullable=True)
 
     # Relacionamentos
     cliente = relationship("CarteiraCliente", back_populates="imobiliarios")
@@ -310,8 +325,12 @@ class CarteiraFundoReferencia(Base):
     tipo_fundo = Column(String(50), nullable=True)
     indexador = Column(String(100), nullable=True)
     percentual_esperado = Column(Float, nullable=True)
+    percentual_credito_recuperavel = Column(Float, nullable=True)
     data_constituicao = Column(Date, nullable=True)
     data_criacao = Column(DateTime, default=datetime.now)
+    data_atualizacao = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    criado_por = Column(String(150), nullable=True)
+    atualizado_por = Column(String(150), nullable=True)
     ativo = Column(Boolean, default=True)
     observacoes = Column(Text, nullable=True)
 
@@ -367,6 +386,8 @@ class CarteiraFundoPosicao(Base):
     observacoes = Column(Text, nullable=True)
     data_criacao = Column(DateTime, default=datetime.now)
     data_atualizacao = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    criado_por = Column(String(150), nullable=True)
+    atualizado_por = Column(String(150), nullable=True)
 
     # Relacionamentos
     cliente = relationship("CarteiraCliente", back_populates="fundos")
@@ -387,8 +408,11 @@ class CarteiraEstrategia(Base):
     nome = Column(String(255), nullable=False, unique=True)
     nome_chip = Column(String(60), nullable=True)  # label curto para o chip (3-4 palavras)
     descricao = Column(Text, nullable=True)
-    criada_por = Column(Integer, nullable=True)
+    criada_por = Column(Integer, nullable=True)  # legado, não usado — ver criado_por (nome)
     data_criacao = Column(DateTime, default=datetime.now)
+    data_atualizacao = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    criado_por = Column(String(150), nullable=True)
+    atualizado_por = Column(String(150), nullable=True)
     publico = Column(Boolean, default=True)
     alocacao_recomendada = Column(JSON, default=dict)
     usuarios_count = Column(Integer, default=0)

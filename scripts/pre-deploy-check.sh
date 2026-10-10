@@ -56,6 +56,20 @@ if not bad:
 sys.exit(1 if bad else 0)
 EOF
 
+# 4) Frontend: erro de tipo NÃO bloqueia o deploy (o build do Docker roda só `vite build`; ver
+#    commit "bypass TypeScript build check"), mas avisa — erro de tipo costuma ser bug de verdade.
+if [ -d frontend/node_modules ]; then
+  tsc_out=$(cd frontend && npx --no-install tsc -b 2>&1)
+  if [ $? -eq 0 ]; then
+    ok "frontend: tsc -b sem erros de tipo"
+  else
+    echo "⚠️  frontend: tsc -b encontrou erros de tipo (não bloqueiam o deploy, mas vale corrigir):"
+    echo "$tsc_out" | grep -E "error TS" | head -8
+  fi
+else
+  echo "⚠️  frontend/node_modules ausente — typecheck pulado (rode 'npm ci' em frontend/ pra checar)"
+fi
+
 echo
 if [ "$erro" -ne 0 ]; then
   echo "⛔ NÃO FAÇA DEPLOY. Corrija acima e rode de novo."

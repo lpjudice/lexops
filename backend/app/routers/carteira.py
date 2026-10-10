@@ -2,13 +2,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, desc, func
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy import Float, Integer
 from typing import List, Optional
 from datetime import date, datetime
 import json
 import base64
 from io import BytesIO
 import httpx
-import os
 
 from app.models.carteira import (
     CarteiraCliente,
@@ -23,11 +24,69 @@ from app.models.carteira import (
     CarteiraUploadDocumento,
 )
 from app.database import get_db
+from app.dependencies import get_optional_user
+from app.models.usuario import Usuario
 from app.services.carteira_ia import CarteiraIAService
 from app.services.carteira_relatorios import CarteiraRelatoriosService
 from app.services.carteira_drive import CarteiraDriveService
 
 router = APIRouter(prefix="/carteira", tags=["carteira"])
+
+
+def _limpar_numericos_vazios(model_cls, data: dict) -> dict:
+    """Converte '' para None nos campos Float/Integer do model antes de
+    criar/atualizar. O frontend manda '' pra campo numérico deixado em
+    branco (next de ??''), e Postgres rejeita '' num tipo numérico
+    (DataError: invalid input syntax for type double precision/integer).
+    Defesa genérica pra não ter que caçar campo por campo cada vez que um
+    formulário novo (ou um campo novo num existente) esquece de marcar o
+    campo como numérico no lado do cliente."""
+    cols = {c.name: c.type for c in model_cls.__table__.columns}
+    out = dict(data)
+    for k, v in list(out.items()):
+        if v == "" and k in cols and isinstance(cols[k], (Float, Integer)):
+            out[k] = None
+    return out
+
+
+def _nome_usuario(current_user: Optional[Usuario]) -> Optional[str]:
+    """Nome de quem fez a chamada, pra auditoria (criado_por/atualizado_por).
+    None quando não autenticado — nunca bloqueia a gravação por causa disso,
+    só fica sem autoria registrada."""
+    return current_user.nome if current_user else None
+
+
+_CAMPO_LABEL = {
+    "cpf": "CPF/CNPJ", "nome": "Nome", "data_aplicacao": "Data de Aplicação",
+    "valor_aplicado": "Valor Aplicado", "data_aquisicao": "Data de Aquisição",
+    "numero_cautela": "Nº Cautela", "valor_total_compromissado": "Valor Total Comprometido",
+    "nome_fundo": "Nome do Fundo", "nome_venda": "Nome do projeto",
+    "nome_serie": "Nome da Série", "numero_emissao": "Nº da Emissão",
+    "emissor": "Emissor", "cliente_id": "Cliente", "fundo_id": "Fundo",
+    "emissao_id": "Emissão", "empreendimento_id": "Empreendimento",
+}
+
+
+def _commit_amigavel(db: Session, contexto: str = "registro") -> None:
+    """Commita a sessão; se faltar um campo obrigatório (NOT NULL) ou colidir
+    com um valor único já cadastrado, devolve uma mensagem legível em vez do
+    500 cru do Postgres. Sem isso, esquecer um campo marcado com "*" no
+    formulário (ex: Data de Aplicação) trava com um erro sem explicação
+    nenhuma pro usuário."""
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        orig = getattr(e, "orig", None)
+        diag = getattr(orig, "diag", None)
+        coluna = getattr(diag, "column_name", None)
+        if coluna:
+            label = _CAMPO_LABEL.get(coluna, coluna)
+            raise HTTPException(status_code=400, detail=f'O campo "{label}" é obrigatório e não foi preenchido.')
+        constraint = (getattr(diag, "constraint_name", None) or "").lower()
+        if "cpf" in constraint:
+            raise HTTPException(status_code=400, detail="Já existe um cliente cadastrado com esse CPF/CNPJ.")
+        raise HTTPException(status_code=400, detail=f"Não foi possível salvar o {contexto}: valor duplicado ou inválido.")
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -69,29 +128,69 @@ def obter_cliente(cliente_id: int, db: Session = Depends(get_db)):
     return cliente
 
 
+def _normalizar_cpf_vazio(data: dict) -> dict:
+    """cpf é UNIQUE — '' não é "sem CPF" pro Postgres (só NULL é), então duas
+    linhas com cpf='' colidem na constraint. Normaliza '' para None antes de
+    gravar (clientes importados do XLS costumam vir sem CPF)."""
+    if data.get("cpf") == "":
+        data = {**data, "cpf": None}
+    return data
+
+
 @router.post("/clientes")
-def criar_cliente(data: dict, db: Session = Depends(get_db)):
+def criar_cliente(data: dict, db: Session = Depends(get_db), current_user: Optional[Usuario] = Depends(get_optional_user)):
     """Cria novo cliente na carteira"""
+    data = _normalizar_cpf_vazio(_limpar_numericos_vazios(CarteiraCliente, data))
+    nome_usuario = _nome_usuario(current_user)
+    data["criado_por"] = nome_usuario
+    data["atualizado_por"] = nome_usuario
     cliente = CarteiraCliente(**data)
     db.add(cliente)
-    db.commit()
+    _commit_amigavel(db, "cliente")
     db.refresh(cliente)
+
+    try:
+        resultado = CarteiraDriveService.criar_pasta_cliente(cliente.nome or f"Cliente_{cliente.id}")
+        cliente.folder_drive_principal_id = resultado["folder_id"]
+        cliente.folder_drive_url = resultado["folder_link"]
+        if cliente.email:
+            CarteiraDriveService.compartilhar_com_email(cliente.nome, cliente.email, role="reader")
+        db.commit()
+    except Exception as _e:
+        import logging
+        logging.getLogger("app").warning(f"Drive auto-create falhou para cliente {cliente.id}: {_e}")
+
     return cliente
 
 
 @router.put("/clientes/{cliente_id}")
-def atualizar_cliente(cliente_id: int, data: dict, db: Session = Depends(get_db)):
+def atualizar_cliente(cliente_id: int, data: dict, db: Session = Depends(get_db), current_user: Optional[Usuario] = Depends(get_optional_user)):
     """Atualiza dados de um cliente"""
     cliente = db.query(CarteiraCliente).filter(CarteiraCliente.id == cliente_id).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
 
+    data = _normalizar_cpf_vazio(_limpar_numericos_vazios(CarteiraCliente, data))
+    data["atualizado_por"] = _nome_usuario(current_user)
     for key, value in data.items():
         setattr(cliente, key, value)
 
-    db.commit()
+    _commit_amigavel(db, "cliente")
     db.refresh(cliente)
     return cliente
+
+
+@router.delete("/clientes/{cliente_id}")
+def deletar_cliente(cliente_id: int, db: Session = Depends(get_db)):
+    """Deleta cliente (apenas se sem posições vinculadas)"""
+    cliente = db.query(CarteiraCliente).filter(CarteiraCliente.id == cliente_id).first()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+    if cliente.debentures or cliente.imobiliarios or cliente.fundos:
+        raise HTTPException(status_code=400, detail="Cliente possui posições vinculadas (debêntures/imobiliário/fundos) — remova-as antes de excluir")
+    db.delete(cliente)
+    db.commit()
+    return {"ok": True}
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -108,11 +207,15 @@ def listar_emissoes(db: Session = Depends(get_db)):
 
 
 @router.post("/emissoes")
-def criar_emissao(data: dict, db: Session = Depends(get_db)):
+def criar_emissao(data: dict, db: Session = Depends(get_db), current_user: Optional[Usuario] = Depends(get_optional_user)):
     """Cria nova emissão de debênture"""
+    data = _limpar_numericos_vazios(CarteiraDebentureadotEmissao, data)
+    nome_usuario = _nome_usuario(current_user)
+    data["criado_por"] = nome_usuario
+    data["atualizado_por"] = nome_usuario
     emissao = CarteiraDebentureadotEmissao(**data)
     db.add(emissao)
-    db.commit()
+    _commit_amigavel(db, "emissão")
     db.refresh(emissao)
     return emissao
 
@@ -129,18 +232,35 @@ def obter_emissao(emissao_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/emissoes/{emissao_id}")
-def atualizar_emissao(emissao_id: int, data: dict, db: Session = Depends(get_db)):
+def atualizar_emissao(emissao_id: int, data: dict, db: Session = Depends(get_db), current_user: Optional[Usuario] = Depends(get_optional_user)):
     """Atualiza emissão de debênture"""
     emissao = db.query(CarteiraDebentureadotEmissao).filter(
         CarteiraDebentureadotEmissao.id == emissao_id
     ).first()
     if not emissao:
         raise HTTPException(status_code=404, detail="Emissão não encontrada")
+    data = _limpar_numericos_vazios(CarteiraDebentureadotEmissao, data)
+    data["atualizado_por"] = _nome_usuario(current_user)
     for key, value in data.items():
         setattr(emissao, key, value)
-    db.commit()
+    _commit_amigavel(db, "emissão")
     db.refresh(emissao)
     return emissao
+
+
+@router.delete("/emissoes/{emissao_id}")
+def deletar_emissao(emissao_id: int, db: Session = Depends(get_db)):
+    """Deleta emissão (apenas se sem posições de debêntures vinculadas)"""
+    emissao = db.query(CarteiraDebentureadotEmissao).filter(
+        CarteiraDebentureadotEmissao.id == emissao_id
+    ).first()
+    if not emissao:
+        raise HTTPException(status_code=404, detail="Emissão não encontrada")
+    if emissao.posicoes:
+        raise HTTPException(status_code=400, detail="Emissão possui posições de debêntures vinculadas — remova-as antes de excluir")
+    db.delete(emissao)
+    db.commit()
+    return {"ok": True}
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -183,11 +303,15 @@ def listar_debentures(
 
 
 @router.post("/debentures")
-def criar_debenture(data: dict, db: Session = Depends(get_db)):
+def criar_debenture(data: dict, db: Session = Depends(get_db), current_user: Optional[Usuario] = Depends(get_optional_user)):
     """Cria nova posição de debênture para cliente"""
+    data = _limpar_numericos_vazios(CarteiraDebenturePosicao, data)
+    nome_usuario = _nome_usuario(current_user)
+    data["criado_por"] = nome_usuario
+    data["atualizado_por"] = nome_usuario
     posicao = CarteiraDebenturePosicao(**data)
     db.add(posicao)
-    db.commit()
+    _commit_amigavel(db, "posição de debênture")
     db.refresh(posicao)
     return posicao
 
@@ -204,7 +328,7 @@ def obter_debenture(posicao_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/debentures/{posicao_id}")
-def atualizar_debenture(posicao_id: int, data: dict, db: Session = Depends(get_db)):
+def atualizar_debenture(posicao_id: int, data: dict, db: Session = Depends(get_db), current_user: Optional[Usuario] = Depends(get_optional_user)):
     """Atualiza posição de debênture"""
     posicao = db.query(CarteiraDebenturePosicao).filter(
         CarteiraDebenturePosicao.id == posicao_id
@@ -212,11 +336,13 @@ def atualizar_debenture(posicao_id: int, data: dict, db: Session = Depends(get_d
     if not posicao:
         raise HTTPException(status_code=404, detail="Posição não encontrada")
 
+    data = _limpar_numericos_vazios(CarteiraDebenturePosicao, data)
+    data["atualizado_por"] = _nome_usuario(current_user)
     for key, value in data.items():
         setattr(posicao, key, value)
 
     posicao.data_atualizacao = datetime.now()
-    db.commit()
+    _commit_amigavel(db, "posição de debênture")
     db.refresh(posicao)
     return posicao
 
@@ -249,26 +375,32 @@ def listar_empreendimentos(db: Session = Depends(get_db)):
 
 
 @router.post("/empreendimentos")
-def criar_empreendimento(data: dict, db: Session = Depends(get_db)):
+def criar_empreendimento(data: dict, db: Session = Depends(get_db), current_user: Optional[Usuario] = Depends(get_optional_user)):
     """Cria novo empreendimento"""
+    data = _limpar_numericos_vazios(CarteiraImobiliarioEmpreendimento, data)
+    nome_usuario = _nome_usuario(current_user)
+    data["criado_por"] = nome_usuario
+    data["atualizado_por"] = nome_usuario
     empreendimento = CarteiraImobiliarioEmpreendimento(**data)
     db.add(empreendimento)
-    db.commit()
+    _commit_amigavel(db, "empreendimento")
     db.refresh(empreendimento)
     return empreendimento
 
 
 @router.put("/empreendimentos/{emp_id}")
-def atualizar_empreendimento(emp_id: int, data: dict, db: Session = Depends(get_db)):
+def atualizar_empreendimento(emp_id: int, data: dict, db: Session = Depends(get_db), current_user: Optional[Usuario] = Depends(get_optional_user)):
     """Atualiza empreendimento"""
     emp = db.query(CarteiraImobiliarioEmpreendimento).filter(
         CarteiraImobiliarioEmpreendimento.id == emp_id
     ).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Empreendimento não encontrado")
+    data = _limpar_numericos_vazios(CarteiraImobiliarioEmpreendimento, data)
+    data["atualizado_por"] = _nome_usuario(current_user)
     for key, value in data.items():
         setattr(emp, key, value)
-    db.commit()
+    _commit_amigavel(db, "empreendimento")
     db.refresh(emp)
     return emp
 
@@ -322,11 +454,15 @@ def listar_imobiliario(
 
 
 @router.post("/imobiliario")
-def criar_imobiliario(data: dict, db: Session = Depends(get_db)):
+def criar_imobiliario(data: dict, db: Session = Depends(get_db), current_user: Optional[Usuario] = Depends(get_optional_user)):
     """Cria nova posição imobiliária para cliente"""
+    data = _limpar_numericos_vazios(CarteiraImobiliarioPosicao, data)
+    nome_usuario = _nome_usuario(current_user)
+    data["criado_por"] = nome_usuario
+    data["atualizado_por"] = nome_usuario
     posicao = CarteiraImobiliarioPosicao(**data)
     db.add(posicao)
-    db.commit()
+    _commit_amigavel(db, "posição imobiliária")
     db.refresh(posicao)
     return posicao
 
@@ -343,7 +479,7 @@ def obter_imobiliario(posicao_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/imobiliario/{posicao_id}")
-def atualizar_imobiliario(posicao_id: int, data: dict, db: Session = Depends(get_db)):
+def atualizar_imobiliario(posicao_id: int, data: dict, db: Session = Depends(get_db), current_user: Optional[Usuario] = Depends(get_optional_user)):
     """Atualiza posição imobiliária"""
     posicao = db.query(CarteiraImobiliarioPosicao).filter(
         CarteiraImobiliarioPosicao.id == posicao_id
@@ -351,13 +487,28 @@ def atualizar_imobiliario(posicao_id: int, data: dict, db: Session = Depends(get
     if not posicao:
         raise HTTPException(status_code=404, detail="Posição não encontrada")
 
+    data = _limpar_numericos_vazios(CarteiraImobiliarioPosicao, data)
+    data["atualizado_por"] = _nome_usuario(current_user)
     for key, value in data.items():
         setattr(posicao, key, value)
 
     posicao.data_atualizacao = datetime.now()
-    db.commit()
+    _commit_amigavel(db, "posição imobiliária")
     db.refresh(posicao)
     return posicao
+
+
+@router.delete("/imobiliario/{posicao_id}")
+def deletar_imobiliario(posicao_id: int, db: Session = Depends(get_db)):
+    """Deleta uma posição imobiliária"""
+    posicao = db.query(CarteiraImobiliarioPosicao).filter(
+        CarteiraImobiliarioPosicao.id == posicao_id
+    ).first()
+    if not posicao:
+        raise HTTPException(status_code=404, detail="Posição não encontrada")
+    db.delete(posicao)
+    db.commit()
+    return {"ok": True}
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -374,26 +525,45 @@ def listar_fundos_referencia(db: Session = Depends(get_db)):
 
 
 @router.put("/fundos-referencia/{fundo_id}")
-def atualizar_fundo_referencia(fundo_id: int, data: dict, db: Session = Depends(get_db)):
+def atualizar_fundo_referencia(fundo_id: int, data: dict, db: Session = Depends(get_db), current_user: Optional[Usuario] = Depends(get_optional_user)):
     """Atualiza fundo de referência"""
     fundo = db.query(CarteiraFundoReferencia).filter(CarteiraFundoReferencia.id == fundo_id).first()
     if not fundo:
         raise HTTPException(status_code=404, detail="Fundo não encontrado")
+    data = _limpar_numericos_vazios(CarteiraFundoReferencia, data)
+    data["atualizado_por"] = _nome_usuario(current_user)
     for key, value in data.items():
         setattr(fundo, key, value)
-    db.commit()
+    _commit_amigavel(db, "fundo de referência")
     db.refresh(fundo)
     return fundo
 
 
 @router.post("/fundos-referencia")
-def criar_fundo_referencia(data: dict, db: Session = Depends(get_db)):
+def criar_fundo_referencia(data: dict, db: Session = Depends(get_db), current_user: Optional[Usuario] = Depends(get_optional_user)):
     """Cria novo fundo de referência"""
+    data = _limpar_numericos_vazios(CarteiraFundoReferencia, data)
+    nome_usuario = _nome_usuario(current_user)
+    data["criado_por"] = nome_usuario
+    data["atualizado_por"] = nome_usuario
     fundo = CarteiraFundoReferencia(**data)
     db.add(fundo)
-    db.commit()
+    _commit_amigavel(db, "fundo de referência")
     db.refresh(fundo)
     return fundo
+
+
+@router.delete("/fundos-referencia/{fundo_id}")
+def deletar_fundo_referencia(fundo_id: int, db: Session = Depends(get_db)):
+    """Deleta fundo de referência (apenas se sem posições vinculadas)"""
+    fundo = db.query(CarteiraFundoReferencia).filter(CarteiraFundoReferencia.id == fundo_id).first()
+    if not fundo:
+        raise HTTPException(status_code=404, detail="Fundo não encontrado")
+    if fundo.posicoes:
+        raise HTTPException(status_code=400, detail="Fundo possui posições vinculadas — remova-as antes de excluir")
+    db.delete(fundo)
+    db.commit()
+    return {"ok": True}
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -435,11 +605,15 @@ def listar_fundos(
 
 
 @router.post("/fundos")
-def criar_fundo(data: dict, db: Session = Depends(get_db)):
+def criar_fundo(data: dict, db: Session = Depends(get_db), current_user: Optional[Usuario] = Depends(get_optional_user)):
     """Cria nova posição em fundo para cliente"""
+    data = _limpar_numericos_vazios(CarteiraFundoPosicao, data)
+    nome_usuario = _nome_usuario(current_user)
+    data["criado_por"] = nome_usuario
+    data["atualizado_por"] = nome_usuario
     posicao = CarteiraFundoPosicao(**data)
     db.add(posicao)
-    db.commit()
+    _commit_amigavel(db, "posição em fundo")
     db.refresh(posicao)
     return posicao
 
@@ -456,7 +630,7 @@ def obter_fundo(posicao_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/fundos/{posicao_id}")
-def atualizar_fundo(posicao_id: int, data: dict, db: Session = Depends(get_db)):
+def atualizar_fundo(posicao_id: int, data: dict, db: Session = Depends(get_db), current_user: Optional[Usuario] = Depends(get_optional_user)):
     """Atualiza posição em fundo"""
     posicao = db.query(CarteiraFundoPosicao).filter(
         CarteiraFundoPosicao.id == posicao_id
@@ -464,13 +638,28 @@ def atualizar_fundo(posicao_id: int, data: dict, db: Session = Depends(get_db)):
     if not posicao:
         raise HTTPException(status_code=404, detail="Posição não encontrada")
 
+    data = _limpar_numericos_vazios(CarteiraFundoPosicao, data)
+    data["atualizado_por"] = _nome_usuario(current_user)
     for key, value in data.items():
         setattr(posicao, key, value)
 
     posicao.data_atualizacao = datetime.now()
-    db.commit()
+    _commit_amigavel(db, "posição em fundo")
     db.refresh(posicao)
     return posicao
+
+
+@router.delete("/fundos/{posicao_id}")
+def deletar_fundo(posicao_id: int, db: Session = Depends(get_db)):
+    """Deleta uma posição em fundo"""
+    posicao = db.query(CarteiraFundoPosicao).filter(
+        CarteiraFundoPosicao.id == posicao_id
+    ).first()
+    if not posicao:
+        raise HTTPException(status_code=404, detail="Posição não encontrada")
+    db.delete(posicao)
+    db.commit()
+    return {"ok": True}
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -501,26 +690,47 @@ def listar_estrategias(
 
 
 @router.post("/estrategias")
-def criar_estrategia(data: dict, db: Session = Depends(get_db)):
+def criar_estrategia(data: dict, db: Session = Depends(get_db), current_user: Optional[Usuario] = Depends(get_optional_user)):
     """Cria nova estratégia"""
+    data = _limpar_numericos_vazios(CarteiraEstrategia, data)
+    nome_usuario = _nome_usuario(current_user)
+    data["criado_por"] = nome_usuario
+    data["atualizado_por"] = nome_usuario
     estrategia = CarteiraEstrategia(**data)
     db.add(estrategia)
-    db.commit()
+    _commit_amigavel(db, "estratégia")
     db.refresh(estrategia)
     return estrategia
 
 
 @router.put("/estrategias/{estrategia_id}")
-def atualizar_estrategia(estrategia_id: int, data: dict, db: Session = Depends(get_db)):
+def atualizar_estrategia(estrategia_id: int, data: dict, db: Session = Depends(get_db), current_user: Optional[Usuario] = Depends(get_optional_user)):
     """Atualiza estratégia"""
     estrategia = db.query(CarteiraEstrategia).filter(CarteiraEstrategia.id == estrategia_id).first()
     if not estrategia:
         raise HTTPException(status_code=404, detail="Estratégia não encontrada")
+    data = _limpar_numericos_vazios(CarteiraEstrategia, data)
+    data["atualizado_por"] = _nome_usuario(current_user)
     for key, value in data.items():
         setattr(estrategia, key, value)
-    db.commit()
+    _commit_amigavel(db, "estratégia")
     db.refresh(estrategia)
     return estrategia
+
+
+@router.delete("/estrategias/{estrategia_id}")
+def deletar_estrategia(estrategia_id: int, db: Session = Depends(get_db)):
+    """Deleta estratégia (se não estiver vinculada a nenhuma posição)"""
+    estrategia = db.query(CarteiraEstrategia).filter(CarteiraEstrategia.id == estrategia_id).first()
+    if not estrategia:
+        raise HTTPException(status_code=404, detail="Estratégia não encontrada")
+    try:
+        db.delete(estrategia)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Estratégia vinculada a posições — remova-a dos ativos antes de excluir")
+    return {"ok": True}
 
 
 @router.get("/estrategias/busca/{termo}")
@@ -620,6 +830,9 @@ async def processar_documento_com_ia(
             tipo
         )
 
+        if resultado.get("erro"):
+            raise HTTPException(status_code=502, detail=resultado["erro"])
+
         return {
             "status": "sucesso",
             "dados_extraidos": resultado["dados"],
@@ -628,6 +841,8 @@ async def processar_documento_com_ia(
             "modelo": resultado["modelo"],
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Erro ao processar documento: {str(e)}")
 
@@ -651,12 +866,12 @@ async def processar_e_salvar_documento(
 
         if cliente_id:
             cliente = db.query(CarteiraCliente).filter(CarteiraCliente.id == cliente_id).first()
-            if cliente and cliente.folder_drive_principal_id:
+            if cliente and cliente.nome:
                 try:
                     dr = CarteiraDriveService.fazer_upload_documento(
                         conteudo,
                         file.filename or "documento",
-                        cliente.folder_drive_principal_id,
+                        cliente.nome,
                         mime_type,
                     )
                     drive_file_id = dr["file_id"]
@@ -786,16 +1001,44 @@ def listar_documentos(cliente_id: int = Query(...), db: Session = Depends(get_db
 # ─────────────────────────────────────────────────────────────────
 
 @router.post("/criar-pasta-drive")
-def criar_pasta_drive(cliente_id: int = Query(...), db: Session = Depends(get_db)):
-    """[V1.2] Cria pasta no Google Drive para o cliente e salva o link"""
+def criar_pasta_drive(
+    cliente_id: int = Query(...),
+    usar_pasta_id: Optional[str] = Query(None, description="Reusa esta pasta já existente em vez de criar uma nova"),
+    confirmar_nova: bool = Query(False, description="Pula a checagem de pasta parecida e cria mesmo assim"),
+    db: Session = Depends(get_db),
+):
+    """[V1.2] Cria (ou reaproveita) a pasta do cliente no Google Drive.
+
+    Evita duplicar pasta de um cliente que já tem uma: se `folder_drive_principal_id`
+    já está salvo, retorna direto sem chamar o Drive. Para cliente sem pasta,
+    antes de criar verifica se já existe pasta de nome PARECIDO no Drive — se
+    achar, devolve os candidatos (status "ambiguo") para o usuário confirmar
+    se é o mesmo cliente (usar_pasta_id) ou se é para criar mesmo assim
+    (confirmar_nova=true).
+    """
     try:
         cliente = db.query(CarteiraCliente).filter(CarteiraCliente.id == cliente_id).first()
         if not cliente:
             raise HTTPException(status_code=404, detail="Cliente não encontrado")
 
-        resultado = CarteiraDriveService.criar_pasta_cliente(
-            cliente.nome or f"Cliente_{cliente_id}"
-        )
+        nome_cliente = cliente.nome or f"Cliente_{cliente_id}"
+
+        if cliente.folder_drive_principal_id and not usar_pasta_id:
+            return {
+                "status": "sucesso",
+                "folder_id": cliente.folder_drive_principal_id,
+                "folder_link": cliente.folder_drive_url,
+                "cliente_id": cliente_id,
+            }
+
+        if usar_pasta_id:
+            resultado = CarteiraDriveService.vincular_pasta_existente(nome_cliente, usar_pasta_id)
+        else:
+            if not confirmar_nova:
+                candidatos = CarteiraDriveService.buscar_pastas_similares(nome_cliente)
+                if candidatos:
+                    return {"status": "ambiguo", "candidatos": candidatos, "cliente_id": cliente_id}
+            resultado = CarteiraDriveService.criar_pasta_cliente(nome_cliente)
 
         cliente.folder_drive_principal_id = resultado['folder_id']
         cliente.folder_drive_url = resultado['folder_link']
@@ -807,6 +1050,8 @@ def criar_pasta_drive(cliente_id: int = Query(...), db: Session = Depends(get_db
             "folder_link": resultado['folder_link'],
             "cliente_id": cliente_id,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -823,15 +1068,14 @@ async def upload_para_drive(
         if not cliente:
             raise HTTPException(status_code=404, detail="Cliente não encontrado")
 
-        pasta_id = cliente.folder_drive_principal_id
-        if not pasta_id:
-            raise HTTPException(status_code=400, detail="Cliente não tem pasta no Drive")
+        if not cliente.nome:
+            raise HTTPException(status_code=400, detail="Cliente sem nome cadastrado")
 
         conteudo = await file.read()
         resultado = CarteiraDriveService.fazer_upload_documento(
             conteudo,
             file.filename or "documento",
-            pasta_id,
+            cliente.nome,
             file.content_type or "application/octet-stream"
         )
 
@@ -853,14 +1097,12 @@ def listar_arquivos_drive(cliente_id: int = Query(...), db: Session = Depends(ge
         if not cliente:
             raise HTTPException(status_code=404, detail="Cliente não encontrado")
 
-        pasta_id = cliente.folder_drive_principal_id
-        if not pasta_id:
-            return {"arquivos": [], "mensagem": "Cliente não tem pasta no Drive"}
+        if not cliente.nome:
+            return {"arquivos": [], "mensagem": "Cliente sem nome cadastrado"}
 
-        arquivos = CarteiraDriveService.listar_arquivos_pasta(pasta_id)
+        arquivos = CarteiraDriveService.listar_arquivos_pasta(cliente.nome)
         return {
             "cliente_id": cliente_id,
-            "pasta_id": pasta_id,
             "total_arquivos": len(arquivos),
             "arquivos": arquivos
         }

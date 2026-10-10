@@ -249,15 +249,25 @@ export const contratosApi = {
 }
 
 // ── Leitura de contratantes por IA ────────────────────────────────────────────
+export interface RepresentanteExtraido {
+  nome?: string
+  cpf?: string
+  email?: string
+  telefone?: string
+}
+
 export interface ContratanteExtraido {
   nome: string
   tipo: 'PF' | 'PJ'
   cpf_cnpj?: string
+  rg?: string
+  nacionalidade?: string
   email?: string
   telefone?: string
   endereco?: string
   estado_civil?: string
   profissao?: string
+  representante?: RepresentanteExtraido
 }
 
 export interface ContratanteCandidato {
@@ -292,11 +302,14 @@ export interface ContratanteDecisao {
   nome: string
   tipo: 'PF' | 'PJ'
   cpf_cnpj?: string
+  rg?: string
+  nacionalidade?: string
   email?: string
   telefone?: string
   endereco?: string
   estado_civil?: string
   profissao?: string
+  representante?: RepresentanteExtraido
   diferenciador?: string
   principal?: boolean
   ignorar_similares?: boolean

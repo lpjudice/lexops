@@ -915,6 +915,44 @@ def resolver_pasta_id_raiz(subpath: list[str]) -> str | None:
             return None
 
 
+def compartilhar_subpasta(
+    nome_cliente: str, subfolder: str, email: str, role: str = "reader",
+    sub_subfolder: str | None = None,
+) -> bool:
+    """Compartilha a subpasta {nome_cliente}/{subfolder} com `email`. Retorna True se ok."""
+    tokens = _load_tokens()
+    if not tokens:
+        return False
+
+    def _do(tkns: dict) -> bool:
+        h = _auth_headers(tkns)
+        cid = _resolver_pasta_cliente(nome_cliente, h)
+        fid = _get_or_create_subfolder(subfolder, cid, h)
+        if sub_subfolder:
+            fid = _get_or_create_subfolder(sub_subfolder, fid, h)
+        r = httpx.post(
+            f"{DRIVE_META}/files/{fid}/permissions",
+            headers={**h, "Content-Type": "application/json"},
+            params={"supportsAllDrives": True, "sendNotificationEmail": False},
+            content=json.dumps({"type": "user", "role": role, "emailAddress": email}),
+            timeout=30,
+        )
+        r.raise_for_status()
+        return True
+
+    try:
+        return _do(tokens)
+    except Exception as exc:
+        if not _is_unauthorized(exc):
+            logger.warning("Falha ao compartilhar pasta %s/%s: %s", nome_cliente, subfolder, exc)
+            return False
+        try:
+            return _do(_refresh(tokens))
+        except Exception as exc2:
+            logger.warning("Falha ao compartilhar pasta apos refresh: %s", exc2)
+            return False
+
+
 def listar_arquivos(nome_cliente: str, subfolder: str, sub_subfolder: str | None = None) -> list[dict]:
     """Lists files from {nome_cliente}/{subfolder}[/{sub_subfolder}] in Drive."""
     tokens = _load_tokens()
@@ -971,6 +1009,42 @@ def listar_arquivos(nome_cliente: str, subfolder: str, sub_subfolder: str | None
 def root_folder_id() -> str:
     """ID da pasta raiz LexOps no Drive."""
     return DRIVE_FOLDER_ID
+
+
+def buscar_pastas_cliente_similares(nome: str, limite: int = 5) -> list[dict]:
+    """Procura, entre as pastas-raiz de cliente já existentes no Drive, nomes
+    PARECIDOS (não idênticos) com `nome` — usado para evitar criar uma 2ª
+    pasta para o mesmo cliente quando o nome tem pequena variação (ex: nome
+    incompleto, sobrenome adicionado). Match exato já é resolvido em outro
+    lugar (_resolver_pasta_cliente) e não aparece aqui."""
+    import difflib
+    filhos = listar_filhos(DRIVE_FOLDER_ID)
+    if not filhos:
+        return []
+    alvo = _normalizar_nome_busca(nome)
+    candidatos = []
+    for item in filhos:
+        if not item.get("is_folder"):
+            continue
+        nome_pasta = item.get("name") or ""
+        comp = _normalizar_nome_busca(nome_pasta)
+        if comp == alvo:
+            continue  # match exato: já tratado pelo fluxo normal, não é "parecido"
+        score = difflib.SequenceMatcher(None, alvo, comp).ratio()
+        if score >= 0.6:
+            candidatos.append({"id": item["id"], "name": nome_pasta, "score": round(score, 2)})
+    candidatos.sort(key=lambda c: -c["score"])
+    return candidatos[:limite]
+
+
+def vincular_pasta_existente(nome_cliente: str, folder_id: str) -> str | None:
+    """Registra `folder_id` como a pasta-raiz de `nome_cliente` (reuso explícito,
+    confirmado pelo usuário) e retorna seu link. Não cria nada no Drive."""
+    nome = _normalizar_nome_criacao(nome_cliente)
+    cache_key = _normalizar_nome_busca(nome)
+    _persistir_folder_id_cliente(nome, folder_id)
+    _cache_set(DRIVE_FOLDER_ID, cache_key, folder_id)
+    return f"https://drive.google.com/drive/folders/{folder_id}"
 
 
 def listar_filhos(folder_id: str | None = None) -> list[dict] | None:

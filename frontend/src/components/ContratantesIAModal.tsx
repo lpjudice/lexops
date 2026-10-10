@@ -16,16 +16,23 @@ interface DecisaoState {
   nome: string
   tipo: 'PF' | 'PJ'
   cpf_cnpj: string
+  rg: string
+  nacionalidade: string
   email: string
   telefone: string
   endereco: string
   estado_civil: string
   profissao: string
+  rep_nome: string
+  rep_cpf: string
+  rep_email: string
+  rep_telefone: string
   diferenciador: string
 }
 
 function estadoInicial(lido: ContratanteLido): DecisaoState {
   const e = lido.extraido
+  const rep = e.representante
   // Se houver candidato por CPF, default = atualizar esse; senão criar novo.
   const porCpf = lido.candidatos.find((c) => c.match === 'cpf')
   return {
@@ -34,11 +41,17 @@ function estadoInicial(lido: ContratanteLido): DecisaoState {
     nome: e.nome || '',
     tipo: e.tipo === 'PJ' ? 'PJ' : 'PF',
     cpf_cnpj: e.cpf_cnpj || '',
+    rg: e.rg || '',
+    nacionalidade: e.nacionalidade || '',
     email: e.email || '',
     telefone: e.telefone || '',
     endereco: e.endereco || '',
     estado_civil: e.estado_civil || '',
     profissao: e.profissao || '',
+    rep_nome: rep?.nome || '',
+    rep_cpf: rep?.cpf || '',
+    rep_email: rep?.email || '',
+    rep_telefone: rep?.telefone || '',
     diferenciador: '',
   }
 }
@@ -90,11 +103,16 @@ export default function ContratantesIAModal({ contratoId, onClose, onApplied }: 
         nome: d.nome,
         tipo: d.tipo,
         cpf_cnpj: d.cpf_cnpj || undefined,
+        rg: d.rg || undefined,
+        nacionalidade: d.nacionalidade || undefined,
         email: d.email || undefined,
         telefone: d.telefone || undefined,
         endereco: d.endereco || undefined,
         estado_civil: d.estado_civil || undefined,
         profissao: d.profissao || undefined,
+        representante: d.tipo === 'PJ' && d.rep_nome
+          ? { nome: d.rep_nome, cpf: d.rep_cpf || undefined, email: d.rep_email || undefined, telefone: d.rep_telefone || undefined }
+          : undefined,
         diferenciador: d.diferenciador || undefined,
         principal: i === principalIdx,
       }))
@@ -161,11 +179,24 @@ export default function ContratantesIAModal({ contratoId, onClose, onApplied }: 
 
                   <div style={grid2}>
                     <input style={inp} value={d.cpf_cnpj} onChange={(e) => setDec(i, { cpf_cnpj: e.target.value })} placeholder="CPF / CNPJ" />
+                    <input style={inp} value={d.rg} onChange={(e) => setDec(i, { rg: e.target.value })} placeholder="RG" />
+                    <input style={inp} value={d.nacionalidade} onChange={(e) => setDec(i, { nacionalidade: e.target.value })} placeholder="Nacionalidade" />
+                    <input style={inp} value={d.estado_civil} onChange={(e) => setDec(i, { estado_civil: e.target.value })} placeholder="Estado civil" />
+                    <input style={inp} value={d.profissao} onChange={(e) => setDec(i, { profissao: e.target.value })} placeholder="Profissão" />
                     <input style={inp} value={d.email} onChange={(e) => setDec(i, { email: e.target.value })} placeholder="E-mail" />
                     <input style={inp} value={d.telefone} onChange={(e) => setDec(i, { telefone: e.target.value })} placeholder="Telefone" />
-                    <input style={inp} value={d.estado_civil} onChange={(e) => setDec(i, { estado_civil: e.target.value })} placeholder="Estado civil" />
                     <input style={{ ...inp, gridColumn: '1 / -1' }} value={d.endereco} onChange={(e) => setDec(i, { endereco: e.target.value })} placeholder="Endereço" />
                   </div>
+
+                  {d.tipo === 'PJ' && (
+                    <div style={{ ...grid2, marginTop: 6, padding: 8, background: '#f9fafb', borderRadius: 8 }}>
+                      <div style={{ gridColumn: '1 / -1', fontSize: 11, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase' }}>Representante legal</div>
+                      <input style={inp} value={d.rep_nome} onChange={(e) => setDec(i, { rep_nome: e.target.value })} placeholder="Nome do representante" />
+                      <input style={inp} value={d.rep_cpf} onChange={(e) => setDec(i, { rep_cpf: e.target.value })} placeholder="CPF do representante" />
+                      <input style={inp} value={d.rep_email} onChange={(e) => setDec(i, { rep_email: e.target.value })} placeholder="E-mail do representante" />
+                      <input style={inp} value={d.rep_telefone} onChange={(e) => setDec(i, { rep_telefone: e.target.value })} placeholder="Telefone do representante" />
+                    </div>
+                  )}
 
                   {/* Decisão: atualizar existente x criar novo x ignorar */}
                   <div style={decRow}>

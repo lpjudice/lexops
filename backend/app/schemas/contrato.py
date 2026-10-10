@@ -139,6 +139,14 @@ class PoderesTemplateOut(PoderesTemplateCreate):
 
 # ── Leitura de contratantes por IA (upload) ──────────────────────────────────
 
+class RepresentanteDecisao(BaseModel):
+    """Representante legal de uma PJ (quando tipo == 'PJ')."""
+    nome: str | None = None
+    cpf: str | None = None
+    email: str | None = None
+    telefone: str | None = None
+
+
 class ContratanteDecisao(BaseModel):
     """Decisão da tela de revisão para UM contratante lido pela IA."""
     acao: Literal["atualizar", "criar", "ignorar"] = "criar"
@@ -146,11 +154,14 @@ class ContratanteDecisao(BaseModel):
     nome: str
     tipo: Literal["PF", "PJ"] = "PF"
     cpf_cnpj: str | None = None
+    rg: str | None = None
+    nacionalidade: str | None = None
     email: str | None = None
     telefone: str | None = None
     endereco: str | None = None
     estado_civil: str | None = None
     profissao: str | None = None
+    representante: RepresentanteDecisao | None = None
     # Nota para distinguir um 2º cadastro homônimo (vai para observações).
     diferenciador: str | None = None
     # Contratante em nome de quem o contrato fica vinculado (o "principal").

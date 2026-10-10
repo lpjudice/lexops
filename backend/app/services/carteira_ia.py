@@ -1,8 +1,30 @@
 import base64
 import json
+import logging
 import os
+import re
 import httpx
 from typing import Dict, Any
+
+logger = logging.getLogger("app")
+
+
+def _parse_json_maybe_fenced(raw: str) -> dict:
+    """Tolera a IA devolver ```json ... ``` ou texto solto antes/depois do JSON,
+    apesar do pedido de JSON puro."""
+    raw = raw.strip()
+    m = re.search(r"```(?:json)?\s*([\s\S]+?)```", raw)
+    if m:
+        raw = m.group(1).strip()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        # Último recurso: pega do primeiro "{" ao último "}" (cobre o caso de
+        # a IA escrever uma frase antes/depois do objeto JSON).
+        inicio, fim = raw.find("{"), raw.rfind("}")
+        if inicio != -1 and fim != -1 and fim > inicio:
+            return json.loads(raw[inicio:fim + 1])
+        raise
 
 
 class CarteiraIAService:
@@ -64,23 +86,42 @@ Retorne APENAS JSON válido.""",
 
 Retorne APENAS JSON válido.""",
 
-            "emissao": """Analise esta escritura de emissão de debêntures ou termo de securitização e extraia:
-- nome_serie (ex: APEX I, BRMAPEX110)
-- numero_emissao (número inteiro)
-- emissor (nome da empresa emissora)
-- cnpj_emissor
-- indexador (CDI, IPCA, IGPM...)
-- taxa_adicional (ex: + 2% a.a.)
-- data_inicio_emissao (YYYY-MM-DD)
-- data_vencimento_previsto (YYYY-MM-DD)
-- resgate_antecipado_emissao (true/false — o documento PREVÊ resgate antecipado?)
-- resgate_antecipado_tipo (APENAS se resgate_antecipado_emissao=true: "desvinculado_lastro" se o resgate independe do recebimento do lastro/portfólio, ou "vinculado_lastro" se condicionado ao recebimento do lastro)
-- clausulas_resgate (transcreva as cláusulas relevantes sobre resgate antecipado, máx. 500 caracteres)
-- prazo_carencia_meses (número de meses de carência antes de poder solicitar resgate, 0 se não houver)
-- prazo_pgto_pos_resgate (prazo para pagamento após pedido de resgate, ex: "30 dias", "D+30")
-- tipos_garantia (descreva as garantias: alienação fiduciária, cessão de recebíveis, aval, etc.)
+            "emissao": """Analise esta escritura de emissão de debêntures ou termo de securitização. \
+O documento pode cobrir UMA ou VÁRIAS séries da mesma emissão (ex: Série I, Série II...) — \
+cada série pode ter indexador e/ou taxa diferentes, mas o resto (emissor, cláusulas de \
+resgate, carência, garantias) normalmente é igual para todas as séries do mesmo documento.
 
-Retorne APENAS JSON válido. Para campos não encontrados retorne null.""",
+Extraia os dados COMUNS a todas as séries uma única vez em "comum", e UM item em "series" \
+para CADA série encontrada (mesmo que seja só uma).
+
+Responda SOMENTE com JSON válido (sem markdown), neste formato exato:
+{
+  "comum": {
+    "emissor": "nome da empresa emissora",
+    "cnpj_emissor": "CNPJ do emissor, se constar",
+    "data_inicio_emissao": "data de início/emissão em AAAA-MM-DD, ou null",
+    "resgate_antecipado_emissao": <true|false — o documento PREVÊ resgate antecipado?>,
+    "resgate_antecipado_tipo": "desvinculado_lastro (resgate independe do recebimento do lastro/portfólio) ou vinculado_lastro (condicionado ao recebimento do lastro) — null se resgate_antecipado_emissao=false",
+    "clausulas_resgate": "transcreva as cláusulas relevantes sobre resgate antecipado, máx. 500 caracteres",
+    "prazo_carencia_dias": <número de DIAS de carência antes de poder solicitar resgate (não meses — se o documento disser em meses, converta para dias), 0 se não houver>,
+    "prazo_pgto_pos_resgate": "prazo para pagamento após pedido de resgate, ex: '30 dias', 'D+30'",
+    "tipos_garantia": "descreva as garantias: alienação fiduciária, cessão de recebíveis, aval, etc."
+  },
+  "series": [
+    {
+      "nome_serie": "identificação da série (ex: APEX I, BRMAPEX110, Série 1ª)",
+      "numero_emissao": <número inteiro da emissão>,
+      "indexador": "CDI, IPCA, IGPM... desta série",
+      "taxa_adicional": "taxa desta série, ex: '+ 2% a.a.'",
+      "data_vencimento_previsto": "data de vencimento desta série em AAAA-MM-DD, ou null"
+    }
+  ]
+}
+
+Regras:
+- Se o documento tiver só uma série, "series" tem um único item mesmo assim.
+- "prazo_carencia_dias" é SEMPRE em dias — nunca em meses.
+- Para campos não encontrados no documento, use null (ou "" para texto, 0 para prazo_carencia_dias).""",
 
             "geral": """Analise este documento financeiro/investimento e extraia:
 - titulo_principal
@@ -96,7 +137,20 @@ Retorne APENAS JSON válido.""",
 
         prompt = prompts.get(tipo_documento, prompts["geral"])
 
-        async with httpx.AsyncClient() as client:
+        # PDF precisa ir como bloco "document" — mandar PDF dentro de um bloco
+        # "image" é rejeitado pela API (ou, dependendo da versão, ignorado),
+        # fazendo a IA "não ler nada" silenciosamente.
+        is_pdf = mime_type == "application/pdf"
+        content_block = {
+            "type": "document" if is_pdf else "image",
+            "source": {
+                "type": "base64",
+                "media_type": mime_type,
+                "data": dados_base64,
+            },
+        }
+
+        async with httpx.AsyncClient(timeout=120) as client:
             response = await client.post(
                 "https://api.anthropic.com/v1/messages",
                 headers={
@@ -104,42 +158,64 @@ Retorne APENAS JSON válido.""",
                     "anthropic-version": "2023-06-01",
                 },
                 json={
-                    "model": "claude-3-5-sonnet-20241022",
-                    "max_tokens": 1024,
+                    "model": "claude-sonnet-5",
+                    "max_tokens": 4096,
                     "messages": [
                         {
                             "role": "user",
-                            "content": [
-                                {
-                                    "type": "image",
-                                    "source": {
-                                        "type": "base64",
-                                        "media_type": mime_type,
-                                        "data": dados_base64,
-                                    },
-                                },
-                                {
-                                    "type": "text",
-                                    "text": prompt,
-                                }
-                            ],
+                            "content": [content_block, {"type": "text", "text": prompt}],
                         }
                     ],
                 },
             )
 
         resultado = response.json()
-        conteudo_resposta = resultado.get("content", [{}])[0].get("text", "{}")
+
+        if response.status_code != 200:
+            erro_msg = resultado.get("error", {}).get("message", response.text[:300])
+            return {
+                "dados": {},
+                "tipo": tipo_documento,
+                "modelo": "claude-sonnet-5",
+                "erro": f"Erro da IA ({response.status_code}): {erro_msg}",
+            }
+
+        conteudo = resultado.get("content") or []
+        conteudo_resposta = conteudo[0].get("text", "{}") if conteudo else "{}"
+        stop_reason = resultado.get("stop_reason")
+        logger.info(
+            "carteira_ia[%s]: stop_reason=%s resposta=%r",
+            tipo_documento, stop_reason, conteudo_resposta[:2000],
+        )
 
         try:
-            dados_extraidos = json.loads(conteudo_resposta)
+            dados_extraidos = _parse_json_maybe_fenced(conteudo_resposta)
         except json.JSONDecodeError:
-            dados_extraidos = {"raw": conteudo_resposta, "erro": "Parse JSON falhou"}
+            motivo = ""
+            if stop_reason == "max_tokens":
+                motivo = " (resposta cortada por ser longa demais — tente enviar só as páginas relevantes)"
+            erro_msg = f"A IA respondeu, mas não consegui interpretar o JSON{motivo}."
+            return {
+                "dados": {},
+                "tipo": tipo_documento,
+                "modelo": "claude-sonnet-5",
+                "erro": erro_msg,
+            }
+
+        if not dados_extraidos or (isinstance(dados_extraidos, dict) and not dados_extraidos):
+            return {
+                "dados": {},
+                "tipo": tipo_documento,
+                "modelo": "claude-sonnet-5",
+                "erro": "A IA não encontrou nada para extrair neste documento. "
+                        "Confira se o PDF tem texto legível (não é só imagem escaneada "
+                        "sem OCR) e se é mesmo uma escritura/termo de emissão.",
+            }
 
         return {
             "dados": dados_extraidos,
             "tipo": tipo_documento,
-            "modelo": "claude-3-5-sonnet",
+            "modelo": "claude-sonnet-5",
             "tokens_usados": resultado.get("usage", {}).get("output_tokens", 0),
         }
 
