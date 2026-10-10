@@ -63,6 +63,7 @@ class Diario2PrazoRequest(BaseModel):
 
 class Diario2StatusPrazoRequest(BaseModel):
     status: str
+    motivo_perda: str | None = None
 
 
 def _normalizar_cnj(numero: str | None) -> str:
@@ -604,6 +605,7 @@ def _prazo_payload(pub: Publicacao, prazo: Prazo | None) -> dict[str, Any] | Non
         "status": prazo.status,
         "dias_prazo": prazo.dias_prazo,
         "tipo_contagem": prazo.tipo_contagem,
+        "motivo_perda": prazo.motivo_perda,
     }
 
 
@@ -829,6 +831,7 @@ def atualizar_status_prazo_diario2(pub_id: uuid.UUID, payload: Diario2StatusPraz
     if not prazo:
         raise HTTPException(status_code=404, detail="Prazo não encontrado")
     prazo.status = payload.status
+    prazo.motivo_perda = payload.motivo_perda if payload.status == "perdido" else None
     aplicar_status_prazo(db, prazo, payload.status)
     db.commit()
     db.refresh(pub)

@@ -75,5 +75,7 @@ class Prazo(Base):
         UUID(as_uuid=True), ForeignKey("responsaveis.id", ondelete="SET NULL"), nullable=True
     )
     google_event_id: Mapped[str | None] = mapped_column(String(255))
+    # Preenchido quando status == "perdido" — referência futura do que houve.
+    motivo_perda: Mapped[str | None] = mapped_column(Text)
     # Criado automaticamente pelo gestor jurídico (Despacho), sem clique humano.
     criado_automaticamente: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")

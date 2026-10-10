@@ -1511,6 +1511,11 @@ def _run_migrations() -> None:
             # cliente: colunas de Drive (folder_drive_principal_id / folder_drive_url)
             "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS folder_drive_principal_id VARCHAR(255)",
             "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS folder_drive_url VARCHAR(500)",
+            # Rito do processo (comum vs. Juizados Especiais) — decide qual
+            # catálogo de prazos legais e peças oferecer no formulário de prazo.
+            "ALTER TABLE processos ADD COLUMN IF NOT EXISTS rito VARCHAR(40) NOT NULL DEFAULT 'comum'",
+            # Motivo registrado quando um prazo é marcado como "perdido".
+            "ALTER TABLE prazos ADD COLUMN IF NOT EXISTS motivo_perda TEXT",
         ]:
             conn.execute(text(_col))
 

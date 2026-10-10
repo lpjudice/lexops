@@ -66,6 +66,9 @@ class Processo(Base):
     sistema_juridico: Mapped[str | None] = mapped_column(String(20), nullable=True)
     grau: Mapped[str | None] = mapped_column(String(20), nullable=True)
     grau_texto: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # "comum" | "juizado_especial_civil" | "juizado_especial_criminal" |
+    # "juizado_especial_federal" | "juizado_especial_fazenda" — ver prazos_legais.py.
+    rito: Mapped[str] = mapped_column(String(40), nullable=False, default="comum", server_default="comum")
 
     # Sync fields
     ultimo_andamento_data: Mapped[date | None] = mapped_column(Date, nullable=True)

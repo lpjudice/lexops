@@ -3,7 +3,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { processosApi } from '../api/processos'
 import { clientesApi } from '../api/clientes'
 import { andamentosApi } from '../api/andamentos'
-import type { ProcessoCreate, EstadoProcesso, FaseProcesso, StatusProcesso, PoloProcesso, SistemaJuridico, GrauProcesso, OrgaoJulgadorTipo, ProcessoClienteIn, ProcessoJusbrPrefill } from '../api/processos'
+import type { ProcessoCreate, EstadoProcesso, FaseProcesso, StatusProcesso, PoloProcesso, SistemaJuridico, GrauProcesso, OrgaoJulgadorTipo, RitoProcesso, ProcessoClienteIn, ProcessoJusbrPrefill } from '../api/processos'
+import { RITO_OPTS } from '../constants/pecas'
 import ClienteCombobox from '../components/ClienteCombobox'
 import ProcessoChat from '../components/ProcessoChat'
 import MemoriaEstrategica from '../components/MemoriaEstrategica'
@@ -68,6 +69,7 @@ const EMPTY: ProcessoCreate = {
   numero_cnj: '', cliente_id: '', vara: '', comarca: '',
   estado: 'ES', tribunal: 'TJES', materia: '', parte_contraria: '', fase: undefined, status: 'ativo', objeto: '',
   orgao_julgador_tipo: 'vara', serventia: '', foro: '', sistema_juridico: null, grau: null, grau_texto: '',
+  rito: 'comum',
   clientes_litisconsorcio: [],
 }
 
@@ -517,6 +519,14 @@ export default function ProcessosPage() {
               </select>
             </div>
             <div className={styles.formRow}>
+              <label className={styles.formLabel}>Rito</label>
+              <select className={styles.input} value={form.rito ?? 'comum'}
+                title="Determina quais prazos/peças o sistema sugere automaticamente no Recorte Digital, Diário Oficial e Prazos — Juizados têm contagem e peças próprias."
+                onChange={(e) => setForm({ ...form, rito: e.target.value as RitoProcesso })}>
+                {RITO_OPTS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+              </select>
+            </div>
+            <div className={styles.formRow}>
               <label className={styles.formLabel}>Status</label>
               <select className={styles.input} value={form.status}
                 onChange={(e) => setForm({ ...form, status: e.target.value as StatusProcesso })}>
@@ -724,7 +734,7 @@ export default function ProcessosPage() {
                   <button className={styles.btnTable}
                     onClick={() => {
                       setEditando(editando === p.id ? null : p.id)
-                      setEditForm({ numero_cnj: p.numero_cnj, cliente_id: p.cliente_id, orgao_julgador_tipo: p.orgao_julgador_tipo, vara: p.vara, comarca: p.comarca, estado: p.estado, tribunal: p.tribunal, materia: p.materia, parte_contraria: p.parte_contraria, fase: p.fase, status: p.status, objeto: p.objeto, polo: p.polo, serventia: p.serventia, foro: p.foro, sistema_juridico: p.sistema_juridico, grau: p.grau, grau_texto: p.grau_texto })
+                      setEditForm({ numero_cnj: p.numero_cnj, cliente_id: p.cliente_id, orgao_julgador_tipo: p.orgao_julgador_tipo, vara: p.vara, comarca: p.comarca, estado: p.estado, tribunal: p.tribunal, materia: p.materia, parte_contraria: p.parte_contraria, fase: p.fase, status: p.status, objeto: p.objeto, polo: p.polo, serventia: p.serventia, foro: p.foro, sistema_juridico: p.sistema_juridico, grau: p.grau, grau_texto: p.grau_texto, rito: p.rito ?? 'comum' })
                       setEditLitis((p.clientes_litisconsorcio ?? []).map((cl) => ({ cliente_id: cl.cliente_id, polo: (cl.polo as PoloProcesso | null) ?? null, principal: cl.principal ?? false })))
                       setDocsChatAberto(null)
                       setAndamentosAberto(null)
@@ -910,6 +920,14 @@ export default function ProcessosPage() {
                       onChange={(e) => setEditForm({ ...editForm, fase: (e.target.value as FaseProcesso) || undefined })}>
                       <option value="">—</option>
                       {FASES.map((f) => <option key={f} value={f}>{f.replace('_', ' ')}</option>)}
+                    </select>
+                  </div>
+                  <div className={styles.formRow}>
+                    <label className={styles.formLabel}>Rito</label>
+                    <select className={styles.input} value={editForm.rito ?? 'comum'}
+                      title="Determina quais prazos/peças o sistema sugere automaticamente no Recorte Digital, Diário Oficial e Prazos."
+                      onChange={(e) => setEditForm({ ...editForm, rito: e.target.value as RitoProcesso })}>
+                      {RITO_OPTS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
                     </select>
                   </div>
                   <div className={styles.formRow}>

@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { diario2Api } from '../api/diario2'
 import type { Diario2Publicacao, Diario2Dia, Diario2PrazoCreate, StatusPrazoDiario2 } from '../api/diario2'
 import { processosApi } from '../api/processos'
-import type { EstadoProcesso } from '../api/processos'
+import type { EstadoProcesso, RitoProcesso } from '../api/processos'
 import { clientesApi } from '../api/clientes'
 import { usuariosApi } from '../api/usuarios'
 import DespachoStatusResumo from '../components/DespachoStatusResumo'
@@ -14,18 +14,11 @@ import {
   useCatalogoPrazos, sugestaoDaPeca, divergeDaLei, textoConfirmacaoDivergencia,
 } from '../api/prazosLegais'
 import PecaCombobox from '../components/PecaCombobox'
+import { RITO_OPTS, pecasPara } from '../constants/pecas'
 import styles from './Page.module.css'
 import diario2Styles from './Diario2Page.module.css'
 
 const TIPOS = ['contestacao', 'recurso', 'contrarrazoes', 'manifestacao', 'audiencia', 'pericia', 'outro']
-const PECAS = [
-  'Agravo de Instrumento', 'Agravo Interno', 'Agravo em Recurso Especial', 'Agravo em Recurso Extraordinário',
-  'Alegações Finais', 'Audiência', 'Contestação', 'Contrarrazões', 'Contrarrazões de Agravo',
-  'Contrarrazões de Apelação', 'Cumprimento de Sentença', 'Embargos de Declaração', 'Embargos de Divergência',
-  'Embargos Infringentes', 'Exceção de Pré-Executividade', 'Impugnação', 'Impugnação ao Cumprimento de Sentença',
-  'Manifestação', 'Memorial', 'Petição Intermediária', 'Quesitos', 'Recurso de Apelação', 'Recurso Especial',
-  'Recurso Extraordinário', 'Recurso Ordinário', 'Réplica',
-].sort((a, b) => a.localeCompare(b, 'pt-BR'))
 
 function formatDate(date?: string | null) {
   if (!date) return '-'
@@ -80,6 +73,7 @@ export default function Diario2Page() {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [prazoPub, setPrazoPub] = useState<string | null>(null)
   const [prazoForm, setPrazoForm] = useState<Diario2PrazoCreate | null>(null)
+  const [ritoEscolhido, setRitoEscolhido] = useState<RitoProcesso>('comum')
   const [editPrazoPub, setEditPrazoPub] = useState<string | null>(null)
   const [msg, setMsg] = useState('')
   const { data: catalogoLegal } = useCatalogoPrazos()
@@ -133,12 +127,26 @@ export default function Diario2Page() {
   })
 
   const statusPrazo = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: StatusPrazoDiario2 }) => diario2Api.atualizarPrazoStatus(id, status),
+    mutationFn: ({ id, status, motivoPerda }: { id: string; status: StatusPrazoDiario2; motivoPerda?: string | null }) =>
+      diario2Api.atualizarPrazoStatus(id, status, motivoPerda),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['diario2'] })
       qc.invalidateQueries({ queryKey: ['prazos'] })
     },
   })
+
+  const mudarStatusPrazo = (id: string, novo: StatusPrazoDiario2) => {
+    if (novo === 'nada_a_fazer' && !confirm(
+      'Marcar como "Nada a fazer"?\n\nA publicação é encerrada e as tarefas automáticas dela são canceladas.',
+    )) return
+    if (novo === 'perdido') {
+      const motivo = window.prompt('O que aconteceu? (fica salvo no prazo, pra referência futura)')
+      if (motivo === null) return
+      statusPrazo.mutate({ id, status: novo, motivoPerda: motivo })
+      return
+    }
+    statusPrazo.mutate({ id, status: novo })
+  }
 
   const relembre = useMutation({
     mutationFn: () => diario2Api.relembre(relembreDays),
@@ -190,6 +198,8 @@ export default function Diario2Page() {
     return p.id
   }
 
+  const getProcesso = (id?: string | null) => processos.find((p) => p.id === id)
+
   const abrirPrazo = (pub: Diario2Publicacao) => {
     setPrazoPub(pub.id)
     // A sugestão da IA vem primeiro; se ela não trouxe dias, usa o prazo legal
@@ -201,6 +211,8 @@ export default function Diario2Page() {
         ? { ...base, dias_prazo: sug.dias, tipo_contagem: (sug.contagem ?? 'uteis') as 'uteis' | 'corridos' }
         : base,
     )
+    // Rito pré-selecionado a partir do cadastro do processo, se já vinculado.
+    setRitoEscolhido(getProcesso(pub.processo_id)?.rito ?? 'comum')
     setExpanded(pub.id)
   }
 
@@ -384,18 +396,17 @@ export default function Diario2Page() {
                               className={styles.input}
                               style={{ width: 150 }}
                               value={pub.prazo.status}
-                              onChange={(e) => {
-                                const novo = e.target.value as StatusPrazoDiario2
-                                if (novo === 'nada_a_fazer' && !confirm(
-                                  'Marcar como "Nada a fazer"?\n\nA publicação é encerrada e as tarefas automáticas dela são canceladas.',
-                                )) return
-                                statusPrazo.mutate({ id: pub.id, status: novo })
-                              }}
+                              onChange={(e) => mudarStatusPrazo(pub.id, e.target.value as StatusPrazoDiario2)}
                             >
                               {(Object.keys(STATUS_LABEL) as StatusPrazoDiario2[]).map((s) => (
                                 <option key={s} value={s}>{STATUS_LABEL[s]}</option>
                               ))}
                             </select>
+                            {pub.prazo.status === 'perdido' && pub.prazo.motivo_perda && (
+                              <span className={diario2Styles.muted} title={pub.prazo.motivo_perda}>
+                                💬 {pub.prazo.motivo_perda.slice(0, 40)}{pub.prazo.motivo_perda.length > 40 ? '…' : ''}
+                              </span>
+                            )}
                             <button
                               className={diario2Styles.ghostBtn}
                               onClick={() => setEditPrazoPub(editPrazoPub === pub.id ? null : pub.id)}
@@ -420,7 +431,9 @@ export default function Diario2Page() {
                               tipo_contagem: pub.prazo.tipo_contagem,
                               responsavel: pub.despacho_status?.prazo?.responsavel ?? null,
                               status: pub.prazo.status,
+                              motivo_perda: pub.prazo.motivo_perda,
                             }}
+                            rito={getProcesso(pub.processo_id)?.rito}
                             dataPublicacaoFallback={pub.data_publicacao}
                             onCancel={() => setEditPrazoPub(null)}
                             onSaved={() => {
@@ -445,11 +458,19 @@ export default function Diario2Page() {
                           >
                             <ProcessoCombobox
                               value={prazoForm.processo_id ?? ''}
-                              onChange={(id) => setPrazoForm({ ...prazoForm, processo_id: id })}
+                              onChange={(id) => {
+                                setPrazoForm({ ...prazoForm, processo_id: id })
+                                setRitoEscolhido(getProcesso(id)?.rito ?? 'comum')
+                              }}
                               processos={processos}
                               clientes={clientes}
                               onCreateProcesso={criarProcesso}
                             />
+                            <select className={styles.input} value={ritoEscolhido}
+                              title="Juizados têm prazos e peças próprios — confirme ou troque se o cadastro do processo ainda não tiver o rito certo."
+                              onChange={(e) => setRitoEscolhido(e.target.value as RitoProcesso)}>
+                              {RITO_OPTS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                            </select>
                             <select className={styles.input} value={prazoForm.tipo} onChange={(e) => setPrazoForm({ ...prazoForm, tipo: e.target.value })}>
                               {TIPOS.map((tipo) => <option key={tipo} value={tipo}>{tipo}</option>)}
                             </select>
@@ -470,7 +491,7 @@ export default function Diario2Page() {
                                     : {}),
                                 })
                               }}
-                              baseOptions={PECAS}
+                              baseOptions={pecasPara(ritoEscolhido)}
                               onApplyDefault={(dias, tipoContagem) =>
                                 setPrazoForm((prev) => prev ? { ...prev, dias_prazo: dias, tipo_contagem: tipoContagem } : prev)
                               }

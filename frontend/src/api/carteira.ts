@@ -47,16 +47,7 @@ export const carteiraAPI = {
   createEstrategia: (data: any) => api.post('/api/carteira/estrategias', data).then(r => r.data),
   buscarEstrategia: (termo: string) => api.get(`/api/carteira/estrategias/busca/${termo}`).then(r => r.data),
 
-  // Uploads
-  uploadDocumento: (formData: FormData) =>
-    api.post('/api/carteira/upload-documento', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    }).then(r => r.data),
-
   // Relatórios
-  gerarPDFCliente: (clienteId: number) =>
-    api.get(`/api/carteira/cliente/${clienteId}/pdf`, { responseType: 'blob' }),
-
   exportarQualificacao: (clienteIds: number[], formato: 'xlsx' | 'pdf' = 'xlsx') =>
     api.post('/api/carteira/exportar-qualificacao', { cliente_ids: clienteIds, formato }, {
       responseType: 'blob',

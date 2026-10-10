@@ -991,7 +991,7 @@ function SecaoExtrato({
             {confirmar.isPending ? 'Salvando…' : (() => {
               const nd = linhas.filter(l => l.selecionado).length
               const ne = entradas.filter(e => e.selecionado).length
-              const partes = []
+              const partes: string[] = []
               if (nd) partes.push(`${nd} despesa(s)`)
               if (ne) partes.push(`${ne} sugestão(ões) de NF`)
               return `Lançar ${partes.join(' + ')}`

@@ -15,6 +15,9 @@ export type PoloProcesso =
   | 'agravante' | 'agravado' | 'recorrente' | 'recorrido'
   | 'outro'
 
+export type RitoProcesso =
+  | 'comum' | 'juizado_especial_civil' | 'juizado_especial_criminal'
+  | 'juizado_especial_federal' | 'juizado_especial_fazenda'
 export type SistemaJuridico = 'esaj' | 'projudi' | 'ejud' | 'pje'
 export type GrauProcesso = '1grau' | '2grau' | 'stj' | 'stf' | 'outro'
 export type OrgaoJulgadorTipo = 'vara' | 'camara' | 'turma' | 'pleno' | 'orgao_especial' | 'gabinete' | 'secao' | 'outro'
@@ -46,6 +49,7 @@ export interface Processo {
   sistema_juridico?: SistemaJuridico | null
   grau?: GrauProcesso | null
   grau_texto?: string | null
+  rito?: RitoProcesso
   clientes_litisconsorcio?: ProcessoClienteRef[]
   // Sync fields
   ultimo_andamento_data?: string | null
@@ -85,6 +89,7 @@ export interface ProcessoCreate {
   sistema_juridico?: SistemaJuridico | null
   grau?: GrauProcesso | null
   grau_texto?: string | null
+  rito?: RitoProcesso
   clientes_litisconsorcio?: ProcessoClienteIn[]
   notificar_telegram?: boolean
 }
