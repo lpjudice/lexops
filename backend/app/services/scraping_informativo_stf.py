@@ -28,7 +28,7 @@ from datetime import date
 
 import httpx
 from bs4 import BeautifulSoup
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.informativo_stf import (
@@ -78,6 +78,13 @@ def _get(url: str, encoding: str = "cp1252") -> str:
                 resp.raise_for_status()
                 resp.encoding = encoding
                 return resp.text
+        except httpx.HTTPStatusError as exc:
+            # 4xx não melhora com retry (edição inexistente, bloqueio de WAF) —
+            # só insiste em erro de rede/5xx.
+            if 400 <= exc.response.status_code < 500:
+                raise
+            last_exc = exc
+            time.sleep(min(0.6 * tentativa, 3.0))
         except httpx.HTTPError as exc:
             last_exc = exc
             time.sleep(min(0.6 * tentativa, 3.0))
@@ -104,12 +111,24 @@ def _parse_data_extenso(txt: str) -> date | None:
 
 
 def listar_numero_mais_recente() -> int:
-    """Lê a página de listagem e acha o maior número de edição linkado."""
+    """Lê a página de listagem e acha o maior número de edição linkado.
+
+    OBS: portal.stf.jus.br costuma bloquear IP de datacenter (403) mesmo
+    quando funciona de uma rede residencial — por isso `sincronizar_novas_edicoes`
+    NÃO depende mais desta função; ela fica só como atalho best-effort (ex.: uso
+    manual local). A descoberta real é por sondagem incremental em `URL_EDICAO`,
+    que não passa pelo portal.
+    """
     html = _get(URL_LISTAGEM, encoding="utf-8")
     numeros = [int(n) for n in re.findall(r"informativo(\d+)\.htm", html, re.IGNORECASE)]
     if not numeros:
         raise ParsingStfError("Não encontrei nenhuma edição linkada na página de listagem do STF.")
     return max(numeros)
+
+
+# Número de uma edição confirmada manualmente — usado como ponto de partida
+# da sondagem incremental quando o banco ainda não tem nenhuma edição salva.
+NUMERO_SEMENTE = 1231
 
 
 def scrape_edicao_stf(numero: int) -> dict:
@@ -373,22 +392,25 @@ def sincronizar_edicao(numero: int, db: Session) -> dict:
 
 
 def sincronizar_novas_edicoes(db: Session, max_edicoes: int = 5) -> dict:
-    """Acha o número mais recente na listagem e sincroniza os que faltam (mais recentes primeiro)."""
-    try:
-        numero_recente = listar_numero_mais_recente()
-    except (httpx.HTTPError, ParsingStfError):
-        logger.warning("Informativo STF: falha ao ler listagem de edições", exc_info=True)
-        return {"edicoes_processadas": 0, "erro": "listagem_indisponivel"}
-
-    numeros_existentes = {
-        n for n, in db.execute(select(InformativoStfEdicao.numero)).all()
-    }
-    candidatos = [n for n in range(max(1, numero_recente - max_edicoes + 1), numero_recente + 1) if n not in numeros_existentes]
-    candidatos = sorted(candidatos, reverse=True)[:max_edicoes]
+    """Sonda sequencialmente a partir da última edição salva (sem depender da
+    página de listagem do portal, que bloqueia IP de datacenter — 403)."""
+    ultimo_numero = db.scalar(select(func.max(InformativoStfEdicao.numero)))
+    proximo = (ultimo_numero or (NUMERO_SEMENTE - 1)) + 1
 
     resultados = []
-    for numero in candidatos:
-        resultados.append(sincronizar_edicao(numero, db))
+    numero = proximo
+    while len(resultados) < max_edicoes:
+        try:
+            resultados.append(sincronizar_edicao(numero, db))
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                break  # edição ainda não publicada — para de sondar
+            logger.warning("Informativo STF: erro HTTP ao sondar edição %s", numero, exc_info=True)
+            break
+        except httpx.HTTPError:
+            logger.warning("Informativo STF: falha de rede ao sondar edição %s", numero, exc_info=True)
+            break
+        numero += 1
 
     return {"edicoes_processadas": len(resultados), "detalhe": resultados}
 
