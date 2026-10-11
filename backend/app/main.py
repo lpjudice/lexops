@@ -1563,6 +1563,11 @@ def _run_migrations() -> None:
             "ALTER TABLE carteira_estrategia ADD COLUMN IF NOT EXISTS data_atualizacao TIMESTAMP",
             "ALTER TABLE carteira_estrategia ADD COLUMN IF NOT EXISTS criado_por VARCHAR(150)",
             "ALTER TABLE carteira_estrategia ADD COLUMN IF NOT EXISTS atualizado_por VARCHAR(150)",
+            # Rito do processo (comum vs. Juizados Especiais) — decide qual
+            # catálogo de prazos legais e peças oferecer no formulário de prazo.
+            "ALTER TABLE processos ADD COLUMN IF NOT EXISTS rito VARCHAR(40) NOT NULL DEFAULT 'comum'",
+            # Motivo registrado quando um prazo é marcado como "perdido".
+            "ALTER TABLE prazos ADD COLUMN IF NOT EXISTS motivo_perda TEXT",
         ]:
             conn.execute(text(_col))
 

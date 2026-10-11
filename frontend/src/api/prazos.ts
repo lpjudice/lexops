@@ -33,6 +33,7 @@ export interface Prazo {
   data_limite?: string
   data_limite_sem_feriado?: string
   status: StatusPrazo
+  motivo_perda?: string | null
   google_event_id?: string
   criado_automaticamente?: boolean
   tarefas_vinculadas?: { id: string; titulo: string }[]
@@ -57,6 +58,7 @@ export interface PrazoEdit {
   dias_prazo?: number
   tipo_contagem?: TipoContagem
   status?: StatusPrazo
+  motivo_perda?: string | null
 }
 
 export interface LembretesResultado {

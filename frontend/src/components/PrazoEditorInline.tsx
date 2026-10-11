@@ -2,7 +2,10 @@ import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { prazosApi } from '../api/prazos'
 import type { StatusPrazo, TipoContagem, TipoPrazo } from '../api/prazos'
+import type { RitoProcesso } from '../api/processos'
 import ResponsavelComboBox from './ResponsavelComboBox'
+import PecaCombobox from './PecaCombobox'
+import { RITO_OPTS, pecasPara } from '../constants/pecas'
 import {
   useCatalogoPrazos, sugestaoDaPeca, divergeDaLei, textoConfirmacaoDivergencia,
 } from '../api/prazosLegais'
@@ -25,17 +28,11 @@ export interface PrazoEditavel {
   tipo_contagem: 'uteis' | 'corridos'
   responsavel: string | null
   status: string
+  motivo_perda?: string | null
 }
 
 const TIPOS: TipoPrazo[] = [
   'contestacao', 'recurso', 'contrarrazoes', 'manifestacao', 'audiencia', 'pericia', 'outro',
-]
-
-const PECAS = [
-  'Contestação', 'Recurso de Apelação', 'Recurso Ordinário', 'Agravo Interno',
-  'Agravo Regimental', 'Embargos de Declaração', 'Contrarrazões de Apelação',
-  'Manifestação', 'Impugnação', 'Réplica', 'Memorial', 'Alegações Finais',
-  'Petição Simples', 'Pedido de Prazo', 'Outro',
 ]
 
 const STATUS: { valor: StatusPrazo; label: string }[] = [
@@ -49,12 +46,16 @@ const STATUS: { valor: StatusPrazo; label: string }[] = [
 export default function PrazoEditorInline({
   prazo,
   dataPublicacaoFallback,
+  rito,
   onSaved,
   onCancel,
 }: {
   prazo: PrazoEditavel
   /** Data da publicação de origem, usada quando o prazo não trouxe a própria. */
   dataPublicacaoFallback?: string
+  /** Rito do processo vinculado — decide qual lista de peças oferecer
+   * (Juizados têm prazos e peças próprios). Vem do cadastro do processo. */
+  rito?: RitoProcesso
   onSaved?: () => void
   onCancel: () => void
 }) {
@@ -67,6 +68,8 @@ export default function PrazoEditorInline({
   const [dias, setDias] = useState(prazo.dias_prazo)
   const [contagem, setContagem] = useState<TipoContagem>(prazo.tipo_contagem)
   const [status, setStatus] = useState<StatusPrazo>(prazo.status as StatusPrazo)
+  const [motivoPerda, setMotivoPerda] = useState(prazo.motivo_perda ?? '')
+  const [ritoEscolhido, setRitoEscolhido] = useState<RitoProcesso>(rito ?? 'comum')
   const [descricao, setDescricao] = useState(prazo.descricao ?? '')
   const [responsavel, setResponsavel] = useState<{ nome: string; email: string; id?: string | null }>({
     nome: prazo.responsavel ?? '', email: '', id: null,
@@ -87,6 +90,11 @@ export default function PrazoEditorInline({
     }
   }
 
+  const escolherStatus = (novo: StatusPrazo) => {
+    setStatus(novo)
+    if (novo !== 'perdido') setMotivoPerda('')
+  }
+
   const salvar = useMutation({
     mutationFn: () =>
       prazosApi.atualizar(prazo.id, {
@@ -96,6 +104,7 @@ export default function PrazoEditorInline({
         dias_prazo: dias,
         tipo_contagem: contagem,
         status,
+        motivo_perda: status === 'perdido' ? (motivoPerda || undefined) : undefined,
         descricao: descricao || undefined,
         responsavel: responsavel.nome || undefined,
         responsavel_id: responsavel.id ?? undefined,
@@ -133,11 +142,20 @@ export default function PrazoEditorInline({
             {TIPOS.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
         ))}
-        {campo('Peça necessária', (
-          <select className={styles.input} value={peca} onChange={(e) => escolherPeca(e.target.value)}>
-            <option value="">— Selecione —</option>
-            {PECAS.map((p) => <option key={p} value={p}>{p}</option>)}
+        {campo('Rito', (
+          <select className={styles.input} value={ritoEscolhido}
+            title="Juizados têm prazos e peças próprios — troque aqui se o processo não estiver cadastrado como Juizado."
+            onChange={(e) => setRitoEscolhido(e.target.value as RitoProcesso)}>
+            {RITO_OPTS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
           </select>
+        ))}
+        {campo('Peça necessária', (
+          <PecaCombobox
+            value={peca}
+            onChange={escolherPeca}
+            baseOptions={pecasPara(ritoEscolhido)}
+            onApplyDefault={(novosDias, novaContagem) => { setDias(novosDias); setContagem(novaContagem) }}
+          />
         ))}
         {campo('Data da publicação', (
           <input className={styles.input} type="date" value={dataPub} onChange={(e) => setDataPub(e.target.value)} />
@@ -152,11 +170,16 @@ export default function PrazoEditorInline({
           </select>
         ))}
         {campo('Status', (
-          <select className={styles.input} value={status} onChange={(e) => setStatus(e.target.value as StatusPrazo)}>
+          <select className={styles.input} value={status} onChange={(e) => escolherStatus(e.target.value as StatusPrazo)}>
             {STATUS.map((s) => <option key={s.valor} value={s.valor}>{s.label}</option>)}
           </select>
         ))}
       </div>
+
+      {status === 'perdido' && campo('Motivo da perda', (
+        <textarea className={styles.input} rows={2} placeholder="O que aconteceu? (referência futura)"
+          value={motivoPerda} onChange={(e) => setMotivoPerda(e.target.value)} />
+      ))}
 
       {campo('Responsável', <ResponsavelComboBox value={responsavel} onChange={setResponsavel} />)}
       {campo('Descrição', (
@@ -194,6 +217,10 @@ export default function PrazoEditorInline({
             if (status === 'nada_a_fazer' && prazo.status !== 'nada_a_fazer' && !confirm(
               'Marcar como "Nada a fazer"?\n\nA publicação é encerrada e as tarefas automáticas dela são canceladas.',
             )) return
+            if (status === 'perdido' && !motivoPerda.trim()) {
+              setErro('Descreva o motivo da perda do prazo antes de salvar.')
+              return
+            }
             if (sugestao && diverge && !confirm(textoConfirmacaoDivergencia(sugestao, dias, contagem))) return
             salvar.mutate()
           }}

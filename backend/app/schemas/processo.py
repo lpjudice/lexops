@@ -21,6 +21,12 @@ PoloProcesso = Literal[
 SistemaJuridico = Literal["esaj", "projudi", "ejud", "pje"]
 GrauProcesso = Literal["1grau", "2grau", "stj", "stf", "outro"]
 OrgaoJulgadorTipo = Literal["vara", "camara", "turma", "pleno", "orgao_especial", "gabinete", "secao", "outro"]
+# Rito do processo — determina qual catálogo de prazos legais vale (comum vs
+# Juizados Especiais, que têm contagem e peças próprias — ver prazos_legais.py).
+RitoProcesso = Literal[
+    "comum", "juizado_especial_civil", "juizado_especial_criminal",
+    "juizado_especial_federal", "juizado_especial_fazenda",
+]
 
 
 class ProcessoClienteIn(BaseModel):
@@ -58,6 +64,7 @@ class ProcessoBase(BaseModel):
     sistema_juridico: SistemaJuridico | None = None
     grau: GrauProcesso | None = None
     grau_texto: str | None = None
+    rito: RitoProcesso = "comum"
     # Push diário do @jusbr_andamentos_bot — pode silenciar por processo.
     notificar_telegram: bool = True
 
@@ -84,6 +91,7 @@ class ProcessoUpdate(BaseModel):
     sistema_juridico: SistemaJuridico | None = None
     grau: GrauProcesso | None = None
     grau_texto: str | None = None
+    rito: RitoProcesso | None = None
     notificar_telegram: bool | None = None
     clientes_litisconsorcio: list[ProcessoClienteIn] | None = None
 

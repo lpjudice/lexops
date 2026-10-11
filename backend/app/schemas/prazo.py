@@ -23,6 +23,7 @@ class PrazoBase(BaseModel):
     dias_prazo: int
     tipo_contagem: TipoContagem = "uteis"
     status: StatusPrazo = "pendente"
+    motivo_perda: str | None = None
 
 
 class PrazoCreate(PrazoBase):
@@ -42,6 +43,7 @@ class PrazoUpdate(BaseModel):
     dias_prazo: int | None = None
     tipo_contagem: TipoContagem | None = None
     status: StatusPrazo | None = None
+    motivo_perda: str | None = None
 
 
 class TarefaVinculada(BaseModel):

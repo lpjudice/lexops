@@ -251,6 +251,11 @@ def atualizar_prazo(
 
     status_anterior = prazo.status
 
+    # Motivo só faz sentido quando o novo status é "perdido" — status virando
+    # outra coisa sem motivo explícito na mesma chamada limpa o campo.
+    if alteracoes.get("status") not in (None, "perdido") and "motivo_perda" not in alteracoes:
+        alteracoes["motivo_perda"] = None
+
     for field, value in alteracoes.items():
         setattr(prazo, field, value)
 

@@ -28,6 +28,7 @@ export interface Diario2Prazo {
   status: StatusPrazoDiario2
   dias_prazo: number
   tipo_contagem: 'uteis' | 'corridos'
+  motivo_perda?: string | null
 }
 
 export interface Diario2Publicacao {
@@ -135,8 +136,8 @@ export const diario2Api = {
   criarPrazo: (id: string, data: Diario2PrazoCreate) =>
     api.post<Diario2Publicacao>(`/diario2/${id}/criar-prazo`, data).then((r) => r.data),
 
-  atualizarPrazoStatus: (id: string, status: StatusPrazoDiario2) =>
-    api.patch<Diario2Publicacao>(`/diario2/${id}/prazo-status`, { status }).then((r) => r.data),
+  atualizarPrazoStatus: (id: string, status: StatusPrazoDiario2, motivoPerda?: string | null) =>
+    api.patch<Diario2Publicacao>(`/diario2/${id}/prazo-status`, { status, motivo_perda: motivoPerda }).then((r) => r.data),
 
   nadaAFazer: (id: string) =>
     api.post<Diario2Publicacao & { resultado_nada_a_fazer: NadaAFazerResultado }>(

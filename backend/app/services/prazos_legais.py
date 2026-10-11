@@ -306,25 +306,37 @@ _JUIZADOS: list[PrazoLegal] = [
         "FONAJE orienta contar os prazos do JEC de forma CONTÍNUA (dias corridos), "
         "mas o enunciado não é vinculante e há forte divergência — parte da "
         "jurisprudência aplica o art. 219 do CPC (dias úteis) também nos Juizados. "
-        "Confira a orientação da sua Turma Recursal antes de fechar a data.", [],
+        "Confira a orientação da sua Turma Recursal antes de fechar a data.",
+        ["Recurso Inominado (JEC)"],
     ),
     PrazoLegal(
         "jec_contrarrazoes", "Contrarrazões ao recurso inominado (JEC)", 10,
         "uteis", "Lei 9.099/95, art. 42, §2º", "juizado", True,
-        "Mesma controvérsia de contagem do recurso inominado.", [],
+        "Mesma controvérsia de contagem do recurso inominado.",
+        ["Contrarrazões em Juizado Especial", "Contrarrazões (JEC)"],
     ),
     PrazoLegal(
         "jec_embargos_declaracao", "Embargos de declaração (JEC)", 5, "uteis",
         "Lei 9.099/95, art. 50", "juizado", True,
         "Eram 48 horas até o CPC/2015, que alterou o art. 50 para 5 dias e passou "
         "a INTERROMPER o prazo recursal (antes suspendia). Cuidado com material "
-        "antigo que ainda repete as 48h.", [],
+        "antigo que ainda repete as 48h.",
+        ["Embargos de Declaração (JEC)"],
     ),
     PrazoLegal(
         "jec_contestacao", "Contestação (JEC)", None, None,
         "Lei 9.099/95, arts. 30 e 9º", "juizado", True,
         "NÃO há prazo em dias: a defesa é apresentada NA audiência de instrução e "
-        "julgamento, escrita ou oral. Não confunda com o rito comum.", [],
+        "julgamento, escrita ou oral. Não confunda com o rito comum.",
+        ["Contestação (JEC)"],
+    ),
+    PrazoLegal(
+        "jec_impugnacao_cumprimento", "Impugnação ao cumprimento de sentença (JEC)",
+        10, "uteis", "Lei 9.099/95, art. 52, IV e IX", "juizado", True,
+        "O cumprimento de sentença no JEC segue o rito próprio da Lei 9.099/95 "
+        "(art. 52), com prazos mais curtos que o CPC comum (art. 525, que é de "
+        "15 dias).",
+        ["Impugnação ao Cumprimento de Sentença (JEC)"],
     ),
     PrazoLegal(
         "jec_sem_prazo_dobro", "Juizados — não há prazo em dobro", None, None,
@@ -336,7 +348,28 @@ _JUIZADOS: list[PrazoLegal] = [
     PrazoLegal(
         "jef_recurso", "Recurso inominado (JEF / Fazenda)", 10, "uteis",
         "Lei 10.259/01, art. 5º; Lei 12.153/09, art. 4º", "juizado", False,
-        "Mesma contagem controvertida do JEC estadual.", [],
+        "Mesma contagem controvertida do JEC estadual.",
+        ["Recurso Inominado (JEF/Fazenda)"],
+    ),
+    PrazoLegal(
+        "jef_contrarrazoes", "Contrarrazões ao recurso inominado (JEF / Fazenda)",
+        10, "uteis", "Lei 10.259/01, art. 5º; Lei 12.153/09, art. 4º", "juizado",
+        False, "Mesma contagem controvertida do JEC estadual.",
+        ["Contrarrazões (JEF/Fazenda)"],
+    ),
+    PrazoLegal(
+        "jec_criminal_recurso", "Apelação / recurso inominado (Juizado Especial Criminal)",
+        10, "uteis", "Lei 9.099/95, art. 82, §1º", "juizado", True,
+        "10 dias da ciência da sentença — mesma contagem controvertida do JEC "
+        "cível (Enunciado 165 FONAJE x art. 219 CPC).",
+        ["Apelação (Juizado Especial Criminal)"],
+    ),
+    PrazoLegal(
+        "jec_criminal_contrarrazoes",
+        "Contrarrazões à apelação (Juizado Especial Criminal)", 10, "uteis",
+        "Lei 9.099/95, art. 82, §1º", "juizado", True,
+        "Mesma contagem do recurso.",
+        ["Contrarrazões (Juizado Especial Criminal)"],
     ),
 ]
 

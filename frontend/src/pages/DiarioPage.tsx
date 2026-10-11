@@ -1207,6 +1207,7 @@ export default function DiarioPage() {
                   <PrazoEditorInline
                     prazo={pub.despacho_status.prazo}
                     dataPublicacaoFallback={pub.data_publicacao}
+                    rito={processos.find((p) => p.id === pub.processo_id)?.rito}
                     onCancel={() => setEditPrazoPub(null)}
                     onSaved={() => {
                       setEditPrazoPub(null)

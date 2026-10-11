@@ -4,14 +4,16 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { prazosApi } from '../api/prazos'
 import type { Prazo, PrazoCreate, PrazoEdit, TipoPrazo, TipoContagem, StatusPrazo } from '../api/prazos'
 import { processosApi } from '../api/processos'
-import type { EstadoProcesso } from '../api/processos'
+import type { EstadoProcesso, RitoProcesso } from '../api/processos'
 import { clientesApi } from '../api/clientes'
 import ResponsavelComboBox from '../components/ResponsavelComboBox'
 import ProcessoCombobox from '../components/ProcessoCombobox'
+import PecaCombobox from '../components/PecaCombobox'
 import LegendaPrazos from '../components/LegendaPrazos'
 import {
   useCatalogoPrazos, sugestaoDaPeca, divergeDaLei, textoConfirmacaoDivergencia,
 } from '../api/prazosLegais'
+import { RITO_OPTS, pecasPara } from '../constants/pecas'
 import { useFiltroMes } from '../components/useFiltroMes'
 import styles from './Page.module.css'
 import prazosStyles from './PrazosPage.module.css'
@@ -19,13 +21,6 @@ import prazosStyles from './PrazosPage.module.css'
 const TIPOS: TipoPrazo[] = [
   'contestacao', 'recurso', 'contrarrazoes', 'manifestacao',
   'audiencia', 'pericia', 'outro',
-]
-
-const PECAS = [
-  'Contestação', 'Recurso de Apelação', 'Recurso Ordinário', 'Agravo Interno',
-  'Agravo Regimental', 'Embargos de Declaração', 'Contrarrazões de Apelação',
-  'Manifestação', 'Impugnação', 'Réplica', 'Memorial', 'Alegações Finais',
-  'Petição Simples', 'Pedido de Prazo', 'Outro',
 ]
 
 const EMPTY: PrazoCreate = {
@@ -103,12 +98,19 @@ function editFormDe(p: Prazo): EditForm {
   }
 }
 
+function pedirMotivoPerda(): string | null {
+  const motivo = window.prompt('O que aconteceu? (fica salvo no prazo, pra referência futura)')
+  return motivo
+}
+
 export default function PrazosPage() {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<PrazoCreate>(EMPTY)
   const [editando, setEditando] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<EditForm | null>(null)
+  const [ritoForm, setRitoForm] = useState<RitoProcesso>('comum')
+  const [ritoEdit, setRitoEdit] = useState<RitoProcesso>('comum')
   const [searchParams] = useSearchParams()
   const tabInicial = searchParams.get('tab')
   const [tabStatus, setTabStatus] = useState<TabStatus>(
@@ -208,6 +210,7 @@ export default function PrazosPage() {
   const abrirEditor = (p: Prazo) => {
     setEditando(p.id)
     setEditForm(editFormDe(p))
+    setRitoEdit(getProcesso(p.processo_id)?.rito ?? 'comum')
   }
 
   const salvarEdicao = (id: string) => {
@@ -400,7 +403,10 @@ export default function PrazosPage() {
             <label className={styles.formLabel}>Processo *</label>
             <ProcessoCombobox
               value={form.processo_id}
-              onChange={(id) => setForm({ ...form, processo_id: id })}
+              onChange={(id) => {
+                setForm({ ...form, processo_id: id })
+                setRitoForm(getProcesso(id)?.rito ?? 'comum')
+              }}
               processos={processos}
               clientes={clientes}
               onCreateProcesso={criarProcesso}
@@ -415,13 +421,24 @@ export default function PrazosPage() {
               </select>
             </div>
             <div className={styles.formRow}>
-              <label className={styles.formLabel}>Peça necessária</label>
-              <select className={styles.input} value={form.peca_necessaria ?? ''}
-                onChange={(e) => aplicarPecaNoForm(e.target.value)}>
-                <option value="">— Selecione —</option>
-                {PECAS.map((p) => <option key={p} value={p}>{p}</option>)}
+              <label className={styles.formLabel}>Rito</label>
+              <select className={styles.input} value={ritoForm}
+                title="Juizados têm prazos e peças próprios — confirme ou troque se o cadastro do processo ainda não tiver o rito certo."
+                onChange={(e) => setRitoForm(e.target.value as RitoProcesso)}>
+                {RITO_OPTS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
               </select>
             </div>
+          </div>
+          <div className={styles.formRow}>
+            <label className={styles.formLabel}>Peça necessária</label>
+            <PecaCombobox
+              value={form.peca_necessaria ?? ''}
+              onChange={aplicarPecaNoForm}
+              baseOptions={pecasPara(ritoForm)}
+              onApplyDefault={(dias, tipoContagem) =>
+                setForm((f) => ({ ...f, dias_prazo: dias, tipo_contagem: tipoContagem }))
+              }
+            />
           </div>
 
           {(() => {
@@ -644,7 +661,10 @@ export default function PrazosPage() {
                           <span className={prazosStyles.editorLabel}>Processo</span>
                           <ProcessoCombobox
                             value={editForm.processo_id}
-                            onChange={(id) => setEditForm({ ...editForm, processo_id: id })}
+                            onChange={(id) => {
+                              setEditForm({ ...editForm, processo_id: id })
+                              setRitoEdit(getProcesso(id)?.rito ?? 'comum')
+                            }}
                             processos={processos}
                             clientes={clientes}
                             onCreateProcesso={criarProcesso}
@@ -659,10 +679,18 @@ export default function PrazosPage() {
                             </select>
                           </div>
                           <div className={prazosStyles.editorField}>
+                            <span className={prazosStyles.editorLabel}>Rito</span>
+                            <select className={styles.input} value={ritoEdit}
+                              title="Juizados têm prazos e peças próprios."
+                              onChange={(e) => setRitoEdit(e.target.value as RitoProcesso)}>
+                              {RITO_OPTS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                            </select>
+                          </div>
+                          <div className={prazosStyles.editorField}>
                             <span className={prazosStyles.editorLabel}>Peça necessária</span>
-                            <select className={styles.input} value={editForm.peca_necessaria}
-                              onChange={(e) => {
-                                const peca = e.target.value
+                            <PecaCombobox
+                              value={editForm.peca_necessaria}
+                              onChange={(peca) => {
                                 const sug = sugestaoDaPeca(catalogoLegal, peca)
                                 setEditForm({
                                   ...editForm,
@@ -671,10 +699,12 @@ export default function PrazosPage() {
                                     ? { dias_prazo: sug.dias, tipo_contagem: (sug.contagem ?? 'uteis') as TipoContagem }
                                     : {}),
                                 })
-                              }}>
-                              <option value="">— Selecione —</option>
-                              {PECAS.map((pc) => <option key={pc} value={pc}>{pc}</option>)}
-                            </select>
+                              }}
+                              baseOptions={pecasPara(ritoEdit)}
+                              onApplyDefault={(dias, tipoContagem) =>
+                                setEditForm((f) => f ? { ...f, dias_prazo: dias, tipo_contagem: tipoContagem } : f)
+                              }
+                            />
                           </div>
                           <div className={prazosStyles.editorField}>
                             <span className={prazosStyles.editorLabel}>Data da publicação</span>
@@ -747,12 +777,23 @@ export default function PrazosPage() {
                           'Marcar como "Nada a fazer"?\n\nA publicação de origem é encerrada e as tarefas automáticas ' +
                           'ligadas a este prazo são canceladas.',
                         )) return
+                        if (novo === 'perdido') {
+                          const motivo = pedirMotivoPerda()
+                          if (motivo === null) return
+                          atualizar.mutate({ id: p.id, data: { status: novo, motivo_perda: motivo } })
+                          return
+                        }
                         atualizar.mutate({ id: p.id, data: { status: novo } })
                       }}>
                       {STATUS_OPCOES.map((s) => (
                         <option key={s.valor} value={s.valor}>{s.label}</option>
                       ))}
                     </select>
+                    {p.status === 'perdido' && p.motivo_perda && (
+                      <span className={prazosStyles.dataItem} title={p.motivo_perda}>
+                        💬 {p.motivo_perda.slice(0, 30)}{p.motivo_perda.length > 30 ? '…' : ''}
+                      </span>
+                    )}
                     <button className={styles.btnDanger}
                       onClick={() => { if (confirm('Remover prazo?')) deletar.mutate(p.id) }}>
                       ×
