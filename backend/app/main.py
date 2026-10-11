@@ -1034,6 +1034,10 @@ def _run_migrations() -> None:
             "INSERT INTO informativo_stf_config (id, areas_selecionadas, keywords_livres) "
             "VALUES (1, '[]'::jsonb, '[]'::jsonb) ON CONFLICT (id) DO NOTHING"
         ))
+        conn.execute(text("ALTER TABLE informativo_stf_config ADD COLUMN IF NOT EXISTS sync_local_solicitado_em TIMESTAMPTZ"))
+        conn.execute(text("ALTER TABLE informativo_stf_config ADD COLUMN IF NOT EXISTS sync_local_ultimo_em TIMESTAMPTZ"))
+        conn.execute(text("ALTER TABLE informativo_stf_config ADD COLUMN IF NOT EXISTS sync_local_ultimo_status VARCHAR(20)"))
+        conn.execute(text("ALTER TABLE informativo_stf_config ADD COLUMN IF NOT EXISTS sync_local_ultima_mensagem TEXT"))
 
         # Instagram — brindes (histórico: 1 linha por geração, não substitui)
         conn.execute(text("""

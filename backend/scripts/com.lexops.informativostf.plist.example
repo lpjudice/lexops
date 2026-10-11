@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.lexops.informativostf</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/lucasjudice/ClaudeCode/GestorJuridico/backend/.venv/bin/python</string>
+        <string>/Users/lucasjudice/ClaudeCode/GestorJuridico/backend/scripts/sync_informativo_stf_local.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/lucasjudice/ClaudeCode/GestorJuridico/backend</string>
+
+    <!-- Roda a cada 30 min; o script decide internamente se "está na hora"
+         (pedido manual pendente ou segunda-feira à tarde). Também dispara
+         ao carregar (RunAtLoad) — cobre o caso do Mac ter ficado desligado
+         na hora agendada: na próxima vez que ligar, o launchd carrega este
+         job de novo e ele checa imediatamente. -->
+    <key>StartInterval</key>
+    <integer>1800</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/com.lexops.informativostf.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/com.lexops.informativostf.err.log</string>
+</dict>
+</plist>

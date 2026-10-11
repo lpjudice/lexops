@@ -71,6 +71,10 @@ class ConfigOut(BaseModel):
     areas_selecionadas: list[str]
     keywords_livres: list[str]
     atualizado_em: datetime
+    sync_local_solicitado_em: datetime | None = None
+    sync_local_ultimo_em: datetime | None = None
+    sync_local_ultimo_status: str | None = None
+    sync_local_ultima_mensagem: str | None = None
 
 
 class ConfigUpdate(BaseModel):
