@@ -424,50 +424,69 @@ export default function CarteiraPage() {
   const fundoNome = (id: number) => fundosRef.find(f => f.id === id)?.nome_fundo ?? `#${id}`
 
   // ── KPIs calculados no frontend ────────────────────────────────────
-  const calcularHonorarios = (c: any) => {
-    const debs = debentures.filter(d => d.cliente_id === c.id)
-    const imobs = imobiliario.filter(i => i.cliente_id === c.id)
-    const fnds = fundos.filter(f => f.cliente_id === c.id)
-    const totalDebValue = debs.reduce((s, d) => s + (d.valor_aplicado ?? 0), 0)
-    // Para fundos com % queda, usa apenas a parcela recuperável no cálculo de êxito
-    const totalFundValue = fnds.reduce((s, f) => {
-      const ref = fundosRef.find((r: any) => r.id === f.fundo_id)
-      const queda = ref?.percentual_credito_recuperavel
-      return s + (f.valor_aplicado ?? 0) * (queda != null ? (1 - queda / 100) : 1)
-    }, 0)
-    const totalFin = totalDebValue + totalFundValue
-    const totalImob = imobs.reduce((s, p) => s + (p.valor_total_compromissado ?? 0), 0)
-    const totalGeral = totalFin + totalImob
-    let feeEntrada = 0
-    if (c.pro_labore_tipo === 'fixo') feeEntrada = c.pro_labore_valor ?? 0
-    else if (c.pro_labore_tipo === 'percentual')
-      feeEntrada = totalImob * ((c.fee_imob_pct ?? 0) / 100) + totalFin * ((c.fee_fin_pct ?? 0) / 100)
+  // calcularHonorarios(c) era chamada várias vezes por render (2x nos totais
+  // do topo + 1x por linha em 2 abas diferentes + 1x por linha no modal de
+  // detalhe) e cada chamada varria os arrays INTEIROS de debêntures/imobiliário/
+  // fundos (centenas de posições) com .filter() — sem nenhuma memoização, isso
+  // rodava de novo a cada render (até digitar num campo de busca disparava).
+  // Agora calcula tudo UMA vez, agrupando por cliente_id, só quando os dados
+  // de origem realmente mudam.
+  type HonorariosCliente = { totalGeral: number; totalFin: number; totalImob: number; feeEntrada: number; exito: number }
+  const honorariosPorCliente = useMemo(() => {
+    const porCliente = new Map<number, HonorariosCliente>()
+    const debsPorCliente = new Map<number, any[]>()
+    const imobsPorCliente = new Map<number, any[]>()
+    const fndsPorCliente = new Map<number, any[]>()
+    for (const d of debentures) { const l = debsPorCliente.get(d.cliente_id); if (l) l.push(d); else debsPorCliente.set(d.cliente_id, [d]) }
+    for (const i of imobiliario) { const l = imobsPorCliente.get(i.cliente_id); if (l) l.push(i); else imobsPorCliente.set(i.cliente_id, [i]) }
+    for (const f of fundos) { const l = fndsPorCliente.get(f.cliente_id); if (l) l.push(f); else fndsPorCliente.set(f.cliente_id, [f]) }
+    const fundoRefPorId = new Map<number, any>(fundosRef.map((r: any) => [r.id, r]))
 
-    // Êxito: soma posição a posição, usando o % EFETIVO de cada uma (o
-    // override "ALTERAR % DESSE FUNDO APENAS" daquela posição, ou — se não
-    // houver override — o % padrão do cliente). Antes aplicava um único %
-    // do cliente sobre o total agregado, então editar o % de uma posição
-    // específica nunca mudava a soma — só o % de cliente fazia diferença.
-    const pctFinPadrao = c.percentual_sucesso_fin ?? c.percentual_sucesso_geral ?? 0
-    const pctImobPadrao = c.percentual_sucesso_imob ?? c.percentual_sucesso_geral ?? 0
-    let exito = 0
-    for (const d of debs) {
-      const pct = d.percentual_sucesso_honor ?? pctFinPadrao
-      exito += (d.valor_aplicado ?? 0) * (pct / 100)
+    for (const c of clientes) {
+      const debs = debsPorCliente.get(c.id) ?? []
+      const imobs = imobsPorCliente.get(c.id) ?? []
+      const fnds = fndsPorCliente.get(c.id) ?? []
+      const totalDebValue = debs.reduce((s, d) => s + (d.valor_aplicado ?? 0), 0)
+      // Para fundos com % queda, usa apenas a parcela recuperável no cálculo de êxito
+      const totalFundValue = fnds.reduce((s, f) => {
+        const queda = fundoRefPorId.get(f.fundo_id)?.percentual_credito_recuperavel
+        return s + (f.valor_aplicado ?? 0) * (queda != null ? (1 - queda / 100) : 1)
+      }, 0)
+      const totalFin = totalDebValue + totalFundValue
+      const totalImob = imobs.reduce((s: number, p: any) => s + (p.valor_total_compromissado ?? 0), 0)
+      const totalGeral = totalFin + totalImob
+      let feeEntrada = 0
+      if (c.pro_labore_tipo === 'fixo') feeEntrada = c.pro_labore_valor ?? 0
+      else if (c.pro_labore_tipo === 'percentual')
+        feeEntrada = totalImob * ((c.fee_imob_pct ?? 0) / 100) + totalFin * ((c.fee_fin_pct ?? 0) / 100)
+
+      // Êxito: soma posição a posição, usando o % EFETIVO de cada uma (o
+      // override "ALTERAR % DESSE FUNDO APENAS" daquela posição, ou — se não
+      // houver override — o % padrão do cliente).
+      const pctFinPadrao = c.percentual_sucesso_fin ?? c.percentual_sucesso_geral ?? 0
+      const pctImobPadrao = c.percentual_sucesso_imob ?? c.percentual_sucesso_geral ?? 0
+      let exito = 0
+      for (const d of debs) {
+        const pct = d.percentual_sucesso_honor ?? pctFinPadrao
+        exito += (d.valor_aplicado ?? 0) * (pct / 100)
+      }
+      for (const f of fnds) {
+        const queda = fundoRefPorId.get(f.fundo_id)?.percentual_credito_recuperavel
+        const base = (f.valor_aplicado ?? 0) * (queda != null ? (1 - queda / 100) : 1)
+        const pct = f.percentual_sucesso_honor ?? pctFinPadrao
+        exito += base * (pct / 100)
+      }
+      for (const i of imobs) {
+        const pct = i.percentual_sucesso_honorario ?? pctImobPadrao
+        exito += (i.valor_total_compromissado ?? 0) * (pct / 100)
+      }
+      porCliente.set(c.id, { totalGeral, totalFin, totalImob, feeEntrada, exito })
     }
-    for (const f of fnds) {
-      const ref = fundosRef.find((r: any) => r.id === f.fundo_id)
-      const queda = ref?.percentual_credito_recuperavel
-      const base = (f.valor_aplicado ?? 0) * (queda != null ? (1 - queda / 100) : 1)
-      const pct = f.percentual_sucesso_honor ?? pctFinPadrao
-      exito += base * (pct / 100)
-    }
-    for (const i of imobs) {
-      const pct = i.percentual_sucesso_honorario ?? pctImobPadrao
-      exito += (i.valor_total_compromissado ?? 0) * (pct / 100)
-    }
-    return { totalGeral, totalFin, totalImob, feeEntrada, exito }
-  }
+    return porCliente
+  }, [clientes, debentures, imobiliario, fundos, fundosRef])
+
+  const HONORARIOS_VAZIO: HonorariosCliente = { totalGeral: 0, totalFin: 0, totalImob: 0, feeEntrada: 0, exito: 0 }
+  const calcularHonorarios = (c: any): HonorariosCliente => honorariosPorCliente.get(c.id) ?? HONORARIOS_VAZIO
 
   // Detalhamento item a item por cliente, pros popups de Fee Entrada / Expectativa Êxito.
   type DetalheItem = { tipo: string; nome: string; valor: number; pct: number; resultado: number }
@@ -517,13 +536,22 @@ export default function CarteiraPage() {
     return items
   }
 
-  const kpiImob = imobiliario.reduce((s, i) => s + (i.valor_total_compromissado ?? 0), 0)
-  const kpiDeb  = debentures.reduce((s, d) => s + (d.valor_aplicado ?? 0), 0)
-  const kpiFundos = fundos.reduce((s, f) => s + (f.valor_aplicado ?? 0), 0)
-  const kpiFin = kpiDeb + kpiFundos
-  const kpiTotal = kpiImob + kpiFin
-  const kpiFeeEntrada = clientes.reduce((s, c) => s + calcularHonorarios(c).feeEntrada, 0)
-  const kpiExito = clientes.filter((c: any) => c.ativo !== false).reduce((s, c) => s + calcularHonorarios(c).exito, 0)
+  const { kpiImob, kpiDeb, kpiFundos, kpiFin, kpiTotal, kpiFeeEntrada, kpiExito } = useMemo(() => {
+    const kpiImob = imobiliario.reduce((s, i) => s + (i.valor_total_compromissado ?? 0), 0)
+    const kpiDeb = debentures.reduce((s, d) => s + (d.valor_aplicado ?? 0), 0)
+    const kpiFundos = fundos.reduce((s, f) => s + (f.valor_aplicado ?? 0), 0)
+    const kpiFin = kpiDeb + kpiFundos
+    const kpiTotal = kpiImob + kpiFin
+    let kpiFeeEntrada = 0
+    let kpiExito = 0
+    for (const c of clientes) {
+      const h = honorariosPorCliente.get(c.id)
+      if (!h) continue
+      kpiFeeEntrada += h.feeEntrada
+      if (c.ativo !== false) kpiExito += h.exito
+    }
+    return { kpiImob, kpiDeb, kpiFundos, kpiFin, kpiTotal, kpiFeeEntrada, kpiExito }
+  }, [imobiliario, debentures, fundos, clientes, honorariosPorCliente])
 
   // Breakdown de fundos por CNPJ (para card expandível)
   const fundosBreakdown = useMemo(() => {
@@ -559,39 +587,63 @@ export default function CarteiraPage() {
   const filtrarPorNome = (nome: string, busca: string) =>
     !busca || nome.toLowerCase().includes(busca.toLowerCase())
 
-  const debsFiltradas = debentures.filter(d =>
+  const debsFiltradas = useMemo(() => debentures.filter(d =>
     filtroDebEmissoes.length === 0 || filtroDebEmissoes.map(String).includes(String(d.emissao_id))
-  )
-  const imobFiltrado = imobiliario.filter(i =>
+  ), [debentures, filtroDebEmissoes])
+  const imobFiltrado = useMemo(() => imobiliario.filter(i =>
     filtroImobEmps.length === 0 || filtroImobEmps.map(String).includes(String(i.empreendimento_id))
-  )
-  const fundosFiltrados = fundos.filter(f =>
+  ), [imobiliario, filtroImobEmps])
+  const fundosFiltrados = useMemo(() => fundos.filter(f =>
     filtroFundosFundos.length === 0 || filtroFundosFundos.map(String).includes(String(f.fundo_id))
-  )
+  ), [fundos, filtroFundosFundos])
 
-  const clientesComDeb = [...new Set(debsFiltradas.map(d => d.cliente_id))]
-    .map(cid => ({ id: cid, nome: clienteNome(cid), posicoes: debsFiltradas.filter(d => d.cliente_id === cid) }))
-    .filter(g => filtrarPorNome(g.nome, filtroClienteDeb))
-    .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+  // Agrupamento por cliente em uma única passada (Map), em vez de um
+  // .filter() completo por cliente único — mesma classe de problema de
+  // performance do calcularHonorarios acima, só que pros agrupamentos das
+  // abas Debêntures/Imobiliário/Fundos.
+  const agruparPorCliente = (itens: any[]): Map<number, any[]> => {
+    const mapa = new Map<number, any[]>()
+    for (const it of itens) {
+      const lista = mapa.get(it.cliente_id)
+      if (lista) lista.push(it); else mapa.set(it.cliente_id, [it])
+    }
+    return mapa
+  }
 
-  const clientesComImob = [...new Set(imobFiltrado.map(i => i.cliente_id))]
-    .map(cid => ({ id: cid, nome: clienteNome(cid), posicoes: imobFiltrado.filter(i => i.cliente_id === cid) }))
-    .filter(g => filtrarPorNome(g.nome, filtroClienteImob))
-    .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+  const clientesComDeb = useMemo(() => {
+    const agrupado = agruparPorCliente(debsFiltradas)
+    return [...agrupado.entries()]
+      .map(([cid, posicoes]) => ({ id: cid, nome: clienteNome(cid), posicoes }))
+      .filter(g => filtrarPorNome(g.nome, filtroClienteDeb))
+      .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+  }, [debsFiltradas, filtroClienteDeb, clientes])
 
-  const clientesComFundos = [...new Set(fundosFiltrados.map(f => f.cliente_id))]
-    .map(cid => ({ id: cid, nome: clienteNome(cid), posicoes: fundosFiltrados.filter(f => f.cliente_id === cid) }))
-    .filter(g => filtrarPorNome(g.nome, filtroClienteFundos))
-    .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+  const clientesComImob = useMemo(() => {
+    const agrupado = agruparPorCliente(imobFiltrado)
+    return [...agrupado.entries()]
+      .map(([cid, posicoes]) => ({ id: cid, nome: clienteNome(cid), posicoes }))
+      .filter(g => filtrarPorNome(g.nome, filtroClienteImob))
+      .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+  }, [imobFiltrado, filtroClienteImob, clientes])
 
-  const clientesAtivos = clientes
-    .filter((c: any) =>
-      debentures.some(d => d.cliente_id === c.id) ||
-      imobiliario.some(i => i.cliente_id === c.id) ||
-      fundos.some(f => f.cliente_id === c.id)
-    )
-    .filter((c: any) => filtrarPorNome(clienteNome(c.id), filtroClientePos))
-    .sort((a: any, b: any) => clienteNome(a.id).localeCompare(clienteNome(b.id), 'pt-BR'))
+  const clientesComFundos = useMemo(() => {
+    const agrupado = agruparPorCliente(fundosFiltrados)
+    return [...agrupado.entries()]
+      .map(([cid, posicoes]) => ({ id: cid, nome: clienteNome(cid), posicoes }))
+      .filter(g => filtrarPorNome(g.nome, filtroClienteFundos))
+      .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+  }, [fundosFiltrados, filtroClienteFundos, clientes])
+
+  const clientesAtivos = useMemo(() => {
+    const comPosicao = new Set<number>()
+    for (const d of debentures) comPosicao.add(d.cliente_id)
+    for (const i of imobiliario) comPosicao.add(i.cliente_id)
+    for (const f of fundos) comPosicao.add(f.cliente_id)
+    return clientes
+      .filter((c: any) => comPosicao.has(c.id))
+      .filter((c: any) => filtrarPorNome(clienteNome(c.id), filtroClientePos))
+      .sort((a: any, b: any) => clienteNome(a.id).localeCompare(clienteNome(b.id), 'pt-BR'))
+  }, [clientes, debentures, imobiliario, fundos, filtroClientePos])
 
   // ── Mutations ─────────────────────────────────────────────────────
   // exito_split é um toggle só de UI (decide mostrar % geral ou % dividido),
@@ -1077,7 +1129,7 @@ export default function CarteiraPage() {
       <div className={styles.pageHeader}><h1 className={styles.pageTitle}>Carteira</h1></div>
 
       {/* KPI Cards */}
-      <div className={cs.kpiGrid} style={{ gridTemplateColumns: 'repeat(7, 1fr)' }}>
+      <div className={cs.kpiGrid}>
         <div className={cs.kpiCard}><span className={cs.kpiLabel}>Clientes</span><span className={cs.kpiValue}>{clientes.length}</span></div>
         <div className={cs.kpiCard}><span className={cs.kpiLabel}>Total Geral</span><span className={cs.kpiValue}>{brl(kpiTotal)}</span></div>
         <div className={cs.kpiCard} style={{ borderTop: '3px solid var(--amber, #f59e0b)', cursor: 'pointer' }}
@@ -2461,7 +2513,7 @@ export default function CarteiraPage() {
                 <div style={{ textAlign: 'center', color: '#9ca3af', padding: 24, fontSize: 13 }}>Nenhum cliente encontrado.</div>
               ) : linhas.map(({ cliente: c, valor }: any) => {
                 const aberto = detalheExpandidos.has(c.id)
-                const items = detalharCliente(c, detalheKpi)
+                const items = aberto ? detalharCliente(c, detalheKpi) : []
                 return (
                   <div key={c.id} style={{ border: '1px solid var(--gray-border)', borderRadius: 8, marginBottom: 8, overflow: 'hidden' }}>
                     <div
