@@ -945,7 +945,8 @@ def _run_migrations() -> None:
             )
         """))
         conn.execute(text(
-            "INSERT INTO informativo_stj_config (id) VALUES (1) ON CONFLICT (id) DO NOTHING"
+            "INSERT INTO informativo_stj_config (id, areas_selecionadas, keywords_livres) "
+            "VALUES (1, '[]'::jsonb, '[]'::jsonb) ON CONFLICT (id) DO NOTHING"
         ))
 
         # Instagram — brindes (histórico: 1 linha por geração, não substitui)
