@@ -31,7 +31,7 @@ SYSTEM_JSON = (
 )
 
 JSON_CONTRATO = """Responda em JSON com exatamente este formato:
-{"tema_central": "1-2 frases identificando o que estava em discussão", "ratio_decidendi": "parágrafo explicando o fundamento jurídico da decisão, por que o STJ decidiu assim"}"""
+{"tema_central": "UMA frase curta, tipo manchete (máx. 18 palavras), direto ao ponto — o que foi decidido, sem rodeio", "ratio_decidendi": "parágrafo explicando o fundamento jurídico da decisão, por que o STJ decidiu assim"}"""
 
 
 def _strip_fences(txt: str) -> str:
@@ -162,7 +162,7 @@ def gerar_resumo_edicao(edicao_id, db: Session) -> str | None:
 
 {linhas}
 
-Responda em JSON: {{"resumo": "1-2 frases citando os 2-3 julgados mais relevantes/impactantes desta edição, direto ao ponto"}}"""
+Responda em JSON: {{"resumo": "UMA frase BEM curta (máx. 15 palavras) — resumo do resumo, só pra decidir se vale abrir a edição. Cite no máximo o assunto mais forte, sem detalhar."}}"""
 
     try:
         import anthropic

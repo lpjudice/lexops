@@ -54,11 +54,20 @@
 
 .verbeteHeadLeft { flex: 1; min-width: 0; }
 
-.verbeteTitulo {
-  font-size: 13.5px;
-  font-weight: 600;
+.verbeteHeadline {
+  font-size: 18px;
+  font-weight: 700;
   color: var(--dark);
+  line-height: 1.35;
+  margin-top: 6px;
+}
+
+.verbeteTitulo {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--gray-mid);
   line-height: 1.4;
+  margin-top: 6px;
 }
 
 .verbeteDestaqueOficial {
@@ -71,7 +80,6 @@
 .verbeteMeta {
   display: flex;
   gap: 6px;
-  margin-top: 8px;
   flex-wrap: wrap;
 }
 
