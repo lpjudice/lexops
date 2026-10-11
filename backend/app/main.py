@@ -1021,6 +1021,7 @@ def _run_migrations() -> None:
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_informativo_stf_itens_favorito ON informativo_stf_itens(favorito)"
         ))
+        conn.execute(text("ALTER TABLE informativo_stf_edicoes ADD COLUMN IF NOT EXISTS email_destaques_enviado_em TIMESTAMPTZ"))
 
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS informativo_stf_config (

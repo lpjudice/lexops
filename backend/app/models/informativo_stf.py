@@ -37,6 +37,12 @@ class InformativoStfEdicao(Base):
     erro_scraping: Mapped[str | None] = mapped_column(Text, nullable=True)
     scraped_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # O scraping roda local (bloqueio de IP no servidor) e o resumo de IA roda
+    # no servidor, em momentos diferentes — por isso o e-mail de destaques é
+    # desacoplado do momento do scraping. Marca quando já foi enviado pra não
+    # mandar de novo a cada varredura periódica.
+    email_destaques_enviado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     criado_em: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
