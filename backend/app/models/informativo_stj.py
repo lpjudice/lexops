@@ -88,6 +88,14 @@ class InformativoStjItem(Base):
 
     destacado: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     favorito: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    # Explicação em português simples (não-jurídico), gerada junto com o resumo IA
+    resumo_leigo: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Registro de que já foi gerado um post de Instagram a partir deste julgado
+    # ("forçar leitura") — não é efêmero: fica marcado mesmo saindo da tela.
+    instagram_sugestao_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    instagram_gerado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     motivo_destaque: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # 'nao_aplicavel' | 'pendente' | 'processando' | 'ok' | 'erro'

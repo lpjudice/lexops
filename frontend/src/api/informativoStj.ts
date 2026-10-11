@@ -23,9 +23,13 @@ export interface InformativoStjItem {
   status_ia: StatusIa
   resumo_tema_central?: string | null
   resumo_ratio_decidendi?: string | null
+  resumo_leigo?: string | null
+  instagram_sugestao_id?: string | null
+  instagram_gerado_em?: string | null
   custo_ia_usd: number
   ia_processado_em?: string | null
   erro_ia?: string | null
+  edicao_numero?: number | null
 }
 
 export interface InformativoStjEdicao {
@@ -93,5 +97,5 @@ export const informativoStjApi = {
     api.post<InformativoStjItem>(`/informativo-stj/itens/${itemId}/favoritar`).then((r) => r.data),
 
   forcarInstagram: (itemId: string) =>
-    api.post<{ sugestao_id: string }>(`/informativo-stj/itens/${itemId}/forcar-instagram`, undefined, { timeout: 120000 }).then((r) => r.data),
+    api.post<InformativoStjItem>(`/informativo-stj/itens/${itemId}/forcar-instagram`, undefined, { timeout: 120000 }).then((r) => r.data),
 }

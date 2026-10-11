@@ -41,15 +41,14 @@ export default function InformativoStjFavoritosPage() {
           >
             <div className={styles.verbeteHead}>
               <div className={styles.verbeteHeadLeft}>
-                <div className={styles.verbeteTitulo}>{item.titulo}</div>
-                <div className={styles.verbeteDestaqueOficial}>
-                  {item.resumo_tema_central || item.destaque_oficial}
-                </div>
                 <div className={styles.verbeteMeta}>
                   <span className={styles.pill} style={{ background: cor.bg, color: cor.fg }}>
                     {item.ramo_direito}
                   </span>
+                  {item.edicao_numero && <span className={styles.pill}>Informativo nº {item.edicao_numero}</span>}
                 </div>
+                <div className={styles.verbeteHeadline}>{item.resumo_tema_central || item.destaque_oficial}</div>
+                <div className={styles.verbeteTitulo}>{item.titulo}</div>
               </div>
               <button
                 className={styles.starBtn}

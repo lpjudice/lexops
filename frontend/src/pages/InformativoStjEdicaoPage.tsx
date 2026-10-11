@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ChevronDown, ChevronRight, Loader2, Star, Camera } from 'lucide-react'
+import { ArrowLeft, ChevronDown, ChevronRight, Loader2, Star, Camera, CheckCircle2 } from 'lucide-react'
 import { informativoStjApi } from '../api/informativoStj'
 import type { InformativoStjItem } from '../api/informativoStj'
 import { ramoCor } from '../utils/ramoColor'
@@ -25,7 +25,11 @@ function Verbete({ item }: { item: InformativoStjItem }) {
 
   const forcarInstagram = useMutation({
     mutationFn: () => informativoStjApi.forcarInstagram(item.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['informativo-stj'] }),
   })
+
+  const [verLeigo, setVerLeigo] = useState(false)
+  const jaGerouInstagram = !!item.instagram_gerado_em
 
   const temResumoIa = item.destacado && item.status_ia === 'ok' && !!item.resumo_tema_central
   const headline = temResumoIa ? item.resumo_tema_central : item.destaque_oficial
@@ -39,6 +43,11 @@ function Verbete({ item }: { item: InformativoStjItem }) {
               {item.ramo_direito}
             </span>
             {item.destacado && <span className={`${styles.pill} ${styles.pillDestacado}`}>Destacado</span>}
+            {jaGerouInstagram && (
+              <span className={`${styles.pill} ${styles.pillInstagram}`}>
+                <Camera size={10} /> Gerado no Instagram
+              </span>
+            )}
           </div>
           <div className={styles.verbeteHeadline}>{headline}</div>
           <div className={styles.verbeteTitulo}>{item.titulo}</div>
@@ -64,6 +73,15 @@ function Verbete({ item }: { item: InformativoStjItem }) {
             <div className={styles.resumoBloco}>
               <span className={styles.resumoLabel}>Ratio decidendi — por que o STJ decidiu assim</span>
               <p className={styles.resumoTexto}>{item.resumo_ratio_decidendi}</p>
+
+              {item.resumo_leigo && (
+                <>
+                  <button className={styles.btnLeigo} onClick={() => setVerLeigo((v) => !v)}>
+                    {verLeigo ? 'Ocultar' : 'Explicar para um leigo'}
+                  </button>
+                  {verLeigo && <p className={styles.resumoTextoLeigo}>{item.resumo_leigo}</p>}
+                </>
+              )}
             </div>
           )}
 
@@ -93,9 +111,13 @@ function Verbete({ item }: { item: InformativoStjItem }) {
             </button>
             <button className={styles.btnInstagram} onClick={() => forcarInstagram.mutate()} disabled={forcarInstagram.isPending}>
               <Camera size={13} />
-              {forcarInstagram.isPending ? 'Gerando…' : 'Gerar post no Instagram'}
+              {forcarInstagram.isPending ? 'Gerando…' : jaGerouInstagram ? 'Gerar novamente' : 'Gerar post no Instagram'}
             </button>
-            {forcarInstagram.isSuccess && <span style={{ fontSize: 12, color: 'var(--teal)' }}>Sugestão criada ✓</span>}
+            {jaGerouInstagram && !forcarInstagram.isPending && (
+              <span style={{ fontSize: 12, color: 'var(--teal)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <CheckCircle2 size={13} /> Já gerado
+              </span>
+            )}
             {forcarInstagram.isError && <span style={{ fontSize: 12, color: '#c0392b' }}>Falha ao gerar</span>}
           </div>
 

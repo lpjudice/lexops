@@ -25,6 +25,21 @@ router = APIRouter(
 )
 
 
+_edicao_numero_cache: dict[uuid.UUID, int] = {}
+
+
+def _item_out(item: InformativoStjItem, db: Session) -> ItemOut:
+    out = ItemOut.model_validate(item)
+    numero = _edicao_numero_cache.get(item.edicao_id)
+    if numero is None:
+        edicao = db.get(InformativoStjEdicao, item.edicao_id)
+        numero = edicao.numero if edicao else None
+        if numero is not None:
+            _edicao_numero_cache[item.edicao_id] = numero
+    out.edicao_numero = numero
+    return out
+
+
 def _get_config(db: Session) -> InformativoStjConfig:
     config = db.get(InformativoStjConfig, 1)
     if not config:
@@ -68,7 +83,7 @@ def obter_edicao(edicao_id: uuid.UUID, db: Session = Depends(get_db)):
         .order_by(InformativoStjItem.orgao_julgador, InformativoStjItem.ordem)
     ).all()
     out = EdicaoDetalheOut.model_validate(edicao)
-    out.itens = [ItemOut.model_validate(i) for i in itens]
+    out.itens = [_item_out(i, db) for i in itens]
     out.total_itens = len(itens)
     out.total_destacados = sum(1 for i in itens if i.destacado)
     return out
@@ -93,7 +108,7 @@ def listar_itens(
     if q:
         stmt = stmt.where(InformativoStjItem.titulo.ilike(f"%{q}%"))
     itens = db.scalars(stmt.limit(limit)).all()
-    return [ItemOut.model_validate(i) for i in itens]
+    return [_item_out(i, db) for i in itens]
 
 
 @router.get("/config", response_model=ConfigOut)
@@ -138,7 +153,7 @@ def reprocessar_item(item_id: uuid.UUID, db: Session = Depends(get_db)):
         item = ia_informativo_stj.processar_item(item_id, db, forcar=True)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    return ItemOut.model_validate(item)
+    return _item_out(item, db)
 
 
 @router.post("/sync", response_model=SyncResponse)
@@ -155,13 +170,13 @@ def listar_candidatos(db: Session = Depends(get_db)):
 @router.get("/busca", response_model=list[ItemOut])
 def buscar(q: str = Query(..., min_length=2), db: Session = Depends(get_db)):
     itens = scraping_informativo_stj.buscar_itens(db, q)
-    return [ItemOut.model_validate(i) for i in itens]
+    return [_item_out(i, db) for i in itens]
 
 
 @router.get("/favoritos", response_model=list[ItemOut])
 def listar_favoritos(db: Session = Depends(get_db)):
     itens = scraping_informativo_stj.listar_favoritos(db)
-    return [ItemOut.model_validate(i) for i in itens]
+    return [_item_out(i, db) for i in itens]
 
 
 @router.post("/itens/{item_id}/favoritar", response_model=ItemOut)
@@ -170,15 +185,16 @@ def favoritar_item(item_id: uuid.UUID, db: Session = Depends(get_db)):
         item = scraping_informativo_stj.toggle_favorito(item_id, db)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
-    return ItemOut.model_validate(item)
+    return _item_out(item, db)
 
 
-@router.post("/itens/{item_id}/forcar-instagram")
+@router.post("/itens/{item_id}/forcar-instagram", response_model=ItemOut)
 def forcar_instagram(item_id: uuid.UUID, db: Session = Depends(get_db)):
     from app.services import ia_instagram
 
     try:
-        sugestao = ia_instagram.gerar_sugestao_forcada_informativo_stj(db, item_id)
+        ia_instagram.gerar_sugestao_forcada_informativo_stj(db, item_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    return {"sugestao_id": str(sugestao.id)}
+    item = db.get(InformativoStjItem, item_id)
+    return _item_out(item, db)
