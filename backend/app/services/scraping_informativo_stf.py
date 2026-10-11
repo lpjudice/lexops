@@ -24,7 +24,7 @@ import logging
 import re
 import time
 import unicodedata
-from datetime import date
+from datetime import date, datetime, timezone
 
 import httpx
 from bs4 import BeautifulSoup
@@ -419,31 +419,57 @@ def sincronizar_novas_edicoes(db: Session, max_edicoes: int = 5) -> dict:
 
 
 def sincronizar_processar_e_notificar(db: Session) -> dict:
+    """Usado pelo endpoint manual antigo (server-side) e por quem quiser tudo
+    junto. O fluxo recomendado hoje é separado: `sincronizar_novas_edicoes`
+    roda local (único jeito de furar o bloqueio de IP do STF) e
+    `processar_pendentes_e_notificar` roda no servidor, com frequência maior
+    e independente do scraping — ver `app.scheduler._sync_informativo_stf`."""
+    resultado = sincronizar_novas_edicoes(db)
+    processar_pendentes_e_notificar(db)
+    return resultado
+
+
+def processar_pendentes_e_notificar(db: Session) -> dict:
+    """Roda o resumo de IA dos itens pendentes (de qualquer origem — local ou
+    servidor) e manda o e-mail de destaques das edições que ainda não foram
+    notificadas. Desacoplado do scraping de propósito: a IA roda no servidor
+    (tem a chave do Gemini), o scraping roda local (o STF bloqueia o IP do
+    servidor) — cada lado faz sua parte sem depender do outro estar no ar
+    no mesmo instante."""
     from app.services import ia_informativo_stf, informativo_stf_email
 
-    resultado = sincronizar_novas_edicoes(db)
-    ia_informativo_stf.processar_pendentes(db)
+    resultado_ia = ia_informativo_stf.processar_pendentes(db)
 
-    for detalhe in resultado.get("detalhe") or []:
-        edicao_id = detalhe.get("edicao_id") if isinstance(detalhe, dict) else None
-        if not edicao_id:
-            continue
-        edicao = db.get(InformativoStfEdicao, edicao_id)
-        if not edicao:
-            continue
-        itens_destacados = list(db.scalars(
-            select(InformativoStfItem)
-            .where(InformativoStfItem.edicao_id == edicao_id)
-            .where(InformativoStfItem.destacado.is_(True))
-            .where(InformativoStfItem.status_ia == "ok")
+    edicoes_pendentes_notificacao = db.scalars(
+        select(InformativoStfEdicao)
+        .where(InformativoStfEdicao.email_destaques_enviado_em.is_(None))
+        .where(InformativoStfEdicao.status_scraping == "ok")
+    ).all()
+
+    notificadas = 0
+    for edicao in edicoes_pendentes_notificacao:
+        itens_da_edicao = list(db.scalars(
+            select(InformativoStfItem).where(InformativoStfItem.edicao_id == edicao.id)
         ).all())
-        if itens_destacados:
-            try:
-                informativo_stf_email.enviar_email_destaques(edicao, itens_destacados)
-            except Exception:
-                logger.warning("Informativo STF: falha ao enviar e-mail de destaques (edição %s)", edicao.numero, exc_info=True)
+        if not itens_da_edicao:
+            continue
+        # Só notifica quando a IA já terminou de passar por todo mundo —
+        # senão manda o e-mail incompleto e não avisa de novo depois.
+        ainda_processando = any(i.status_ia in ("pendente", "processando") for i in itens_da_edicao)
+        if ainda_processando:
+            continue
 
-    return resultado
+        itens_destacados = [i for i in itens_da_edicao if i.destacado and i.status_ia == "ok"]
+        try:
+            if itens_destacados:
+                informativo_stf_email.enviar_email_destaques(edicao, itens_destacados)
+            edicao.email_destaques_enviado_em = datetime.now(timezone.utc)
+            db.commit()
+            notificadas += 1
+        except Exception:
+            logger.warning("Informativo STF: falha ao enviar e-mail de destaques (edição %s)", edicao.numero, exc_info=True)
+
+    return {"ia": resultado_ia, "edicoes_notificadas": notificadas}
 
 
 def listar_candidatos(db: Session, apenas_nao_usados: bool = False) -> list[dict]:
