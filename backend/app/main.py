@@ -937,6 +937,11 @@ def _run_migrations() -> None:
         ))
         conn.execute(text("ALTER TABLE informativo_stj_itens ALTER COLUMN ramo_direito TYPE VARCHAR(255)"))
         conn.execute(text("ALTER TABLE informativo_stj_itens ALTER COLUMN processo_numero TYPE TEXT"))
+        conn.execute(text("ALTER TABLE informativo_stj_itens ADD COLUMN IF NOT EXISTS favorito BOOLEAN NOT NULL DEFAULT false"))
+        conn.execute(text("ALTER TABLE informativo_stj_edicoes ADD COLUMN IF NOT EXISTS resumo_edicao TEXT"))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_informativo_stj_itens_favorito ON informativo_stj_itens(favorito)"
+        ))
 
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS informativo_stj_config (

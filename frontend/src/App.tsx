@@ -42,6 +42,7 @@ import InformativoAssinantesPage from './pages/InformativoAssinantesPage'
 import InformativoStjPage from './pages/InformativoStjPage'
 import InformativoStjEdicaoPage from './pages/InformativoStjEdicaoPage'
 import InformativoStjConfigPage from './pages/InformativoStjConfigPage'
+import InformativoStjFavoritosPage from './pages/InformativoStjFavoritosPage'
 import AutosIAPage from './pages/AutosIAPage'
 import AutosIACasoPage from './pages/AutosIACasoPage'
 import PrivacidadePage from './pages/PrivacidadePage'
@@ -100,6 +101,7 @@ function AppRoutes() {
         <Route path="informativos/assinantes" element={<InformativoAssinantesPage />} />
         <Route path="informativo-stj" element={<InformativoStjPage />} />
         <Route path="informativo-stj/config" element={<InformativoStjConfigPage />} />
+        <Route path="informativo-stj/favoritos" element={<InformativoStjFavoritosPage />} />
         <Route path="informativo-stj/:edicaoId" element={<InformativoStjEdicaoPage />} />
         <Route path="instagram/brindes" element={<InstagramBrindesPage />} />
         <Route path="fiscal" element={<FiscalPage />} />

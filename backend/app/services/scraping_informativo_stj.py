@@ -347,6 +347,15 @@ def sincronizar_edicao(numero: int, db: Session) -> dict:
             destacados += 1
 
     db.commit()
+
+    if inseridos > 0:
+        try:
+            from app.services.ia_informativo_stj import gerar_resumo_edicao
+
+            gerar_resumo_edicao(edicao.id, db)
+        except Exception:
+            logger.warning("Informativo STJ: falha ao gerar resumo da edição %s", edicao.numero, exc_info=True)
+
     return {
         "edicao_id": edicao.id,
         "inseridos": inseridos,
@@ -378,6 +387,35 @@ def sincronizar_novas_edicoes(db: Session, max_edicoes: int = 5) -> dict:
     return {"edicoes_processadas": len(resultados), "detalhe": resultados}
 
 
+def sincronizar_processar_e_notificar(db: Session) -> dict:
+    """Orquestra sync -> IA -> e-mail de destaques. Usado pelo botão manual e pelo cron."""
+    from app.services import ia_informativo_stj, informativo_stj_email
+
+    resultado = sincronizar_novas_edicoes(db)
+    ia_informativo_stj.processar_pendentes(db)
+
+    for detalhe in resultado.get("detalhe") or []:
+        edicao_id = detalhe.get("edicao_id") if isinstance(detalhe, dict) else None
+        if not edicao_id:
+            continue
+        edicao = db.get(InformativoStjEdicao, edicao_id)
+        if not edicao:
+            continue
+        itens_destacados = list(db.scalars(
+            select(InformativoStjItem)
+            .where(InformativoStjItem.edicao_id == edicao_id)
+            .where(InformativoStjItem.destacado.is_(True))
+            .where(InformativoStjItem.status_ia == "ok")
+        ).all())
+        if itens_destacados:
+            try:
+                informativo_stj_email.enviar_email_destaques(edicao, itens_destacados)
+            except Exception:
+                logger.warning("Informativo STJ: falha ao enviar e-mail de destaques (edição %s)", edicao.numero, exc_info=True)
+
+    return resultado
+
+
 def listar_candidatos(db: Session, apenas_nao_usados: bool = False) -> list[dict]:
     """Itens destacados com resumo de IA pronto — consumidos por PJudice e Instagram."""
     itens = db.scalars(
@@ -399,3 +437,41 @@ def listar_candidatos(db: Session, apenas_nao_usados: bool = False) -> list[dict
         }
         for i in itens
     ]
+
+
+def buscar_itens(db: Session, q: str, limit: int = 100) -> list[InformativoStjItem]:
+    """Busca por texto em TODOS os itens (não só os 20 visíveis na listagem)."""
+    termo = f"%{q.strip()}%"
+    if not q.strip():
+        return []
+    return list(db.scalars(
+        select(InformativoStjItem)
+        .where(
+            InformativoStjItem.titulo.ilike(termo)
+            | InformativoStjItem.destaque_oficial.ilike(termo)
+            | InformativoStjItem.texto_explicativo.ilike(termo)
+            | InformativoStjItem.resumo_tema_central.ilike(termo)
+            | InformativoStjItem.resumo_ratio_decidendi.ilike(termo)
+            | InformativoStjItem.processo_numero.ilike(termo)
+            | InformativoStjItem.ramo_direito.ilike(termo)
+        )
+        .order_by(InformativoStjItem.criado_em.desc())
+        .limit(limit)
+    ).all())
+
+
+def toggle_favorito(item_id, db: Session) -> InformativoStjItem:
+    item = db.get(InformativoStjItem, item_id)
+    if not item:
+        raise ValueError(f"Item {item_id} não encontrado")
+    item.favorito = not item.favorito
+    db.commit()
+    return item
+
+
+def listar_favoritos(db: Session) -> list[InformativoStjItem]:
+    return list(db.scalars(
+        select(InformativoStjItem)
+        .where(InformativoStjItem.favorito.is_(True))
+        .order_by(InformativoStjItem.criado_em.desc())
+    ).all())

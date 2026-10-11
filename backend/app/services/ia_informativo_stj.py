@@ -128,3 +128,57 @@ def processar_pendentes(db: Session, limite: int = 50) -> dict:
             erro += 1
 
     return {"total": len(itens), "ok": ok, "erro": erro}
+
+
+SYSTEM_RESUMO_EDICAO = (
+    "Você resume uma edição do Informativo do STJ para um advogado que precisa decidir, "
+    "em 1 olhada, se vale abrir a edição. Responda SEMPRE E SOMENTE com JSON válido."
+)
+
+
+def gerar_resumo_edicao(edicao_id, db: Session) -> str | None:
+    """Resumo ultra-curto (1-2 frases) do que tem de mais relevante na edição.
+
+    Roda sobre os títulos/destaques oficiais (não precisa esperar a IA por item).
+    """
+    from app.models.informativo_stj import InformativoStjEdicao
+
+    edicao = db.get(InformativoStjEdicao, edicao_id)
+    if not edicao:
+        return None
+    itens = db.scalars(
+        select(InformativoStjItem).where(InformativoStjItem.edicao_id == edicao_id)
+    ).all()
+    if not itens:
+        return None
+
+    if not settings.anthropic_api_key:
+        return None
+
+    linhas = "\n".join(
+        f"- [{i.ramo_direito}] {i.titulo}: {i.destaque_oficial}" for i in itens
+    )
+    prompt = f"""Edição nº {edicao.numero} do Informativo do STJ. Julgados desta edição:
+
+{linhas}
+
+Responda em JSON: {{"resumo": "1-2 frases citando os 2-3 julgados mais relevantes/impactantes desta edição, direto ao ponto"}}"""
+
+    try:
+        import anthropic
+
+        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        msg = client.messages.create(
+            model=getattr(settings, "instagram_claude_model", None) or "claude-opus-4-5",
+            max_tokens=400,
+            system=SYSTEM_RESUMO_EDICAO,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        txt = "".join(getattr(b, "text", "") for b in msg.content if getattr(b, "type", "") == "text")
+        resumo = json.loads(_strip_fences(txt)).get("resumo")
+        edicao.resumo_edicao = resumo
+        db.commit()
+        return resumo
+    except Exception:
+        logger.warning("Informativo STJ: falha ao gerar resumo da edição %s", edicao.numero, exc_info=True)
+        return None

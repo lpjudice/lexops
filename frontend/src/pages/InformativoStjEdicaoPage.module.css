@@ -33,13 +33,14 @@
 .verbete {
   background: var(--white);
   border: 1px solid var(--gray-border);
+  border-left: 4px solid var(--gray-border);
   border-radius: var(--radius-card);
   margin-bottom: 10px;
   overflow: hidden;
 }
 
 .verbeteDestacado {
-  border-left: 3px solid var(--teal);
+  box-shadow: 0 0 0 1px var(--teal-glow);
 }
 
 .verbeteHead {
@@ -113,10 +114,44 @@
 }
 
 .resumoTexto {
-  font-size: 13px;
+  font-size: 14.5px;
   color: var(--dark);
-  line-height: 1.6;
+  line-height: 1.65;
+  font-weight: 500;
 }
+
+.actionsRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.starBtn {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--gray-mid);
+  display: flex;
+  align-items: center;
+}
+.starBtnAtivo { color: #f59e0b; }
+
+.btnInstagram {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--gray-border);
+  background: var(--white);
+  color: var(--dark);
+  border-radius: 100px;
+  padding: 5px 13px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btnInstagram:hover { border-color: var(--teal); color: var(--teal); }
+.btnInstagram:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .statusIa {
   display: flex;

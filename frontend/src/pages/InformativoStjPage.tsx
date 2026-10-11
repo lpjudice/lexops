@@ -1,16 +1,24 @@
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { RefreshCw, Settings, AlertTriangle } from 'lucide-react'
+import { RefreshCw, Settings, AlertTriangle, Search, Star } from 'lucide-react'
 import { informativoStjApi } from '../api/informativoStj'
 import styles from './InformativoStjPage.module.css'
 
 export default function InformativoStjPage() {
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const [busca, setBusca] = useState('')
 
   const { data: edicoes = [], isLoading } = useQuery({
     queryKey: ['informativo-stj', 'edicoes'],
-    queryFn: () => informativoStjApi.listarEdicoes(),
+    queryFn: () => informativoStjApi.listarEdicoes(20),
+  })
+
+  const { data: resultadosBusca = [], isFetching: buscando } = useQuery({
+    queryKey: ['informativo-stj', 'busca', busca],
+    queryFn: () => informativoStjApi.buscar(busca),
+    enabled: busca.trim().length >= 2,
   })
 
   const sync = useMutation({
@@ -18,11 +26,16 @@ export default function InformativoStjPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['informativo-stj'] }),
   })
 
+  const mostrandoBusca = busca.trim().length >= 2
+
   return (
     <div>
       <div className={styles.header}>
         <span className={styles.headerTitle}>Informativo de Jurisprudência — STJ</span>
         <div className={styles.headerActions}>
+          <button className={styles.btn} onClick={() => navigate('/informativo-stj/favoritos')}>
+            <Star size={14} /> Favoritos
+          </button>
           <button className={styles.btn} onClick={() => navigate('/informativo-stj/config')}>
             <Settings size={14} /> Áreas de destaque
           </button>
@@ -31,10 +44,42 @@ export default function InformativoStjPage() {
             onClick={() => sync.mutate()}
             disabled={sync.isPending}
           >
-            <RefreshCw size={14} className={sync.isPending ? 'spin' : ''} />
+            <RefreshCw size={14} />
             {sync.isPending ? 'Sincronizando…' : 'Sincronizar agora'}
           </button>
         </div>
+      </div>
+
+      <div className={styles.searchBar}>
+        <Search size={15} className={styles.searchIcon} />
+        <input
+          className={styles.searchInput}
+          placeholder="Buscar em todos os informativos (não só os últimos 20)…"
+          value={busca}
+          onChange={(e) => setBusca(e.target.value)}
+        />
+        {mostrandoBusca && (
+          <div className={styles.searchResults}>
+            {buscando && <div className={styles.searchResultItem}>Buscando…</div>}
+            {!buscando && resultadosBusca.length === 0 && (
+              <div className={styles.searchResultItem}>Nenhum resultado para "{busca}".</div>
+            )}
+            {!buscando &&
+              resultadosBusca.map((item) => (
+                <div
+                  key={item.id}
+                  className={styles.searchResultItem}
+                  onClick={() => navigate(`/informativo-stj/${item.edicao_id}`)}
+                >
+                  <div className={styles.searchResultTitulo}>{item.titulo}</div>
+                  <div className={styles.searchResultTrecho}>
+                    [{item.ramo_direito}] {(item.resumo_tema_central || item.destaque_oficial || '').slice(0, 140)}
+                  </div>
+                </div>
+              ))}
+          </div>
+        )}
+        {!mostrandoBusca && <div className={styles.searchHint}>Mostrando os 20 informativos mais recentes abaixo.</div>}
       </div>
 
       {isLoading && <p className={styles.empty}>Carregando edições…</p>}
@@ -57,6 +102,7 @@ export default function InformativoStjPage() {
                 {e.data_publicacao ? new Date(e.data_publicacao + 'T00:00:00').toLocaleDateString('pt-BR') : '—'}
               </span>
             </div>
+            {e.resumo_edicao && <div className={styles.cardResumo}>{e.resumo_edicao}</div>}
             <div className={styles.cardMeta}>
               {e.total_destacados > 0 && (
                 <span className={`${styles.badge} ${styles.badgeDestacado}`}>

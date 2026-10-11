@@ -1,28 +1,40 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
+import { ArrowLeft, ChevronDown, ChevronRight, Loader2, Star, Camera } from 'lucide-react'
 import { informativoStjApi } from '../api/informativoStj'
 import type { InformativoStjItem } from '../api/informativoStj'
+import { ramoCor } from '../utils/ramoColor'
 import styles from './InformativoStjEdicaoPage.module.css'
 
 function Verbete({ item }: { item: InformativoStjItem }) {
   const [aberto, setAberto] = useState(false)
+  const [verTextoOriginal, setVerTextoOriginal] = useState(false)
   const qc = useQueryClient()
+  const cor = ramoCor(item.ramo_direito)
 
   const reprocessar = useMutation({
     mutationFn: () => informativoStjApi.reprocessarItem(item.id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['informativo-stj'] }),
   })
 
+  const favoritar = useMutation({
+    mutationFn: () => informativoStjApi.favoritar(item.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['informativo-stj'] }),
+  })
+
+  const forcarInstagram = useMutation({
+    mutationFn: () => informativoStjApi.forcarInstagram(item.id),
+  })
+
   return (
-    <div className={`${styles.verbete} ${item.destacado ? styles.verbeteDestacado : ''}`}>
+    <div className={`${styles.verbete} ${item.destacado ? styles.verbeteDestacado : ''}`} style={{ borderLeftColor: cor.fg }}>
       <div className={styles.verbeteHead} onClick={() => setAberto((v) => !v)}>
         <div className={styles.verbeteHeadLeft}>
           <div className={styles.verbeteTitulo}>{item.titulo}</div>
           <div className={styles.verbeteDestaqueOficial}>{item.destaque_oficial}</div>
           <div className={styles.verbeteMeta}>
-            <span className={`${styles.pill} ${item.destacado ? styles.pillDestacado : ''}`}>
+            <span className={styles.pill} style={{ background: cor.bg, color: cor.fg }}>
               {item.ramo_direito}
             </span>
             {item.destacado && <span className={`${styles.pill} ${styles.pillDestacado}`}>Destacado</span>}
@@ -71,14 +83,36 @@ function Verbete({ item }: { item: InformativoStjItem }) {
             </div>
           )}
 
+          <div className={styles.actionsRow}>
+            <button
+              className={styles.starBtn}
+              onClick={() => favoritar.mutate()}
+              disabled={favoritar.isPending}
+              title={item.favorito ? 'Remover dos favoritos' : 'Favoritar'}
+            >
+              <Star size={18} className={item.favorito ? styles.starBtnAtivo : ''} fill={item.favorito ? 'currentColor' : 'none'} />
+            </button>
+            <button className={styles.btnInstagram} onClick={() => forcarInstagram.mutate()} disabled={forcarInstagram.isPending}>
+              <Camera size={13} />
+              {forcarInstagram.isPending ? 'Gerando…' : 'Gerar post no Instagram'}
+            </button>
+            {forcarInstagram.isSuccess && <span style={{ fontSize: 12, color: 'var(--teal)' }}>Sugestão criada ✓</span>}
+            {forcarInstagram.isError && <span style={{ fontSize: 12, color: '#c0392b' }}>Falha ao gerar</span>}
+          </div>
+
           {item.texto_explicativo && (
-            <div>
-              <span className={styles.resumoLabel} style={{ color: 'var(--gray-mid)' }}>
-                Informações do inteiro teor (STJ)
-              </span>
-              <p className={styles.resumoTexto} style={{ color: 'var(--gray-mid)' }}>
-                {item.texto_explicativo}
-              </p>
+            <div style={{ marginTop: 12 }}>
+              <button
+                className={styles.btnReprocessar}
+                onClick={() => setVerTextoOriginal((v) => !v)}
+              >
+                {verTextoOriginal ? 'Ocultar' : 'Ver'} texto original do STJ
+              </button>
+              {verTextoOriginal && (
+                <p className={styles.resumoTexto} style={{ color: 'var(--gray-mid)', fontWeight: 400, fontSize: 12.5, marginTop: 8 }}>
+                  {item.texto_explicativo}
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -115,6 +149,11 @@ export default function InformativoStjEdicaoPage() {
         Informativo nº {edicao.numero}
         {edicao.data_publicacao && ` — ${new Date(edicao.data_publicacao + 'T00:00:00').toLocaleDateString('pt-BR')}`}
       </div>
+      {edicao.resumo_edicao && (
+        <p style={{ fontSize: 14, color: 'var(--dark)', marginTop: -8, marginBottom: 20, lineHeight: 1.6 }}>
+          {edicao.resumo_edicao}
+        </p>
+      )}
 
       {Object.entries(porOrgao).map(([orgao, itens]) => (
         <div key={orgao}>

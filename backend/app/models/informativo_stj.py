@@ -32,6 +32,10 @@ class InformativoStjEdicao(Base):
 
     url_origem: Mapped[str] = mapped_column(Text, nullable=False)
 
+    # Resumo ultra-curto (IA) do que tem de relevante nessa edição — usado na
+    # listagem para decidir se vale abrir, sem precisar ler item por item.
+    resumo_edicao: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # 'pendente' | 'ok' | 'erro_parsing'
     status_scraping: Mapped[str] = mapped_column(String(20), nullable=False, default="pendente")
     erro_scraping: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -83,6 +87,7 @@ class InformativoStjItem(Base):
     ordem: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     destacado: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    favorito: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     motivo_destaque: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # 'nao_aplicavel' | 'pendente' | 'processando' | 'ok' | 'erro'

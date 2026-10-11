@@ -18,6 +18,7 @@ export interface InformativoStjItem {
   legislacao_citada: string[]
   ordem: number
   destacado: boolean
+  favorito: boolean
   motivo_destaque?: string | null
   status_ia: StatusIa
   resumo_tema_central?: string | null
@@ -34,6 +35,7 @@ export interface InformativoStjEdicao {
   tipo: 'ordinaria' | 'extraordinaria'
   tema_extraordinario?: string | null
   url_origem: string
+  resumo_edicao?: string | null
   status_scraping: StatusScraping
   erro_scraping?: string | null
   scraped_em?: string | null
@@ -80,4 +82,16 @@ export const informativoStjApi = {
 
   sincronizarAgora: () =>
     api.post<SyncResponse>('/informativo-stj/sync', undefined, { timeout: 120000 }).then((r) => r.data),
+
+  buscar: (q: string) =>
+    api.get<InformativoStjItem[]>('/informativo-stj/busca', { params: { q } }).then((r) => r.data),
+
+  listarFavoritos: () =>
+    api.get<InformativoStjItem[]>('/informativo-stj/favoritos').then((r) => r.data),
+
+  favoritar: (itemId: string) =>
+    api.post<InformativoStjItem>(`/informativo-stj/itens/${itemId}/favoritar`).then((r) => r.data),
+
+  forcarInstagram: (itemId: string) =>
+    api.post<{ sugestao_id: string }>(`/informativo-stj/itens/${itemId}/forcar-instagram`, undefined, { timeout: 120000 }).then((r) => r.data),
 }
