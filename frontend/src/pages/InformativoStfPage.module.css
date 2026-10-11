@@ -252,3 +252,23 @@
     gap: 2px;
   }
 }
+
+.syncErro {
+  background: #fdecea;
+  color: #c0392b;
+  border: 1px solid #f5c6cb;
+  border-radius: var(--radius-card);
+  padding: 12px 16px;
+  font-size: 13px;
+  margin-bottom: 1rem;
+  line-height: 1.5;
+}
+
+.syncAviso {
+  background: var(--light);
+  color: var(--gray-mid);
+  border-radius: var(--radius-card);
+  padding: 10px 16px;
+  font-size: 13px;
+  margin-bottom: 1rem;
+}

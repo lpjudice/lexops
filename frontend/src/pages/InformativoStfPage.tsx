@@ -65,6 +65,13 @@ export default function InformativoStfPage() {
         </div>
       </div>
 
+      {sync.data?.erro && (
+        <div className={styles.syncErro}>{sync.data.erro}</div>
+      )}
+      {sync.isSuccess && !sync.data?.erro && sync.data?.edicoes_processadas === 0 && (
+        <div className={styles.syncAviso}>Nenhuma edição nova encontrada (já está tudo sincronizado até a última disponível).</div>
+      )}
+
       <div className={styles.searchBar}>
         <div className={styles.searchInputWrap}>
           <Search size={15} className={styles.searchIcon} />
