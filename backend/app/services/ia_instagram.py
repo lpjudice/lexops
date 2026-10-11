@@ -122,7 +122,7 @@ def _janela(dias: int) -> date:
     return date.today() - timedelta(days=dias)
 
 
-FONTES_VALIDAS = {"insights", "publicacoes", "andamentos", "pecas", "teses", "informativo_stj", "evergreen"}
+FONTES_VALIDAS = {"insights", "publicacoes", "andamentos", "pecas", "teses", "informativo_stj", "informativo_stf", "evergreen"}
 
 
 def coletar_contexto_semana(db: Session, fontes: set[str] | None = None) -> dict:
@@ -132,7 +132,7 @@ def coletar_contexto_semana(db: Session, fontes: set[str] | None = None) -> dict
     desselecionar 'insights' para forçar o Agente a buscar em outras fontes."""
     on = fontes if fontes else FONTES_VALIDAS
     ctx: dict = {"publicacoes": [], "andamentos": [], "pecas": [], "teses": [], "insights": [],
-                 "informativo_stj": [],
+                 "informativo_stj": [], "informativo_stf": [],
                  "evergreen": EVERGREEN_TEMAS if "evergreen" in on else []}
 
     # Publicações (Diário/DJEN/Recorte) dos últimos 7 dias
@@ -207,6 +207,22 @@ def coletar_contexto_semana(db: Session, fontes: set[str] | None = None) -> dict
         except Exception as exc:  # pragma: no cover
             logger.warning("[ig] falha ao coletar Informativo STJ: %s", exc)
 
+    # Informativo STF — mesma lógica do STJ
+    if "informativo_stf" in on:
+        try:
+            from app.services.scraping_informativo_stf import listar_candidatos as listar_candidatos_stf
+
+            for c in listar_candidatos_stf(db)[:15]:
+                ctx["informativo_stf"].append({
+                    "item_id": c["item_id"],
+                    "titulo": c["titulo"],
+                    "ramo": c["ramo_direito"],
+                    "tema_central": c.get("tema_central") or "",
+                    "ratio": c.get("ratio_decidendi") or "",
+                })
+        except Exception as exc:  # pragma: no cover
+            logger.warning("[ig] falha ao coletar Informativo STF: %s", exc)
+
     # Insights do site (Pílulas Jurídicas) — hoje pode vir vazio; resiliente
     if "insights" in on:
         try:
@@ -264,6 +280,8 @@ def _resumir_contexto(ctx: dict) -> str:
     bloco("Pílulas Jurídicas / Insights do site (fonte editorial rica)", ctx.get("insights", []),
           lambda i: f"[{i.get('area') or '—'}] {i.get('assunto') or ''}: {i.get('resumo', '')}")
     bloco("Julgados destacados do Informativo STJ (gancho jurisprudencial forte)", ctx.get("informativo_stj", []),
+          lambda j: f"[{j.get('ramo')}] {j.get('titulo')}: {j.get('tema_central') or j.get('ratio') or ''}")
+    bloco("Julgados destacados do Informativo STF (gancho jurisprudencial forte)", ctx.get("informativo_stf", []),
           lambda j: f"[{j.get('ramo')}] {j.get('titulo')}: {j.get('tema_central') or j.get('ratio') or ''}")
 
     partes.append("\n### Temas evergreen (use quando não houver novidade forte):")
@@ -391,6 +409,8 @@ def _classificar_fonte(ctx: dict) -> str:
         return "insight"
     if ctx.get("informativo_stj"):
         return "informativo_stj"
+    if ctx.get("informativo_stf"):
+        return "informativo_stf"
     if ctx.get("publicacoes"):
         return "publicacao"
     if ctx.get("andamentos"):
@@ -604,6 +624,61 @@ def gerar_sugestao_forcada_informativo_stj(db: Session, item_id) -> InstagramSug
         fonte_tipo="informativo_stj",
         fonte_ref=str(item.id),
         motivo_ia=post.get("motivo") or f"Forçado a partir do Informativo STJ: {item.titulo}",
+        status="sugerido",
+        custo_usd=custo,
+    )
+    db.add(sug)
+    db.flush()
+
+    item.instagram_sugestao_id = sug.id
+    item.instagram_gerado_em = datetime.now(timezone.utc)
+
+    db.commit()
+    db.refresh(sug)
+    return sug
+
+
+def gerar_sugestao_forcada_informativo_stf(db: Session, item_id) -> InstagramSugestao:
+    """"Forçar leitura": gera 1 sugestão de post AGORA, ancorada só nesse julgado do STF."""
+    from app.models.informativo_stf import InformativoStfItem
+
+    item = db.get(InformativoStfItem, item_id)
+    if not item:
+        raise ValueError(f"Item {item_id} não encontrado")
+
+    ctx = {
+        "publicacoes": [], "andamentos": [], "pecas": [], "teses": [], "insights": [],
+        "evergreen": [],
+        "informativo_stf": [{
+            "item_id": str(item.id),
+            "titulo": item.titulo,
+            "ramo": item.ramo_direito,
+            "tema_central": item.resumo_tema_central or item.destaque_oficial,
+            "ratio": item.resumo_ratio_decidendi or item.texto_explicativo or "",
+        }],
+    }
+    prompt = _build_prompt(ctx, quantidade=1, formato=None, evitar=_temas_recentes(db))
+    data, custo = _call_llm_json(prompt)
+
+    posts = data.get("posts") if isinstance(data, dict) else data
+    if not isinstance(posts, list) or not posts:
+        raise ValueError("Resposta da IA sem posts.")
+    post = posts[0]
+    slides = post.get("slides") or []
+    if not slides:
+        raise ValueError("IA não retornou slides.")
+
+    sug = InstagramSugestao(
+        titulo=(post.get("titulo") or post.get("tema") or item.titulo)[:255],
+        tema=(post.get("tema") or "")[:255],
+        formato="estatico" if post.get("formato") == "estatico" else "carrossel",
+        tema_capa=_capa_codigo(slides),
+        slides=slides,
+        legenda=post.get("legenda") or "",
+        hashtags=post.get("hashtags") or "",
+        fonte_tipo="informativo_stf",
+        fonte_ref=str(item.id),
+        motivo_ia=post.get("motivo") or f"Forçado a partir do Informativo STF: {item.titulo}",
         status="sugerido",
         custo_usd=custo,
     )

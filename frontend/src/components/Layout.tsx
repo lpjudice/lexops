@@ -32,6 +32,7 @@ import {
   Search,
   Wallet,
   BookOpen,
+  Library,
 } from 'lucide-react'
 import api from '../api/client'
 import { useAuth } from '../contexts/AuthContext'
@@ -92,6 +93,7 @@ const navGroups: NavGroup[] = [
     items: [
       { to: '/despacho', label: 'Despacho', Icon: Gavel },
       { to: '/informativo-stj', label: 'Informativo STJ', Icon: BookOpen },
+      { to: '/informativo-stf', label: 'Informativo STF', Icon: Library },
       { to: '/conselho-juridico', label: 'Conselho Jurídico', Icon: Landmark },
       { to: '/diario', label: 'Diário Oficial', Icon: Newspaper },
       { to: '/diario2', label: 'Recorte Digital OAB', Icon: Newspaper },
@@ -176,6 +178,9 @@ const PAGE_TITLES: Record<string, string> = {
   '/informativo-stj': 'Informativo STJ',
   '/informativo-stj/config': 'Informativo STJ — Configuração',
   '/informativo-stj/favoritos': 'Informativo STJ — Favoritos',
+  '/informativo-stf': 'Informativo STF',
+  '/informativo-stf/config': 'Informativo STF — Configuração',
+  '/informativo-stf/favoritos': 'Informativo STF — Favoritos',
   '/configuracoes': 'Configurações',
   '/carteira': 'Carteira',
   '/autos-ia': 'Autos IA',

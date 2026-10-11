@@ -1,0 +1,267 @@
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app.dependencies import get_current_user
+from app.models.informativo_stf import InformativoStfConfig, InformativoStfEdicao, InformativoStfItem
+from app.schemas.informativo_stf import (
+    CandidatoOut,
+    ConfigOut,
+    ConfigUpdate,
+    DestaqueResumoOut,
+    EdicaoDetalheOut,
+    EdicaoOut,
+    ItemOut,
+    SyncResponse,
+)
+from app.services import ia_informativo_stf, scraping_informativo_stf
+
+router = APIRouter(
+    prefix="/informativo-stf",
+    tags=["informativo-stf"],
+    dependencies=[Depends(get_current_user)],
+)
+
+
+_edicao_numero_cache: dict[uuid.UUID, int] = {}
+
+
+def _item_out(item: InformativoStfItem, db: Session) -> ItemOut:
+    out = ItemOut.model_validate(item)
+    numero = _edicao_numero_cache.get(item.edicao_id)
+    if numero is None:
+        edicao = db.get(InformativoStfEdicao, item.edicao_id)
+        numero = edicao.numero if edicao else None
+        if numero is not None:
+            _edicao_numero_cache[item.edicao_id] = numero
+    out.edicao_numero = numero
+
+    if item.instagram_sugestao_id:
+        from app.models.instagram import InstagramSugestao
+
+        sug = db.get(InstagramSugestao, item.instagram_sugestao_id)
+        out.instagram_status = sug.status if sug else None
+
+    return out
+
+
+def _get_config(db: Session) -> InformativoStfConfig:
+    config = db.get(InformativoStfConfig, 1)
+    if not config:
+        config = InformativoStfConfig(id=1, areas_selecionadas=[], keywords_livres=[])
+        db.add(config)
+        db.commit()
+    return config
+
+
+@router.get("/edicoes", response_model=list[EdicaoOut])
+def listar_edicoes(db: Session = Depends(get_db), limit: int = Query(20, le=100)):
+    edicoes = db.scalars(
+        select(InformativoStfEdicao).order_by(InformativoStfEdicao.numero.desc()).limit(limit)
+    ).all()
+    out = []
+    for edicao in edicoes:
+        total = db.scalar(
+            select(func.count()).select_from(InformativoStfItem).where(InformativoStfItem.edicao_id == edicao.id)
+        ) or 0
+        destacados = db.scalar(
+            select(func.count())
+            .select_from(InformativoStfItem)
+            .where(InformativoStfItem.edicao_id == edicao.id)
+            .where(InformativoStfItem.destacado.is_(True))
+        ) or 0
+        destaques = db.scalars(
+            select(InformativoStfItem)
+            .where(InformativoStfItem.edicao_id == edicao.id)
+            .where((InformativoStfItem.destacado.is_(True)) | (InformativoStfItem.favorito.is_(True)))
+            .where(InformativoStfItem.status_ia == "ok")
+            .order_by(InformativoStfItem.favorito.desc(), InformativoStfItem.ordem)
+            .limit(8)
+        ).all()
+
+        item = EdicaoOut.model_validate(edicao)
+        item.total_itens = total
+        item.total_destacados = destacados
+        item.destaques = [
+            DestaqueResumoOut(
+                id=d.id, titulo=d.titulo, resumo_tema_central=d.resumo_tema_central,
+                ramo_direito=d.ramo_direito, favorito=d.favorito,
+            )
+            for d in destaques
+        ]
+        out.append(item)
+    return out
+
+
+@router.get("/edicoes/{edicao_id}", response_model=EdicaoDetalheOut)
+def obter_edicao(edicao_id: uuid.UUID, db: Session = Depends(get_db)):
+    edicao = db.get(InformativoStfEdicao, edicao_id)
+    if not edicao:
+        raise HTTPException(status_code=404, detail="Edição não encontrada")
+    itens = db.scalars(
+        select(InformativoStfItem)
+        .where(InformativoStfItem.edicao_id == edicao_id)
+        .order_by(InformativoStfItem.orgao_julgador, InformativoStfItem.ordem)
+    ).all()
+    out = EdicaoDetalheOut.model_validate(edicao)
+    out.itens = [_item_out(i, db) for i in itens]
+    out.total_itens = len(itens)
+    out.total_destacados = sum(1 for i in itens if i.destacado)
+    return out
+
+
+@router.get("/itens", response_model=list[ItemOut])
+def listar_itens(
+    db: Session = Depends(get_db),
+    area: str | None = None,
+    destacado: bool | None = None,
+    status_ia: str | None = None,
+    q: str | None = None,
+    limit: int = Query(50, le=200),
+):
+    stmt = select(InformativoStfItem).order_by(InformativoStfItem.criado_em.desc())
+    if area:
+        stmt = stmt.where(InformativoStfItem.ramo_direito.ilike(f"%{area}%"))
+    if destacado is not None:
+        stmt = stmt.where(InformativoStfItem.destacado.is_(destacado))
+    if status_ia:
+        stmt = stmt.where(InformativoStfItem.status_ia == status_ia)
+    if q:
+        stmt = stmt.where(InformativoStfItem.titulo.ilike(f"%{q}%"))
+    itens = db.scalars(stmt.limit(limit)).all()
+    return [_item_out(i, db) for i in itens]
+
+
+@router.get("/config", response_model=ConfigOut)
+def obter_config(db: Session = Depends(get_db)):
+    return ConfigOut.model_validate(_get_config(db))
+
+
+@router.put("/config", response_model=ConfigOut)
+def atualizar_config(payload: ConfigUpdate, db: Session = Depends(get_db)):
+    config = _get_config(db)
+    config.areas_selecionadas = payload.areas_selecionadas
+    config.keywords_livres = payload.keywords_livres
+    db.commit()
+    return ConfigOut.model_validate(config)
+
+
+@router.post("/reclassificar")
+def reclassificar(db: Session = Depends(get_db)):
+    config = _get_config(db)
+    itens = db.scalars(select(InformativoStfItem)).all()
+    alterados = 0
+    for item in itens:
+        item_dados = {
+            "ramo_direito": item.ramo_direito,
+            "titulo": item.titulo,
+            "destaque_oficial": item.destaque_oficial,
+        }
+        destacado, motivo = scraping_informativo_stf.calcular_destaque(item_dados, config)
+        if destacado != item.destacado:
+            item.destacado = destacado
+            item.motivo_destaque = motivo
+            if destacado and item.status_ia == "nao_aplicavel":
+                item.status_ia = "pendente"
+            alterados += 1
+    db.commit()
+    return {"total_itens": len(itens), "alterados": alterados}
+
+
+@router.post("/itens/{item_id}/reprocessar", response_model=ItemOut)
+def reprocessar_item(item_id: uuid.UUID, db: Session = Depends(get_db)):
+    try:
+        item = ia_informativo_stf.processar_item(item_id, db, forcar=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _item_out(item, db)
+
+
+@router.post("/sync", response_model=SyncResponse)
+def sincronizar_agora(db: Session = Depends(get_db)):
+    resultado = scraping_informativo_stf.sincronizar_processar_e_notificar(db)
+    return SyncResponse(**resultado)
+
+
+@router.get("/candidatos", response_model=list[CandidatoOut])
+def listar_candidatos(db: Session = Depends(get_db)):
+    return scraping_informativo_stf.listar_candidatos(db)
+
+
+@router.get("/busca", response_model=list[ItemOut])
+def buscar(q: str = Query(..., min_length=2), db: Session = Depends(get_db)):
+    itens = scraping_informativo_stf.buscar_itens(db, q)
+    return [_item_out(i, db) for i in itens]
+
+
+@router.get("/favoritos", response_model=list[ItemOut])
+def listar_favoritos(db: Session = Depends(get_db)):
+    itens = scraping_informativo_stf.listar_favoritos(db)
+    return [_item_out(i, db) for i in itens]
+
+
+@router.post("/itens/{item_id}/favoritar", response_model=ItemOut)
+def favoritar_item(item_id: uuid.UUID, db: Session = Depends(get_db)):
+    try:
+        item = scraping_informativo_stf.toggle_favorito(item_id, db)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return _item_out(item, db)
+
+
+@router.post("/itens/{item_id}/forcar-instagram", response_model=ItemOut)
+def forcar_instagram(item_id: uuid.UUID, db: Session = Depends(get_db)):
+    from app.services import ia_instagram
+
+    try:
+        ia_instagram.gerar_sugestao_forcada_informativo_stf(db, item_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    item = db.get(InformativoStfItem, item_id)
+    return _item_out(item, db)
+
+
+@router.post("/reprocessar-tudo")
+def reprocessar_tudo(db: Session = Depends(get_db)):
+    """Reprocessa o resumo de IA de TODOS os itens já baixados (sem buscar edições novas)."""
+    itens = db.scalars(select(InformativoStfItem)).all()
+    ok = erro = 0
+    for item in itens:
+        try:
+            ia_informativo_stf.processar_item(item.id, db, forcar=True)
+            if item.status_ia == "ok":
+                ok += 1
+            else:
+                erro += 1
+        except Exception:
+            erro += 1
+    return {"total": len(itens), "ok": ok, "erro": erro}
+
+
+@router.post("/itens/{item_id}/enviar-email")
+def enviar_email_item(item_id: uuid.UUID, payload: dict | None = None, db: Session = Depends(get_db)):
+    from app.services import informativo_stf_email
+
+    item = db.get(InformativoStfItem, item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item não encontrado")
+    destinatario = (payload or {}).get("destinatario") or None
+    edicao = db.get(InformativoStfEdicao, item.edicao_id)
+    try:
+        informativo_stf_email.enviar_email_item(item, destinatario, edicao)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Falha ao enviar e-mail: {exc}")
+    return {"enviado_para": destinatario or informativo_stf_email.DESTINATARIO}
+
+
+@router.post("/edicoes/{numero}/resync")
+def resync_edicao(numero: int, db: Session = Depends(get_db)):
+    """Rebaixa/atualiza metadados (ex.: data) de uma edição já existente, sem duplicar itens."""
+    try:
+        resultado = scraping_informativo_stf.sincronizar_edicao(numero, db)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Falha ao resincronizar: {exc}")
+    return resultado
