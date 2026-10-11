@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ChevronDown, ChevronRight, Loader2, Star, Camera, CheckCircle2, Mail, X } from 'lucide-react'
+import { ArrowLeft, ChevronDown, ChevronRight, Loader2, Star, Camera, CheckCircle2, Mail, X, Sparkles } from 'lucide-react'
 import { informativoStjApi } from '../api/informativoStj'
 import type { InformativoStjItem } from '../api/informativoStj'
 import { ramoCor } from '../utils/ramoColor'
@@ -14,39 +15,65 @@ const INSTAGRAM_STATUS_LABEL: Record<string, string> = {
   publicado: 'Instagram: publicado',
 }
 
-function EmailPopover({ itemId, onClose }: { itemId: string; onClose: () => void }) {
+function EmailPopover({
+  itemId,
+  anchorRect,
+  onClose,
+}: {
+  itemId: string
+  anchorRect: DOMRect
+  onClose: () => void
+}) {
   const [destinatario, setDestinatario] = useState('')
   const enviar = useMutation({
     mutationFn: (email?: string) => informativoStjApi.enviarEmailItem(itemId, email),
   })
 
-  return (
-    <div className={styles.emailPopover} onClick={(e) => e.stopPropagation()}>
-      <div className={styles.emailPopoverHeader}>
-        <span>Enviar por e-mail</span>
-        <button className={styles.emailPopoverClose} onClick={onClose}><X size={14} /></button>
-      </div>
-      <button className={styles.emailPopoverBtn} onClick={() => enviar.mutate(undefined)} disabled={enviar.isPending}>
-        Enviar para o meu e-mail
-      </button>
-      <div className={styles.emailPopoverRow}>
-        <input
-          className={styles.emailPopoverInput}
-          placeholder="ou outro e-mail…"
-          value={destinatario}
-          onChange={(e) => setDestinatario(e.target.value)}
-        />
-        <button
-          className={styles.emailPopoverBtn}
-          onClick={() => destinatario.trim() && enviar.mutate(destinatario.trim())}
-          disabled={enviar.isPending || !destinatario.trim()}
-        >
-          Enviar
+  const largura = 260
+  const margem = 8
+  let left = anchorRect.left
+  if (left + largura + margem > window.innerWidth) left = window.innerWidth - largura - margem
+  if (left < margem) left = margem
+
+  const espacoAbaixo = window.innerHeight - anchorRect.bottom
+  const abrirParaCima = espacoAbaixo < 220
+  const top = abrirParaCima ? anchorRect.top - 8 : anchorRect.bottom + 8
+
+  return createPortal(
+    <>
+      <div className={styles.emailBackdrop} onClick={onClose} />
+      <div
+        className={styles.emailPopover}
+        style={{ left, top, transform: abrirParaCima ? 'translateY(-100%)' : undefined }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className={styles.emailPopoverHeader}>
+          <span>Enviar por e-mail</span>
+          <button className={styles.emailPopoverClose} onClick={onClose}><X size={14} /></button>
+        </div>
+        <button className={styles.emailPopoverBtn} onClick={() => enviar.mutate(undefined)} disabled={enviar.isPending}>
+          Enviar para o meu e-mail
         </button>
+        <div className={styles.emailPopoverRow}>
+          <input
+            className={styles.emailPopoverInput}
+            placeholder="ou outro e-mail…"
+            value={destinatario}
+            onChange={(e) => setDestinatario(e.target.value)}
+          />
+          <button
+            className={styles.emailPopoverBtn}
+            onClick={() => destinatario.trim() && enviar.mutate(destinatario.trim())}
+            disabled={enviar.isPending || !destinatario.trim()}
+          >
+            Enviar
+          </button>
+        </div>
+        {enviar.isSuccess && <div className={styles.emailPopoverOk}>Enviado ✓</div>}
+        {enviar.isError && <div className={styles.emailPopoverErro}>Falha ao enviar</div>}
       </div>
-      {enviar.isSuccess && <div className={styles.emailPopoverOk}>Enviado ✓</div>}
-      {enviar.isError && <div className={styles.emailPopoverErro}>Falha ao enviar</div>}
-    </div>
+    </>,
+    document.body,
   )
 }
 
@@ -54,7 +81,8 @@ function Verbete({ item, destacarItem }: { item: InformativoStjItem; destacarIte
   const [aberto, setAberto] = useState(false)
   const [verTextoOriginal, setVerTextoOriginal] = useState(false)
   const [verLeigo, setVerLeigo] = useState(false)
-  const [emailAberto, setEmailAberto] = useState(false)
+  const [emailAnchor, setEmailAnchor] = useState<DOMRect | null>(null)
+  const emailBtnRef = useRef<HTMLButtonElement>(null)
   const ref = useRef<HTMLDivElement>(null)
   const qc = useQueryClient()
   const cor = ramoCor(item.ramo_direito)
@@ -85,7 +113,7 @@ function Verbete({ item, destacarItem }: { item: InformativoStjItem; destacarIte
   const instagramLabel = item.instagram_status ? INSTAGRAM_STATUS_LABEL[item.instagram_status] : null
   const instagramRejeitado = item.instagram_status === 'rejeitado'
 
-  const temResumoIa = item.destacado && item.status_ia === 'ok' && !!item.resumo_tema_central
+  const temResumoIa = item.status_ia === 'ok' && !!item.resumo_tema_central
   const headline = temResumoIa ? item.resumo_tema_central : item.destaque_oficial
 
   return (
@@ -132,9 +160,9 @@ function Verbete({ item, destacarItem }: { item: InformativoStjItem; destacarIte
 
       {aberto && (
         <div className={styles.verbeteBody}>
-          {item.destacado && item.status_ia === 'ok' && (
+          {item.status_ia === 'ok' && (
             <div className={styles.resumoBloco}>
-              <span className={styles.resumoLabel}>Ratio decidendi — por que o STJ decidiu assim</span>
+              <span className={styles.resumoLabel}>Ratio decidendi (gerado por IA) — por que o STJ decidiu assim</span>
               <p className={styles.resumoTexto}>{item.resumo_ratio_decidendi}</p>
 
               {item.resumo_leigo && (
@@ -148,15 +176,19 @@ function Verbete({ item, destacarItem }: { item: InformativoStjItem; destacarIte
             </div>
           )}
 
-          {item.destacado && item.status_ia !== 'ok' && (
+          {item.status_ia !== 'ok' && (
             <div className={styles.statusIa}>
               {item.status_ia === 'processando' && (
                 <>
                   <Loader2 size={14} className="spin" /> Gerando resumo estruturado…
                 </>
               )}
-              {item.status_ia === 'pendente' && <>Resumo estruturado ainda não processado.</>}
+              {(item.status_ia === 'pendente' || item.status_ia === 'nao_aplicavel') && <>Resumo de IA ainda não processado.</>}
               {item.status_ia === 'erro' && <>Erro ao gerar resumo: {item.erro_ia}</>}
+              <button className={styles.btnReprocessar} onClick={() => reprocessar.mutate()} disabled={reprocessar.isPending}>
+                <Sparkles size={12} />
+                {reprocessar.isPending ? 'Processando…' : 'Processar com IA'}
+              </button>
             </div>
           )}
 
@@ -170,14 +202,19 @@ function Verbete({ item, destacarItem }: { item: InformativoStjItem; destacarIte
               <Star size={18} className={item.favorito ? styles.starBtnAtivo : ''} fill={item.favorito ? 'currentColor' : 'none'} />
             </button>
 
-            <div style={{ position: 'relative' }}>
-              <button className={styles.starBtn} onClick={() => setEmailAberto((v) => !v)} title="Enviar por e-mail">
-                <Mail size={17} />
-              </button>
-              {emailAberto && <EmailPopover itemId={item.id} onClose={() => setEmailAberto(false)} />}
-            </div>
+            <button
+              ref={emailBtnRef}
+              className={styles.starBtn}
+              onClick={() => setEmailAnchor(emailAnchor ? null : emailBtnRef.current!.getBoundingClientRect())}
+              title="Enviar por e-mail"
+            >
+              <Mail size={17} />
+            </button>
+            {emailAnchor && (
+              <EmailPopover itemId={item.id} anchorRect={emailAnchor} onClose={() => setEmailAnchor(null)} />
+            )}
 
-            {item.destacado && (
+            {item.status_ia === 'ok' && (
               <button className={styles.btnReprocessar} onClick={() => reprocessar.mutate()} disabled={reprocessar.isPending}>
                 {reprocessar.isPending ? 'Processando…' : 'Reprocessar resumo'}
               </button>
@@ -251,11 +288,6 @@ export default function InformativoStjEdicaoPage() {
         Informativo nº {edicao.numero}
         {edicao.data_publicacao && ` — ${new Date(edicao.data_publicacao + 'T00:00:00').toLocaleDateString('pt-BR')}`}
       </div>
-      {edicao.resumo_edicao && (
-        <p style={{ fontSize: 14, color: 'var(--dark)', marginTop: -8, marginBottom: 16, lineHeight: 1.6 }}>
-          {edicao.resumo_edicao}
-        </p>
-      )}
 
       {todosRamos.length > 1 && (
         <div className={styles.filtroChips}>

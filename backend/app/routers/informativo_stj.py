@@ -11,6 +11,7 @@ from app.schemas.informativo_stj import (
     CandidatoOut,
     ConfigOut,
     ConfigUpdate,
+    DestaqueResumoOut,
     EdicaoDetalheOut,
     EdicaoOut,
     ItemOut,
@@ -72,9 +73,25 @@ def listar_edicoes(db: Session = Depends(get_db), limit: int = Query(20, le=100)
             .where(InformativoStjItem.edicao_id == edicao.id)
             .where(InformativoStjItem.destacado.is_(True))
         ) or 0
+        destaques = db.scalars(
+            select(InformativoStjItem)
+            .where(InformativoStjItem.edicao_id == edicao.id)
+            .where((InformativoStjItem.destacado.is_(True)) | (InformativoStjItem.favorito.is_(True)))
+            .where(InformativoStjItem.status_ia == "ok")
+            .order_by(InformativoStjItem.favorito.desc(), InformativoStjItem.ordem)
+            .limit(8)
+        ).all()
+
         item = EdicaoOut.model_validate(edicao)
         item.total_itens = total
         item.total_destacados = destacados
+        item.destaques = [
+            DestaqueResumoOut(
+                id=d.id, titulo=d.titulo, resumo_tema_central=d.resumo_tema_central,
+                ramo_direito=d.ramo_direito, favorito=d.favorito,
+            )
+            for d in destaques
+        ]
         out.append(item)
     return out
 
@@ -209,10 +226,8 @@ def forcar_instagram(item_id: uuid.UUID, db: Session = Depends(get_db)):
 
 @router.post("/reprocessar-tudo")
 def reprocessar_tudo(db: Session = Depends(get_db)):
-    """Reprocessa o resumo de IA de TODOS os destacados já baixados (sem buscar edições novas)."""
-    itens = db.scalars(
-        select(InformativoStjItem).where(InformativoStjItem.destacado.is_(True))
-    ).all()
+    """Reprocessa o resumo de IA de TODOS os itens já baixados (sem buscar edições novas)."""
+    itens = db.scalars(select(InformativoStjItem)).all()
     ok = erro = 0
     for item in itens:
         try:
@@ -240,3 +255,13 @@ def enviar_email_item(item_id: uuid.UUID, payload: dict | None = None, db: Sessi
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Falha ao enviar e-mail: {exc}")
     return {"enviado_para": destinatario or informativo_stj_email.DESTINATARIO}
+
+
+@router.post("/edicoes/{numero}/resync")
+def resync_edicao(numero: int, db: Session = Depends(get_db)):
+    """Rebaixa/atualiza metadados (ex.: data) de uma edição já existente, sem duplicar itens."""
+    try:
+        resultado = scraping_informativo_stj.sincronizar_edicao(numero, db)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Falha ao resincronizar: {exc}")
+    return resultado

@@ -33,6 +33,14 @@ export interface InformativoStjItem {
   edicao_numero?: number | null
 }
 
+export interface DestaqueResumo {
+  id: string
+  titulo: string
+  resumo_tema_central?: string | null
+  ramo_direito: string
+  favorito: boolean
+}
+
 export interface InformativoStjEdicao {
   id: string
   numero: number
@@ -46,6 +54,7 @@ export interface InformativoStjEdicao {
   scraped_em?: string | null
   total_itens: number
   total_destacados: number
+  destaques: DestaqueResumo[]
 }
 
 export interface InformativoStjEdicaoDetalhe extends InformativoStjEdicao {

@@ -82,7 +82,8 @@ def _normalizar(txt: str) -> str:
 
 
 def _parse_data_extenso(txt: str) -> date | None:
-    m = re.search(r"(\d{1,2})\s+de\s+(\w+)\s+de\s+(\d{4})", txt, re.IGNORECASE)
+    # Dia 1 vem como "1º" (ordinal) — ex. "1º de setembro de 2026" (edição 899).
+    m = re.search(r"(\d{1,2})[ºo°]?\s+de\s+(\w+)\s+de\s+(\d{4})", txt, re.IGNORECASE)
     if not m:
         return None
     dia, mes_nome, ano = m.groups()
@@ -338,7 +339,7 @@ def sincronizar_edicao(numero: int, db: Session) -> dict:
             edicao_id=edicao.id,
             destacado=destacado,
             motivo_destaque=motivo,
-            status_ia="pendente" if destacado else "nao_aplicavel",
+            status_ia="pendente",  # resumo de IA roda em TODOS os itens, não só destacados
             **item_dados,
         )
         db.add(item)
@@ -347,14 +348,6 @@ def sincronizar_edicao(numero: int, db: Session) -> dict:
             destacados += 1
 
     db.commit()
-
-    if inseridos > 0:
-        try:
-            from app.services.ia_informativo_stj import gerar_resumo_edicao
-
-            gerar_resumo_edicao(edicao.id, db)
-        except Exception:
-            logger.warning("Informativo STJ: falha ao gerar resumo da edição %s", edicao.numero, exc_info=True)
 
     return {
         "edicao_id": edicao.id,

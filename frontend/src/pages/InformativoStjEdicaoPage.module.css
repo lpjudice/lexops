@@ -260,17 +260,22 @@
 }
 .processoLinha a { color: var(--teal); }
 
+.emailBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+}
+
 .emailPopover {
-  position: absolute;
-  top: 28px;
-  left: 0;
-  z-index: 20;
+  position: fixed;
+  z-index: 1000;
   background: var(--white);
   border: 1px solid var(--gray-border);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card-hover);
   padding: 12px;
   width: 260px;
+  max-width: calc(100vw - 16px);
 }
 
 .emailPopoverHeader {
@@ -335,4 +340,11 @@
   font-size: 11.5px;
   color: #c0392b;
   margin-top: 6px;
+}
+
+@media (max-width: 640px) {
+  .verbeteHeadline { font-size: 16px; }
+  .actionsRow { flex-wrap: wrap; row-gap: 8px; }
+  .filtroChips { gap: 6px; }
+  .filtroChip { font-size: 11px; padding: 4px 10px; }
 }
