@@ -65,6 +65,10 @@ export interface InformativoStfConfig {
   areas_selecionadas: string[]
   keywords_livres: string[]
   atualizado_em: string
+  sync_local_solicitado_em?: string | null
+  sync_local_ultimo_em?: string | null
+  sync_local_ultimo_status?: 'ok' | 'erro' | null
+  sync_local_ultima_mensagem?: string | null
 }
 
 export interface SyncResponse {
@@ -114,4 +118,7 @@ export const informativoStfApi = {
 
   enviarEmailItem: (itemId: string, destinatario?: string) =>
     api.post<{ enviado_para: string }>(`/informativo-stf/itens/${itemId}/enviar-email`, { destinatario }).then((r) => r.data),
+
+  solicitarSyncLocal: () =>
+    api.post<InformativoStfConfig>('/informativo-stf/local-sync/solicitar').then((r) => r.data),
 }

@@ -4,6 +4,7 @@ __pycache__/
 venv/
 *.egg-info/
 .env
+.env.production
 uploads/*
 !uploads/.gitkeep
 google_tokens.json

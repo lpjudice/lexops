@@ -149,6 +149,19 @@ def atualizar_config(payload: ConfigUpdate, db: Session = Depends(get_db)):
     return ConfigOut.model_validate(config)
 
 
+@router.post("/local-sync/solicitar", response_model=ConfigOut)
+def solicitar_sync_local(db: Session = Depends(get_db)):
+    """O site do STF bloqueia o IP do servidor — por isso a sincronização real
+    roda num script local (Mac do usuário, via launchd), que faz polling deste
+    campo. Este endpoint só grava o pedido; quem executa é o script local."""
+    from datetime import datetime, timezone
+
+    config = _get_config(db)
+    config.sync_local_solicitado_em = datetime.now(timezone.utc)
+    db.commit()
+    return ConfigOut.model_validate(config)
+
+
 @router.post("/reclassificar")
 def reclassificar(db: Session = Depends(get_db)):
     config = _get_config(db)

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { RefreshCw, Settings, AlertTriangle, Search, Star, Sparkles } from 'lucide-react'
+import { Settings, AlertTriangle, Search, Star, Sparkles, Monitor, CheckCircle2, Clock } from 'lucide-react'
 import { informativoStfApi } from '../api/informativoStf'
 import { ramoCor } from '../utils/ramoColor'
 import styles from './InformativoStfPage.module.css'
@@ -22,9 +22,14 @@ export default function InformativoStfPage() {
     enabled: busca.trim().length >= 2,
   })
 
-  const sync = useMutation({
-    mutationFn: () => informativoStfApi.sincronizarAgora(),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['informativo-stf'] }),
+  const { data: config } = useQuery({
+    queryKey: ['informativo-stf', 'config'],
+    queryFn: () => informativoStfApi.getConfig(),
+  })
+
+  const solicitarSyncLocal = useMutation({
+    mutationFn: () => informativoStfApi.solicitarSyncLocal(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['informativo-stf', 'config'] }),
   })
 
   const reprocessarTudo = useMutation({
@@ -56,20 +61,40 @@ export default function InformativoStfPage() {
           </button>
           <button
             className={`${styles.btn} ${styles.btnPrimary}`}
-            onClick={() => sync.mutate()}
-            disabled={sync.isPending}
+            onClick={() => solicitarSyncLocal.mutate()}
+            disabled={solicitarSyncLocal.isPending}
+            title="O site do STF bloqueia o servidor — a sincronização real roda num script no seu computador, que verifica este pedido em até 30 min"
           >
-            <RefreshCw size={14} />
-            {sync.isPending ? 'Sincronizando…' : 'Sincronizar agora'}
+            <Monitor size={14} />
+            {solicitarSyncLocal.isPending ? 'Enviando pedido…' : 'Rodar sincronização agora'}
           </button>
         </div>
       </div>
 
-      {sync.data?.erro && (
-        <div className={styles.syncErro}>{sync.data.erro}</div>
+      {solicitarSyncLocal.isSuccess && (
+        <div className={styles.syncAviso}>
+          <Clock size={13} /> Pedido enviado — seu computador vai buscar em até 30 min (se estiver ligado e com o script rodando).
+        </div>
       )}
-      {sync.isSuccess && !sync.data?.erro && sync.data?.edicoes_processadas === 0 && (
-        <div className={styles.syncAviso}>Nenhuma edição nova encontrada (já está tudo sincronizado até a última disponível).</div>
+
+      {config && (config.sync_local_ultimo_em || config.sync_local_solicitado_em) && (
+        <div className={config.sync_local_ultimo_status === 'erro' ? styles.syncErro : styles.syncStatus}>
+          {config.sync_local_ultimo_status === 'erro' ? (
+            <>
+              <AlertTriangle size={13} /> Última sincronização local falhou ({new Date(config.sync_local_ultimo_em!).toLocaleString('pt-BR')}):{' '}
+              {config.sync_local_ultima_mensagem}
+            </>
+          ) : config.sync_local_ultimo_em ? (
+            <>
+              <CheckCircle2 size={13} /> Última sincronização local: {new Date(config.sync_local_ultimo_em).toLocaleString('pt-BR')}
+              {config.sync_local_ultima_mensagem ? ` — ${config.sync_local_ultima_mensagem}` : ''}
+            </>
+          ) : (
+            <>
+              <Clock size={13} /> Pedido pendente desde {new Date(config.sync_local_solicitado_em!).toLocaleString('pt-BR')} — aguardando seu computador.
+            </>
+          )}
+        </div>
       )}
 
       <div className={styles.searchBar}>

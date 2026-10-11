@@ -112,3 +112,13 @@ class InformativoStfConfig(Base):
     atualizado_em: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+    # Sincronização local (o site do STF bloqueia o IP do servidor — Fly.io —
+    # mas não a rede residencial/doméstica; um script roda no Mac do usuário
+    # via launchd e grava direto no banco). Esses campos conectam o botão
+    # "Rodar agora" (web) ao script local, que faz polling.
+    sync_local_solicitado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sync_local_ultimo_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # 'ok' | 'erro'
+    sync_local_ultimo_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    sync_local_ultima_mensagem: Mapped[str | None] = mapped_column(Text, nullable=True)
