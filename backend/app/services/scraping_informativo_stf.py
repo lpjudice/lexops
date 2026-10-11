@@ -398,6 +398,7 @@ def sincronizar_novas_edicoes(db: Session, max_edicoes: int = 5) -> dict:
     proximo = (ultimo_numero or (NUMERO_SEMENTE - 1)) + 1
 
     resultados = []
+    erro: str | None = None
     numero = proximo
     while len(resultados) < max_edicoes:
         try:
@@ -406,13 +407,15 @@ def sincronizar_novas_edicoes(db: Session, max_edicoes: int = 5) -> dict:
             if exc.response.status_code == 404:
                 break  # edição ainda não publicada — para de sondar
             logger.warning("Informativo STF: erro HTTP ao sondar edição %s", numero, exc_info=True)
+            erro = f"HTTP {exc.response.status_code} ao buscar edição {numero} ({exc.request.url.host}) — provável bloqueio de IP/WAF do site do STF para servidores de datacenter."
             break
-        except httpx.HTTPError:
+        except httpx.HTTPError as exc:
             logger.warning("Informativo STF: falha de rede ao sondar edição %s", numero, exc_info=True)
+            erro = f"Falha de rede ao buscar edição {numero}: {exc}"
             break
         numero += 1
 
-    return {"edicoes_processadas": len(resultados), "detalhe": resultados}
+    return {"edicoes_processadas": len(resultados), "detalhe": resultados, "erro": erro}
 
 
 def sincronizar_processar_e_notificar(db: Session) -> dict:
