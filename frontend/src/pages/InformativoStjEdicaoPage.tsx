@@ -27,18 +27,21 @@ function Verbete({ item }: { item: InformativoStjItem }) {
     mutationFn: () => informativoStjApi.forcarInstagram(item.id),
   })
 
+  const temResumoIa = item.destacado && item.status_ia === 'ok' && !!item.resumo_tema_central
+  const headline = temResumoIa ? item.resumo_tema_central : item.destaque_oficial
+
   return (
     <div className={`${styles.verbete} ${item.destacado ? styles.verbeteDestacado : ''}`} style={{ borderLeftColor: cor.fg }}>
       <div className={styles.verbeteHead} onClick={() => setAberto((v) => !v)}>
         <div className={styles.verbeteHeadLeft}>
-          <div className={styles.verbeteTitulo}>{item.titulo}</div>
-          <div className={styles.verbeteDestaqueOficial}>{item.destaque_oficial}</div>
           <div className={styles.verbeteMeta}>
             <span className={styles.pill} style={{ background: cor.bg, color: cor.fg }}>
               {item.ramo_direito}
             </span>
             {item.destacado && <span className={`${styles.pill} ${styles.pillDestacado}`}>Destacado</span>}
           </div>
+          <div className={styles.verbeteHeadline}>{headline}</div>
+          <div className={styles.verbeteTitulo}>{item.titulo}</div>
           {item.processo_numero && (
             <div className={styles.processoLinha}>
               {item.processo_url ? (
@@ -59,11 +62,7 @@ function Verbete({ item }: { item: InformativoStjItem }) {
         <div className={styles.verbeteBody}>
           {item.destacado && item.status_ia === 'ok' && (
             <div className={styles.resumoBloco}>
-              <span className={styles.resumoLabel}>Tema central</span>
-              <p className={styles.resumoTexto}>{item.resumo_tema_central}</p>
-              <span className={styles.resumoLabel} style={{ marginTop: 10, display: 'block' }}>
-                Ratio decidendi
-              </span>
+              <span className={styles.resumoLabel}>Ratio decidendi — por que o STJ decidiu assim</span>
               <p className={styles.resumoTexto}>{item.resumo_ratio_decidendi}</p>
             </div>
           )}

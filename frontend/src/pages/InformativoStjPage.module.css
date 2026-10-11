@@ -137,11 +137,14 @@
 }
 
 .cardResumo {
-  font-size: 13.5px;
-  color: var(--dark);
-  margin-top: 6px;
-  line-height: 1.5;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--gray-mid);
+  margin-top: 5px;
+  line-height: 1.4;
 }
+.cardResumo::before { content: '" '; }
+.cardResumo::after { content: ' "'; }
 
 .cardMeta {
   display: flex;
