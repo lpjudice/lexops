@@ -405,6 +405,21 @@ def _sync_informativo_stj() -> None:
         logger.warning("Scheduler: falha na sincronização automática do Informativo STJ: %s", exc)
 
 
+def _sync_informativo_stf() -> None:
+    try:
+        from app.database import SessionLocal
+        from app.services import scraping_informativo_stf
+
+        db = SessionLocal()
+        try:
+            resultado = scraping_informativo_stf.sincronizar_processar_e_notificar(db)
+            logger.info("Scheduler: Informativo STF sincronizado — %s", resultado)
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.warning("Scheduler: falha na sincronização automática do Informativo STF: %s", exc)
+
+
 def _enviar_lembretes_reembolso() -> None:
     try:
         from app.database import SessionLocal
@@ -887,6 +902,13 @@ def start_scheduler() -> None:
         _sync_informativo_stj,
         trigger=CronTrigger(day_of_week="mon", hour=12, minute=0, timezone="America/Sao_Paulo"),
         id="sync_informativo_stj",
+        replace_existing=True,
+    )
+    # Informativo STF: semanal, segunda 13h (1h após o STJ, evita concorrência).
+    scheduler.add_job(
+        _sync_informativo_stf,
+        trigger=CronTrigger(day_of_week="mon", hour=13, minute=0, timezone="America/Sao_Paulo"),
+        id="sync_informativo_stf",
         replace_existing=True,
     )
     # Recorte Digital OAB (Diário 2 via Gmail): 07h/09h/11h/15h seg-sex.

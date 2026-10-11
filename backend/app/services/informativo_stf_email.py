@@ -1,0 +1,109 @@
+"""E-mail de aviso de novos destaques do Informativo STF.
+
+Mesmo estilo visual (teal, cartão branco, tabela de detalhes) do aviso de
+lembretes de prazo em app/services/prazo_lembretes.py.
+"""
+
+from __future__ import annotations
+
+import html
+
+from app.config import settings
+from app.models.informativo_stf import InformativoStfEdicao, InformativoStfItem
+
+DESTINATARIO = "lucasjudice@gmail.com"
+
+
+def _linha_item(item: InformativoStfItem) -> str:
+    frontend = (settings.frontend_url or "").rstrip("/")
+    link = f"{frontend}/informativo-stf/{item.edicao_id}" if frontend else "#"
+    resumo = item.resumo_tema_central or item.destaque_oficial
+    return f"""
+    <div style="border-left:3px solid #0d9488;padding:10px 14px;margin-bottom:10px;background:#f0fdfa">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#0d9488;letter-spacing:.04em">
+        {html.escape(item.ramo_direito)}
+      </div>
+      <div style="font-size:14px;font-weight:600;color:#111827;margin-top:2px">{html.escape(item.titulo)}</div>
+      <div style="font-size:13px;color:#374151;margin-top:4px;line-height:1.5">{html.escape(resumo or '')}</div>
+      <a href="{html.escape(link)}" style="font-size:12px;color:#0d9488">Abrir no sistema →</a>
+    </div>
+    """
+
+
+def corpo_html(edicao: InformativoStfEdicao, itens_destacados: list[InformativoStfItem]) -> str:
+    itens_html = "".join(_linha_item(i) for i in itens_destacados)
+    frontend = (settings.frontend_url or "").rstrip("/")
+    link_edicao = f"{frontend}/informativo-stf/{edicao.id}" if frontend else "#"
+
+    return f"""<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="UTF-8" /></head>
+<body style="margin:0;padding:24px;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif">
+  <div style="max-width:680px;margin:0 auto;background:#ffffff;border-radius:10px;padding:24px">
+    <div style="border-left:4px solid #0d9488;padding-left:12px;margin-bottom:20px">
+      <div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#0d9488;font-weight:700">
+        Informativo STF nº {edicao.numero}
+      </div>
+      <div style="font-size:20px;font-weight:700;color:#111827;margin-top:4px">
+        {len(itens_destacados)} julgado(s) destacado(s) nesta edição
+      </div>
+      
+    </div>
+
+    {itens_html}
+
+    <p style="margin-top:24px">
+      <a href="{html.escape(link_edicao)}" style="background:#0d9488;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;font-size:13px;font-weight:600">
+        Abrir edição completa
+      </a>
+    </p>
+  </div>
+</body></html>"""
+
+
+def enviar_email_destaques(edicao: InformativoStfEdicao, itens_destacados: list[InformativoStfItem]) -> None:
+    if not itens_destacados:
+        return
+    from app.services.email_service import _send_via_gmail_oauth
+
+    assunto = f"Informativo STF nº {edicao.numero} — {len(itens_destacados)} destaque(s)"
+    html_msg = corpo_html(edicao, itens_destacados)
+    _send_via_gmail_oauth(DESTINATARIO, assunto, html_msg)
+
+
+def corpo_html_item(item: InformativoStfItem, edicao: InformativoStfEdicao | None) -> str:
+    frontend = (settings.frontend_url or "").rstrip("/")
+    link = f"{frontend}/informativo-stf/{item.edicao_id}?item={item.id}" if frontend else "#"
+    headline = item.resumo_tema_central or item.destaque_oficial
+    bloco_ratio = (
+        f"""<div style="margin-top:14px"><div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#0d9488">Ratio decidendi</div>
+        <p style="font-size:13px;color:#374151;line-height:1.6;margin:4px 0 0">{html.escape(item.resumo_ratio_decidendi)}</p></div>"""
+        if item.resumo_ratio_decidendi else ""
+    )
+
+    return f"""<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="UTF-8" /></head>
+<body style="margin:0;padding:24px;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif">
+  <div style="max-width:680px;margin:0 auto;background:#ffffff;border-radius:10px;padding:24px">
+    <div style="border-left:4px solid #0d9488;padding-left:12px;margin-bottom:16px">
+      <div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#0d9488;font-weight:700">
+        {html.escape(item.ramo_direito)} {f'· Informativo nº {edicao.numero}' if edicao else ''}
+      </div>
+      <div style="font-size:19px;font-weight:700;color:#111827;margin-top:4px;line-height:1.4">{html.escape(headline or '')}</div>
+      <div style="font-size:12.5px;color:#6b7280;margin-top:4px">{html.escape(item.titulo)}</div>
+    </div>
+    {bloco_ratio}
+    <p style="margin-top:20px">
+      <a href="{html.escape(link)}" style="background:#0d9488;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;font-size:13px;font-weight:600">
+        Abrir no sistema
+      </a>
+    </p>
+  </div>
+</body></html>"""
+
+
+def enviar_email_item(item: InformativoStfItem, destinatario: str | None, edicao: InformativoStfEdicao | None = None) -> None:
+    from app.services.email_service import _send_via_gmail_oauth
+
+    assunto = f"Informativo STF — {item.titulo[:80]}"
+    html_msg = corpo_html_item(item, edicao)
+    _send_via_gmail_oauth(destinatario or DESTINATARIO, assunto, html_msg)
