@@ -20,18 +20,18 @@ from app.models.informativo_stj import InformativoStjItem
 
 logger = logging.getLogger(__name__)
 
-_CLAUDE_IN_PER_MTOK = 5.00
-_CLAUDE_OUT_PER_MTOK = 25.00
-
 SYSTEM_JSON = (
-    "Você resume decisões do STJ para um escritório de advocacia patrimonialista/"
-    "societária. Foco: identificar com precisão o tema central do julgado e a "
-    "ratio decidendi (o fundamento jurídico que sustenta a decisão, não só o resultado). "
+    "Você resume decisões do STJ para um advogado que precisa ler rápido. Seu estilo é "
+    "igual ao de um bom social media jurídico: tema_central é um GANCHO — uma pergunta ou "
+    "afirmação curta e provocativa que já entrega o cerne da decisão e dá vontade de "
+    "continuar lendo (ex.: 'FII que investe em FII paga IR?', 'Fiança sem outorga da esposa "
+    "vale?'). ratio_decidendi e resumo_leigo são PARÁGRAFOS CURTOS (3-4 linhas no máximo), "
+    "nunca listas longas, nunca repetindo o texto oficial do STJ. "
     "Responda SEMPRE E SOMENTE com JSON válido — sem markdown, sem crases, sem comentários."
 )
 
 JSON_CONTRATO = """Responda em JSON com exatamente este formato:
-{"tema_central": "UMA frase curta, tipo manchete (máx. 18 palavras), direto ao ponto — o que foi decidido, sem rodeio", "ratio_decidendi": "parágrafo explicando o fundamento jurídico da decisão, por que o STJ decidiu assim"}"""
+{"tema_central": "GANCHO curto (máx. 12 palavras) — pergunta ou afirmação direta, no estilo 'FII que investe em FII paga IR?'", "ratio_decidendi": "parágrafo CURTO (3-4 linhas) explicando o fundamento jurídico, por que o STJ decidiu assim — sem listas, sem repetir o texto oficial", "resumo_leigo": "parágrafo CURTO (2-3 linhas) explicando a decisão em português simples, sem juridiquês, pra quem não é advogado"}"""
 
 
 def _strip_fences(txt: str) -> str:
@@ -60,24 +60,11 @@ Legislação citada: {legislacao}
 
 
 def gerar_resumo_item(item: InformativoStjItem) -> tuple[dict, float]:
-    if not settings.anthropic_api_key:
-        raise RuntimeError("ANTHROPIC_API_KEY não configurada.")
-    import anthropic
+    """Usa o Gemini (mesma integração do Instagram) — mais barato e bom em resumir curto."""
+    from app.services.ia_instagram import _call_gemini_json
 
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-    msg = client.messages.create(
-        model=getattr(settings, "instagram_claude_model", None) or "claude-opus-4-5",
-        max_tokens=2000,
-        system=SYSTEM_JSON,
-        messages=[{"role": "user", "content": _montar_prompt(item)}],
-    )
-    txt = "".join(getattr(b, "text", "") for b in msg.content if getattr(b, "type", "") == "text")
-    usage = getattr(msg, "usage", None)
-    tin = getattr(usage, "input_tokens", 0) or 0
-    tout = getattr(usage, "output_tokens", 0) or 0
-    custo = round((tin * _CLAUDE_IN_PER_MTOK + tout * _CLAUDE_OUT_PER_MTOK) / 1_000_000, 5)
-    resumo = json.loads(_strip_fences(txt))
-    return resumo, custo
+    prompt = f"{SYSTEM_JSON}\n\n{_montar_prompt(item)}"
+    return _call_gemini_json(prompt)
 
 
 def processar_item(item_id, db: Session, forcar: bool = False) -> InformativoStjItem:
@@ -95,6 +82,7 @@ def processar_item(item_id, db: Session, forcar: bool = False) -> InformativoStj
         resumo, custo = gerar_resumo_item(item)
         item.resumo_tema_central = resumo.get("tema_central")
         item.resumo_ratio_decidendi = resumo.get("ratio_decidendi")
+        item.resumo_leigo = resumo.get("resumo_leigo")
         item.custo_ia_usd = (item.custo_ia_usd or 0.0) + custo
         item.ia_processado_em = datetime.now(timezone.utc)
         item.status_ia = "ok"

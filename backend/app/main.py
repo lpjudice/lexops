@@ -942,6 +942,9 @@ def _run_migrations() -> None:
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_informativo_stj_itens_favorito ON informativo_stj_itens(favorito)"
         ))
+        conn.execute(text("ALTER TABLE informativo_stj_itens ADD COLUMN IF NOT EXISTS resumo_leigo TEXT"))
+        conn.execute(text("ALTER TABLE informativo_stj_itens ADD COLUMN IF NOT EXISTS instagram_sugestao_id UUID"))
+        conn.execute(text("ALTER TABLE informativo_stj_itens ADD COLUMN IF NOT EXISTS instagram_gerado_em TIMESTAMPTZ"))
 
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS informativo_stj_config (

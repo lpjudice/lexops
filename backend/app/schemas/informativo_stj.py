@@ -26,9 +26,13 @@ class ItemOut(BaseModel):
     status_ia: str
     resumo_tema_central: str | None
     resumo_ratio_decidendi: str | None
+    resumo_leigo: str | None
+    instagram_sugestao_id: uuid.UUID | None
+    instagram_gerado_em: datetime | None
     custo_ia_usd: float
     ia_processado_em: datetime | None
     erro_ia: str | None
+    edicao_numero: int | None = None
 
 
 class EdicaoOut(BaseModel):

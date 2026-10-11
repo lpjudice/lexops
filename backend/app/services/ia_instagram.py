@@ -608,6 +608,11 @@ def gerar_sugestao_forcada_informativo_stj(db: Session, item_id) -> InstagramSug
         custo_usd=custo,
     )
     db.add(sug)
+    db.flush()
+
+    item.instagram_sugestao_id = sug.id
+    item.instagram_gerado_em = datetime.now(timezone.utc)
+
     db.commit()
     db.refresh(sug)
     return sug

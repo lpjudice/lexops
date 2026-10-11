@@ -97,6 +97,14 @@
   color: var(--teal);
 }
 
+.pillInstagram {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: #fce7f3;
+  color: #be185d;
+}
+
 .verbeteBody {
   padding: 0 18px 18px;
   border-top: 1px solid var(--gray-border);
@@ -122,10 +130,31 @@
 }
 
 .resumoTexto {
-  font-size: 14.5px;
+  font-size: 13.5px;
   color: var(--dark);
-  line-height: 1.65;
+  line-height: 1.6;
   font-weight: 500;
+}
+
+.btnLeigo {
+  border: none;
+  background: none;
+  color: var(--teal);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+  margin-top: 10px;
+}
+
+.resumoTextoLeigo {
+  font-size: 12.5px;
+  color: var(--dark);
+  line-height: 1.55;
+  font-weight: 400;
+  margin-top: 6px;
+  font-style: italic;
 }
 
 .actionsRow {
