@@ -37,7 +37,7 @@ export default function InformativoStjFavoritosPage() {
             key={item.id}
             className={styles.verbete}
             style={{ borderLeftColor: cor.fg, cursor: 'pointer' }}
-            onClick={() => navigate(`/informativo-stj/${item.edicao_id}`)}
+            onClick={() => navigate(`/informativo-stj/${item.edicao_id}?item=${item.id}`)}
           >
             <div className={styles.verbeteHead}>
               <div className={styles.verbeteHeadLeft}>

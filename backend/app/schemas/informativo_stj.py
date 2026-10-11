@@ -29,6 +29,7 @@ class ItemOut(BaseModel):
     resumo_leigo: str | None
     instagram_sugestao_id: uuid.UUID | None
     instagram_gerado_em: datetime | None
+    instagram_status: str | None = None
     custo_ia_usd: float
     ia_processado_em: datetime | None
     erro_ia: str | None

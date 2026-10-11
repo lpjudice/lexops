@@ -65,6 +65,9 @@
   top: 50%;
   transform: translateY(-50%);
   color: var(--gray-mid);
+  display: block;
+  pointer-events: none;
+  line-height: 0;
 }
 
 .searchHint {

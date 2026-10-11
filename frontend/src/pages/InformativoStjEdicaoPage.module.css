@@ -43,6 +43,40 @@
   box-shadow: 0 0 0 1px var(--teal-glow);
 }
 
+.verbeteSelecionado {
+  box-shadow: 0 0 0 2px var(--teal);
+}
+
+.filtroChips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.filtroChip {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 100px;
+  background: var(--white);
+  border: 1.5px solid;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.filtroChipLimpar {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 100px;
+  background: none;
+  border: none;
+  color: var(--gray-mid);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .verbeteHead {
   display: flex;
   align-items: flex-start;
@@ -103,6 +137,14 @@
   gap: 3px;
   background: #fce7f3;
   color: #be185d;
+}
+
+.pillInstagramRejeitado {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: #fee2e2;
+  color: #b91c1c;
 }
 
 .verbeteBody {
@@ -217,3 +259,80 @@
   margin-top: 8px;
 }
 .processoLinha a { color: var(--teal); }
+
+.emailPopover {
+  position: absolute;
+  top: 28px;
+  left: 0;
+  z-index: 20;
+  background: var(--white);
+  border: 1px solid var(--gray-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card-hover);
+  padding: 12px;
+  width: 260px;
+}
+
+.emailPopoverHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--dark);
+  margin-bottom: 8px;
+}
+
+.emailPopoverClose {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--gray-mid);
+  display: flex;
+}
+
+.emailPopoverBtn {
+  width: 100%;
+  border: 1px solid var(--teal);
+  background: none;
+  color: var(--teal);
+  border-radius: var(--radius-btn);
+  padding: 6px 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+.emailPopoverBtn:hover { background: var(--teal-light); }
+.emailPopoverBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.emailPopoverRow {
+  display: flex;
+  gap: 6px;
+}
+.emailPopoverRow .emailPopoverBtn {
+  width: auto;
+  margin-bottom: 0;
+  white-space: nowrap;
+}
+
+.emailPopoverInput {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--gray-border);
+  border-radius: var(--radius-input);
+  padding: 6px 8px;
+  font-size: 11.5px;
+}
+
+.emailPopoverOk {
+  font-size: 11.5px;
+  color: var(--teal);
+  margin-top: 6px;
+}
+
+.emailPopoverErro {
+  font-size: 11.5px;
+  color: #c0392b;
+  margin-top: 6px;
+}
