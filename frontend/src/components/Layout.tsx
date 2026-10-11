@@ -175,6 +175,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/informativos/assinantes': 'E-mails (Informativos)',
   '/informativo-stj': 'Informativo STJ',
   '/informativo-stj/config': 'Informativo STJ — Configuração',
+  '/informativo-stj/favoritos': 'Informativo STJ — Favoritos',
   '/configuracoes': 'Configurações',
   '/carteira': 'Carteira',
   '/autos-ia': 'Autos IA',

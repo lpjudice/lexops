@@ -143,11 +143,42 @@ def reprocessar_item(item_id: uuid.UUID, db: Session = Depends(get_db)):
 
 @router.post("/sync", response_model=SyncResponse)
 def sincronizar_agora(db: Session = Depends(get_db)):
-    resultado = scraping_informativo_stj.sincronizar_novas_edicoes(db)
-    ia_informativo_stj.processar_pendentes(db)
+    resultado = scraping_informativo_stj.sincronizar_processar_e_notificar(db)
     return SyncResponse(**resultado)
 
 
 @router.get("/candidatos", response_model=list[CandidatoOut])
 def listar_candidatos(db: Session = Depends(get_db)):
     return scraping_informativo_stj.listar_candidatos(db)
+
+
+@router.get("/busca", response_model=list[ItemOut])
+def buscar(q: str = Query(..., min_length=2), db: Session = Depends(get_db)):
+    itens = scraping_informativo_stj.buscar_itens(db, q)
+    return [ItemOut.model_validate(i) for i in itens]
+
+
+@router.get("/favoritos", response_model=list[ItemOut])
+def listar_favoritos(db: Session = Depends(get_db)):
+    itens = scraping_informativo_stj.listar_favoritos(db)
+    return [ItemOut.model_validate(i) for i in itens]
+
+
+@router.post("/itens/{item_id}/favoritar", response_model=ItemOut)
+def favoritar_item(item_id: uuid.UUID, db: Session = Depends(get_db)):
+    try:
+        item = scraping_informativo_stj.toggle_favorito(item_id, db)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return ItemOut.model_validate(item)
+
+
+@router.post("/itens/{item_id}/forcar-instagram")
+def forcar_instagram(item_id: uuid.UUID, db: Session = Depends(get_db)):
+    from app.services import ia_instagram
+
+    try:
+        sugestao = ia_instagram.gerar_sugestao_forcada_informativo_stj(db, item_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"sugestao_id": str(sugestao.id)}

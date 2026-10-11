@@ -393,14 +393,12 @@ def _sync_diarios_monitorados() -> None:
 def _sync_informativo_stj() -> None:
     try:
         from app.database import SessionLocal
-        from app.services import ia_informativo_stj, scraping_informativo_stj
+        from app.services import scraping_informativo_stj
 
         db = SessionLocal()
         try:
-            resultado = scraping_informativo_stj.sincronizar_novas_edicoes(db)
+            resultado = scraping_informativo_stj.sincronizar_processar_e_notificar(db)
             logger.info("Scheduler: Informativo STJ sincronizado — %s", resultado)
-            ia_resultado = ia_informativo_stj.processar_pendentes(db)
-            logger.info("Scheduler: Informativo STJ resumos IA — %s", ia_resultado)
         finally:
             db.close()
     except Exception as exc:

@@ -21,6 +21,7 @@ class ItemOut(BaseModel):
     legislacao_citada: list[str]
     ordem: int
     destacado: bool
+    favorito: bool
     motivo_destaque: str | None
     status_ia: str
     resumo_tema_central: str | None
@@ -39,6 +40,7 @@ class EdicaoOut(BaseModel):
     tipo: str
     tema_extraordinario: str | None
     url_origem: str
+    resumo_edicao: str | None
     status_scraping: str
     erro_scraping: str | None
     scraped_em: datetime | None
