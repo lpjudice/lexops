@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { RefreshCw, Settings, AlertTriangle, Search, Star } from 'lucide-react'
+import { RefreshCw, Settings, AlertTriangle, Search, Star, Sparkles } from 'lucide-react'
 import { informativoStjApi } from '../api/informativoStj'
 import styles from './InformativoStjPage.module.css'
 
@@ -26,6 +26,11 @@ export default function InformativoStjPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['informativo-stj'] }),
   })
 
+  const reprocessarTudo = useMutation({
+    mutationFn: () => informativoStjApi.reprocessarTudo(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['informativo-stj'] }),
+  })
+
   const mostrandoBusca = busca.trim().length >= 2
 
   return (
@@ -38,6 +43,15 @@ export default function InformativoStjPage() {
           </button>
           <button className={styles.btn} onClick={() => navigate('/informativo-stj/config')}>
             <Settings size={14} /> Áreas de destaque
+          </button>
+          <button
+            className={styles.btn}
+            onClick={() => reprocessarTudo.mutate()}
+            disabled={reprocessarTudo.isPending}
+            title="Regera o resumo de IA de todos os julgados destacados já baixados, sem buscar edições novas"
+          >
+            <Sparkles size={14} />
+            {reprocessarTudo.isPending ? 'Reprocessando…' : 'Reprocessar tudo'}
           </button>
           <button
             className={`${styles.btn} ${styles.btnPrimary}`}
@@ -69,7 +83,7 @@ export default function InformativoStjPage() {
                 <div
                   key={item.id}
                   className={styles.searchResultItem}
-                  onClick={() => navigate(`/informativo-stj/${item.edicao_id}`)}
+                  onClick={() => navigate(`/informativo-stj/${item.edicao_id}?item=${item.id}`)}
                 >
                   <div className={styles.searchResultTitulo}>{item.titulo}</div>
                   <div className={styles.searchResultTrecho}>

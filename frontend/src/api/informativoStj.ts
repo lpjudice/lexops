@@ -26,6 +26,7 @@ export interface InformativoStjItem {
   resumo_leigo?: string | null
   instagram_sugestao_id?: string | null
   instagram_gerado_em?: string | null
+  instagram_status?: 'sugerido' | 'aprovado' | 'rejeitado' | 'publicado' | null
   custo_ia_usd: number
   ia_processado_em?: string | null
   erro_ia?: string | null
@@ -98,4 +99,10 @@ export const informativoStjApi = {
 
   forcarInstagram: (itemId: string) =>
     api.post<InformativoStjItem>(`/informativo-stj/itens/${itemId}/forcar-instagram`, undefined, { timeout: 120000 }).then((r) => r.data),
+
+  reprocessarTudo: () =>
+    api.post<{ total: number; ok: number; erro: number }>('/informativo-stj/reprocessar-tudo', undefined, { timeout: 300000 }).then((r) => r.data),
+
+  enviarEmailItem: (itemId: string, destinatario?: string) =>
+    api.post<{ enviado_para: string }>(`/informativo-stj/itens/${itemId}/enviar-email`, { destinatario }).then((r) => r.data),
 }

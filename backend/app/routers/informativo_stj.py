@@ -37,6 +37,13 @@ def _item_out(item: InformativoStjItem, db: Session) -> ItemOut:
         if numero is not None:
             _edicao_numero_cache[item.edicao_id] = numero
     out.edicao_numero = numero
+
+    if item.instagram_sugestao_id:
+        from app.models.instagram import InstagramSugestao
+
+        sug = db.get(InstagramSugestao, item.instagram_sugestao_id)
+        out.instagram_status = sug.status if sug else None
+
     return out
 
 
@@ -198,3 +205,38 @@ def forcar_instagram(item_id: uuid.UUID, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(exc))
     item = db.get(InformativoStjItem, item_id)
     return _item_out(item, db)
+
+
+@router.post("/reprocessar-tudo")
+def reprocessar_tudo(db: Session = Depends(get_db)):
+    """Reprocessa o resumo de IA de TODOS os destacados já baixados (sem buscar edições novas)."""
+    itens = db.scalars(
+        select(InformativoStjItem).where(InformativoStjItem.destacado.is_(True))
+    ).all()
+    ok = erro = 0
+    for item in itens:
+        try:
+            ia_informativo_stj.processar_item(item.id, db, forcar=True)
+            if item.status_ia == "ok":
+                ok += 1
+            else:
+                erro += 1
+        except Exception:
+            erro += 1
+    return {"total": len(itens), "ok": ok, "erro": erro}
+
+
+@router.post("/itens/{item_id}/enviar-email")
+def enviar_email_item(item_id: uuid.UUID, payload: dict | None = None, db: Session = Depends(get_db)):
+    from app.services import informativo_stj_email
+
+    item = db.get(InformativoStjItem, item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item não encontrado")
+    destinatario = (payload or {}).get("destinatario") or None
+    edicao = db.get(InformativoStjEdicao, item.edicao_id)
+    try:
+        informativo_stj_email.enviar_email_item(item, destinatario, edicao)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Falha ao enviar e-mail: {exc}")
+    return {"enviado_para": destinatario or informativo_stj_email.DESTINATARIO}

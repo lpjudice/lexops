@@ -1,17 +1,70 @@
-import { useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ChevronDown, ChevronRight, Loader2, Star, Camera, CheckCircle2 } from 'lucide-react'
+import { ArrowLeft, ChevronDown, ChevronRight, Loader2, Star, Camera, CheckCircle2, Mail, X } from 'lucide-react'
 import { informativoStjApi } from '../api/informativoStj'
 import type { InformativoStjItem } from '../api/informativoStj'
 import { ramoCor } from '../utils/ramoColor'
 import styles from './InformativoStjEdicaoPage.module.css'
 
-function Verbete({ item }: { item: InformativoStjItem }) {
+const INSTAGRAM_STATUS_LABEL: Record<string, string> = {
+  sugerido: 'Instagram: sugerido',
+  aprovado: 'Instagram: aprovado',
+  rejeitado: 'Instagram: rejeitado',
+  publicado: 'Instagram: publicado',
+}
+
+function EmailPopover({ itemId, onClose }: { itemId: string; onClose: () => void }) {
+  const [destinatario, setDestinatario] = useState('')
+  const enviar = useMutation({
+    mutationFn: (email?: string) => informativoStjApi.enviarEmailItem(itemId, email),
+  })
+
+  return (
+    <div className={styles.emailPopover} onClick={(e) => e.stopPropagation()}>
+      <div className={styles.emailPopoverHeader}>
+        <span>Enviar por e-mail</span>
+        <button className={styles.emailPopoverClose} onClick={onClose}><X size={14} /></button>
+      </div>
+      <button className={styles.emailPopoverBtn} onClick={() => enviar.mutate(undefined)} disabled={enviar.isPending}>
+        Enviar para o meu e-mail
+      </button>
+      <div className={styles.emailPopoverRow}>
+        <input
+          className={styles.emailPopoverInput}
+          placeholder="ou outro e-mail…"
+          value={destinatario}
+          onChange={(e) => setDestinatario(e.target.value)}
+        />
+        <button
+          className={styles.emailPopoverBtn}
+          onClick={() => destinatario.trim() && enviar.mutate(destinatario.trim())}
+          disabled={enviar.isPending || !destinatario.trim()}
+        >
+          Enviar
+        </button>
+      </div>
+      {enviar.isSuccess && <div className={styles.emailPopoverOk}>Enviado ✓</div>}
+      {enviar.isError && <div className={styles.emailPopoverErro}>Falha ao enviar</div>}
+    </div>
+  )
+}
+
+function Verbete({ item, destacarItem }: { item: InformativoStjItem; destacarItem: string | null }) {
   const [aberto, setAberto] = useState(false)
   const [verTextoOriginal, setVerTextoOriginal] = useState(false)
+  const [verLeigo, setVerLeigo] = useState(false)
+  const [emailAberto, setEmailAberto] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
   const qc = useQueryClient()
   const cor = ramoCor(item.ramo_direito)
+
+  useEffect(() => {
+    if (destacarItem === item.id) {
+      setAberto(true)
+      setTimeout(() => ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 150)
+    }
+  }, [destacarItem, item.id])
 
   const reprocessar = useMutation({
     mutationFn: () => informativoStjApi.reprocessarItem(item.id),
@@ -28,14 +81,19 @@ function Verbete({ item }: { item: InformativoStjItem }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['informativo-stj'] }),
   })
 
-  const [verLeigo, setVerLeigo] = useState(false)
   const jaGerouInstagram = !!item.instagram_gerado_em
+  const instagramLabel = item.instagram_status ? INSTAGRAM_STATUS_LABEL[item.instagram_status] : null
+  const instagramRejeitado = item.instagram_status === 'rejeitado'
 
   const temResumoIa = item.destacado && item.status_ia === 'ok' && !!item.resumo_tema_central
   const headline = temResumoIa ? item.resumo_tema_central : item.destaque_oficial
 
   return (
-    <div className={`${styles.verbete} ${item.destacado ? styles.verbeteDestacado : ''}`} style={{ borderLeftColor: cor.fg }}>
+    <div
+      ref={ref}
+      className={`${styles.verbete} ${item.destacado ? styles.verbeteDestacado : ''} ${destacarItem === item.id ? styles.verbeteSelecionado : ''}`}
+      style={{ borderLeftColor: cor.fg }}
+    >
       <div className={styles.verbeteHead} onClick={() => setAberto((v) => !v)}>
         <div className={styles.verbeteHeadLeft}>
           <div className={styles.verbeteMeta}>
@@ -43,9 +101,14 @@ function Verbete({ item }: { item: InformativoStjItem }) {
               {item.ramo_direito}
             </span>
             {item.destacado && <span className={`${styles.pill} ${styles.pillDestacado}`}>Destacado</span>}
-            {jaGerouInstagram && (
-              <span className={`${styles.pill} ${styles.pillInstagram}`}>
-                <Camera size={10} /> Gerado no Instagram
+            {temResumoIa && (
+              <span className={styles.pill} title="Gerado por IA a partir do texto oficial do STJ">
+                ✨ Resumo por IA
+              </span>
+            )}
+            {instagramLabel && (
+              <span className={`${styles.pill} ${instagramRejeitado ? styles.pillInstagramRejeitado : styles.pillInstagram}`}>
+                <Camera size={10} /> {instagramLabel}
               </span>
             )}
           </div>
@@ -94,9 +157,6 @@ function Verbete({ item }: { item: InformativoStjItem }) {
               )}
               {item.status_ia === 'pendente' && <>Resumo estruturado ainda não processado.</>}
               {item.status_ia === 'erro' && <>Erro ao gerar resumo: {item.erro_ia}</>}
-              <button className={styles.btnReprocessar} onClick={() => reprocessar.mutate()} disabled={reprocessar.isPending}>
-                {reprocessar.isPending ? 'Processando…' : 'Reprocessar'}
-              </button>
             </div>
           )}
 
@@ -109,6 +169,20 @@ function Verbete({ item }: { item: InformativoStjItem }) {
             >
               <Star size={18} className={item.favorito ? styles.starBtnAtivo : ''} fill={item.favorito ? 'currentColor' : 'none'} />
             </button>
+
+            <div style={{ position: 'relative' }}>
+              <button className={styles.starBtn} onClick={() => setEmailAberto((v) => !v)} title="Enviar por e-mail">
+                <Mail size={17} />
+              </button>
+              {emailAberto && <EmailPopover itemId={item.id} onClose={() => setEmailAberto(false)} />}
+            </div>
+
+            {item.destacado && (
+              <button className={styles.btnReprocessar} onClick={() => reprocessar.mutate()} disabled={reprocessar.isPending}>
+                {reprocessar.isPending ? 'Processando…' : 'Reprocessar resumo'}
+              </button>
+            )}
+
             <button className={styles.btnInstagram} onClick={() => forcarInstagram.mutate()} disabled={forcarInstagram.isPending}>
               <Camera size={13} />
               {forcarInstagram.isPending ? 'Gerando…' : jaGerouInstagram ? 'Gerar novamente' : 'Gerar post no Instagram'}
@@ -123,11 +197,8 @@ function Verbete({ item }: { item: InformativoStjItem }) {
 
           {item.texto_explicativo && (
             <div style={{ marginTop: 12 }}>
-              <button
-                className={styles.btnReprocessar}
-                onClick={() => setVerTextoOriginal((v) => !v)}
-              >
-                {verTextoOriginal ? 'Ocultar' : 'Ver'} texto original do STJ
+              <button className={styles.btnLeigo} onClick={() => setVerTextoOriginal((v) => !v)}>
+                {verTextoOriginal ? 'Ocultar' : 'Ver'} texto oficial do STJ (original, sem IA)
               </button>
               {verTextoOriginal && (
                 <p className={styles.resumoTexto} style={{ color: 'var(--gray-mid)', fontWeight: 400, fontSize: 12.5, marginTop: 8 }}>
@@ -145,6 +216,9 @@ function Verbete({ item }: { item: InformativoStjItem }) {
 export default function InformativoStjEdicaoPage() {
   const { edicaoId } = useParams<{ edicaoId: string }>()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const destacarItem = searchParams.get('item')
+  const [ramosFiltro, setRamosFiltro] = useState<string[]>([])
 
   const { data: edicao, isLoading } = useQuery({
     queryKey: ['informativo-stj', 'edicoes', edicaoId],
@@ -154,12 +228,19 @@ export default function InformativoStjEdicaoPage() {
 
   if (isLoading || !edicao) return <p>Carregando…</p>
 
-  const porOrgao = edicao.itens.reduce<Record<string, typeof edicao.itens>>((acc, item) => {
+  const todosRamos = Array.from(new Set(edicao.itens.map((i) => i.ramo_direito))).sort()
+  const itensFiltrados = ramosFiltro.length === 0 ? edicao.itens : edicao.itens.filter((i) => ramosFiltro.includes(i.ramo_direito))
+
+  const porOrgao = itensFiltrados.reduce<Record<string, typeof edicao.itens>>((acc, item) => {
     const key = item.orgao_julgador || 'Outros'
     acc[key] = acc[key] || []
     acc[key].push(item)
     return acc
   }, {})
+
+  function toggleRamo(ramo: string) {
+    setRamosFiltro((atual) => (atual.includes(ramo) ? atual.filter((r) => r !== ramo) : [...atual, ramo]))
+  }
 
   return (
     <div>
@@ -171,16 +252,40 @@ export default function InformativoStjEdicaoPage() {
         {edicao.data_publicacao && ` — ${new Date(edicao.data_publicacao + 'T00:00:00').toLocaleDateString('pt-BR')}`}
       </div>
       {edicao.resumo_edicao && (
-        <p style={{ fontSize: 14, color: 'var(--dark)', marginTop: -8, marginBottom: 20, lineHeight: 1.6 }}>
+        <p style={{ fontSize: 14, color: 'var(--dark)', marginTop: -8, marginBottom: 16, lineHeight: 1.6 }}>
           {edicao.resumo_edicao}
         </p>
+      )}
+
+      {todosRamos.length > 1 && (
+        <div className={styles.filtroChips}>
+          {todosRamos.map((ramo) => {
+            const cor = ramoCor(ramo)
+            const ativo = ramosFiltro.includes(ramo)
+            return (
+              <button
+                key={ramo}
+                className={styles.filtroChip}
+                style={ativo ? { background: cor.fg, color: '#fff', borderColor: cor.fg } : { borderColor: cor.fg, color: cor.fg }}
+                onClick={() => toggleRamo(ramo)}
+              >
+                {ramo}
+              </button>
+            )
+          })}
+          {ramosFiltro.length > 0 && (
+            <button className={styles.filtroChipLimpar} onClick={() => setRamosFiltro([])}>
+              Limpar filtro
+            </button>
+          )}
+        </div>
       )}
 
       {Object.entries(porOrgao).map(([orgao, itens]) => (
         <div key={orgao}>
           <div className={styles.orgao}>{orgao}</div>
           {itens.map((item) => (
-            <Verbete key={item.id} item={item} />
+            <Verbete key={item.id} item={item} destacarItem={destacarItem} />
           ))}
         </div>
       ))}
