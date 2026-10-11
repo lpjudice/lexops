@@ -1129,7 +1129,7 @@ export default function CarteiraPage() {
       <div className={styles.pageHeader}><h1 className={styles.pageTitle}>Carteira</h1></div>
 
       {/* KPI Cards */}
-      <div className={cs.kpiGrid} style={{ gridTemplateColumns: 'repeat(7, 1fr)' }}>
+      <div className={cs.kpiGrid}>
         <div className={cs.kpiCard}><span className={cs.kpiLabel}>Clientes</span><span className={cs.kpiValue}>{clientes.length}</span></div>
         <div className={cs.kpiCard}><span className={cs.kpiLabel}>Total Geral</span><span className={cs.kpiValue}>{brl(kpiTotal)}</span></div>
         <div className={cs.kpiCard} style={{ borderTop: '3px solid var(--amber, #f59e0b)', cursor: 'pointer' }}
