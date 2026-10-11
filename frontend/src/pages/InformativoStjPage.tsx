@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { RefreshCw, Settings, AlertTriangle, Search, Star, Sparkles } from 'lucide-react'
 import { informativoStjApi } from '../api/informativoStj'
+import { ramoCor } from '../utils/ramoColor'
 import styles from './InformativoStjPage.module.css'
 
 export default function InformativoStjPage() {
@@ -65,13 +66,15 @@ export default function InformativoStjPage() {
       </div>
 
       <div className={styles.searchBar}>
-        <Search size={15} className={styles.searchIcon} />
-        <input
-          className={styles.searchInput}
-          placeholder="Buscar em todos os informativos (não só os últimos 20)…"
-          value={busca}
-          onChange={(e) => setBusca(e.target.value)}
-        />
+        <div className={styles.searchInputWrap}>
+          <Search size={15} className={styles.searchIcon} />
+          <input
+            className={styles.searchInput}
+            placeholder="Buscar em todos os informativos…"
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+          />
+        </div>
         {mostrandoBusca && (
           <div className={styles.searchResults}>
             {buscando && <div className={styles.searchResultItem}>Buscando…</div>}
@@ -116,7 +119,6 @@ export default function InformativoStjPage() {
                 {e.data_publicacao ? new Date(e.data_publicacao + 'T00:00:00').toLocaleDateString('pt-BR') : '—'}
               </span>
             </div>
-            {e.resumo_edicao && <div className={styles.cardResumo}>{e.resumo_edicao}</div>}
             <div className={styles.cardMeta}>
               {e.total_destacados > 0 && (
                 <span className={`${styles.badge} ${styles.badgeDestacado}`}>
@@ -130,6 +132,21 @@ export default function InformativoStjPage() {
                 </span>
               )}
             </div>
+
+            {e.destaques.length > 0 && (
+              <div className={styles.cardDestaquesLista}>
+                {e.destaques.map((d) => {
+                  const cor = ramoCor(d.ramo_direito)
+                  return (
+                    <div key={d.id} className={styles.cardDestaqueLinha}>
+                      {d.favorito && <Star size={10} className={styles.cardDestaqueFavIcon} fill="currentColor" />}
+                      <span className={styles.cardDestaqueRamo} style={{ color: cor.fg }}>●</span>
+                      <span className={styles.cardDestaqueTexto}>{d.resumo_tema_central || d.titulo}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         ))}
       </div>

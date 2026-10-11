@@ -49,25 +49,33 @@
   margin-bottom: 1.25rem;
 }
 
-.searchInput {
-  width: 100%;
+.searchInputWrap {
+  position: relative;
+  display: flex;
+  align-items: center;
   border: 1px solid var(--gray-border);
   border-radius: var(--radius-input);
-  padding: 10px 14px 10px 38px;
+  background: var(--white);
+}
+.searchInputWrap:focus-within { border-color: var(--teal); }
+
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  padding: 10px 14px 10px 8px;
   font-size: 13px;
   box-sizing: border-box;
 }
-.searchInput:focus { outline: none; border-color: var(--teal); }
+.searchInput:focus { outline: none; }
 
 .searchIcon {
-  position: absolute;
-  left: 12px;
-  top: 50%;
-  transform: translateY(-50%);
+  flex: none;
+  margin-left: 12px;
   color: var(--gray-mid);
-  display: block;
+  display: flex;
   pointer-events: none;
-  line-height: 0;
 }
 
 .searchHint {
@@ -139,15 +147,40 @@
   color: var(--gray-mid);
 }
 
-.cardResumo {
-  font-size: 12px;
-  font-style: italic;
-  color: var(--gray-mid);
-  margin-top: 5px;
-  line-height: 1.4;
+.cardDestaquesLista {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
-.cardResumo::before { content: '" '; }
-.cardResumo::after { content: ' "'; }
+
+.cardDestaqueLinha {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--dark);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardDestaqueRamo {
+  flex: none;
+  font-size: 9px;
+}
+
+.cardDestaqueFavIcon {
+  flex: none;
+  color: #f59e0b;
+}
+
+.cardDestaqueTexto {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .cardMeta {
   display: flex;
@@ -196,4 +229,26 @@
   color: var(--gray-mid);
   padding: 3rem 0;
   font-size: 14px;
+}
+
+@media (max-width: 640px) {
+  .header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .headerActions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .btn {
+    flex: 1;
+    justify-content: center;
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+  .cardTop {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
 }

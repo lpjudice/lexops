@@ -36,6 +36,14 @@ class ItemOut(BaseModel):
     edicao_numero: int | None = None
 
 
+class DestaqueResumoOut(BaseModel):
+    id: uuid.UUID
+    titulo: str
+    resumo_tema_central: str | None
+    ramo_direito: str
+    favorito: bool
+
+
 class EdicaoOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -51,6 +59,7 @@ class EdicaoOut(BaseModel):
     scraped_em: datetime | None
     total_itens: int = 0
     total_destacados: int = 0
+    destaques: list[DestaqueResumoOut] = []
 
 
 class EdicaoDetalheOut(EdicaoOut):

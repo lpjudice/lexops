@@ -71,8 +71,6 @@ def processar_item(item_id, db: Session, forcar: bool = False) -> InformativoStj
     item = db.get(InformativoStjItem, item_id)
     if not item:
         raise ValueError(f"Item {item_id} não encontrado")
-    if not item.destacado:
-        raise ValueError("Item não está destacado — resumo de IA só roda em itens destacados")
     if item.status_ia == "ok" and not forcar:
         return item
 
@@ -98,7 +96,6 @@ def processar_item(item_id, db: Session, forcar: bool = False) -> InformativoStj
 def processar_pendentes(db: Session, limite: int = 50) -> dict:
     itens = db.scalars(
         select(InformativoStjItem)
-        .where(InformativoStjItem.destacado.is_(True))
         .where(InformativoStjItem.status_ia == "pendente")
         .limit(limite)
     ).all()
