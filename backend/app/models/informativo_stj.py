@@ -67,12 +67,12 @@ class InformativoStjItem(Base):
 
     orgao_julgador: Mapped[str] = mapped_column(String(100), nullable=False, default="")
     # Rótulo oficial do STJ (ex: "Direito Civil", "Direito Tributário") — sem mapeamento próprio
-    ramo_direito: Mapped[str] = mapped_column(String(100), nullable=False, default="Não classificado")
+    ramo_direito: Mapped[str] = mapped_column(String(255), nullable=False, default="Não classificado")
 
     titulo: Mapped[str] = mapped_column(Text, nullable=False, default="")
     destaque_oficial: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
-    processo_numero: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    processo_numero: Mapped[str | None] = mapped_column(Text, nullable=True)
     processo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     relator: Mapped[str | None] = mapped_column(String(255), nullable=True)
     data_julgamento: Mapped[date | None] = mapped_column(Date, nullable=True)

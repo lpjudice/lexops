@@ -907,10 +907,10 @@ def _run_migrations() -> None:
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 edicao_id UUID NOT NULL REFERENCES informativo_stj_edicoes(id) ON DELETE CASCADE,
                 orgao_julgador VARCHAR(100) NOT NULL DEFAULT '',
-                ramo_direito VARCHAR(100) NOT NULL DEFAULT 'Não classificado',
+                ramo_direito VARCHAR(255) NOT NULL DEFAULT 'Não classificado',
                 titulo TEXT NOT NULL DEFAULT '',
                 destaque_oficial TEXT NOT NULL DEFAULT '',
-                processo_numero VARCHAR(100),
+                processo_numero TEXT,
                 processo_url TEXT,
                 relator VARCHAR(255),
                 data_julgamento DATE,
@@ -935,6 +935,8 @@ def _run_migrations() -> None:
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_informativo_stj_itens_destacado ON informativo_stj_itens(destacado, status_ia)"
         ))
+        conn.execute(text("ALTER TABLE informativo_stj_itens ALTER COLUMN ramo_direito TYPE VARCHAR(255)"))
+        conn.execute(text("ALTER TABLE informativo_stj_itens ALTER COLUMN processo_numero TYPE TEXT"))
 
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS informativo_stj_config (
