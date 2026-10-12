@@ -322,6 +322,20 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Badge no PRÓPRIO card do andamento, avisando que há anotação vinculada a
+   ele logo abaixo — mesmo acento teal do .notaCard, pra ficar óbvio que são
+   a mesma coisa (sem isso só dava pra notar olhando o card tracejado). */
+.notaIndicador {
+  font-size: 10px;
+  font-weight: 700;
+  background: #e8f7f4;
+  color: #00875a;
+  border: 1px solid #a7f3d0;
+  border-radius: 999px;
+  padding: 1px 7px;
+  cursor: help;
+}
+
 /* ── Nota de prazo interleaved (dado humano, não de tribunal) ──
    Tracejado + acento teal: distinta o bastante dos cards cinza de andamento
    pra nunca ser confundida com movimento oficial, mas sem brigar visualmente

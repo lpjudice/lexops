@@ -552,14 +552,17 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
       ) : (
         <>
           <div className={styles.lista}>
-            {andamentos.map((a) => (
-              <Fragment key={a.id}>
-                <AndamentoCard andamento={a} novoLote={novoLoteIds.has(a.id)} />
-                {(comentariosPorAndamento.get(a.id) ?? []).map((c) => (
-                  <NotaPrazoCard key={c.id} comentario={c} />
-                ))}
-              </Fragment>
-            ))}
+            {andamentos.map((a) => {
+              const notas = comentariosPorAndamento.get(a.id) ?? []
+              return (
+                <Fragment key={a.id}>
+                  <AndamentoCard andamento={a} novoLote={novoLoteIds.has(a.id)} comentarios={notas} />
+                  {notas.map((c) => (
+                    <NotaPrazoCard key={c.id} comentario={c} />
+                  ))}
+                </Fragment>
+              )
+            })}
           </div>
           <div className={styles.paginacao}>
             {offset > 0 && (
@@ -599,7 +602,9 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
   )
 }
 
-function AndamentoCard({ andamento: a, novoLote = false }: { andamento: Andamento; novoLote?: boolean }) {
+function AndamentoCard({ andamento: a, novoLote = false, comentarios = [] }: {
+  andamento: Andamento; novoLote?: boolean; comentarios?: ComentarioPrazoDoProcesso[]
+}) {
   const arquivoUrl = andamentosApi.arquivoUrl(a.id)
   return (
     <div className={`${styles.card} ${novoLote ? styles.cardNovoLote : !a.lido ? styles.cardNaoLido : ''}`}>
@@ -610,6 +615,17 @@ function AndamentoCard({ andamento: a, novoLote = false }: { andamento: Andament
         {novoLote
           ? <span className={styles.novoLoteBadge}>Novo neste lote</span>
           : !a.lido && <span className={styles.novoBadge}>Novo</span>}
+        {comentarios.length > 0 && (
+          // Indica, no próprio card do andamento, que há anotação vinculada a
+          // ele — sem isso só dava pra perceber olhando o card tracejado logo
+          // abaixo, que passava despercebido numa lista longa.
+          <span
+            className={styles.notaIndicador}
+            title={comentarios.map((c) => `"${c.texto}" — ${c.autor_nome || 'usuário'}`).join('\n\n')}
+          >
+            💬 {comentarios.length > 1 ? comentarios.length : ''}
+          </span>
+        )}
         {a.arquivo_nome && (
           <a
             className={styles.btnArquivo}
