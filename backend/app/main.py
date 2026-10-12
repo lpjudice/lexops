@@ -41,6 +41,7 @@ from app.models import autos_ia as _autos_ia_model  # noqa: F401 — ensures Aut
 from app.models import carteira as _carteira_model  # noqa: F401 — ensures Carteira tables are registered
 from app.models import informativo_stj as _informativo_stj_model  # noqa: F401 — ensures InformativoStj tables are registered
 from app.models import informativo_stf as _informativo_stf_model  # noqa: F401 — ensures InformativoStf tables are registered
+from app.models import comentario_prazo as _comentario_prazo_model  # noqa: F401 — ensures ComentarioPrazo table is registered
 from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, fiscal, pagantes, config_fiscal, jurisprudencia, organizador, pje, prazos, processos, publico, reembolsos, reunioes, system, tarefas, telegram, telegram_andamentos, telegram_tasks, teses, usuarios, webhooks, whatsapp
 from app.routers import backoffice, precedentcheck, conselho, tarefa_projetos, tarefa_cards, memoria_estrategica, despacho, conselho_juridico, responsaveis, patrimonio, instagram
 from app.routers import cadastro_links, cadastro_publico, cadastro_submissoes

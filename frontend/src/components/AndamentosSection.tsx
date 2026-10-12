@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 import { andamentosApi } from '../api/andamentos'
 import { processosApi } from '../api/processos'
+import { prazosApi } from '../api/prazos'
 import type { Andamento, JusbrSessionStatus, JusbrSyncJobStatus, SincronizacaoResult } from '../api/andamentos'
+import type { ComentarioPrazoDoProcesso } from '../api/prazos'
 import InstrucoesJusBRModal from './InstrucoesJusBRModal'
 import ConectarGovBrModal from './ConectarGovBrModal'
 import { JUSBR_VERSION } from '../jusbrVersion'
@@ -151,6 +153,27 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
     queryFn: () => andamentosApi.contar(processoId, fonteParam),
     staleTime: 30_000,
   })
+
+  // Comentários de prazo deste processo — mesma query (mesma chave) usada por
+  // AnotacoesPrazosSection, então os dois painéis compartilham uma única
+  // chamada de rede. Os vinculados a um andamento entram na timeline (ver
+  // `.lista` abaixo); TODOS (vinculados ou não) também aparecem no painel
+  // separado "Anotações de Prazos", renderizado logo depois deste componente.
+  const { data: comentariosPrazo = [] } = useQuery({
+    queryKey: ['comentarios-prazo-processo', processoId],
+    queryFn: () => prazosApi.listarComentariosDoProcesso(processoId),
+    staleTime: 30_000,
+  })
+  const comentariosPorAndamento = useMemo(() => {
+    const mapa = new Map<string, ComentarioPrazoDoProcesso[]>()
+    for (const c of comentariosPrazo) {
+      if (!c.andamento_id) continue
+      const lista = mapa.get(c.andamento_id) ?? []
+      lista.push(c)
+      mapa.set(c.andamento_id, lista)
+    }
+    return mapa
+  }, [comentariosPrazo])
 
   // Indicador discreto de documentos salvos com erro do "Codex" (PDPJ). Barato
   // (só lê a flag já marcada pela faxina/reparo anterior) — não renderiza nada
@@ -530,7 +553,12 @@ export default function AndamentosSection({ processoId, ultimoAndamentoData, ult
         <>
           <div className={styles.lista}>
             {andamentos.map((a) => (
-              <AndamentoCard key={a.id} andamento={a} novoLote={novoLoteIds.has(a.id)} />
+              <Fragment key={a.id}>
+                <AndamentoCard andamento={a} novoLote={novoLoteIds.has(a.id)} />
+                {(comentariosPorAndamento.get(a.id) ?? []).map((c) => (
+                  <NotaPrazoCard key={c.id} comentario={c} />
+                ))}
+              </Fragment>
             ))}
           </div>
           <div className={styles.paginacao}>
@@ -598,6 +626,37 @@ function AndamentoCard({ andamento: a, novoLote = false }: { andamento: Andament
       <span className={styles.atualizadoEm}>
         Última atualização: {formatDateTime(a.created_at)}
       </span>
+    </div>
+  )
+}
+
+const PRAZO_TIPO_LABEL: Record<string, string> = {
+  contestacao: 'Contestação', recurso: 'Recurso', contrarrazoes: 'Contrarrazões',
+  manifestacao: 'Manifestação', audiencia: 'Audiência', pericia: 'Perícia', outro: 'Prazo',
+}
+const PRAZO_STATUS_LABEL: Record<string, string> = {
+  pendente: 'pendente', cumprido: 'cumprido', perdido: 'perdido',
+  ignorado: 'ignorado', nada_a_fazer: 'nada a fazer',
+}
+
+/** Nota de prazo interleaved na timeline — visualmente distinta (tracejada,
+ * acento teal) do andamento real que ela explica, logo abaixo dele. É a MESMA
+ * anotação que também aparece em AnotacoesPrazosSection (Opção B); aqui só os
+ * comentários VINCULADOS a este andamento específico entram. */
+function NotaPrazoCard({ comentario: c }: { comentario: ComentarioPrazoDoProcesso }) {
+  const peca = c.prazo_peca || PRAZO_TIPO_LABEL[c.prazo_tipo] || c.prazo_tipo
+  const statusLabel = PRAZO_STATUS_LABEL[c.prazo_status] ?? c.prazo_status
+  return (
+    <div className={styles.notaCard}>
+      <div className={styles.notaMeta}>
+        <span className={styles.notaBadge}>💬 nota do prazo</span>
+        <span className={styles.notaPeca}>
+          {peca}{c.prazo_data_limite ? ` · ${statusLabel === 'pendente' ? 'vence' : statusLabel} ${formatDate(c.prazo_data_limite)}` : ''}
+        </span>
+        <span className={styles.notaData}>{formatDateTime(c.created_at)}</span>
+      </div>
+      <p className={styles.notaTexto}>"{c.texto}"</p>
+      <span className={styles.notaAutor}>{c.autor_nome || 'usuário'}</span>
     </div>
   )
 }

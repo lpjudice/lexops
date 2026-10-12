@@ -6,11 +6,21 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.models.andamento import AndamentoProcesso
+from app.models.comentario_prazo import ComentarioPrazo
 from app.models.prazo import Prazo
 from app.models.processo import Processo
 from app.models.publicacao import Publicacao
 from app.models.tarefa import Tarefa
-from app.schemas.prazo import PrazoCreate, PrazoOut, PrazoUpdate
+from app.models.usuario import Usuario
+from app.schemas.prazo import (
+    ComentarioPrazoCreate,
+    ComentarioPrazoOut,
+    ComentarioPrazoProcessoOut,
+    PrazoCreate,
+    PrazoOut,
+    PrazoUpdate,
+)
 from app.services.google_calendar import criar_evento, deletar_evento
 from app.services.nada_a_fazer import aplicar_status_prazo
 from app.services.prazo_calc import calcular_prazo
@@ -179,10 +189,21 @@ def listar_prazos(
             peca_por_prazo[pub.prazo_id] = pub.peca_doc_url
         origem_por_prazo[pub.prazo_id] = _origem_payload(pub)
 
+    comentarios_por_prazo: dict = {}
+    comentarios = (
+        db.query(ComentarioPrazo)
+        .filter(ComentarioPrazo.prazo_id.in_([p.id for p in prazos]))
+        .order_by(ComentarioPrazo.created_at.desc())
+        .all()
+    )
+    for c in comentarios:
+        comentarios_por_prazo.setdefault(c.prazo_id, []).append(c)
+
     for p in prazos:
         p.tarefas_vinculadas = tarefas_por_prazo.get(p.id, [])
         p.peca_doc_url = peca_por_prazo.get(p.id)
         p.publicacao_origem = origem_por_prazo.get(p.id)
+        p.comentarios = comentarios_por_prazo.get(p.id, [])
 
     return prazos
 
@@ -224,6 +245,36 @@ def catalogo_prazos_legais():
     from app.services.prazos_legais import catalogo
 
     return catalogo()
+
+
+@router.get("/processo/{processo_id}/comentarios", response_model=list[ComentarioPrazoProcessoOut])
+def listar_comentarios_do_processo(processo_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Todos os comentários de prazo deste processo, vinculados ou não a um
+    andamento — alimenta o painel "Anotações de Prazos" em Processos e, pra
+    quem está vinculado, a nota interleaved na linha do tempo de Andamentos.
+    Achatado de propósito (ver ComentarioPrazoProcessoOut)."""
+    linhas = (
+        db.query(
+            ComentarioPrazo.id.label("id"),
+            ComentarioPrazo.texto.label("texto"),
+            ComentarioPrazo.autor_nome.label("autor_nome"),
+            ComentarioPrazo.created_at.label("created_at"),
+            ComentarioPrazo.andamento_id.label("andamento_id"),
+            AndamentoProcesso.tipo.label("andamento_tipo"),
+            AndamentoProcesso.data_andamento.label("andamento_data"),
+            Prazo.id.label("prazo_id"),
+            Prazo.tipo.label("prazo_tipo"),
+            Prazo.peca_necessaria.label("prazo_peca"),
+            Prazo.status.label("prazo_status"),
+            Prazo.data_limite.label("prazo_data_limite"),
+        )
+        .join(Prazo, ComentarioPrazo.prazo_id == Prazo.id)
+        .outerjoin(AndamentoProcesso, ComentarioPrazo.andamento_id == AndamentoProcesso.id)
+        .filter(Prazo.processo_id == processo_id)
+        .order_by(ComentarioPrazo.created_at.desc())
+        .all()
+    )
+    return linhas
 
 
 @router.get("/{prazo_id}", response_model=PrazoOut)
@@ -331,3 +382,59 @@ def recalcular_prazo(prazo_id: uuid.UUID, db: Session = Depends(get_db)):
         db.refresh(prazo)
 
     return prazo
+
+
+# ── Comentários (anotação livre, sem relação com dado de tribunal) ───────────
+# Mesmo padrão de /patrimonio/{bem_id}/comentarios. Pensados pra registrar POR
+# QUE um ato foi ou não praticado — ainda sem vínculo com Andamentos do
+# processo (isso é a próxima etapa, depois de validar o mockup com o Lucas).
+@router.post(
+    "/{prazo_id}/comentarios",
+    response_model=ComentarioPrazoOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def criar_comentario_prazo(
+    prazo_id: uuid.UUID,
+    data: ComentarioPrazoCreate,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    prazo = db.query(Prazo).filter(Prazo.id == prazo_id).first()
+    if not prazo:
+        raise HTTPException(status_code=404, detail="Prazo não encontrado")
+
+    if data.andamento_id:
+        andamento = db.query(AndamentoProcesso).filter(AndamentoProcesso.id == data.andamento_id).first()
+        # Precisa pertencer ao MESMO processo do prazo — sem isso dá pra
+        # vincular por engano a andamento de outro cliente (o front só lista
+        # candidatos do processo certo, mas o backend não confia nisso).
+        if not andamento or andamento.processo_id != prazo.processo_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Andamento não encontrado ou não pertence ao processo deste prazo",
+            )
+
+    com = ComentarioPrazo(
+        prazo_id=prazo.id,
+        andamento_id=data.andamento_id,
+        texto=data.texto,
+        autor_id=usuario.id,
+        autor_nome=getattr(usuario, "nome", None) or getattr(usuario, "email", None),
+    )
+    db.add(com)
+    db.commit()
+    db.refresh(com)
+    return com
+
+
+@router.delete("/{prazo_id}/comentarios/{comentario_id}", status_code=status.HTTP_204_NO_CONTENT)
+def deletar_comentario_prazo(prazo_id: uuid.UUID, comentario_id: uuid.UUID, db: Session = Depends(get_db)):
+    com = (
+        db.query(ComentarioPrazo)
+        .filter(ComentarioPrazo.id == comentario_id, ComentarioPrazo.prazo_id == prazo_id)
+        .first()
+    )
+    if not com:
+        raise HTTPException(status_code=404, detail="Comentário não encontrado")
+    db.delete(com)
+    db.commit()
