@@ -112,6 +112,17 @@ def _importar_todos_os_models() -> None:
         importlib.import_module(f"app.models.{info.name}")
 
 
+def _com_retry(fn, tentativas: int = 6, espera: float = 2.0):
+    ultimo_exc: Exception | None = None
+    for _ in range(tentativas):
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001 — qualquer erro de conexão conta
+            ultimo_exc = exc
+            time.sleep(espera)
+    raise ultimo_exc  # type: ignore[misc]
+
+
 def main() -> None:
     tunel = _abrir_tunel()
     try:
@@ -125,7 +136,11 @@ def main() -> None:
 
         db = SessionLocal()
         try:
-            config = db.get(InformativoStfConfig, 1)
+            # A porta local do túnel aceita conexão TCP antes do caminho de
+            # dados (WireGuard até o Postgres) estar de fato pronto — por
+            # isso a primeira consulta real pode levar um "connection
+            # refused" mesmo com o túnel "aberto". Tenta de novo com backoff.
+            config = _com_retry(lambda: db.get(InformativoStfConfig, 1))
             if not config:
                 config = InformativoStfConfig(id=1, areas_selecionadas=[], keywords_livres=[])
                 db.add(config)
