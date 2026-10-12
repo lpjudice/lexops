@@ -17,6 +17,7 @@ from app.schemas.prazo import (
     ComentarioPrazoCreate,
     ComentarioPrazoOut,
     ComentarioPrazoProcessoOut,
+    ComentarioPrazoUpdate,
     PrazoCreate,
     PrazoOut,
     PrazoUpdate,
@@ -422,6 +423,43 @@ def criar_comentario_prazo(
         autor_nome=getattr(usuario, "nome", None) or getattr(usuario, "email", None),
     )
     db.add(com)
+    db.commit()
+    db.refresh(com)
+    return com
+
+
+@router.patch("/{prazo_id}/comentarios/{comentario_id}", response_model=ComentarioPrazoOut)
+def atualizar_comentario_prazo(
+    prazo_id: uuid.UUID,
+    comentario_id: uuid.UUID,
+    data: ComentarioPrazoUpdate,
+    db: Session = Depends(get_db),
+):
+    """Corrige o texto ou o vínculo de um comentário já salvo — sobretudo pra
+    quando o sistema (ou o próprio usuário, na hora) escolheu o andamento
+    errado, sem precisar apagar e recriar o comentário."""
+    com = (
+        db.query(ComentarioPrazo)
+        .filter(ComentarioPrazo.id == comentario_id, ComentarioPrazo.prazo_id == prazo_id)
+        .first()
+    )
+    if not com:
+        raise HTTPException(status_code=404, detail="Comentário não encontrado")
+
+    alteracoes = data.model_dump(exclude_unset=True)
+
+    if alteracoes.get("andamento_id"):
+        prazo = db.query(Prazo).filter(Prazo.id == prazo_id).first()
+        andamento = db.query(AndamentoProcesso).filter(AndamentoProcesso.id == alteracoes["andamento_id"]).first()
+        if not prazo or not andamento or andamento.processo_id != prazo.processo_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Andamento não encontrado ou não pertence ao processo deste prazo",
+            )
+
+    for field, value in alteracoes.items():
+        setattr(com, field, value)
+
     db.commit()
     db.refresh(com)
     return com

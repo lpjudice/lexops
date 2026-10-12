@@ -58,6 +58,13 @@ class ComentarioPrazoCreate(BaseModel):
     andamento_id: uuid.UUID | None = None
 
 
+class ComentarioPrazoUpdate(BaseModel):
+    # Parcial (exclude_unset no router, mesmo padrão de PrazoUpdate): omitir um
+    # campo deixa ele como está; `andamento_id: null` explícito desvincula.
+    texto: str | None = None
+    andamento_id: uuid.UUID | None = None
+
+
 class ComentarioPrazoOut(BaseModel):
     id: uuid.UUID
     texto: str

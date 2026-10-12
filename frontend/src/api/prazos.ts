@@ -124,6 +124,14 @@ export const prazosApi = {
       texto,
       andamento_id: andamentoId ?? null,
     }).then((r) => r.data),
+  atualizarComentario: (
+    prazoId: string, comentarioId: string,
+    data: { texto?: string; andamentoId?: string | null },
+  ) =>
+    api.patch<ComentarioPrazo>(`/prazos/${prazoId}/comentarios/${comentarioId}`, {
+      ...(data.texto !== undefined ? { texto: data.texto } : {}),
+      ...(data.andamentoId !== undefined ? { andamento_id: data.andamentoId } : {}),
+    }).then((r) => r.data),
   deletarComentario: (prazoId: string, comentarioId: string) =>
     api.delete(`/prazos/${prazoId}/comentarios/${comentarioId}`),
   listarComentariosDoProcesso: (processoId: string) =>
