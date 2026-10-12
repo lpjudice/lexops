@@ -14,13 +14,20 @@
     <key>WorkingDirectory</key>
     <string>/Users/lucasjudice/ClaudeCode/GestorJuridico/backend</string>
 
-    <!-- Roda a cada 30 min; o script decide internamente se "está na hora"
-         (pedido manual pendente ou segunda-feira à tarde). Também dispara
-         ao carregar (RunAtLoad) — cobre o caso do Mac ter ficado desligado
-         na hora agendada: na próxima vez que ligar, o launchd carrega este
-         job de novo e ele checa imediatamente. -->
-    <key>StartInterval</key>
-    <integer>1800</integer>
+    <!-- Roda só 1x por dia, de tarde (o script decide se é segunda-feira e
+         se ainda não rodou esta semana — qualquer outro dia, sai sem fazer
+         nada em menos de 1s). Isso não pesa o computador: StartCalendarInterval
+         só dispara nesse horário, não fica checando o tempo todo. RunAtLoad
+         também dispara ao carregar — cobre o Mac ter ficado desligado nessa
+         hora: na próxima vez que ligar/fizer login, o launchd já roda e,
+         se for segunda, pega o atraso. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>15</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
 
     <key>RunAtLoad</key>
     <true/>

@@ -171,9 +171,10 @@ def _deve_rodar(config, agora: datetime) -> bool:
     ):
         return True  # pedido manual pendente ("Rodar sincronização agora")
 
-    # Agenda semanal: segunda a partir das 13h, só 1x por semana.
-    e_segunda_tarde = agora.weekday() == 0 and agora.hour >= 13
-    if not e_segunda_tarde:
+    # Agenda semanal: roda 1x por dia (ver plist — StartCalendarInterval), só
+    # tenta de fato na segunda-feira (dia em que o STF costuma publicar) e
+    # só 1x por semana, mesmo se a checagem diária rodar mais de uma vez.
+    if agora.weekday() != 0:  # 0 = segunda
         return False
     if not config.sync_local_ultimo_em:
         return True
