@@ -132,12 +132,21 @@ function AndamentoPicker({
 }) {
   const { data: andamentos = [], isLoading } = useQuery({
     queryKey: ['andamentos', processoId, 0, undefined],
-    queryFn: () => andamentosApi.listar(processoId, 8, 0),
+    queryFn: () => andamentosApi.listar(processoId, 12, 0),
   })
 
   return (
     <div className={prazosStyles.picker}>
       <p className={prazosStyles.pickerTitulo}>A qual andamento este comentário se refere?</p>
+      {/* DataJud e jus.br costumam importar o MESMO movimento como duas linhas
+          diferentes (uma terser, outra com o documento) — sem indicar a fonte
+          aqui, as duas pareciam opções equivalentes e dava pra vincular à
+          linha que NÃO é a que aparece na aba Andamentos que você está vendo
+          (foi exatamente o que aconteceu no caso "Embargos... Ementa.html"). */}
+      <p className={prazosStyles.pickerAviso}>
+        DataJud e jus.br às vezes trazem o mesmo movimento como duas linhas distintas — confira a fonte
+        antes de escolher, pra vincular à mesma que aparece na aba Andamentos.
+      </p>
       {isLoading ? (
         <p className={prazosStyles.pickerVazio}>Carregando andamentos do processo...</p>
       ) : andamentos.length === 0 ? (
@@ -152,7 +161,13 @@ function AndamentoPicker({
                 <span className={prazosStyles.pickerOpcaoTitulo}>
                   {a.tipo || 'Andamento'}{a.descricao ? ` — "${a.descricao.slice(0, 70)}${a.descricao.length > 70 ? '…' : ''}"` : ''}
                 </span>
-                <span className={prazosStyles.pickerOpcaoMeta}>{formatDate(a.data_andamento ?? undefined)}</span>
+                <span className={prazosStyles.pickerOpcaoMeta}>
+                  {formatDate(a.data_andamento ?? undefined)}
+                  {' · '}
+                  <span className={prazosStyles.pickerOpcaoFonte}>
+                    {(a.fonte ?? '').toUpperCase().startsWith('JUSBR') ? 'jus.br' : 'DataJud'}
+                  </span>
+                </span>
               </span>
             </label>
           ))}

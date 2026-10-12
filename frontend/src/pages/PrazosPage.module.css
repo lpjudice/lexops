@@ -339,6 +339,17 @@
   color: #9ca3af;
 }
 
+.pickerAviso {
+  margin: 2px 0 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #92400e;
+  background: #fffbeb;
+  border-left: 3px solid #f59e0b;
+  padding: 6px 9px;
+  border-radius: 0 6px 6px 0;
+}
+
 .pickerLista {
   display: flex;
   flex-direction: column;
@@ -379,6 +390,11 @@
   display: block;
   font-size: 10.5px;
   color: #9ca3af;
+}
+
+.pickerOpcaoFonte {
+  font-weight: 700;
+  color: #6a7070;
 }
 
 /* ── Editor completo do prazo ── */
