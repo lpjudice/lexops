@@ -81,6 +81,11 @@ class Settings(BaseSettings):
     # Modelo Claude do bot de dúvidas via WhatsApp (barato: consulta objetiva).
     whatsapp_claude_model: str = "claude-haiku-4-5"
 
+    # Bland.ai — chamadas de voz via IA (ligar para o Lucas ou para terceiros)
+    bland_api_key: str = ""
+    # Número do Lucas em E.164 (ex.: +5527888098809), usado por /telefonia/me-ligar
+    telefonia_numero_lucas: str = ""
+
     # NFS-e Nacional — e-CNPJ A1 (mTLS)
     nfse_cert_path: str = ""       # caminho local do .pfx (dev)
     nfse_cert_password: str = ""   # senha do .pfx

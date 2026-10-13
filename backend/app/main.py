@@ -50,6 +50,7 @@ from app.routers import autos_ia
 from app.routers import carteira
 from app.routers import informativo_stj
 from app.routers import informativo_stf
+from app.routers import telefonia
 
 # Cria as tabelas (Alembic gerencia em produção; aqui facilita o dev)
 Base.metadata.create_all(bind=engine)
@@ -2074,6 +2075,7 @@ app.include_router(usuarios.router)
 app.include_router(reunioes.router)
 app.include_router(webhooks.router)
 app.include_router(whatsapp.router)
+app.include_router(telefonia.router)
 app.include_router(telegram.router)
 app.include_router(telegram_andamentos.router)
 app.include_router(telegram_tasks.router)
