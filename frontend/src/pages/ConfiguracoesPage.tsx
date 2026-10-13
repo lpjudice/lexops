@@ -484,58 +484,35 @@ function AcessosConfidenciaisSection() {
 }
 
 function TelefoniaSection() {
-  const [telefone, setTelefone] = useState('')
-  const [tarefa, setTarefa] = useState('Diga que esta é uma chamada de teste do sistema Sui, e que está funcionando.')
-  const [resultado, setResultado] = useState<string | null>(null)
-
-  const { data: status } = useQuery({
-    queryKey: ['telefonia-status'],
-    queryFn: () => api.get<{ configurado: boolean; numero_lucas_configurado: boolean }>('/telefonia/status').then((r) => r.data),
-  })
-
-  const ligar = useMutation({
-    mutationFn: () =>
-      telefone.trim()
-        ? api.post('/telefonia/ligar', { telefone: telefone.trim(), tarefa }).then((r) => r.data)
-        : api.post('/telefonia/me-ligar', { tarefa }).then((r) => r.data),
-    onSuccess: (data) => setResultado(`Chamada disparada (id: ${data.call_id ?? data.id ?? '—'}).`),
-    onError: (err: any) => setResultado(`Erro: ${err?.response?.data?.detail ?? 'falha ao disparar chamada'}`),
-  })
-
+  // Descontinuada: o ciclo ligação → transcrição → aprovação demorava demais
+  // pra valer a pena no uso pessoal, e não há volume de cobrança/aviso a
+  // cliente que justifique ligação automática (a maior parte já sai por
+  // e-mail). Implementação mantida no backend como registro histórico —
+  // ver app/routers/telefonia.py e app/routers/telegram_pedidos.py.
   return (
-    <div className={cfg.secao}>
+    <div className={cfg.secao} style={{ opacity: 0.55, filter: 'grayscale(1)', pointerEvents: 'none', userSelect: 'none' }}>
       <div className={cfg.secaoHeader}>
         <h2 className={cfg.secaoTitulo}>Telefonia (chamadas via IA)</h2>
         <p className={cfg.secaoDesc}>
-          Dispara uma ligação de voz via Bland.ai. Informe um número (sua 2ª linha, um cliente, etc.) ou deixe
-          em branco para ligar para o seu número cadastrado.
-          {status && !status.configurado && ' Bland.ai não configurado (BLAND_API_KEY ausente).'}
-          {status && status.configurado && !status.numero_lucas_configurado && !telefone.trim() && ' Número padrão não configurado (TELEFONIA_NUMERO_LUCAS ausente) — informe um número manualmente.'}
+          <strong>Funcionalidade descontinuada.</strong> O fluxo de ligação via Bland.ai (voz → transcrição → aprovação)
+          foi desativado — o tempo de espera pelo resumo da chamada não compensava o uso, e não há volume de
+          avisos/cobranças que justifique ligação automática no lugar do e-mail.
         </p>
       </div>
       <input
         type="tel"
-        value={telefone}
-        onChange={(e) => setTelefone(e.target.value)}
-        style={{ width: '100%', fontFamily: 'Archivo, sans-serif', fontSize: 13, padding: 10, borderRadius: 8, border: '1px solid #e5e7eb', marginBottom: 8 }}
-        placeholder="Número a discar (ex.: +12138452982) — vazio = seu número cadastrado"
+        disabled
+        style={{ width: '100%', fontFamily: 'Archivo, sans-serif', fontSize: 13, padding: 10, borderRadius: 8, border: '1px solid #e5e7eb', marginBottom: 8, background: '#f3f4f6' }}
+        placeholder="Número a discar — desativado"
       />
       <textarea
-        value={tarefa}
-        onChange={(e) => setTarefa(e.target.value)}
+        disabled
         rows={3}
-        style={{ width: '100%', fontFamily: 'Archivo, sans-serif', fontSize: 13, padding: 10, borderRadius: 8, border: '1px solid #e5e7eb', resize: 'vertical' }}
-        placeholder="O que a IA deve dizer/fazer na chamada"
+        style={{ width: '100%', fontFamily: 'Archivo, sans-serif', fontSize: 13, padding: 10, borderRadius: 8, border: '1px solid #e5e7eb', resize: 'vertical', background: '#f3f4f6' }}
+        placeholder="Desativado"
       />
-      <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 12 }}>
-        <button
-          className={styles.btnPrimary}
-          disabled={ligar.isPending || !status?.configurado || (!telefone.trim() && !status?.numero_lucas_configurado)}
-          onClick={() => { setResultado(null); ligar.mutate() }}
-        >
-          {ligar.isPending ? 'Ligando...' : telefone.trim() ? 'Ligar para este número' : 'Ligar para mim (teste)'}
-        </button>
-        {resultado && <span style={{ fontSize: 13, color: resultado.startsWith('Erro') ? '#b91c1c' : '#047857' }}>{resultado}</span>}
+      <div style={{ marginTop: 10 }}>
+        <button className={styles.btnPrimary} disabled>Ligar (desativado)</button>
       </div>
     </div>
   )
