@@ -326,6 +326,12 @@ export default function CarteiraPage() {
   const [filtroClienteFundos, setFiltroClienteFundos] = useState('')
   const [filtroClientePos, setFiltroClientePos] = useState('')
   const [filtroClienteRef, setFiltroClienteRef] = useState('')
+  // Referência/Clientes: filtrar a lista só pra quem já tem o ativo marcado
+  // (ao contrário do mostrarDebs/Imob/Fundos de baixo, que só escondem seção
+  // dentro do card — aqui ligado = restringe quais clientes aparecem).
+  const [filtroRefDeb, setFiltroRefDeb] = useState(false)
+  const [filtroRefImob, setFiltroRefImob] = useState(false)
+  const [filtroRefFundos, setFiltroRefFundos] = useState(false)
   // Filtro tipo de ativo em Posição por Cliente
   const [mostrarDebs, setMostrarDebs] = useState(true)
   const [mostrarImob, setMostrarImob] = useState(true)
@@ -644,6 +650,27 @@ export default function CarteiraPage() {
       .filter((c: any) => filtrarPorNome(clienteNome(c.id), filtroClientePos))
       .sort((a: any, b: any) => clienteNome(a.id).localeCompare(clienteNome(b.id), 'pt-BR'))
   }, [clientes, debentures, imobiliario, fundos, filtroClientePos])
+
+  // Referência/Clientes: mesma ideia do clientesAtivos, mas com um Set por
+  // tipo de ativo — se algum dos 3 filtros estiver ligado, só passa quem tem
+  // pelo menos um dos tipos marcados (OR entre os marcados); nenhum marcado
+  // = sem filtro, mostra todos (comportamento atual).
+  const clientesFiltradosRef = useMemo(() => {
+    const comDeb = new Set<number>()
+    const comImob = new Set<number>()
+    const comFundo = new Set<number>()
+    for (const d of debentures) comDeb.add(d.cliente_id)
+    for (const i of imobiliario) comImob.add(i.cliente_id)
+    for (const f of fundos) comFundo.add(f.cliente_id)
+    const algumFiltroAtivo = filtroRefDeb || filtroRefImob || filtroRefFundos
+    return clientes
+      .filter((c: any) => !algumFiltroAtivo || (
+        (filtroRefDeb && comDeb.has(c.id)) ||
+        (filtroRefImob && comImob.has(c.id)) ||
+        (filtroRefFundos && comFundo.has(c.id))
+      ))
+      .filter((c: any) => filtrarPorNome(clienteNome(c.id), filtroClienteRef))
+  }, [clientes, debentures, imobiliario, fundos, filtroRefDeb, filtroRefImob, filtroRefFundos, filtroClienteRef])
 
   // ── Mutations ─────────────────────────────────────────────────────
   // exito_split é um toggle só de UI (decide mostrar % geral ou % dividido),
@@ -1729,8 +1756,19 @@ export default function CarteiraPage() {
       {/* ══ CLIENTES (referência) ══════════════════════════════════ */}
       {tab === 'clientes' && (
         <>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 10 }}>
-            <input className={styles.input} style={{ width: 240 }} placeholder="Filtrar por nome..." value={filtroClienteRef} onChange={e => setFiltroClienteRef(e.target.value)} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 10, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+              <input className={styles.input} style={{ width: 240 }} placeholder="Filtrar por nome..." value={filtroClienteRef} onChange={e => setFiltroClienteRef(e.target.value)} />
+              <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, cursor: 'pointer' }}>
+                <input type="checkbox" checked={filtroRefDeb} onChange={e => setFiltroRefDeb(e.target.checked)} style={{ accentColor: 'var(--teal)' }} /> Debêntures
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, cursor: 'pointer' }}>
+                <input type="checkbox" checked={filtroRefImob} onChange={e => setFiltroRefImob(e.target.checked)} style={{ accentColor: 'var(--amber, #f59e0b)' }} /> Imobiliário
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, cursor: 'pointer' }}>
+                <input type="checkbox" checked={filtroRefFundos} onChange={e => setFiltroRefFundos(e.target.checked)} style={{ accentColor: 'var(--blue, #3b82f6)' }} /> Fundos
+              </label>
+            </div>
             <button className={styles.btnPrimary} onClick={() => { setForm({ pro_labore_tipo: '', tipo_pessoa: 'PF', exito_split: false }); setEditandoClienteId(null); setModal('cliente') }}>+ Novo Cliente</button>
           </div>
           <div className={styles.tableCard}>
@@ -1738,9 +1776,9 @@ export default function CarteiraPage() {
               <colgroup><col /><col style={{ width: 60 }} /><col style={{ width: 140 }} /><col style={{ width: 160 }} /><col style={{ width: 150 }} /><col style={{ width: 150 }} /><col style={{ width: 80 }} /><col style={{ width: 36 }} /><col style={{ width: 36 }} /><col style={{ width: 60 }} /></colgroup>
               <thead><tr><th>Nome</th><th>Tipo</th><th>CPF/CNPJ</th><th>{isSuperAdmin ? 'Fee entrada' : '🔒 Fee'}</th>{thR(isSuperAdmin ? 'Fee (R$ esp.)' : '🔒')}{thR(isSuperAdmin ? 'Êxito (R$ esp.)' : '🔒')}<th>Status</th><th /><th title="Drive" /></tr></thead>
               <tbody>
-                {clientes.filter((c: any) => filtrarPorNome(clienteNome(c.id), filtroClienteRef)).length === 0
+                {clientesFiltradosRef.length === 0
                   ? <tr><td colSpan={10} style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Nenhum registro</td></tr>
-                  : clientes.filter((c: any) => filtrarPorNome(clienteNome(c.id), filtroClienteRef)).map((c: any) => {
+                  : clientesFiltradosRef.map((c: any) => {
                     const { feeEntrada, exito } = calcularHonorarios(c)
                     const feeLbl = c.pro_labore_tipo === 'fixo' ? brl(c.pro_labore_valor)
                       : c.pro_labore_tipo === 'percentual'
