@@ -32,9 +32,12 @@ def disparar_chamada(
     voice: str | None = None,
     webhook_url: str | None = None,
     metadata: dict[str, Any] | None = None,
+    language: str | None = None,
 ) -> dict | None:
     """Dispara uma chamada via Bland.ai. `tarefa` é a instrução em linguagem
     natural que a IA vai seguir durante a ligação (o parâmetro `task` da API).
+    `language` força o idioma da ligação (ex.: "en", "pt-BR"), independente
+    da configuração padrão da conta Bland.ai.
     """
     if not settings.bland_api_key:
         return None
@@ -51,6 +54,8 @@ def disparar_chamada(
         payload["webhook"] = webhook_url
     if metadata:
         payload["metadata"] = metadata
+    if language:
+        payload["language"] = language
     try:
         resp = httpx.post(
             f"{API_BASE}/v1/calls",

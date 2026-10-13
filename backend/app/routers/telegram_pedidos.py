@@ -36,13 +36,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/telegram-pedidos", tags=["telegram-pedidos"])
 
 TAREFA_BLAND = (
-    "Você está atendendo uma ligação do Lucas Judice, advogado, sobre o sistema "
-    "interno dele chamado Sui (LexOps). Lucas vai descrever uma mudança ou "
-    "funcionalidade que ele quer no sistema. Ouça com atenção, faça perguntas "
-    "de esclarecimento se o pedido estiver vago, e ao final REPITA o pedido "
-    "em voz alta pra confirmar que você entendeu corretamente antes de "
-    "encerrar. Depois da confirmação, agradeça e diga que ele vai receber a "
-    "confirmação por Telegram para aprovar, e encerre a ligação educadamente."
+    "You are taking a call from Lucas Judice, a lawyer, about his internal "
+    "system called Sui (LexOps). Lucas will describe a change or feature he "
+    "wants in the system. Listen carefully, ask clarifying questions if the "
+    "request is vague, and at the end REPEAT the request back out loud to "
+    "confirm you understood it correctly before hanging up. After he "
+    "confirms, thank him, tell him he'll get a Telegram message to approve "
+    "it, and end the call politely."
 )
 
 
@@ -101,6 +101,7 @@ def _handle_message(db: Session, message: dict) -> None:
             tarefa=TAREFA_BLAND,
             webhook_url=webhook_url,
             metadata={"pedido_id": str(pedido.id)},
+            language="en",
         )
         if resultado is None or "erro" in (resultado or {}):
             pedido.status = "falhou"
