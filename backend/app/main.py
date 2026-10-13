@@ -25,6 +25,7 @@ from app.models import nota_fiscal as _nota_fiscal_model  # noqa: F401
 from app.models import config_fiscal as _config_fiscal_model  # noqa: F401
 from app.models import relatorio_fiscal_log as _relatorio_fiscal_log_model  # noqa: F401
 from app.models import telegram_task as _telegram_task_model  # noqa: F401 — TelegramTaskBatch/Item/Session
+from app.models import pedido_voz as _pedido_voz_model  # noqa: F401 — PedidoVoz
 from app.models import backoffice as _backoffice_model  # noqa: F401
 from app.models import precedentcheck as _precedentcheck_model  # noqa: F401
 from app.models import tarefa_projeto as _tarefa_projeto_model  # noqa: F401
@@ -51,6 +52,7 @@ from app.routers import carteira
 from app.routers import informativo_stj
 from app.routers import informativo_stf
 from app.routers import telefonia
+from app.routers import telegram_pedidos
 
 # Cria as tabelas (Alembic gerencia em produção; aqui facilita o dev)
 Base.metadata.create_all(bind=engine)
@@ -1733,6 +1735,28 @@ def _run_migrations() -> None:
         ]:
             conn.execute(text(_col))
 
+        # Pedidos de voz (bot de Pedidos no Telegram → ligação via Bland.ai)
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS pedidos_voz (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                call_id VARCHAR(100),
+                chat_id VARCHAR(100) NOT NULL,
+                telefone VARCHAR(30) NOT NULL,
+                status VARCHAR(30) NOT NULL DEFAULT 'em_chamada',
+                transcricao TEXT,
+                resumo_pedido TEXT,
+                telegram_message_id VARCHAR(100),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                resolved_at TIMESTAMPTZ
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_pedidos_voz_call_id ON pedidos_voz(call_id)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_pedidos_voz_chat_id ON pedidos_voz(chat_id)"
+        ))
+
         conn.commit()
 
 
@@ -2076,6 +2100,7 @@ app.include_router(reunioes.router)
 app.include_router(webhooks.router)
 app.include_router(whatsapp.router)
 app.include_router(telefonia.router)
+app.include_router(telegram_pedidos.router)
 app.include_router(telegram.router)
 app.include_router(telegram_andamentos.router)
 app.include_router(telegram_tasks.router)
