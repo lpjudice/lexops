@@ -483,6 +483,52 @@ function AcessosConfidenciaisSection() {
   )
 }
 
+function TelefoniaSection() {
+  const [tarefa, setTarefa] = useState('Diga ao Lucas que esta é uma chamada de teste do sistema Sui, e que está funcionando.')
+  const [resultado, setResultado] = useState<string | null>(null)
+
+  const { data: status } = useQuery({
+    queryKey: ['telefonia-status'],
+    queryFn: () => api.get<{ configurado: boolean; numero_lucas_configurado: boolean }>('/telefonia/status').then((r) => r.data),
+  })
+
+  const ligar = useMutation({
+    mutationFn: () => api.post('/telefonia/me-ligar', { tarefa }).then((r) => r.data),
+    onSuccess: (data) => setResultado(`Chamada disparada (id: ${data.call_id ?? data.id ?? '—'}).`),
+    onError: (err: any) => setResultado(`Erro: ${err?.response?.data?.detail ?? 'falha ao disparar chamada'}`),
+  })
+
+  return (
+    <div className={cfg.secao}>
+      <div className={cfg.secaoHeader}>
+        <h2 className={cfg.secaoTitulo}>Telefonia (chamadas via IA)</h2>
+        <p className={cfg.secaoDesc}>
+          Dispara uma ligação de voz via Bland.ai para o número cadastrado do Lucas, seguindo a instrução abaixo.
+          {status && !status.configurado && ' Bland.ai não configurado (BLAND_API_KEY ausente).'}
+          {status && status.configurado && !status.numero_lucas_configurado && ' Número do Lucas não configurado (TELEFONIA_NUMERO_LUCAS ausente).'}
+        </p>
+      </div>
+      <textarea
+        value={tarefa}
+        onChange={(e) => setTarefa(e.target.value)}
+        rows={3}
+        style={{ width: '100%', fontFamily: 'Archivo, sans-serif', fontSize: 13, padding: 10, borderRadius: 8, border: '1px solid #e5e7eb', resize: 'vertical' }}
+        placeholder="O que a IA deve dizer/fazer na chamada"
+      />
+      <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 12 }}>
+        <button
+          className={styles.btnPrimary}
+          disabled={ligar.isPending || !status?.configurado}
+          onClick={() => { setResultado(null); ligar.mutate() }}
+        >
+          {ligar.isPending ? 'Ligando...' : 'Ligar para mim (teste)'}
+        </button>
+        {resultado && <span style={{ fontSize: 13, color: resultado.startsWith('Erro') ? '#b91c1c' : '#047857' }}>{resultado}</span>}
+      </div>
+    </div>
+  )
+}
+
 export default function ConfiguracoesPage() {
   const [searchParams] = useSearchParams()
   const conviteBanner = searchParams.get('convite') === '1'
@@ -773,6 +819,9 @@ export default function ConfiguracoesPage() {
             </div>
           </div>
         </div>
+
+        {/* Seção: Telefonia (Bland.ai) */}
+        <TelefoniaSection />
 
         {/* Seção: Acessos Confidenciais — super_admin only */}
         {isSuperAdmin && <AcessosConfidenciaisSection />}
