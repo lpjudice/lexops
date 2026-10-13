@@ -25,6 +25,7 @@ from app.models import nota_fiscal as _nota_fiscal_model  # noqa: F401
 from app.models import config_fiscal as _config_fiscal_model  # noqa: F401
 from app.models import relatorio_fiscal_log as _relatorio_fiscal_log_model  # noqa: F401
 from app.models import telegram_task as _telegram_task_model  # noqa: F401 — TelegramTaskBatch/Item/Session
+from app.models import pedido_voz as _pedido_voz_model  # noqa: F401 — PedidoVoz
 from app.models import backoffice as _backoffice_model  # noqa: F401
 from app.models import precedentcheck as _precedentcheck_model  # noqa: F401
 from app.models import tarefa_projeto as _tarefa_projeto_model  # noqa: F401
@@ -39,12 +40,19 @@ from app.models import instagram as _instagram_model  # noqa: F401 — ensures I
 from app.models import informativo as _informativo_model  # noqa: F401 — ensures Informativo table is registered
 from app.models import autos_ia as _autos_ia_model  # noqa: F401 — ensures Autos IA tables are registered
 from app.models import carteira as _carteira_model  # noqa: F401 — ensures Carteira tables are registered
+from app.models import informativo_stj as _informativo_stj_model  # noqa: F401 — ensures InformativoStj tables are registered
+from app.models import informativo_stf as _informativo_stf_model  # noqa: F401 — ensures InformativoStf tables are registered
+from app.models import comentario_prazo as _comentario_prazo_model  # noqa: F401 — ensures ComentarioPrazo table is registered
 from app.routers import andamentos, anotacoes, auth, clientes, contratos, conversas_ia, diario, diario2, feriados, financeiro, fiscal, pagantes, config_fiscal, jurisprudencia, organizador, pje, prazos, processos, publico, reembolsos, reunioes, system, tarefas, telegram, telegram_andamentos, telegram_tasks, teses, usuarios, webhooks, whatsapp
 from app.routers import backoffice, precedentcheck, conselho, tarefa_projetos, tarefa_cards, memoria_estrategica, despacho, conselho_juridico, responsaveis, patrimonio, instagram
 from app.routers import cadastro_links, cadastro_publico, cadastro_submissoes
 from app.routers import informativos
 from app.routers import autos_ia
 from app.routers import carteira
+from app.routers import informativo_stj
+from app.routers import informativo_stf
+from app.routers import telefonia
+from app.routers import telegram_pedidos
 
 # Cria as tabelas (Alembic gerencia em produção; aqui facilita o dev)
 Base.metadata.create_all(bind=engine)
@@ -880,6 +888,162 @@ def _run_migrations() -> None:
             "INSERT INTO instagram_config (id, assessoria_emails) VALUES (1, 'moni@pimentajudice.com.br') ON CONFLICT (id) DO NOTHING"
         ))
 
+        # Informativo STJ — scraping semanal do Informativo de Jurisprudência do STJ
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS informativo_stj_edicoes (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                numero INTEGER NOT NULL,
+                data_publicacao DATE,
+                tipo VARCHAR(20) NOT NULL DEFAULT 'ordinaria',
+                tema_extraordinario VARCHAR(255),
+                url_origem TEXT NOT NULL,
+                status_scraping VARCHAR(20) NOT NULL DEFAULT 'pendente',
+                erro_scraping TEXT,
+                scraped_em TIMESTAMPTZ,
+                criado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+                atualizado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_informativo_stj_edicoes_numero ON informativo_stj_edicoes(numero)"
+        ))
+
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS informativo_stj_itens (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                edicao_id UUID NOT NULL REFERENCES informativo_stj_edicoes(id) ON DELETE CASCADE,
+                orgao_julgador VARCHAR(100) NOT NULL DEFAULT '',
+                ramo_direito VARCHAR(255) NOT NULL DEFAULT 'Não classificado',
+                titulo TEXT NOT NULL DEFAULT '',
+                destaque_oficial TEXT NOT NULL DEFAULT '',
+                processo_numero TEXT,
+                processo_url TEXT,
+                relator VARCHAR(255),
+                data_julgamento DATE,
+                texto_explicativo TEXT,
+                legislacao_citada JSONB NOT NULL DEFAULT '[]'::jsonb,
+                ordem INTEGER NOT NULL DEFAULT 0,
+                destacado BOOLEAN NOT NULL DEFAULT false,
+                motivo_destaque VARCHAR(255),
+                status_ia VARCHAR(20) NOT NULL DEFAULT 'nao_aplicavel',
+                resumo_tema_central TEXT,
+                resumo_ratio_decidendi TEXT,
+                custo_ia_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+                ia_processado_em TIMESTAMPTZ,
+                erro_ia TEXT,
+                criado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+                atualizado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_informativo_stj_itens_edicao ON informativo_stj_itens(edicao_id)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_informativo_stj_itens_destacado ON informativo_stj_itens(destacado, status_ia)"
+        ))
+        conn.execute(text("ALTER TABLE informativo_stj_itens ALTER COLUMN ramo_direito TYPE VARCHAR(255)"))
+        conn.execute(text("ALTER TABLE informativo_stj_itens ALTER COLUMN processo_numero TYPE TEXT"))
+        conn.execute(text("ALTER TABLE informativo_stj_itens ADD COLUMN IF NOT EXISTS favorito BOOLEAN NOT NULL DEFAULT false"))
+        conn.execute(text("ALTER TABLE informativo_stj_edicoes ADD COLUMN IF NOT EXISTS resumo_edicao TEXT"))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_informativo_stj_itens_favorito ON informativo_stj_itens(favorito)"
+        ))
+        conn.execute(text("ALTER TABLE informativo_stj_itens ADD COLUMN IF NOT EXISTS resumo_leigo TEXT"))
+        conn.execute(text("ALTER TABLE informativo_stj_itens ADD COLUMN IF NOT EXISTS instagram_sugestao_id UUID"))
+        conn.execute(text("ALTER TABLE informativo_stj_itens ADD COLUMN IF NOT EXISTS instagram_gerado_em TIMESTAMPTZ"))
+
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS informativo_stj_config (
+                id INTEGER PRIMARY KEY DEFAULT 1,
+                areas_selecionadas JSONB NOT NULL DEFAULT '[]'::jsonb,
+                keywords_livres JSONB NOT NULL DEFAULT '[]'::jsonb,
+                atualizado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text(
+            "INSERT INTO informativo_stj_config (id, areas_selecionadas, keywords_livres) "
+            "VALUES (1, '[]'::jsonb, '[]'::jsonb) ON CONFLICT (id) DO NOTHING"
+        ))
+
+        # Informativo STF — scraping semanal do Informativo do STF
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS informativo_stf_edicoes (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                numero INTEGER NOT NULL,
+                data_publicacao DATE,
+                tipo VARCHAR(20) NOT NULL DEFAULT 'ordinaria',
+                tema_extraordinario VARCHAR(255),
+                url_origem TEXT NOT NULL,
+                status_scraping VARCHAR(20) NOT NULL DEFAULT 'pendente',
+                erro_scraping TEXT,
+                scraped_em TIMESTAMPTZ,
+                criado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+                atualizado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_informativo_stf_edicoes_numero ON informativo_stf_edicoes(numero)"
+        ))
+
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS informativo_stf_itens (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                edicao_id UUID NOT NULL REFERENCES informativo_stf_edicoes(id) ON DELETE CASCADE,
+                orgao_julgador VARCHAR(100) NOT NULL DEFAULT '',
+                ramo_direito VARCHAR(255) NOT NULL DEFAULT 'Não classificado',
+                titulo TEXT NOT NULL DEFAULT '',
+                destaque_oficial TEXT NOT NULL DEFAULT '',
+                processo_numero TEXT,
+                processo_url TEXT,
+                relator VARCHAR(255),
+                data_julgamento DATE,
+                texto_explicativo TEXT,
+                legislacao_citada JSONB NOT NULL DEFAULT '[]'::jsonb,
+                ordem INTEGER NOT NULL DEFAULT 0,
+                destacado BOOLEAN NOT NULL DEFAULT false,
+                favorito BOOLEAN NOT NULL DEFAULT false,
+                motivo_destaque VARCHAR(255),
+                status_ia VARCHAR(20) NOT NULL DEFAULT 'nao_aplicavel',
+                resumo_tema_central TEXT,
+                resumo_ratio_decidendi TEXT,
+                resumo_leigo TEXT,
+                instagram_sugestao_id UUID,
+                instagram_gerado_em TIMESTAMPTZ,
+                custo_ia_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+                ia_processado_em TIMESTAMPTZ,
+                erro_ia TEXT,
+                criado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+                atualizado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_informativo_stf_itens_edicao ON informativo_stf_itens(edicao_id)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_informativo_stf_itens_destacado ON informativo_stf_itens(destacado, status_ia)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_informativo_stf_itens_favorito ON informativo_stf_itens(favorito)"
+        ))
+        conn.execute(text("ALTER TABLE informativo_stf_edicoes ADD COLUMN IF NOT EXISTS email_destaques_enviado_em TIMESTAMPTZ"))
+
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS informativo_stf_config (
+                id INTEGER PRIMARY KEY DEFAULT 1,
+                areas_selecionadas JSONB NOT NULL DEFAULT '[]'::jsonb,
+                keywords_livres JSONB NOT NULL DEFAULT '[]'::jsonb,
+                atualizado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        conn.execute(text(
+            "INSERT INTO informativo_stf_config (id, areas_selecionadas, keywords_livres) "
+            "VALUES (1, '[]'::jsonb, '[]'::jsonb) ON CONFLICT (id) DO NOTHING"
+        ))
+        conn.execute(text("ALTER TABLE informativo_stf_config ADD COLUMN IF NOT EXISTS sync_local_solicitado_em TIMESTAMPTZ"))
+        conn.execute(text("ALTER TABLE informativo_stf_config ADD COLUMN IF NOT EXISTS sync_local_ultimo_em TIMESTAMPTZ"))
+        conn.execute(text("ALTER TABLE informativo_stf_config ADD COLUMN IF NOT EXISTS sync_local_ultimo_status VARCHAR(20)"))
+        conn.execute(text("ALTER TABLE informativo_stf_config ADD COLUMN IF NOT EXISTS sync_local_ultima_mensagem TEXT"))
+
         # Instagram — brindes (histórico: 1 linha por geração, não substitui)
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS instagram_brindes (
@@ -1571,6 +1735,28 @@ def _run_migrations() -> None:
         ]:
             conn.execute(text(_col))
 
+        # Pedidos de voz (bot de Pedidos no Telegram → ligação via Bland.ai)
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS pedidos_voz (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                call_id VARCHAR(100),
+                chat_id VARCHAR(100) NOT NULL,
+                telefone VARCHAR(30) NOT NULL,
+                status VARCHAR(30) NOT NULL DEFAULT 'em_chamada',
+                transcricao TEXT,
+                resumo_pedido TEXT,
+                telegram_message_id VARCHAR(100),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                resolved_at TIMESTAMPTZ
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_pedidos_voz_call_id ON pedidos_voz(call_id)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_pedidos_voz_chat_id ON pedidos_voz(chat_id)"
+        ))
+
         conn.commit()
 
 
@@ -1913,6 +2099,8 @@ app.include_router(usuarios.router)
 app.include_router(reunioes.router)
 app.include_router(webhooks.router)
 app.include_router(whatsapp.router)
+app.include_router(telefonia.router)
+app.include_router(telegram_pedidos.router)
 app.include_router(telegram.router)
 app.include_router(telegram_andamentos.router)
 app.include_router(telegram_tasks.router)
@@ -1929,6 +2117,8 @@ app.include_router(instagram.router)
 app.include_router(informativos.router)
 app.include_router(autos_ia.router)
 app.include_router(carteira.router)
+app.include_router(informativo_stj.router)
+app.include_router(informativo_stf.router)
 
 
 @app.on_event("startup")

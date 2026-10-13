@@ -483,6 +483,41 @@ function AcessosConfidenciaisSection() {
   )
 }
 
+function TelefoniaSection() {
+  // Descontinuada: o ciclo ligação → transcrição → aprovação demorava demais
+  // pra valer a pena no uso pessoal, e não há volume de cobrança/aviso a
+  // cliente que justifique ligação automática (a maior parte já sai por
+  // e-mail). Implementação mantida no backend como registro histórico —
+  // ver app/routers/telefonia.py e app/routers/telegram_pedidos.py.
+  return (
+    <div className={cfg.secao} style={{ opacity: 0.55, filter: 'grayscale(1)', pointerEvents: 'none', userSelect: 'none' }}>
+      <div className={cfg.secaoHeader}>
+        <h2 className={cfg.secaoTitulo}>Telefonia (chamadas via IA)</h2>
+        <p className={cfg.secaoDesc}>
+          <strong>Funcionalidade descontinuada.</strong> O fluxo de ligação via Bland.ai (voz → transcrição → aprovação)
+          foi desativado — o tempo de espera pelo resumo da chamada não compensava o uso, e não há volume de
+          avisos/cobranças que justifique ligação automática no lugar do e-mail.
+        </p>
+      </div>
+      <input
+        type="tel"
+        disabled
+        style={{ width: '100%', fontFamily: 'Archivo, sans-serif', fontSize: 13, padding: 10, borderRadius: 8, border: '1px solid #e5e7eb', marginBottom: 8, background: '#f3f4f6' }}
+        placeholder="Número a discar — desativado"
+      />
+      <textarea
+        disabled
+        rows={3}
+        style={{ width: '100%', fontFamily: 'Archivo, sans-serif', fontSize: 13, padding: 10, borderRadius: 8, border: '1px solid #e5e7eb', resize: 'vertical', background: '#f3f4f6' }}
+        placeholder="Desativado"
+      />
+      <div style={{ marginTop: 10 }}>
+        <button className={styles.btnPrimary} disabled>Ligar (desativado)</button>
+      </div>
+    </div>
+  )
+}
+
 export default function ConfiguracoesPage() {
   const [searchParams] = useSearchParams()
   const conviteBanner = searchParams.get('convite') === '1'
@@ -773,6 +808,9 @@ export default function ConfiguracoesPage() {
             </div>
           </div>
         </div>
+
+        {/* Seção: Telefonia (Bland.ai) */}
+        <TelefoniaSection />
 
         {/* Seção: Acessos Confidenciais — super_admin only */}
         {isSuperAdmin && <AcessosConfidenciaisSection />}

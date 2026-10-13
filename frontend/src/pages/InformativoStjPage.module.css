@@ -1,0 +1,254 @@
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.headerTitle {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--teal);
+}
+
+.headerActions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--gray-border);
+  background: var(--white);
+  color: var(--dark);
+  border-radius: var(--radius-btn);
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.btn:hover { border-color: var(--teal); color: var(--teal); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btnPrimary {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: var(--white);
+}
+.btnPrimary:hover { background: #009d82; color: var(--white); }
+
+.searchBar {
+  position: relative;
+  margin-bottom: 1.25rem;
+}
+
+.searchInputWrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--gray-border);
+  border-radius: var(--radius-input);
+  background: var(--white);
+}
+.searchInputWrap:focus-within { border-color: var(--teal); }
+
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  padding: 10px 14px 10px 8px;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+.searchInput:focus { outline: none; }
+
+.searchIcon {
+  flex: none;
+  margin-left: 12px;
+  color: var(--gray-mid);
+  display: flex;
+  pointer-events: none;
+}
+
+.searchHint {
+  font-size: 11.5px;
+  color: var(--gray-mid);
+  margin-top: 4px;
+}
+
+.searchResults {
+  background: var(--white);
+  border: 1px solid var(--gray-border);
+  border-radius: var(--radius-card);
+  margin-top: 8px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.searchResultItem {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--gray-border);
+  cursor: pointer;
+}
+.searchResultItem:last-child { border-bottom: none; }
+.searchResultItem:hover { background: var(--light); }
+
+.searchResultTitulo {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dark);
+}
+
+.searchResultTrecho {
+  font-size: 12px;
+  color: var(--gray-mid);
+  margin-top: 3px;
+}
+
+.grid {
+  display: grid;
+  gap: 10px;
+}
+
+.card {
+  background: var(--white);
+  border: 1px solid var(--gray-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: 14px 18px;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.card:hover { box-shadow: var(--shadow-card-hover); }
+
+.cardTop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cardNumero {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--dark);
+}
+
+.cardData {
+  font-size: 12px;
+  color: var(--gray-mid);
+}
+
+.cardDestaquesLista {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cardDestaqueLinha {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--dark);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardDestaqueRamo {
+  flex: none;
+  font-size: 9px;
+}
+
+.cardDestaqueFavIcon {
+  flex: none;
+  color: #f59e0b;
+}
+
+.cardDestaqueTexto {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardMeta {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 100px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.badgeDestacado {
+  background: var(--teal-light);
+  color: var(--teal);
+}
+
+.badgeNeutro {
+  background: var(--light);
+  color: var(--gray-mid);
+}
+
+.badgeErro {
+  background: #fdecea;
+  color: #c0392b;
+}
+
+.ramoChip {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 100px;
+}
+
+.empty {
+  text-align: center;
+  color: var(--gray-mid);
+  padding: 3rem 0;
+  font-size: 14px;
+}
+
+@media (max-width: 640px) {
+  .header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .headerActions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .btn {
+    flex: 1;
+    justify-content: center;
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+  .cardTop {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+}

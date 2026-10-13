@@ -390,6 +390,41 @@ def _sync_diarios_monitorados() -> None:
         logger.warning("Scheduler: falha na sincronização automática do Diário Oficial: %s", exc)
 
 
+def _sync_informativo_stj() -> None:
+    try:
+        from app.database import SessionLocal
+        from app.services import scraping_informativo_stj
+
+        db = SessionLocal()
+        try:
+            resultado = scraping_informativo_stj.sincronizar_processar_e_notificar(db)
+            logger.info("Scheduler: Informativo STJ sincronizado — %s", resultado)
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.warning("Scheduler: falha na sincronização automática do Informativo STJ: %s", exc)
+
+
+def _processar_pendentes_informativo_stf() -> None:
+    """NÃO faz scraping — o site do STF bloqueia o IP do servidor, por isso o
+    scraping roda só localmente (script no Mac do usuário, via launchd). Este
+    job só processa o resumo de IA (tem a chave aqui) e envia o e-mail de
+    destaques das edições que o script local já inseriu. Frequente (a cada
+    hora) pra não segurar o e-mail esperando o próximo ciclo semanal."""
+    try:
+        from app.database import SessionLocal
+        from app.services import scraping_informativo_stf
+
+        db = SessionLocal()
+        try:
+            resultado = scraping_informativo_stf.processar_pendentes_e_notificar(db)
+            logger.info("Scheduler: Informativo STF — resumo/notificação — %s", resultado)
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.warning("Scheduler: falha ao processar pendentes do Informativo STF: %s", exc)
+
+
 def _enviar_lembretes_reembolso() -> None:
     try:
         from app.database import SessionLocal
@@ -865,6 +900,22 @@ def start_scheduler() -> None:
         _sync_diarios_monitorados,
         trigger=CronTrigger(day_of_week="mon-fri", hour=8, minute=0),
         id="sync_diario_monitorado",
+        replace_existing=True,
+    )
+    # Informativo de Jurisprudência do STJ: semanal, segunda 12h (STJ publica de manhã).
+    scheduler.add_job(
+        _sync_informativo_stj,
+        trigger=CronTrigger(day_of_week="mon", hour=12, minute=0, timezone="America/Sao_Paulo"),
+        id="sync_informativo_stj",
+        replace_existing=True,
+    )
+    # Informativo STF: scraping roda local (script no Mac do usuário — o STF
+    # bloqueia o IP do servidor). Este job só processa resumo de IA + e-mail,
+    # de hora em hora, pra pegar rápido o que o script local inserir.
+    scheduler.add_job(
+        _processar_pendentes_informativo_stf,
+        trigger=CronTrigger(minute=15, timezone="America/Sao_Paulo"),
+        id="processar_pendentes_informativo_stf",
         replace_existing=True,
     )
     # Recorte Digital OAB (Diário 2 via Gmail): 07h/09h/11h/15h seg-sex.

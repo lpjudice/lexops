@@ -31,6 +31,8 @@ import {
   Mail,
   Search,
   Wallet,
+  BookOpen,
+  Library,
 } from 'lucide-react'
 import api from '../api/client'
 import { useAuth } from '../contexts/AuthContext'
@@ -82,7 +84,7 @@ const navGroups: NavGroup[] = [
       { to: '/reunioes', label: 'Reuniões', Icon: Video },
       { to: '/conselho', label: 'Expansão', Icon: Users2 },
       { to: '/instagram', label: 'Instagram', Icon: Camera },
-      { to: '/informativos', label: 'Informativos', Icon: Newspaper },
+      { to: '/informativos', label: 'Informativo PJudice', Icon: Newspaper },
       { to: '/informativos/assinantes', label: 'E-mails (Informativos)', Icon: Mail },
     ],
   },
@@ -90,6 +92,8 @@ const navGroups: NavGroup[] = [
     label: 'CONTEÚDO',
     items: [
       { to: '/despacho', label: 'Despacho', Icon: Gavel },
+      { to: '/informativo-stj', label: 'Informativo STJ', Icon: BookOpen },
+      { to: '/informativo-stf', label: 'Informativo STF', Icon: Library },
       { to: '/conselho-juridico', label: 'Conselho Jurídico', Icon: Landmark },
       { to: '/diario', label: 'Diário Oficial', Icon: Newspaper },
       { to: '/diario2', label: 'Recorte Digital OAB', Icon: Newspaper },
@@ -169,8 +173,14 @@ const PAGE_TITLES: Record<string, string> = {
   '/reunioes': 'Reuniões',
   '/conselho': 'Expansão',
   '/instagram': 'Instagram',
-  '/informativos': 'Informativos',
+  '/informativos': 'Informativo PJudice',
   '/informativos/assinantes': 'E-mails (Informativos)',
+  '/informativo-stj': 'Informativo STJ',
+  '/informativo-stj/config': 'Informativo STJ — Configuração',
+  '/informativo-stj/favoritos': 'Informativo STJ — Favoritos',
+  '/informativo-stf': 'Informativo STF',
+  '/informativo-stf/config': 'Informativo STF — Configuração',
+  '/informativo-stf/favoritos': 'Informativo STF — Favoritos',
   '/configuracoes': 'Configurações',
   '/carteira': 'Carteira',
   '/autos-ia': 'Autos IA',

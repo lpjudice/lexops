@@ -81,6 +81,20 @@ class Settings(BaseSettings):
     # Modelo Claude do bot de dúvidas via WhatsApp (barato: consulta objetiva).
     whatsapp_claude_model: str = "claude-haiku-4-5"
 
+    # Bland.ai — chamadas de voz via IA (ligar para o Lucas ou para terceiros)
+    bland_api_key: str = ""
+    # Número do Lucas em E.164 (ex.: +12138452982), usado por /telefonia/me-ligar
+    telefonia_numero_lucas: str = ""
+    # Segredo compartilhado com a Bland.ai para validar o webhook de fim de chamada
+    # (enviado como query param ?secret=... na URL do webhook que registramos).
+    bland_webhook_secret: str = ""
+
+    # Telegram — bot de Pedidos (pedido feito por voz/ligação, aprovação por Telegram)
+    telegram_pedidos_bot_token: str = ""
+    telegram_pedidos_webhook_secret: str = ""
+    # IDs de usuários Telegram autorizados a disparar /ligar e aprovar pedidos.
+    telegram_pedidos_allowed_user_ids: str = ""
+
     # NFS-e Nacional — e-CNPJ A1 (mTLS)
     nfse_cert_path: str = ""       # caminho local do .pfx (dev)
     nfse_cert_password: str = ""   # senha do .pfx
@@ -107,6 +121,18 @@ class Settings(BaseSettings):
     def telegram_allowed_group_ids_set(self) -> set[int]:
         out: set[int] = set()
         for part in self.telegram_allowed_group_ids.split(","):
+            part = part.strip()
+            if part:
+                try:
+                    out.add(int(part))
+                except ValueError:
+                    pass
+        return out
+
+    @property
+    def telegram_pedidos_allowed_ids(self) -> set[int]:
+        out: set[int] = set()
+        for part in self.telegram_pedidos_allowed_user_ids.split(","):
             part = part.strip()
             if part:
                 try:

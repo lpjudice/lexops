@@ -322,6 +322,75 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Badge no PRÓPRIO card do andamento, avisando que há anotação vinculada a
+   ele logo abaixo — mesmo acento teal do .notaCard, pra ficar óbvio que são
+   a mesma coisa (sem isso só dava pra notar olhando o card tracejado). */
+.notaIndicador {
+  font-size: 10px;
+  font-weight: 700;
+  background: #e8f7f4;
+  color: #00875a;
+  border: 1px solid #a7f3d0;
+  border-radius: 999px;
+  padding: 1px 7px;
+  cursor: help;
+}
+
+/* ── Nota de prazo interleaved (dado humano, não de tribunal) ──
+   Tracejado + acento teal: distinta o bastante dos cards cinza de andamento
+   pra nunca ser confundida com movimento oficial, mas sem brigar visualmente
+   com o "novo"/"não lido" azul já usado nesta mesma lista. */
+.notaCard {
+  background: #e8f7f4;
+  border: 1px dashed #00b090;
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.notaMeta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+
+.notaBadge {
+  font-size: 10px;
+  font-weight: 700;
+  background: #00b090;
+  color: #fff;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.notaPeca {
+  font-size: 11px;
+  font-weight: 700;
+  color: #006b56;
+}
+
+.notaData {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: #6a7070;
+}
+
+.notaTexto {
+  font-size: 12.5px;
+  color: #2a2a2a;
+  font-style: italic;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.notaAutor {
+  display: block;
+  margin-top: 5px;
+  font-size: 10.5px;
+  color: #6a7070;
+}
+
 /* ── jus.br token renew button ──────────────────────────────────────── */
 .btnTokenReset {
   font-size: 14px;

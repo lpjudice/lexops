@@ -69,6 +69,15 @@ class Prazo(Base):
     )
 
     processo: Mapped["Processo"] = relationship("Processo", back_populates="prazos")  # noqa: F821
+    # Sem relationship ORM pra comentários de propósito: o router monta a lista
+    # como atributo transiente em listar_prazos (mesmo padrão de
+    # tarefas_vinculadas/peca_doc_url/publicacao_origem, nenhum dos quais é
+    # coluna mapeada). Declarar aqui como relationship() seria perigoso —
+    # reatribuir `p.comentarios = [...]` marcaria a coleção como substituída no
+    # unit-of-work, e com cascade="all, delete-orphan" um commit() posterior
+    # na mesma sessão apagaria os comentários reais do banco. A cascade de
+    # exclusão já é garantida no nível do Postgres via ON DELETE CASCADE na FK
+    # de comentarios_prazo.prazo_id — não precisa do relationship pra isso.
     peca_necessaria: Mapped[str | None] = mapped_column(String(100))
     responsavel: Mapped[str | None] = mapped_column(String(100))
     responsavel_id: Mapped[uuid.UUID | None] = mapped_column(

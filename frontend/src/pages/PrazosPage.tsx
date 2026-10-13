@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { prazosApi } from '../api/prazos'
-import type { Prazo, PrazoCreate, PrazoEdit, TipoPrazo, TipoContagem, StatusPrazo } from '../api/prazos'
+import type { Prazo, PrazoCreate, PrazoEdit, TipoPrazo, TipoContagem, StatusPrazo, ComentarioPrazo } from '../api/prazos'
 import { processosApi } from '../api/processos'
 import type { EstadoProcesso, RitoProcesso } from '../api/processos'
 import { clientesApi } from '../api/clientes'
+import { andamentosApi } from '../api/andamentos'
 import ResponsavelComboBox from '../components/ResponsavelComboBox'
 import ProcessoCombobox from '../components/ProcessoCombobox'
 import PecaCombobox from '../components/PecaCombobox'
@@ -36,9 +37,17 @@ function diasRestantes(data?: string): number | null {
 }
 
 /** Um prazo só deixa de cobrar atenção quando recebe tratamento. Vencido e
- * ainda "pendente" é o caso mais grave que existe aqui — vai de vermelho. */
-function urgenciaClass(dias: number | null, status: StatusPrazo): string {
-  if (status !== 'pendente') return prazosStyles.tratado
+ * ainda "pendente" é o caso mais grave que existe aqui — vai de vermelho.
+ *
+ * O cinza/opaco de "tratado" só faz sentido na aba "Todas", onde ele distingue
+ * o que ainda está em aberto do que já foi resolvido. Dentro de uma aba que já
+ * filtrou por um status tratado específico (Perdido, Cumprido...) TODO card
+ * teria essa classe — o cinza vira ruído, e a opacidade reduzida passa a
+ * impressão de card desabilitado/não clicável, quando ele continua
+ * interativo normalmente (o Lucas relatou exatamente essa confusão).
+ */
+function urgenciaClass(dias: number | null, status: StatusPrazo, tab: TabStatus): string {
+  if (status !== 'pendente') return tab === 'todas' ? prazosStyles.tratado : ''
   if (dias === null) return ''
   if (dias < 0) return prazosStyles.vencido
   if (dias <= 2) return prazosStyles.urgente
@@ -103,12 +112,116 @@ function pedirMotivoPerda(): string | null {
   return motivo
 }
 
+function formatDateTime(iso: string) {
+  return new Date(iso).toLocaleString('pt-BR', {
+    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  })
+}
+
+/** 2ª etapa de "anotar um prazo": a qual andamento do processo este
+ * comentário se refere. "Não vinculado" vem pré-selecionado — confirmar sem
+ * mexer em nada ainda salva (resolve o caso de "o sistema não achou o
+ * andamento certo", sem travar quem só quer registrar a anotação rápido). */
+function AndamentoPicker({
+  processoId, selecionado, onSelecionar, semVinculo,
+}: {
+  processoId: string
+  selecionado: string
+  onSelecionar: (v: string) => void
+  semVinculo: string
+}) {
+  const { data: andamentos = [], isLoading } = useQuery({
+    queryKey: ['andamentos', processoId, 0, undefined],
+    queryFn: () => andamentosApi.listar(processoId, 12, 0),
+  })
+
+  return (
+    <div className={prazosStyles.picker}>
+      <p className={prazosStyles.pickerTitulo}>A qual andamento este comentário se refere?</p>
+      {/* DataJud e jus.br costumam importar o MESMO movimento como duas linhas
+          diferentes (uma terser, outra com o documento) — sem indicar a fonte
+          aqui, as duas pareciam opções equivalentes e dava pra vincular à
+          linha que NÃO é a que aparece na aba Andamentos que você está vendo
+          (foi exatamente o que aconteceu no caso "Embargos... Ementa.html"). */}
+      <p className={prazosStyles.pickerAviso}>
+        DataJud e jus.br às vezes trazem o mesmo movimento como duas linhas distintas — confira a fonte
+        antes de escolher, pra vincular à mesma que aparece na aba Andamentos.
+      </p>
+      {isLoading ? (
+        <p className={prazosStyles.pickerVazio}>Carregando andamentos do processo...</p>
+      ) : andamentos.length === 0 ? (
+        <p className={prazosStyles.pickerVazio}>Nenhum andamento sincronizado ainda para este processo.</p>
+      ) : (
+        <div className={prazosStyles.pickerLista}>
+          {andamentos.map((a) => (
+            <label key={a.id} className={`${prazosStyles.pickerOpcao} ${selecionado === a.id ? prazosStyles.pickerOpcaoSel : ''}`}>
+              <input type="radio" name={`andamento-${processoId}`} checked={selecionado === a.id}
+                onChange={() => onSelecionar(a.id)} />
+              <span>
+                <span className={prazosStyles.pickerOpcaoTitulo}>
+                  {a.tipo || 'Andamento'}{a.descricao ? ` — "${a.descricao.slice(0, 70)}${a.descricao.length > 70 ? '…' : ''}"` : ''}
+                </span>
+                <span className={prazosStyles.pickerOpcaoMeta}>
+                  {formatDate(a.data_andamento ?? undefined)}
+                  {' · '}
+                  <span className={prazosStyles.pickerOpcaoFonte}>
+                    {(a.fonte ?? '').toUpperCase().startsWith('JUSBR') ? 'jus.br' : 'DataJud'}
+                  </span>
+                </span>
+              </span>
+            </label>
+          ))}
+        </div>
+      )}
+      <label className={`${prazosStyles.pickerOpcao} ${prazosStyles.pickerOpcaoVazia} ${selecionado === semVinculo ? prazosStyles.pickerOpcaoSel : ''}`}>
+        <input type="radio" name={`andamento-${processoId}`} checked={selecionado === semVinculo}
+          onChange={() => onSelecionar(semVinculo)} />
+        <span>
+          <span className={prazosStyles.pickerOpcaoTitulo}>◻ Não vinculado a andamento</span>
+          <span className={prazosStyles.pickerOpcaoMeta}>o comentário é salvo normalmente</span>
+        </span>
+      </label>
+    </div>
+  )
+}
+
 export default function PrazosPage() {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<PrazoCreate>(EMPTY)
   const [editando, setEditando] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<EditForm | null>(null)
+  // Comentários: painel independente do editor (pode ficar aberto junto), e
+  // mais de um card pode estar com o painel aberto ao mesmo tempo.
+  //
+  // Visibilidade por padrão: ABERTO quando o prazo já tem algum comentário
+  // (antes exigia clicar no 💬 pra enxergar um comentário que já existia),
+  // FECHADO quando não tem nenhum (senão toda a lista viraria um formulário
+  // de comentário permanente). `painelOverride` guarda só a EXCEÇÃO ao
+  // padrão — ausente = segue o padrão; presente = o usuário decidiu na mão
+  // (true = forçar aberto, false = forçar fechado/recolhido) — e o botão 💬
+  // sempre inverte o que está em tela no momento, não um valor fixo.
+  const [painelOverride, setPainelOverride] = useState<Record<string, boolean>>({})
+  const painelAberto = (p: Prazo) =>
+    painelOverride[p.id] ?? (p.comentarios?.length ?? 0) > 0
+  const toggleComentarios = (p: Prazo) =>
+    setPainelOverride((m) => ({ ...m, [p.id]: !painelAberto(p) }))
+
+  const [novoComentario, setNovoComentario] = useState<Record<string, string>>({})
+  // 2ª etapa do comentário: depois de escrever, confirma a qual andamento do
+  // processo ele se refere (ou "não vinculado") antes de salvar de verdade —
+  // é o que faz o mesmo comentário aparecer tanto em Prazos quanto, já
+  // vinculado ou não, no Processo (Andamentos / Anotações de Prazos).
+  const [vinculandoIds, setVinculandoIds] = useState<Set<string>>(new Set())
+  const SEM_VINCULO = '__sem_vinculo__'
+  const [andamentoEscolhido, setAndamentoEscolhido] = useState<Record<string, string>>({})
+
+  // Edição de um comentário já salvo (texto e/ou vínculo) — mesmo picker de
+  // andamento da criação, só que sem a etapa de confirmação separada: editar
+  // já É o ato deliberado, não precisa de uma 2ª tela de "tem certeza".
+  const [editandoComentarioId, setEditandoComentarioId] = useState<string | null>(null)
+  const [textoEditado, setTextoEditado] = useState<Record<string, string>>({})
+  const [andamentoEditado, setAndamentoEditado] = useState<Record<string, string>>({})
   const [ritoForm, setRitoForm] = useState<RitoProcesso>('comum')
   const [ritoEdit, setRitoEdit] = useState<RitoProcesso>('comum')
   const [searchParams] = useSearchParams()
@@ -237,6 +350,81 @@ export default function PrazosPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['prazos'] }),
     onError: () => alert('Não foi possível remover este prazo.'),
   })
+
+  const criarComentario = useMutation({
+    mutationFn: ({ prazoId, texto, andamentoId, processoId }: {
+      prazoId: string; texto: string; andamentoId: string | null; processoId: string
+    }) => prazosApi.criarComentario(prazoId, texto, andamentoId),
+    onSuccess: (_r, { prazoId, processoId }) => {
+      qc.invalidateQueries({ queryKey: ['prazos'] })
+      // Mesmo dado que alimenta Andamentos/Anotações de Prazos em Processos —
+      // sem isso, só reabrindo o processo pra ver o comentário novo lá.
+      qc.invalidateQueries({ queryKey: ['comentarios-prazo-processo', processoId] })
+      setNovoComentario((m) => ({ ...m, [prazoId]: '' }))
+      setVinculandoIds((atual) => { const n = new Set(atual); n.delete(prazoId); return n })
+    },
+    onError: () => alert('Não foi possível salvar o comentário.'),
+  })
+
+  const deletarComentario = useMutation({
+    mutationFn: ({ prazoId, comentarioId }: { prazoId: string; comentarioId: string; processoId: string }) =>
+      prazosApi.deletarComentario(prazoId, comentarioId),
+    onSuccess: (_r, { processoId }) => {
+      qc.invalidateQueries({ queryKey: ['prazos'] })
+      qc.invalidateQueries({ queryKey: ['comentarios-prazo-processo', processoId] })
+    },
+    onError: () => alert('Não foi possível remover o comentário.'),
+  })
+
+  const atualizarComentario = useMutation({
+    mutationFn: ({ prazoId, comentarioId, texto, andamentoId }: {
+      prazoId: string; comentarioId: string; texto: string; andamentoId: string | null; processoId: string
+    }) => prazosApi.atualizarComentario(prazoId, comentarioId, { texto, andamentoId }),
+    onSuccess: (_r, { processoId }) => {
+      qc.invalidateQueries({ queryKey: ['prazos'] })
+      qc.invalidateQueries({ queryKey: ['comentarios-prazo-processo', processoId] })
+      setEditandoComentarioId(null)
+    },
+    onError: () => alert('Não foi possível salvar as alterações do comentário.'),
+  })
+
+  /** Fim da etapa 1 (escrever): abre a escolha de andamento, com "não
+   * vinculado" pré-selecionado — confirmar sem mexer em nada ainda salva. */
+  const irParaVincular = (prazoId: string) => {
+    setVinculandoIds((atual) => new Set(atual).add(prazoId))
+    setAndamentoEscolhido((m) => ({ ...m, [prazoId]: SEM_VINCULO }))
+  }
+
+  const confirmarComentario = (p: Prazo) => {
+    const texto = (novoComentario[p.id] ?? '').trim()
+    if (!texto) return
+    const escolha = andamentoEscolhido[p.id]
+    criarComentario.mutate({
+      prazoId: p.id,
+      texto,
+      andamentoId: !escolha || escolha === SEM_VINCULO ? null : escolha,
+      processoId: p.processo_id,
+    })
+  }
+
+  const abrirEdicaoComentario = (c: ComentarioPrazo) => {
+    setEditandoComentarioId(c.id)
+    setTextoEditado((m) => ({ ...m, [c.id]: c.texto }))
+    setAndamentoEditado((m) => ({ ...m, [c.id]: c.andamento_id ?? SEM_VINCULO }))
+  }
+
+  const salvarEdicaoComentario = (p: Prazo, comentarioId: string) => {
+    const texto = (textoEditado[comentarioId] ?? '').trim()
+    if (!texto) return
+    const escolha = andamentoEditado[comentarioId]
+    atualizarComentario.mutate({
+      prazoId: p.id,
+      comentarioId,
+      texto,
+      andamentoId: !escolha || escolha === SEM_VINCULO ? null : escolha,
+      processoId: p.processo_id,
+    })
+  }
 
   const criarProcesso = async (data: { numero_cnj: string; cliente_id: string; estado: EstadoProcesso }): Promise<string> => {
     const p = await processosApi.criar(data)
@@ -526,7 +714,7 @@ export default function PrazosPage() {
             const dias = diasRestantes(p.data_limite)
             const proc = getProcesso(p.processo_id)
             const cliente = getCliente(p.processo_id)
-            const urg = urgenciaClass(dias, p.status)
+            const urg = urgenciaClass(dias, p.status, tabStatus)
             const vencido = estaVencido(p)
             const origem = p.publicacao_origem
             // Marca de agrupamento: como a lista está ordenada por data limite,
@@ -654,6 +842,124 @@ export default function PrazosPage() {
                           : '—'}
                       </span>
                     </div>
+
+                    {/* Motivo da perda: bloco próprio e por extenso — antes
+                        vivia espremido na barra de ações, cortado em 30
+                        caracteres com "..." (só o title/hover mostrava o
+                        resto). Sempre visível por completo, em qualquer aba. */}
+                    {p.status === 'perdido' && p.motivo_perda && (
+                      <div className={prazosStyles.motivoPerda}>
+                        <strong>Motivo da perda:</strong> {p.motivo_perda}
+                      </div>
+                    )}
+
+                    {painelAberto(p) && (
+                      <div className={prazosStyles.comentPainel}>
+                        {(p.comentarios?.length ?? 0) > 0 && (
+                          <div className={prazosStyles.comentLista}>
+                            {p.comentarios!.map((c) => (
+                              <div key={c.id} className={prazosStyles.comentItem}>
+                                {editandoComentarioId === c.id ? (
+                                  <div className={prazosStyles.comentNovo}>
+                                    <textarea
+                                      className={styles.input}
+                                      rows={2}
+                                      value={textoEditado[c.id] ?? ''}
+                                      onChange={(e) => setTextoEditado((m) => ({ ...m, [c.id]: e.target.value }))}
+                                    />
+                                    <AndamentoPicker
+                                      processoId={p.processo_id}
+                                      selecionado={andamentoEditado[c.id] ?? SEM_VINCULO}
+                                      onSelecionar={(v) => setAndamentoEditado((m) => ({ ...m, [c.id]: v }))}
+                                      semVinculo={SEM_VINCULO}
+                                    />
+                                    <div className={prazosStyles.editorActions}>
+                                      <button className={styles.btnPrimary} style={{ fontSize: 12, padding: '6px 12px' }}
+                                        disabled={!(textoEditado[c.id] ?? '').trim() || atualizarComentario.isPending}
+                                        onClick={() => salvarEdicaoComentario(p, c.id)}>
+                                        {atualizarComentario.isPending ? 'Salvando...' : 'Salvar'}
+                                      </button>
+                                      <button className={styles.btnDanger} onClick={() => setEditandoComentarioId(null)}>
+                                        Cancelar
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <>
+                                    <div className={prazosStyles.comentCabecalho}>
+                                      <span className={prazosStyles.comentMeta}>
+                                        {c.autor_nome || 'usuário'} · {formatDateTime(c.created_at)}
+                                      </span>
+                                      <button
+                                        className={prazosStyles.comentRemover}
+                                        title="Editar comentário"
+                                        onClick={() => abrirEdicaoComentario(c)}
+                                      >✎</button>
+                                      <button
+                                        className={prazosStyles.comentRemover}
+                                        title="Remover comentário"
+                                        onClick={() => {
+                                          if (confirm('Remover este comentário?')) {
+                                            deletarComentario.mutate({ prazoId: p.id, comentarioId: c.id, processoId: p.processo_id })
+                                          }
+                                        }}
+                                      >×</button>
+                                    </div>
+                                    <div className={prazosStyles.comentTexto}>{c.texto}</div>
+                                    {c.andamento_id ? (
+                                      <div className={prazosStyles.comentVinculo}>⧉ vinculado a um andamento do processo</div>
+                                    ) : (
+                                      <div className={prazosStyles.comentSemVinculo}>◻ não vinculado a andamento</div>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {vinculandoIds.has(p.id) ? (
+                          <div className={prazosStyles.comentNovo}>
+                            <div className={prazosStyles.comentPreview}>"{novoComentario[p.id]}"</div>
+                            <AndamentoPicker
+                              processoId={p.processo_id}
+                              selecionado={andamentoEscolhido[p.id] ?? SEM_VINCULO}
+                              onSelecionar={(v) => setAndamentoEscolhido((m) => ({ ...m, [p.id]: v }))}
+                              semVinculo={SEM_VINCULO}
+                            />
+                            <div className={prazosStyles.editorActions}>
+                              <button className={styles.btnPrimary} style={{ fontSize: 12, padding: '6px 12px' }}
+                                disabled={criarComentario.isPending}
+                                onClick={() => confirmarComentario(p)}>
+                                {criarComentario.isPending ? 'Salvando...' : 'Confirmar comentário'}
+                              </button>
+                              <button className={styles.btnDanger}
+                                onClick={() => setVinculandoIds((atual) => { const n = new Set(atual); n.delete(p.id); return n })}>
+                                Voltar
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className={prazosStyles.comentNovo}>
+                            <textarea
+                              className={styles.input}
+                              rows={2}
+                              placeholder="Anotar algo sobre este prazo (ex.: por que não recorremos, o que o cliente decidiu...)"
+                              value={novoComentario[p.id] ?? ''}
+                              onChange={(e) => setNovoComentario((m) => ({ ...m, [p.id]: e.target.value }))}
+                            />
+                            <button
+                              className={styles.btnPrimary}
+                              style={{ fontSize: 12, padding: '6px 12px', alignSelf: 'flex-start' }}
+                              disabled={!(novoComentario[p.id] ?? '').trim()}
+                              onClick={() => irParaVincular(p.id)}
+                            >
+                              Salvar comentário
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {editando === p.id && editForm && (
                       <div className={prazosStyles.editor}>
@@ -789,11 +1095,14 @@ export default function PrazosPage() {
                         <option key={s.valor} value={s.valor}>{s.label}</option>
                       ))}
                     </select>
-                    {p.status === 'perdido' && p.motivo_perda && (
-                      <span className={prazosStyles.dataItem} title={p.motivo_perda}>
-                        💬 {p.motivo_perda.slice(0, 30)}{p.motivo_perda.length > 30 ? '…' : ''}
-                      </span>
-                    )}
+                    <button
+                      className={`${prazosStyles.btnEditar} ${painelAberto(p) ? prazosStyles.btnComentarioAtivo : ''}`}
+                      title={painelAberto(p) ? 'Recolher comentários' : 'Ver/anotar comentários deste prazo'}
+                      onClick={() => toggleComentarios(p)}
+                    >
+                      💬{(p.comentarios?.length ?? 0) > 0 ? ` ${p.comentarios!.length}` : ''}
+                      {painelAberto(p) ? ' ▾' : ' ▸'}
+                    </button>
                     <button className={styles.btnDanger}
                       onClick={() => { if (confirm('Remover prazo?')) deletar.mutate(p.id) }}>
                       ×

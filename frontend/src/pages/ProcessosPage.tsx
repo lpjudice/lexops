@@ -10,6 +10,7 @@ import ProcessoChat from '../components/ProcessoChat'
 import MemoriaEstrategica from '../components/MemoriaEstrategica'
 import FontesContexto from '../components/FontesContexto'
 import AndamentosSection from '../components/AndamentosSection'
+import AnotacoesPrazosSection from '../components/AnotacoesPrazosSection'
 import SincronizarModal from '../components/SincronizarModal'
 import InstrucoesJusBRModal from '../components/InstrucoesJusBRModal'
 import { saveStoredJusbrToken } from '../utils/jusbrToken'
@@ -983,6 +984,7 @@ export default function ProcessosPage() {
                     ultimoCheck={p.ultimo_check}
                     novosLoteCount={batchNew?.counts?.[p.id] ?? 0}
                   />
+                  <AnotacoesPrazosSection processoId={p.id} />
                 </div>
               )}
             </div>

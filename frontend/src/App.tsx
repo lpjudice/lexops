@@ -39,6 +39,14 @@ import InstagramBrindesPage from './pages/InstagramBrindesPage'
 import PostPublicoPage from './pages/PostPublicoPage'
 import InformativosPage from './pages/InformativosPage'
 import InformativoAssinantesPage from './pages/InformativoAssinantesPage'
+import InformativoStjPage from './pages/InformativoStjPage'
+import InformativoStjEdicaoPage from './pages/InformativoStjEdicaoPage'
+import InformativoStjConfigPage from './pages/InformativoStjConfigPage'
+import InformativoStjFavoritosPage from './pages/InformativoStjFavoritosPage'
+import InformativoStfPage from './pages/InformativoStfPage'
+import InformativoStfEdicaoPage from './pages/InformativoStfEdicaoPage'
+import InformativoStfConfigPage from './pages/InformativoStfConfigPage'
+import InformativoStfFavoritosPage from './pages/InformativoStfFavoritosPage'
 import AutosIAPage from './pages/AutosIAPage'
 import AutosIACasoPage from './pages/AutosIACasoPage'
 import PrivacidadePage from './pages/PrivacidadePage'
@@ -95,6 +103,14 @@ function AppRoutes() {
         <Route path="instagram" element={<InstagramPage />} />
         <Route path="informativos" element={<InformativosPage />} />
         <Route path="informativos/assinantes" element={<InformativoAssinantesPage />} />
+        <Route path="informativo-stj" element={<InformativoStjPage />} />
+        <Route path="informativo-stj/config" element={<InformativoStjConfigPage />} />
+        <Route path="informativo-stj/favoritos" element={<InformativoStjFavoritosPage />} />
+        <Route path="informativo-stj/:edicaoId" element={<InformativoStjEdicaoPage />} />
+        <Route path="informativo-stf" element={<InformativoStfPage />} />
+        <Route path="informativo-stf/config" element={<InformativoStfConfigPage />} />
+        <Route path="informativo-stf/favoritos" element={<InformativoStfFavoritosPage />} />
+        <Route path="informativo-stf/:edicaoId" element={<InformativoStfEdicaoPage />} />
         <Route path="instagram/brindes" element={<InstagramBrindesPage />} />
         <Route path="fiscal" element={<FiscalPage />} />
         <Route path="fiscal/visao" element={<VisaoFiscalPage />} />

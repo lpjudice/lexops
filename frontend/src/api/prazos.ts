@@ -6,6 +6,32 @@ export type TipoPrazo =
 export type TipoContagem = 'uteis' | 'corridos'
 export type StatusPrazo = 'pendente' | 'cumprido' | 'perdido' | 'ignorado' | 'nada_a_fazer'
 
+export interface ComentarioPrazo {
+  id: string
+  texto: string
+  autor_nome?: string | null
+  andamento_id?: string | null
+  created_at: string
+}
+
+/** Mesmo comentário, pela ótica do PROCESSO — alimenta o painel "Anotações de
+ * Prazos" em Processos e a nota interleaved em Andamentos. Vem achatado do
+ * backend (ver ComentarioPrazoProcessoOut). */
+export interface ComentarioPrazoDoProcesso {
+  id: string
+  texto: string
+  autor_nome?: string | null
+  created_at: string
+  andamento_id?: string | null
+  andamento_tipo?: string | null
+  andamento_data?: string | null
+  prazo_id: string
+  prazo_tipo: TipoPrazo
+  prazo_peca?: string | null
+  prazo_status: StatusPrazo
+  prazo_data_limite?: string | null
+}
+
 export interface PublicacaoOrigem {
   id: string
   fonte: string
@@ -40,6 +66,7 @@ export interface Prazo {
   peca_doc_url?: string | null
   publicacao_origem?: PublicacaoOrigem | null
   ultimo_lembrete_em?: string | null
+  comentarios?: ComentarioPrazo[]
   created_at: string
   updated_at: string
 }
@@ -92,4 +119,21 @@ export const prazosApi = {
   deletar: (id: string) => api.delete(`/prazos/${id}`),
   enviarLembretes: (forcar = false) =>
     api.post<LembretesResultado>('/prazos/lembretes/enviar', null, { params: { forcar } }).then((r) => r.data),
+  criarComentario: (prazoId: string, texto: string, andamentoId?: string | null) =>
+    api.post<ComentarioPrazo>(`/prazos/${prazoId}/comentarios`, {
+      texto,
+      andamento_id: andamentoId ?? null,
+    }).then((r) => r.data),
+  atualizarComentario: (
+    prazoId: string, comentarioId: string,
+    data: { texto?: string; andamentoId?: string | null },
+  ) =>
+    api.patch<ComentarioPrazo>(`/prazos/${prazoId}/comentarios/${comentarioId}`, {
+      ...(data.texto !== undefined ? { texto: data.texto } : {}),
+      ...(data.andamentoId !== undefined ? { andamento_id: data.andamentoId } : {}),
+    }).then((r) => r.data),
+  deletarComentario: (prazoId: string, comentarioId: string) =>
+    api.delete(`/prazos/${prazoId}/comentarios/${comentarioId}`),
+  listarComentariosDoProcesso: (processoId: string) =>
+    api.get<ComentarioPrazoDoProcesso[]>(`/prazos/processo/${processoId}/comentarios`).then((r) => r.data),
 }

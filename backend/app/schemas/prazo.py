@@ -51,6 +51,54 @@ class TarefaVinculada(BaseModel):
     titulo: str
 
 
+class ComentarioPrazoCreate(BaseModel):
+    texto: str
+    # Qual andamento do processo este comentário explica. None = o usuário
+    # marcou explicitamente "Não vinculado a andamento" (ou pulou a escolha).
+    andamento_id: uuid.UUID | None = None
+
+
+class ComentarioPrazoUpdate(BaseModel):
+    # Parcial (exclude_unset no router, mesmo padrão de PrazoUpdate): omitir um
+    # campo deixa ele como está; `andamento_id: null` explícito desvincula.
+    texto: str | None = None
+    andamento_id: uuid.UUID | None = None
+
+
+class ComentarioPrazoOut(BaseModel):
+    id: uuid.UUID
+    texto: str
+    autor_nome: str | None = None
+    andamento_id: uuid.UUID | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ComentarioPrazoProcessoOut(BaseModel):
+    """Comentário de prazo, mas pela ótica do PROCESSO — é o que alimenta o
+    painel "Anotações de Prazos" em Processos e a nota interleaved em
+    Andamentos. Vem achatado (sem objetos aninhados) porque as duas telas só
+    precisam de rótulos prontos pra exibir, não dos registros completos de
+    Prazo/AndamentoProcesso."""
+    id: uuid.UUID
+    texto: str
+    autor_nome: str | None = None
+    created_at: datetime
+
+    andamento_id: uuid.UUID | None = None
+    andamento_tipo: str | None = None
+    andamento_data: date | None = None
+
+    prazo_id: uuid.UUID
+    prazo_tipo: TipoPrazo
+    prazo_peca: str | None = None
+    prazo_status: StatusPrazo
+    prazo_data_limite: date | None = None
+
+    model_config = {"from_attributes": True}
+
+
 class PublicacaoOrigem(BaseModel):
     """Publicação (Diário Oficial ou Recorte Digital) que originou o prazo —
     devolvida junto pra tela de Prazos poder voltar à origem sem outra chamada."""
@@ -79,6 +127,7 @@ class PrazoOut(PrazoBase):
     peca_doc_url: str | None = None
     publicacao_origem: PublicacaoOrigem | None = None
     ultimo_lembrete_em: datetime | None = None
+    comentarios: list[ComentarioPrazoOut] = []
     created_at: datetime
     updated_at: datetime
 
