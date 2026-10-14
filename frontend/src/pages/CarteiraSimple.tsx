@@ -412,6 +412,55 @@ function EtapasPreview({ etapas, ordenada }: { etapas: any[]; ordenada: boolean 
   )
 }
 
+// ── Linha do tempo visual (bolinhas conectadas) de 1 cronologia pro cliente —
+// cada etapa é "concluída" se já existe um ato desse cliente, vinculado a
+// essa cronologia, do mesmo tipo da etapa. Clicar numa etapa pendente abre o
+// Novo Ato pré-preenchido (jeito rápido de "marcar como concluído": vira um
+// registro de verdade, com data); clicar numa concluída abre o ato pra editar.
+function CronologiaStepper({
+  cronologia, atosCliente, onStepClick,
+}: {
+  cronologia: any
+  atosCliente: any[]
+  onStepClick: (etapa: any, concluida: boolean, ato: any | null) => void
+}) {
+  const etapas = cronologia.etapas ?? []
+  if (!etapas.length) return null
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8, color: 'var(--dark)' }}>{cronologia.nome}</div>
+      <div style={{ display: 'flex', alignItems: 'flex-start', overflowX: 'auto', paddingBottom: 6 }}>
+        {etapas.map((et: any, i: number) => {
+          const ato = atosCliente.find((a: any) => a.cronologia_id === cronologia.id && a.tipo_ato === et.tipo_ato) ?? null
+          const concluida = !!ato
+          return (
+            <React.Fragment key={i}>
+              {i > 0 && <div style={{ flex: '0 0 24px', height: 2, background: concluida ? '#16a34a' : 'var(--gray-border)', marginTop: 14 }} />}
+              <div
+                style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: '0 0 78px', cursor: 'pointer' }}
+                title={concluida ? `Concluído em ${ato.data_ato} — clique pra editar` : 'Pendente — clique pra registrar'}
+                onClick={() => onStepClick(et, concluida, ato)}
+              >
+                <div style={{
+                  width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: concluida ? '#16a34a' : '#fff',
+                  border: concluida ? 'none' : '1.5px solid var(--gray-border)',
+                  color: concluida ? '#fff' : 'var(--gray-mid)', fontSize: 12, fontWeight: 700, flexShrink: 0,
+                }}>
+                  {concluida ? '✓' : i + 1}
+                </div>
+                <span style={{ fontSize: 10, textAlign: 'center', marginTop: 4, color: concluida ? 'var(--dark)' : 'var(--gray-mid)', lineHeight: 1.3 }}>
+                  {et.label || tipoAtoLabel(et.tipo_ato)}
+                </span>
+              </div>
+            </React.Fragment>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ── Editor de etapas de uma cronologia (criação/edição) ───────────────────
 function EtapasBuilder({
   etapas, onChange, ordenada,
@@ -495,6 +544,12 @@ export default function CarteiraPage() {
   // Ações: drawer com a linha do tempo de 1 cliente (Posição por Cliente) +
   // filtros da aba global
   const [acoesClienteId, setAcoesClienteId] = useState<number | null>(null)
+  // Abrir o modal de Ato (novo/editar) a partir do drawer de Ações tem que
+  // fechar o drawer antes — dois <Modal> (mesmo overlay fixed+inset:0) ao
+  // mesmo tempo sobrepõem com o backdrop translúcido um do outro, dando a
+  // impressão de formulário "atrás"/quebrado. Guarda o cliente aqui pra
+  // reabrir o drawer sozinho quando o modal de ato fechar.
+  const [atoDrawerReturnTo, setAtoDrawerReturnTo] = useState<number | null>(null)
   const [filtroAcoesTipo, setFiltroAcoesTipo] = useState('')
   const [filtroAcoesStatus, setFiltroAcoesStatus] = useState('')
   const [filtroAcoesBusca, setFiltroAcoesBusca] = useState('')
@@ -531,6 +586,8 @@ export default function CarteiraPage() {
   const qc = useQueryClient()
   const inp = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }))
   const closeModal = () => {
+    if (modal === 'ato' && atoDrawerReturnTo !== null) setAcoesClienteId(atoDrawerReturnTo)
+    setAtoDrawerReturnTo(null)
     setModal(null); setForm({})
     setEditandoClienteId(null); setEditandoEmpId(null)
     setEditandoDebId(null); setEditandoImobId(null); setEditandoFundoId(null)
@@ -2819,15 +2876,40 @@ export default function CarteiraPage() {
         const c = clientes.find((x: any) => x.id === acoesClienteId)
         if (!c) return null
         const lista = atosDoCliente(acoesClienteId)
+        const cronologiasDoCliente = (c.cronologia_ids ?? []).map((id: number) => cronologias.find((cr: any) => cr.id === id)).filter(Boolean)
+        const abrirNovoAto = (preset: any = {}) => {
+          setAtoDrawerReturnTo(acoesClienteId)
+          setAcoesClienteId(null)
+          setForm({ cliente_id: acoesClienteId, data_ato: new Date().toISOString().slice(0, 10), status: 'aberto', anexos: [], ...preset })
+          setEditandoAtoId(null)
+          setModal('ato')
+        }
+        const abrirEditarAtoDoDrawer = (a: any) => {
+          setAtoDrawerReturnTo(acoesClienteId)
+          setAcoesClienteId(null)
+          abrirEdicaoAto(a)
+        }
         return (
-          <Modal title={`Ações — ${clienteNome(acoesClienteId)}`} onClose={() => setAcoesClienteId(null)} width={520}>
+          <Modal title={`Ações — ${clienteNome(acoesClienteId)}`} onClose={() => setAcoesClienteId(null)} width={560}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ fontSize: 11, color: 'var(--gray-mid)' }}>Cronologias vinculadas:</span>
                 <CronologiaChips ids={c.cronologia_ids ?? []} cronologias={cronologias} onUpdate={ids => patchCronologiaCliente.mutate({ id: c.id, ids })} />
               </div>
-              <button className={styles.btnSmall} onClick={() => { setForm({ cliente_id: acoesClienteId, data_ato: new Date().toISOString().slice(0, 10), status: 'aberto', anexos: [] }); setEditandoAtoId(null); setModal('ato') }}>+ Novo ato</button>
+              <button className={styles.btnSmall} onClick={() => abrirNovoAto()}>+ Novo ato</button>
             </div>
+            {cronologiasDoCliente.map((cron: any) => (
+              <CronologiaStepper
+                key={cron.id}
+                cronologia={cron}
+                atosCliente={lista}
+                onStepClick={(etapa, concluida, ato) => {
+                  if (concluida && ato) abrirEditarAtoDoDrawer(ato)
+                  else abrirNovoAto({ cronologia_id: cron.id, tipo_ato: etapa.tipo_ato, titulo: etapa.label || tipoAtoLabel(etapa.tipo_ato), status: 'concluido' })
+                }}
+              />
+            ))}
+            {cronologiasDoCliente.length > 0 && <div style={{ borderTop: '1px solid var(--gray-light, #f3f4f6)', margin: '4px 0 14px' }} />}
             {lista.length === 0
               ? <p style={{ fontSize: 13, color: '#9ca3af', textAlign: 'center', padding: '24px 0' }}>Nenhum ato registrado para este cliente.</p>
               : (
@@ -2837,7 +2919,7 @@ export default function CarteiraPage() {
                       <div style={{ position: 'absolute', left: -23, top: 3, width: 8, height: 8, borderRadius: '50%', background: a.status === 'concluido' ? '#16a34a' : a.status === 'aguardando_resposta' ? '#d97706' : '#9ca3af' }} />
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                         <span style={{ fontSize: 11, color: 'var(--gray-mid)' }}>{a.data_ato}</span>
-                        <span>{rowActions(() => abrirEdicaoAto(a), `o ato "${a.titulo ?? tipoAtoLabel(a.tipo_ato)}"`, () => deletarAto.mutate(a.id), a)}</span>
+                        <span>{rowActions(() => abrirEditarAtoDoDrawer(a), `o ato "${a.titulo ?? tipoAtoLabel(a.tipo_ato)}"`, () => deletarAto.mutate(a.id), a)}</span>
                       </div>
                       <div style={{ fontSize: 13, fontWeight: 600, margin: '2px 0' }}>{a.titulo || tipoAtoLabel(a.tipo_ato)}</div>
                       {a.descricao && <div style={{ fontSize: 12, color: 'var(--gray-mid)', marginBottom: 4 }}>{a.descricao}</div>}
