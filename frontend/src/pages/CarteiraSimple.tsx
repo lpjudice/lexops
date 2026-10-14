@@ -426,6 +426,13 @@ export default function CarteiraPage() {
     return `#${id}`
   }
   const emissaoNome = (id: number) => emissoes.find(e => e.id === id)?.nome_serie ?? `#${id}`
+  // Célula de tabela: série + nº da emissão juntos (antes só mostrava a série, confundindo
+  // com o número da emissão — ex: BRMAPEX115 é a série, "11ª" é a emissão).
+  const emissaoCelula = (id: number) => {
+    const e = emissoes.find(x => x.id === id)
+    if (!e) return `#${id}`
+    return <>{e.nome_serie}{e.numero_emissao != null && <span style={{ color: 'var(--gray-mid)', fontSize: 11 }}> · {e.numero_emissao}ª emissão</span>}</>
+  }
   const empreendimentoNome = (id: number) => empreendimentos.find(e => e.id === id)?.nome_venda ?? `#${id}`
   const fundoNome = (id: number) => fundosRef.find(f => f.id === id)?.nome_fundo ?? `#${id}`
 
@@ -1303,7 +1310,7 @@ export default function CarteiraPage() {
                         <tbody>
                           {debs.map(d => (
                             <tr key={d.id}>
-                              <td>{d.numero_cautela}</td><td>{emissaoNome(d.emissao_id)}</td>
+                              <td>{d.numero_cautela}</td><td>{emissaoCelula(d.emissao_id)}</td>
                               <td>{resgateAntBadge(d)}</td>
                               <td style={{ textAlign: 'right' }}>{brl(d.valor_aplicado)}</td>
                               <td style={{ textAlign: 'right' }}>{d.valor_atual_estimado ? brl(d.valor_atual_estimado) : '—'}</td>
@@ -1433,7 +1440,7 @@ export default function CarteiraPage() {
                       return (
                         <div key={emissaoId} className={cs.clientePosicaoCard} style={{ marginBottom: 10 }}>
                           <div className={cs.clientePosicaoHeader}>
-                            <span className={cs.clientePosicaoNome}>{emissaoNome(Number(emissaoId))}</span>
+                            <span className={cs.clientePosicaoNome}>{emissaoCelula(Number(emissaoId))}</span>
                             <span className={cs.clientePosicaoTotal}>{brl(total)} · {debs.length} posições</span>
                           </div>
                           <div style={{ padding: '6px 0 4px' }}>
@@ -1531,7 +1538,7 @@ export default function CarteiraPage() {
               return (
                 <div key={emissaoId} className={cs.clientePosicaoCard} style={{ marginBottom: 10 }}>
                   <div className={cs.clientePosicaoHeader}>
-                    <span className={cs.clientePosicaoNome}>{emissaoNome(Number(emissaoId))}</span>
+                    <span className={cs.clientePosicaoNome}>{emissaoCelula(Number(emissaoId))}</span>
                     <span className={cs.clientePosicaoTotal}>{brl(total)} · {debs.length} posições</span>
                   </div>
                   <div style={{ padding: '6px 0 4px' }}>
@@ -1561,7 +1568,7 @@ export default function CarteiraPage() {
                 <tbody>
                   {g.posicoes.map((d: any) => (
                     <tr key={d.id}>
-                      <td><strong>{d.numero_cautela}</strong></td><td>{emissaoNome(d.emissao_id)}</td>
+                      <td><strong>{d.numero_cautela}</strong></td><td>{emissaoCelula(d.emissao_id)}</td>
                       <td>{resgateAntBadge(d)}</td>
                       <td style={{ textAlign: 'right' }}>{brl(d.valor_aplicado)}</td>
                       <td style={{ textAlign: 'right' }}>{d.valor_atual_estimado ? brl(d.valor_atual_estimado) : '—'}</td>
@@ -2421,7 +2428,8 @@ export default function CarteiraPage() {
         return (
           <Modal title={`Detalhes — ${d.numero_cautela ?? emissaoNome(d.emissao_id)}`} onClose={() => setDebInfoId(null)} width={480}>
             <div style={{ marginBottom: 8 }}>
-              {infoRow('Emissão', emissaoNome(d.emissao_id))}
+              {infoRow('Série', emissaoNome(d.emissao_id))}
+              {infoRow('Nº da emissão', em?.numero_emissao != null ? `${em.numero_emissao}ª` : '—')}
               {infoRow('Data de aquisição', d.data_aquisicao ?? '—')}
               {em && infoRow('Data de vencimento previsto', em.data_vencimento_previsto ?? '—')}
               {em && infoRow('Indexador', em.indexador ? `${em.indexador}${em.taxa_adicional ? ` + ${em.taxa_adicional}` : ''}` : '—')}
