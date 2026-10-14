@@ -7,7 +7,26 @@ import { useAuth } from '@/contexts/AuthContext'
 import styles from './Page.module.css'
 import cs from './Carteira.module.css'
 
-type Tab = 'posicao-cliente' | 'clientes' | 'emissoes' | 'debentures' | 'empreendimentos' | 'imobiliario' | 'fundos-ref' | 'fundos' | 'estrategias'
+type Tab = 'posicao-cliente' | 'clientes' | 'emissoes' | 'debentures' | 'empreendimentos' | 'imobiliario' | 'fundos-ref' | 'fundos' | 'estrategias' | 'acoes' | 'cronologias'
+
+// Tipos de ato extensíveis — usados tanto na cronologia (etapas-modelo, sem
+// data) quanto no ato real (com data). "outro" cobre o que não se encaixa.
+const TIPOS_ATO: { value: string; label: string }[] = [
+  { value: 'notificacao', label: 'Notificação' },
+  { value: 'contra_notificacao', label: 'Contra-notificação' },
+  { value: 'email', label: 'E-mail' },
+  { value: 'resposta', label: 'Resposta' },
+  { value: 'solicitacao_documento', label: 'Solicitação de documento' },
+  { value: 'parecer', label: 'Parecer' },
+  { value: 'acao_judicial', label: 'Ação judicial' },
+  { value: 'outro', label: 'Outro' },
+]
+const tipoAtoLabel = (v: string) => TIPOS_ATO.find(t => t.value === v)?.label ?? v
+const STATUS_ATO: { value: string; label: string }[] = [
+  { value: 'aberto', label: 'Aberto' },
+  { value: 'aguardando_resposta', label: 'Aguardando resposta' },
+  { value: 'concluido', label: 'Concluído' },
+]
 
 const brl = (v: number | null | undefined) =>
   `R$ ${(v ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -19,6 +38,7 @@ const TABS_POS: { key: Tab; label: string }[] = [
   { key: 'debentures', label: 'Debêntures' },
   { key: 'imobiliario', label: 'Imobiliário' },
   { key: 'fundos', label: 'Fundos' },
+  { key: 'acoes', label: 'Ações' },
 ]
 const TABS_REF: { key: Tab; label: string }[] = [
   { key: 'clientes', label: 'Clientes' },
@@ -26,6 +46,7 @@ const TABS_REF: { key: Tab; label: string }[] = [
   { key: 'empreendimentos', label: 'Empreendimentos' },
   { key: 'fundos-ref', label: 'Fundos Ref.' },
   { key: 'estrategias', label: 'Estratégias' },
+  { key: 'cronologias', label: 'Cronologias' },
 ]
 
 // ── ComboSelect (síncrono, fecha ao selecionar) ─────────────────────
@@ -306,6 +327,133 @@ function EstrategiaChips({
   )
 }
 
+// ── Chips de cronologia — mesmo padrão do EstrategiaChips, mas pra vincular
+// uma cronologia (caminho de ações) a um cliente/ativo específico ────────
+function CronologiaChips({
+  ids, cronologias, onUpdate,
+}: {
+  ids: number[]; cronologias: any[]; onUpdate: (newIds: number[]) => void
+}) {
+  const [showAdd, setShowAdd] = useState(false)
+  const [selected, setSelected] = useState<any | null>(null)
+  const [dropStyle, setDropStyle] = useState<React.CSSProperties>({})
+  const btnRef = useRef<HTMLButtonElement>(null)
+
+  const current = ids.map(id => cronologias.find(c => c.id === id)).filter(Boolean)
+  const available = cronologias.filter(c => !ids.includes(c.id))
+
+  const openAdd = () => {
+    if (!btnRef.current) return
+    const rect = btnRef.current.getBoundingClientRect()
+    setDropStyle({ position: 'fixed', top: rect.bottom + 2, left: rect.left, minWidth: 200, maxWidth: 300, zIndex: 9999, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 6, maxHeight: 200, overflowY: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,0.12)' })
+    setShowAdd(s => !s)
+  }
+
+  return (
+    <>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, alignItems: 'center' }}>
+        {current.map((c: any) => (
+          <span key={c.id}
+            title={c.observacoes || c.nome}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 2, background: '#eef2ff', border: '1px solid #6366f1', borderRadius: 10, padding: '1px 7px 1px 8px', fontSize: 10, cursor: 'pointer', color: '#4338ca', whiteSpace: 'nowrap' }}
+            onClick={() => setSelected(c)}>
+            {c.nome}
+            <button
+              style={{ marginLeft: 2, cursor: 'pointer', fontSize: 13, color: '#6b7280', lineHeight: 1, background: 'none', border: 'none', padding: '0 1px', borderRadius: 2 }}
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onUpdate(ids.filter(x => x !== c.id)) }}>×</button>
+          </span>
+        ))}
+        <button ref={btnRef}
+          style={{ background: 'none', border: '1px dashed #d1d5db', borderRadius: 10, padding: '1px 7px', fontSize: 10, cursor: 'pointer', color: '#9ca3af', lineHeight: 1.5 }}
+          onClick={openAdd}>+</button>
+      </div>
+      {showAdd && createPortal(
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 9998 }} onClick={() => setShowAdd(false)} />
+          <div style={dropStyle}>
+            {available.length === 0
+              ? <div style={{ padding: '10px 14px', color: '#9ca3af', fontSize: 12 }}>Todas selecionadas</div>
+              : available.map((c: any) => (
+                <div key={c.id}
+                  style={{ padding: '8px 14px', cursor: 'pointer', fontSize: 12, borderBottom: '1px solid #f3f4f6' }}
+                  onMouseDown={() => { onUpdate([...ids, c.id]); setShowAdd(false) }}>
+                  <strong>{c.nome}</strong>
+                  {!c.ordenada && <span style={{ fontSize: 10, color: '#9ca3af', marginLeft: 6 }}>(sem ordem)</span>}
+                </div>
+              ))
+            }
+          </div>
+        </>,
+        document.body
+      )}
+      {selected && (
+        <Modal title={selected.nome} onClose={() => setSelected(null)} width={420}>
+          <EtapasPreview etapas={selected.etapas ?? []} ordenada={!!selected.ordenada} />
+        </Modal>
+      )}
+    </>
+  )
+}
+
+// ── Lista somente-leitura das etapas de uma cronologia (preview no chip) ──
+function EtapasPreview({ etapas, ordenada }: { etapas: any[]; ordenada: boolean }) {
+  if (!etapas.length) return <p style={{ fontSize: 13, color: '#9ca3af' }}>Sem etapas cadastradas.</p>
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {etapas.map((et: any, i: number) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 13 }}>
+          {ordenada && <span style={{ color: '#9ca3af', fontSize: 11, minWidth: 16 }}>{i + 1}.</span>}
+          <span style={{ fontWeight: 600 }}>{et.label || tipoAtoLabel(et.tipo_ato)}</span>
+          <span style={{ color: '#6b7280', fontSize: 11 }}>({tipoAtoLabel(et.tipo_ato)})</span>
+          {et.obrigatoria && <span style={{ color: '#d97706', fontSize: 10 }}>obrigatória</span>}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Editor de etapas de uma cronologia (criação/edição) ───────────────────
+function EtapasBuilder({
+  etapas, onChange, ordenada,
+}: {
+  etapas: any[]; onChange: (next: any[]) => void; ordenada: boolean
+}) {
+  const addEtapa = () => onChange([...etapas, { ordem: etapas.length + 1, tipo_ato: 'notificacao', label: '', obrigatoria: false }])
+  const updEtapa = (i: number, patch: any) => onChange(etapas.map((e, idx) => idx === i ? { ...e, ...patch } : e))
+  const delEtapa = (i: number) => onChange(etapas.filter((_, idx) => idx !== i).map((e, idx) => ({ ...e, ordem: idx + 1 })))
+  const mover = (i: number, dir: -1 | 1) => {
+    const j = i + dir
+    if (j < 0 || j >= etapas.length) return
+    const next = [...etapas]
+    ;[next[i], next[j]] = [next[j], next[i]]
+    onChange(next.map((e, idx) => ({ ...e, ordem: idx + 1 })))
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {etapas.map((et: any, i: number) => (
+        <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', background: 'var(--gray-light, #f8f9fa)', padding: '6px 8px', borderRadius: 6 }}>
+          {ordenada && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <button style={{ fontSize: 9, border: 'none', background: 'none', cursor: 'pointer', color: '#6b7280' }} onClick={() => mover(i, -1)} disabled={i === 0}>▲</button>
+              <button style={{ fontSize: 9, border: 'none', background: 'none', cursor: 'pointer', color: '#6b7280' }} onClick={() => mover(i, 1)} disabled={i === etapas.length - 1}>▼</button>
+            </div>
+          )}
+          {ordenada && <span style={{ fontSize: 11, color: '#9ca3af', minWidth: 14 }}>{i + 1}.</span>}
+          <select className={styles.input} style={{ width: 170, fontSize: 12 }} value={et.tipo_ato} onChange={e => updEtapa(i, { tipo_ato: e.target.value })}>
+            {TIPOS_ATO.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+          </select>
+          <input className={styles.input} style={{ flex: 1, fontSize: 12 }} placeholder="Rótulo (opcional)" value={et.label ?? ''} onChange={e => updEtapa(i, { label: e.target.value })} />
+          <label style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, whiteSpace: 'nowrap', cursor: 'pointer' }}>
+            <input type="checkbox" checked={!!et.obrigatoria} onChange={e => updEtapa(i, { obrigatoria: e.target.checked })} /> obrigatória
+          </label>
+          <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', fontSize: 14 }} onClick={() => delEtapa(i)}>✕</button>
+        </div>
+      ))}
+      <button style={{ alignSelf: 'flex-start', padding: '4px 10px', background: 'none', border: '1px dashed var(--gray-border)', borderRadius: 6, cursor: 'pointer', fontSize: 12, color: 'var(--gray-mid)' }} onClick={addEtapa}>+ Etapa</button>
+    </div>
+  )
+}
+
 // ────────────────────────────────────────────────────────────────────
 export default function CarteiraPage() {
   const [tab, setTab] = useState<Tab>('posicao-cliente')
@@ -342,6 +490,15 @@ export default function CarteiraPage() {
   const [editandoEmissaoId, setEditandoEmissaoId] = useState<number | null>(null)
   const [editandoFundoRefId, setEditandoFundoRefId] = useState<number | null>(null)
   const [editandoEstrategiaId, setEditandoEstrategiaId] = useState<number | null>(null)
+  const [editandoCronologiaId, setEditandoCronologiaId] = useState<number | null>(null)
+  const [editandoAtoId, setEditandoAtoId] = useState<number | null>(null)
+  // Ações: drawer com a linha do tempo de 1 cliente (Posição por Cliente) +
+  // filtros da aba global
+  const [acoesClienteId, setAcoesClienteId] = useState<number | null>(null)
+  const [filtroAcoesTipo, setFiltroAcoesTipo] = useState('')
+  const [filtroAcoesStatus, setFiltroAcoesStatus] = useState('')
+  const [filtroAcoesBusca, setFiltroAcoesBusca] = useState('')
+  const [filtroAcoesCliente, setFiltroAcoesCliente] = useState<number | ''>('')
   // Resgate antecipado modal
   const [resgateDebId, setResgateDebId] = useState<number | null>(null)
   // Drive modal
@@ -378,6 +535,7 @@ export default function CarteiraPage() {
     setEditandoClienteId(null); setEditandoEmpId(null)
     setEditandoDebId(null); setEditandoImobId(null); setEditandoFundoId(null)
     setEditandoEmissaoId(null); setEditandoFundoRefId(null); setEditandoEstrategiaId(null)
+    setEditandoCronologiaId(null); setEditandoAtoId(null)
     setEmissaoSeries(null)
   }
 
@@ -407,6 +565,8 @@ export default function CarteiraPage() {
   const { data: fundosRefRes = [] } = useQuery({ queryKey: ['carteira-fundos-ref'], queryFn: () => api.get('/carteira/fundos-referencia').then(r => r.data) })
   const { data: fundosRes } = useQuery({ queryKey: ['carteira-fundos'], queryFn: () => api.get('/carteira/fundos', { params: { limit: 500 } }).then(r => r.data) })
   const { data: estrategiasRes } = useQuery({ queryKey: ['carteira-estrategias'], queryFn: () => api.get('/carteira/estrategias').then(r => r.data) })
+  const { data: cronologiasRes = [] } = useQuery({ queryKey: ['carteira-cronologias'], queryFn: () => api.get('/carteira/cronologias').then(r => r.data) })
+  const { data: atosRes } = useQuery({ queryKey: ['carteira-atos'], queryFn: () => api.get('/carteira/atos', { params: { limit: 1000 } }).then(r => r.data) })
 
   const clientes: any[] = clientesRes?.data ?? []
   const debentures: any[] = debenturesRes?.data ?? []
@@ -416,6 +576,8 @@ export default function CarteiraPage() {
   const empreendimentos: any[] = Array.isArray(empreendimentosRef) ? empreendimentosRef : []
   const fundosRef: any[] = Array.isArray(fundosRefRes) ? fundosRefRes : []
   const estrategias: any[] = estrategiasRes?.data ?? []
+  const cronologias: any[] = Array.isArray(cronologiasRes) ? cronologiasRes : []
+  const atos: any[] = atosRes?.data ?? []
 
   // ── Lookups ───────────────────────────────────────────────────────
   const clienteNome = (id: number) => {
@@ -435,6 +597,49 @@ export default function CarteiraPage() {
   }
   const empreendimentoNome = (id: number) => empreendimentos.find(e => e.id === id)?.nome_venda ?? `#${id}`
   const fundoNome = (id: number) => fundosRef.find(f => f.id === id)?.nome_fundo ?? `#${id}`
+  const estrategiaNome = (id: number) => estrategias.find((e: any) => e.id === id)?.nome ?? `#${id}`
+  const cronologiaNome = (id: number) => cronologias.find((c: any) => c.id === id)?.nome ?? `#${id}`
+  const ATIVO_TIPO_LABEL: Record<string, string> = { debenture: 'Debênture', imobiliario: 'Imobiliário', fundo: 'Fundo' }
+  // Nome do ativo específico (posição) por tipo+id — usado nos atos, que
+  // guardam o ativo de forma polimórfica (mesmo padrão de CarteiraUploadDocumento).
+  const ativoNomeCurto = (ativoTipo: string | null, ativoId: number | null) => {
+    if (!ativoTipo || ativoId == null) return null
+    if (ativoTipo === 'debenture') {
+      const d = debentures.find((x: any) => x.id === ativoId)
+      return d ? `${emissaoNome(d.emissao_id)} (${d.numero_cautela})` : `#${ativoId}`
+    }
+    if (ativoTipo === 'imobiliario') {
+      const i = imobiliario.find((x: any) => x.id === ativoId)
+      return i ? empreendimentoNome(i.empreendimento_id) : `#${ativoId}`
+    }
+    if (ativoTipo === 'fundo') {
+      const f = fundos.find((x: any) => x.id === ativoId)
+      return f ? fundoNome(f.fundo_id) : `#${ativoId}`
+    }
+    return `#${ativoId}`
+  }
+  // Opções de ativo pra um cliente+tipo específico, pro ComboSelect do ato
+  const ativoOptionsPara = (clienteId: number | null, ativoTipo: string | null) => {
+    if (!clienteId || !ativoTipo) return []
+    if (ativoTipo === 'debenture') return debentures.filter((d: any) => d.cliente_id === clienteId).map((d: any) => ({ value: d.id, label: `${emissaoNome(d.emissao_id)} (${d.numero_cautela})` }))
+    if (ativoTipo === 'imobiliario') return imobiliario.filter((i: any) => i.cliente_id === clienteId).map((i: any) => ({ value: i.id, label: empreendimentoNome(i.empreendimento_id) }))
+    if (ativoTipo === 'fundo') return fundos.filter((f: any) => f.cliente_id === clienteId).map((f: any) => ({ value: f.id, label: fundoNome(f.fundo_id) }))
+    return []
+  }
+
+  // Ações (aba global) — filtros client-side sobre a lista já carregada
+  const atosFiltrados = useMemo(() => {
+    return atos
+      .filter((a: any) => !filtroAcoesCliente || a.cliente_id === filtroAcoesCliente)
+      .filter((a: any) => !filtroAcoesTipo || a.tipo_ato === filtroAcoesTipo)
+      .filter((a: any) => !filtroAcoesStatus || a.status === filtroAcoesStatus)
+      .filter((a: any) => !filtroAcoesBusca || `${a.titulo ?? ''} ${a.descricao ?? ''}`.toLowerCase().includes(filtroAcoesBusca.toLowerCase()))
+      .sort((a: any, b: any) => (b.data_ato ?? '').localeCompare(a.data_ato ?? ''))
+  }, [atos, filtroAcoesCliente, filtroAcoesTipo, filtroAcoesStatus, filtroAcoesBusca])
+  // Ações de 1 cliente (drawer da Posição por Cliente)
+  const atosDoCliente = (clienteId: number) => atos
+    .filter((a: any) => a.cliente_id === clienteId)
+    .sort((a: any, b: any) => (b.data_ato ?? '').localeCompare(a.data_ato ?? ''))
 
   // ── KPIs calculados no frontend ────────────────────────────────────
   // calcularHonorarios(c) era chamada várias vezes por render (2x nos totais
@@ -687,12 +892,21 @@ export default function CarteiraPage() {
   // isso eles viajariam de volta no payload com o valor ANTIGO e o
   // onupdate do SQLAlchemy ficaria "congelado" no valor que o cliente mandou.
   const CAMPOS_AUDITORIA = ['criado_por', 'atualizado_por', 'data_criacao', 'data_atualizacao', 'data_cadastro']
-  const limparPayload = (p: any) => { delete p.exito_split; CAMPOS_AUDITORIA.forEach(k => delete p[k]) }
+  const limparPayload = (p: any) => {
+    delete p.exito_split; CAMPOS_AUDITORIA.forEach(k => delete p[k])
+    // Linhas de anexo adicionadas e removidas (ou deixadas em branco) não
+    // devem virar registro vazio salvo — só manda quem tem nome ou url.
+    if (Array.isArray(p.anexos)) p.anexos = p.anexos.filter((a: any) => a?.nome || a?.url)
+  }
   const mk = (url: string, keys: string[], numFields: string[] = []) => useMutation({
     mutationFn: () => {
       const p: any = { ...form }
       limparPayload(p)
-      numFields.forEach(k => { if (p[k] === '') p[k] = null; else if (p[k] !== undefined) p[k] = Number(p[k]) })
+      // null fica null (nunca vira Number(null)=0) — campo FK opcional (ex:
+      // ato_pai_id) chega como null ao editar um registro que nunca teve
+      // valor, e Number(null)=0 quebraria a FK (não existe id=0). undefined
+      // continua sendo ignorado/omitido do payload, como antes.
+      numFields.forEach(k => { if (p[k] === '' || p[k] === null) p[k] = null; else if (p[k] !== undefined) p[k] = Number(p[k]) })
       return api.post(url, p).then(r => r.data)
     },
     onSuccess: () => { keys.forEach(k => qc.invalidateQueries({ queryKey: [k] })); closeModal() },
@@ -702,7 +916,7 @@ export default function CarteiraPage() {
     mutationFn: () => {
       const p: any = { ...form }
       limparPayload(p)
-      numFields.forEach(k => { if (p[k] === '') p[k] = null; else if (p[k] !== undefined) p[k] = Number(p[k]) })
+      numFields.forEach(k => { if (p[k] === '' || p[k] === null) p[k] = null; else if (p[k] !== undefined) p[k] = Number(p[k]) })
       return api.put(urlFn(), p).then(r => r.data)
     },
     onSuccess: () => { keys.forEach(k => qc.invalidateQueries({ queryKey: [k] })); closeModal() },
@@ -732,10 +946,51 @@ export default function CarteiraPage() {
   const salvarFundo = mk('/carteira/fundos', ['carteira-fundos'], numFundo)
   const atualizarFundo = mkPut(() => `/carteira/fundos/${editandoFundoId}`, ['carteira-fundos'], numFundo)
 
-  const salvarEstrategia = mk('/carteira/estrategias', ['carteira-estrategias'])
   const atualizarEmissao = mkPut(() => `/carteira/emissoes/${editandoEmissaoId}`, ['carteira-emissoes'], ['numero_emissao', 'prazo_carencia_dias'])
   const atualizarFundoRef = mkPut(() => `/carteira/fundos-referencia/${editandoFundoRefId}`, ['carteira-fundos-ref'], ['percentual_credito_recuperavel'])
-  const atualizarEstrategia = mkPut(() => `/carteira/estrategias/${editandoEstrategiaId}`, ['carteira-estrategias'])
+
+  // Estratégia tem um passo extra (perguntar/montar a cronologia de ações
+  // antes de salvar), por isso não usa o mk()/mkPut() genérico — precisa de
+  // 1-2 chamadas em sequência (cronologia primeiro, depois a estratégia já
+  // com o cronologia_ids resolvido).
+  const salvarEstrategiaComCronologia = useMutation({
+    mutationFn: async () => {
+      const f: any = { ...form }
+      const temCron = !!f._temCronologia
+      let cronologiaIds: number[] = f.cronologia_ids ?? []
+      delete f._temCronologia
+      if (!temCron) {
+        cronologiaIds = []
+      } else {
+        const payloadCron = { nome: f._novaCronologiaNome || f.nome, ordenada: f._novaCronologiaOrdenada ?? true, etapas: f._novaCronologiaEtapas ?? [] }
+        if (cronologiaIds[0]) {
+          const r = await api.put(`/carteira/cronologias/${cronologiaIds[0]}`, payloadCron)
+          cronologiaIds = [r.data.id]
+        } else {
+          const r = await api.post('/carteira/cronologias', payloadCron)
+          cronologiaIds = [r.data.id]
+        }
+      }
+      delete f._novaCronologiaNome; delete f._novaCronologiaOrdenada; delete f._novaCronologiaEtapas
+      f.cronologia_ids = cronologiaIds
+      limparPayload(f)
+      if (editandoEstrategiaId) return api.put(`/carteira/estrategias/${editandoEstrategiaId}`, f).then(r => r.data)
+      return api.post('/carteira/estrategias', f).then(r => r.data)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['carteira-estrategias'] })
+      qc.invalidateQueries({ queryKey: ['carteira-cronologias'] })
+      closeModal()
+    },
+    onError: (e: any) => alert(e?.response?.data?.detail || 'Erro ao salvar'),
+  })
+
+  const salvarCronologia = mk('/carteira/cronologias', ['carteira-cronologias'])
+  const atualizarCronologia = mkPut(() => `/carteira/cronologias/${editandoCronologiaId}`, ['carteira-cronologias'])
+
+  const numAto = ['cliente_id', 'ativo_id', 'estrategia_id', 'cronologia_id', 'ato_pai_id']
+  const salvarAto = mk('/carteira/atos', ['carteira-atos'], numAto)
+  const atualizarAto = mkPut(() => `/carteira/atos/${editandoAtoId}`, ['carteira-atos'], numAto)
 
   const mkDelete = (urlFn: (id: number) => string, keys: string[]) => useMutation({
     mutationFn: (id: number) => api.delete(urlFn(id)).then(r => r.data),
@@ -750,6 +1005,19 @@ export default function CarteiraPage() {
   const deletarFundoRef = mkDelete(id => `/carteira/fundos-referencia/${id}`, ['carteira-fundos-ref'])
   const deletarFundoPos = mkDelete(id => `/carteira/fundos/${id}`, ['carteira-fundos'])
   const deletarEstrategia = mkDelete(id => `/carteira/estrategias/${id}`, ['carteira-estrategias'])
+  const deletarCronologia = mkDelete(id => `/carteira/cronologias/${id}`, ['carteira-cronologias'])
+  const deletarAto = mkDelete(id => `/carteira/atos/${id}`, ['carteira-atos'])
+
+  const patchCronologiaCliente = useMutation({
+    mutationFn: ({ id, ids }: { id: number; ids: number[] }) =>
+      api.put(`/carteira/clientes/${id}`, { cronologia_ids: ids }).then(r => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['carteira-clientes'] }),
+  })
+  const patchCronologiaDeb = useMutation({
+    mutationFn: ({ id, ids }: { id: number; ids: number[] }) =>
+      api.put(`/carteira/debentures/${id}`, { cronologia_ids: ids }).then(r => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['carteira-debentures'] }),
+  })
 
   const patchEstratDeb = useMutation({
     mutationFn: ({ id, ids }: { id: number; ids: number[] }) =>
@@ -970,8 +1238,24 @@ export default function CarteiraPage() {
     setEditandoFundoRefId(f.id); setModal('fundo-ref')
   }
   const abrirEdicaoEstrategia = (e: any) => {
-    setForm({ ...e })
+    const cronId = (e.cronologia_ids ?? [])[0]
+    const cron = cronId ? cronologias.find((c: any) => c.id === cronId) : null
+    setForm({
+      ...e,
+      _temCronologia: !!cron,
+      _novaCronologiaNome: cron?.nome ?? '',
+      _novaCronologiaOrdenada: cron?.ordenada ?? true,
+      _novaCronologiaEtapas: cron?.etapas ?? [],
+    })
     setEditandoEstrategiaId(e.id); setModal('estrategia')
+  }
+  const abrirEdicaoCronologia = (c: any) => {
+    setForm({ ...c })
+    setEditandoCronologiaId(c.id); setModal('cronologia')
+  }
+  const abrirEdicaoAto = (a: any) => {
+    setForm({ ...a })
+    setEditandoAtoId(a.id); setModal('ato')
   }
 
   // ── Qualificação para clipboard ────────────────────────────────────
@@ -1049,6 +1333,16 @@ export default function CarteiraPage() {
     if (s === 'Resgatado') return <span className={`${styles.badge} ${styles.status_encerrado}`}>{label}</span>
     return <span className={`${styles.badge} ${styles.status_ativo}`}>{label}</span>
   }
+  const statusAtoBadge = (s: string) => {
+    if (s === 'concluido') return <span className={`${styles.badge} ${styles.status_ativo}`}>Concluído</span>
+    if (s === 'aguardando_resposta') return <span className={`${styles.badge} ${styles.status_suspenso}`}>Aguardando resposta</span>
+    return <span className={styles.badge}>Aberto</span>
+  }
+  const atoTipoBadge = (tipo: string) => (
+    <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, background: tipo === 'acao_judicial' ? '#fee2e2' : tipo === 'contra_notificacao' || tipo === 'notificacao' ? '#e0e7ff' : '#f3f4f6', color: tipo === 'acao_judicial' ? '#b91c1c' : tipo === 'contra_notificacao' || tipo === 'notificacao' ? '#4338ca' : '#4b5563', whiteSpace: 'nowrap' }}>
+      {tipoAtoLabel(tipo)}
+    </span>
+  )
   const addBtn = (label: string, onClick: () => void) => (
     <div className={styles.pageHeader} style={{ marginBottom: 12 }}>
       <span /><button className={styles.btnPrimary} onClick={onClick}>+ {label}</button>
@@ -1298,7 +1592,10 @@ export default function CarteiraPage() {
                         </span>
                       })()}
                     </div>
-                    <button className={styles.btnSmall} onClick={() => window.open(`/api/carteira/cliente/${c.id}/pdf`, '_blank')}>PDF</button>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button className={styles.btnSmall} onClick={() => setAcoesClienteId(c.id)}>Ações{atosDoCliente(c.id).length > 0 ? ` (${atosDoCliente(c.id).length})` : ''}</button>
+                      <button className={styles.btnSmall} onClick={() => window.open(`/api/carteira/cliente/${c.id}/pdf`, '_blank')}>PDF</button>
+                    </div>
                   </div>
 
                   {mostrarDebs && debs.length > 0 && (
@@ -1760,6 +2057,51 @@ export default function CarteiraPage() {
         </>
       )}
 
+      {/* ══ AÇÕES (aba global — tipo CRM) ════════════════════════════ */}
+      {tab === 'acoes' && (
+        <>
+          {addBtn('Novo Ato', () => { setForm({ data_ato: new Date().toISOString().slice(0, 10), status: 'aberto', anexos: [] }); setEditandoAtoId(null); setModal('ato') })}
+          <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+            <input className={styles.input} style={{ width: 200 }} placeholder="Buscar título/descrição..." value={filtroAcoesBusca} onChange={e => setFiltroAcoesBusca(e.target.value)} />
+            <div style={{ width: 220 }}>
+              <ComboSelect value={filtroAcoesCliente} onChange={v => setFiltroAcoesCliente(Number(v))} options={clienteOptions} placeholder="Todos os clientes" />
+            </div>
+            <select className={styles.input} style={{ width: 170 }} value={filtroAcoesTipo} onChange={e => setFiltroAcoesTipo(e.target.value)}>
+              <option value="">Todos os tipos</option>
+              {TIPOS_ATO.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+            <select className={styles.input} style={{ width: 170 }} value={filtroAcoesStatus} onChange={e => setFiltroAcoesStatus(e.target.value)}>
+              <option value="">Todos os status</option>
+              {STATUS_ATO.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+            </select>
+            {filtroAcoesCliente !== '' && (
+              <button style={{ background: 'none', border: 'none', color: 'var(--teal)', fontSize: 12, cursor: 'pointer' }} onClick={() => setFiltroAcoesCliente('')}>✕ Limpar cliente</button>
+            )}
+          </div>
+          <div className={styles.tableCard}>
+            <table className={styles.table}>
+              <thead><tr><th>Data</th><th>Cliente</th><th>Ativo</th><th>Tipo</th><th>Estratégia</th><th>Status</th><th>Anexos</th><th /></tr></thead>
+              <tbody>
+                {atosFiltrados.length === 0
+                  ? <tr><td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Nenhum ato registrado</td></tr>
+                  : atosFiltrados.map((a: any) => (
+                    <tr key={a.id}>
+                      <td style={{ whiteSpace: 'nowrap' }}>{a.data_ato}</td>
+                      <td>{clienteNome(a.cliente_id)}</td>
+                      <td style={{ fontSize: 12, color: '#6b7280' }}>{ativoNomeCurto(a.ativo_tipo, a.ativo_id) ?? '—'}</td>
+                      <td>{atoTipoBadge(a.tipo_ato)}</td>
+                      <td style={{ fontSize: 12, color: '#6b7280' }}>{a.estrategia_id ? estrategiaNome(a.estrategia_id) : '—'}</td>
+                      <td>{statusAtoBadge(a.status)}</td>
+                      <td style={{ fontSize: 12, color: '#6b7280' }}>{(a.anexos ?? []).length || '—'}</td>
+                      <td>{rowActions(() => abrirEdicaoAto(a), `o ato "${a.titulo ?? tipoAtoLabel(a.tipo_ato)}"`, () => deletarAto.mutate(a.id), a)}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
       {/* ══ CLIENTES (referência) ══════════════════════════════════ */}
       {tab === 'clientes' && (
         <>
@@ -1928,6 +2270,33 @@ export default function CarteiraPage() {
                       <td style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.descricao ?? '—'}</td>
                       <td>{e.usuarios_count ?? 0}</td><td>{statusBadge(e.ativo)}</td>
                       <td>{rowActions(() => abrirEdicaoEstrategia(e), `a estratégia ${e.nome ?? ''}`, () => deletarEstrategia.mutate(e.id), e)}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {tab === 'cronologias' && (
+        <>
+          {addBtn('Nova Cronologia', () => { setForm({ ordenada: true, etapas: [] }); setModal('cronologia') })}
+          <p style={{ fontSize: 12, color: 'var(--gray-mid)', marginTop: -8, marginBottom: 12 }}>
+            Modelos de "caminho de ações" reutilizáveis — monte aqui e depois vincule a um cliente, a uma estratégia ou a um ativo específico.
+          </p>
+          <div className={styles.tableCard}>
+            <table className={styles.table}>
+              <thead><tr><th>Nome</th><th>Ordem</th><th>Etapas</th><th>Status</th><th /></tr></thead>
+              <tbody>
+                {cronologias.length === 0
+                  ? <tr><td colSpan={5} style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Nenhum registro</td></tr>
+                  : cronologias.map((c: any) => (
+                    <tr key={c.id}>
+                      <td><strong>{c.nome}</strong></td>
+                      <td>{c.ordenada ? 'Sequencial' : 'Sem ordem'}</td>
+                      <td style={{ fontSize: 12, color: '#6b7280' }}>{(c.etapas ?? []).map((et: any, i: number) => (et.label || tipoAtoLabel(et.tipo_ato))).join(c.ordenada ? ' → ' : ', ') || '—'}</td>
+                      <td>{statusBadge(c.ativo)}</td>
+                      <td>{rowActions(() => abrirEdicaoCronologia(c), `a cronologia ${c.nome ?? ''}`, () => deletarCronologia.mutate(c.id), c)}</td>
                     </tr>
                   ))}
               </tbody>
@@ -2348,10 +2717,144 @@ export default function CarteiraPage() {
           {fl('Nome *', fi('nome', 'text', 'Ex: Conservadora, ABM-PARSE'))}
           {fl('Nome do chip (3-4 palavras)', fi('nome_chip', 'text', 'Ex: Cons. Capital'))}
           {fl('Descrição', fta('descricao', 4))}
+          <div style={{ borderTop: '1px solid var(--gray-border)', margin: '10px 0', paddingTop: 10 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer', marginBottom: 8 }}>
+              <input type="checkbox" checked={!!form._temCronologia} onChange={e => inp('_temCronologia', e.target.checked)} />
+              Esta estratégia tem uma linha de ações a ser implementada (cronologia)?
+            </label>
+            {form._temCronologia && (
+              <div style={{ background: 'var(--gray-light, #f8f9fa)', borderRadius: 8, padding: 10 }}>
+                {fl('Cronologia', (
+                  <ComboSelect
+                    value={form.cronologia_ids?.[0] ?? ''}
+                    onChange={v => {
+                      const c = cronologias.find((x: any) => x.id === Number(v))
+                      setForm((f: any) => ({ ...f, cronologia_ids: [Number(v)], _novaCronologiaNome: c?.nome ?? '', _novaCronologiaOrdenada: c?.ordenada ?? true, _novaCronologiaEtapas: c?.etapas ?? [] }))
+                    }}
+                    options={cronologias.map((c: any) => ({ value: c.id, label: c.nome }))}
+                    placeholder="— Usar cronologia existente ou criar nova abaixo —"
+                  />
+                ))}
+                {fl('Nome da cronologia', fi('_novaCronologiaNome', 'text', 'Ex: Resistência judicial'))}
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', marginBottom: 8 }}>
+                  <input type="checkbox" checked={form._novaCronologiaOrdenada ?? true} onChange={e => inp('_novaCronologiaOrdenada', e.target.checked)} />
+                  Etapas seguem uma ordem/sequência (senão é só uma lista, sem ordem obrigatória)
+                </label>
+                <EtapasBuilder
+                  etapas={form._novaCronologiaEtapas ?? []}
+                  ordenada={form._novaCronologiaOrdenada ?? true}
+                  onChange={next => inp('_novaCronologiaEtapas', next)}
+                />
+              </div>
+            )}
+          </div>
           {auditCaption(!!editandoEstrategiaId)}
-          <button className={styles.btnPrimary} onClick={() => editandoEstrategiaId ? atualizarEstrategia.mutate() : salvarEstrategia.mutate()} disabled={salvarEstrategia.isPending || atualizarEstrategia.isPending}>{(salvarEstrategia.isPending || atualizarEstrategia.isPending) ? 'Salvando...' : 'Salvar'}</button>
+          <button className={styles.btnPrimary} onClick={() => salvarEstrategiaComCronologia.mutate()} disabled={salvarEstrategiaComCronologia.isPending}>{salvarEstrategiaComCronologia.isPending ? 'Salvando...' : 'Salvar'}</button>
         </Modal>
       )}
+
+      {/* ── MODAL CRONOLOGIA (standalone) ───────────────────────── */}
+      {modal === 'cronologia' && (
+        <Modal title={editandoCronologiaId ? 'Editar Cronologia' : 'Nova Cronologia'} onClose={closeModal} width={560}>
+          {fl('Nome *', fi('nome', 'text', 'Ex: Resistência judicial'))}
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer', marginBottom: 10 }}>
+            <input type="checkbox" checked={form.ordenada ?? true} onChange={e => inp('ordenada', e.target.checked)} />
+            Etapas seguem uma ordem/sequência (senão é só uma lista, sem ordem obrigatória)
+          </label>
+          <EtapasBuilder etapas={form.etapas ?? []} ordenada={form.ordenada ?? true} onChange={next => inp('etapas', next)} />
+          <div style={{ marginTop: 12 }}>{fl('Observações', fta('observacoes', 3))}</div>
+          {auditCaption(!!editandoCronologiaId)}
+          <button className={styles.btnPrimary} onClick={() => editandoCronologiaId ? atualizarCronologia.mutate() : salvarCronologia.mutate()} disabled={salvarCronologia.isPending || atualizarCronologia.isPending}>{(salvarCronologia.isPending || atualizarCronologia.isPending) ? 'Salvando...' : 'Salvar'}</button>
+        </Modal>
+      )}
+
+      {/* ── MODAL ATO (ação registrada) ─────────────────────────── */}
+      {modal === 'ato' && (
+        <Modal title={editandoAtoId ? 'Editar Ato' : 'Novo Ato'} onClose={closeModal} width={560}>
+          {fl('Cliente *', <ComboSelect value={form.cliente_id} onChange={v => inp('cliente_id', Number(v))} options={clienteOptions} placeholder="Selecione o cliente..." />)}
+          {fl('Tipo de ativo', fs('ativo_tipo', [{ value: '', label: '— Nenhum (ato geral do cliente) —' }, { value: 'debenture', label: 'Debênture' }, { value: 'imobiliario', label: 'Imobiliário' }, { value: 'fundo', label: 'Fundo' }]))}
+          {form.ativo_tipo && (
+            fl('Ativo', <ComboSelect value={form.ativo_id} onChange={v => inp('ativo_id', Number(v))} options={ativoOptionsPara(form.cliente_id ?? null, form.ativo_tipo)} placeholder="Selecione o ativo..." />)
+          )}
+          {fl('Estratégia (opcional)', <ComboSelect value={form.estrategia_id} onChange={v => inp('estrategia_id', Number(v))} options={estrategias.map((e: any) => ({ value: e.id, label: e.nome }))} placeholder="— Nenhuma —" />)}
+          {fl('Cronologia (opcional)', <ComboSelect value={form.cronologia_id} onChange={v => inp('cronologia_id', Number(v))} options={cronologias.map((c: any) => ({ value: c.id, label: c.nome }))} placeholder="— Nenhuma —" />)}
+          {fl('Responde a outro ato (opcional)', <ComboSelect
+            value={form.ato_pai_id}
+            onChange={v => inp('ato_pai_id', Number(v))}
+            options={atos.filter((a: any) => a.cliente_id === form.cliente_id && a.id !== editandoAtoId).map((a: any) => ({ value: a.id, label: `${a.data_ato} — ${a.titulo || tipoAtoLabel(a.tipo_ato)}` }))}
+            placeholder="— Nenhum —"
+          />)}
+          {fl('Tipo de ato *', fs('tipo_ato', TIPOS_ATO))}
+          {fl('Título', fi('titulo', 'text', 'Ex: Contra-notificação enviada'))}
+          {fl('Descrição', fta('descricao', 3))}
+          {fl('Data do ato *', fi('data_ato', 'date'))}
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer', margin: '4px 0 10px' }}>
+            <input type="checkbox" checked={!!form.depende_resposta} onChange={e => inp('depende_resposta', e.target.checked)} />
+            Depende de resposta
+          </label>
+          {form.depende_resposta && fl('Prazo para resposta', fi('prazo_resposta', 'date'))}
+          {fl('Status', fs('status', STATUS_ATO))}
+          <div style={{ marginBottom: 10 }}>
+            <label style={{ fontSize: 12, color: 'var(--gray-mid)', display: 'block', marginBottom: 4 }}>Anexos (links do Drive)</label>
+            {(form.anexos ?? []).map((an: any, i: number) => (
+              <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
+                <input className={styles.input} style={{ flex: 1, fontSize: 12 }} placeholder="Nome do arquivo" value={an.nome ?? ''}
+                  onChange={e => inp('anexos', (form.anexos ?? []).map((x: any, idx: number) => idx === i ? { ...x, nome: e.target.value } : x))} />
+                <input className={styles.input} style={{ flex: 2, fontSize: 12 }} placeholder="https://drive.google.com/..." value={an.url ?? ''}
+                  onChange={e => inp('anexos', (form.anexos ?? []).map((x: any, idx: number) => idx === i ? { ...x, url: e.target.value } : x))} />
+                <button style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer' }} onClick={() => inp('anexos', (form.anexos ?? []).filter((_: any, idx: number) => idx !== i))}>✕</button>
+              </div>
+            ))}
+            <button style={{ padding: '4px 10px', background: 'none', border: '1px dashed var(--gray-border)', borderRadius: 6, cursor: 'pointer', fontSize: 12, color: 'var(--gray-mid)' }}
+              onClick={() => inp('anexos', [...(form.anexos ?? []), { nome: '', url: '' }])}>+ Anexo</button>
+          </div>
+          {fl('Observações', fta('observacoes', 2))}
+          {auditCaption(!!editandoAtoId)}
+          <button className={styles.btnPrimary} onClick={() => editandoAtoId ? atualizarAto.mutate() : salvarAto.mutate()} disabled={salvarAto.isPending || atualizarAto.isPending}>{(salvarAto.isPending || atualizarAto.isPending) ? 'Salvando...' : 'Salvar'}</button>
+        </Modal>
+      )}
+
+      {/* ── DRAWER AÇÕES DO CLIENTE (linha do tempo — Posição por Cliente) ── */}
+      {acoesClienteId !== null && (() => {
+        const c = clientes.find((x: any) => x.id === acoesClienteId)
+        if (!c) return null
+        const lista = atosDoCliente(acoesClienteId)
+        return (
+          <Modal title={`Ações — ${clienteNome(acoesClienteId)}`} onClose={() => setAcoesClienteId(null)} width={520}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 11, color: 'var(--gray-mid)' }}>Cronologias vinculadas:</span>
+                <CronologiaChips ids={c.cronologia_ids ?? []} cronologias={cronologias} onUpdate={ids => patchCronologiaCliente.mutate({ id: c.id, ids })} />
+              </div>
+              <button className={styles.btnSmall} onClick={() => { setForm({ cliente_id: acoesClienteId, data_ato: new Date().toISOString().slice(0, 10), status: 'aberto', anexos: [] }); setEditandoAtoId(null); setModal('ato') }}>+ Novo ato</button>
+            </div>
+            {lista.length === 0
+              ? <p style={{ fontSize: 13, color: '#9ca3af', textAlign: 'center', padding: '24px 0' }}>Nenhum ato registrado para este cliente.</p>
+              : (
+                <div style={{ position: 'relative', paddingLeft: 18, borderLeft: '1.5px solid var(--gray-border)', marginLeft: 4 }}>
+                  {lista.map((a: any) => (
+                    <div key={a.id} style={{ marginBottom: 16, position: 'relative' }}>
+                      <div style={{ position: 'absolute', left: -23, top: 3, width: 8, height: 8, borderRadius: '50%', background: a.status === 'concluido' ? '#16a34a' : a.status === 'aguardando_resposta' ? '#d97706' : '#9ca3af' }} />
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                        <span style={{ fontSize: 11, color: 'var(--gray-mid)' }}>{a.data_ato}</span>
+                        <span>{rowActions(() => abrirEdicaoAto(a), `o ato "${a.titulo ?? tipoAtoLabel(a.tipo_ato)}"`, () => deletarAto.mutate(a.id), a)}</span>
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 600, margin: '2px 0' }}>{a.titulo || tipoAtoLabel(a.tipo_ato)}</div>
+                      {a.descricao && <div style={{ fontSize: 12, color: 'var(--gray-mid)', marginBottom: 4 }}>{a.descricao}</div>}
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                        {atoTipoBadge(a.tipo_ato)}
+                        {ativoNomeCurto(a.ativo_tipo, a.ativo_id) && <span style={{ fontSize: 11, color: 'var(--gray-mid)' }}>{ativoNomeCurto(a.ativo_tipo, a.ativo_id)}</span>}
+                        {a.estrategia_id && <span style={{ fontSize: 11, padding: '2px 7px', borderRadius: 10, background: '#f0fdfa', color: '#0d6b63', border: '1px solid #0d9488' }}>{estrategiaNome(a.estrategia_id)}</span>}
+                        {statusAtoBadge(a.status)}
+                        {(a.anexos ?? []).length > 0 && <span style={{ fontSize: 11, color: 'var(--gray-mid)' }}>📎 {a.anexos.length}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+          </Modal>
+        )
+      })()}
 
       {/* ── MODAL CONFIRM % ÊXITO OVERRIDE ──────────────────────── */}
       {confirmPctOverride !== null && (
@@ -2428,6 +2931,10 @@ export default function CarteiraPage() {
         return (
           <Modal title={`Detalhes — ${d.numero_cautela ?? emissaoNome(d.emissao_id)}`} onClose={() => setDebInfoId(null)} width={480}>
             <div style={{ marginBottom: 8 }}>
+              <div style={{ display: 'flex', gap: 12, padding: '6px 0', borderBottom: '1px solid var(--gray-light, #f3f4f6)', fontSize: 13, alignItems: 'center' }}>
+                <span style={{ minWidth: 220, color: 'var(--gray-mid)', fontSize: 12, fontWeight: 500 }}>Cronologias vinculadas</span>
+                <CronologiaChips ids={d.cronologia_ids ?? []} cronologias={cronologias} onUpdate={ids => patchCronologiaDeb.mutate({ id: d.id, ids })} />
+              </div>
               {infoRow('Série', emissaoNome(d.emissao_id))}
               {infoRow('Nº da emissão', em?.numero_emissao != null ? `${em.numero_emissao}ª` : '—')}
               {infoRow('Data de aquisição', d.data_aquisicao ?? '—')}

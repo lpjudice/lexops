@@ -60,6 +60,10 @@ class CarteiraCliente(Base):
     observacao_honorarios = Column(Text, nullable=True)
     fonte_captacao = Column(String(255), nullable=True)
 
+    # Cronologias (múltiplas — array de IDs) vinculadas diretamente ao cliente,
+    # sem estar presas a um ativo ou estratégia específicos
+    cronologia_ids = Column(JSON, default=list)
+
     # Drive
     folder_drive_principal_id = Column(String(255), nullable=True)
     folder_drive_url = Column(String(500), nullable=True)
@@ -161,6 +165,8 @@ class CarteiraDebenturePosicao(Base):
 
     # Estratégias (múltiplas — array de IDs)
     estrategia_ids = Column(JSON, default=list)
+    # Cronologias (múltiplas — array de IDs) vinculadas a esta posição
+    cronologia_ids = Column(JSON, default=list)
 
     # Administrativo
     estrategia_id = Column(Integer, ForeignKey('carteira_estrategia.id'), nullable=True)
@@ -290,6 +296,8 @@ class CarteiraImobiliarioPosicao(Base):
 
     # Estratégias (múltiplas — array de IDs)
     estrategia_ids = Column(JSON, default=list)
+    # Cronologias (múltiplas — array de IDs) vinculadas a esta posição
+    cronologia_ids = Column(JSON, default=list)
 
     # Administrativo
     estrategia_id = Column(Integer, ForeignKey('carteira_estrategia.id'), nullable=True)
@@ -375,6 +383,8 @@ class CarteiraFundoPosicao(Base):
 
     # Estratégias (múltiplas — array de IDs)
     estrategia_ids = Column(JSON, default=list)
+    # Cronologias (múltiplas — array de IDs) vinculadas a esta posição
+    cronologia_ids = Column(JSON, default=list)
 
     # Administrativo
     faz_parte_honorarios = Column(Boolean, default=False)
@@ -418,6 +428,10 @@ class CarteiraEstrategia(Base):
     usuarios_count = Column(Integer, default=0)
     ativo = Column(Boolean, default=True)
 
+    # Cronologias (múltiplas — array de IDs) — a "linha de ações" sugerida
+    # para quem adota esta estratégia (perguntado ao criar/editar a estratégia)
+    cronologia_ids = Column(JSON, default=list)
+
     # Relacionamentos
     posicoes_debentures = relationship("CarteiraDebenturePosicao", back_populates="estrategia")
     posicoes_imobiliarios = relationship("CarteiraImobiliarioPosicao", back_populates="estrategia")
@@ -427,7 +441,79 @@ class CarteiraEstrategia(Base):
 
 
 # ─────────────────────────────────────────────────────────────────
-# 6. AUXILIARES
+# 6. CRONOLOGIA (modelo reutilizável de etapas) + AÇÕES/ATOS
+# ─────────────────────────────────────────────────────────────────
+
+class CarteiraCronologia(Base):
+    """Modelo reutilizável de "caminho" de ações (ex: notificação → resposta
+    → contra-notificação → ação judicial). Pode ser montada isoladamente e
+    depois vinculada a um cliente, a uma estratégia e/ou a um ativo
+    específico (debênture/imobiliário/fundo) — por isso não tem FK fixa pra
+    nenhum desses; o vínculo vive do lado de quem usa (cronologia_ids nos
+    outros models), igual ao padrão já usado em estrategia_ids."""
+    __tablename__ = 'carteira_cronologia'
+
+    id = Column(Integer, primary_key=True)
+    nome = Column(String(255), nullable=False)
+    ordenada = Column(Boolean, default=True)  # True = etapas têm ordem/sequência; False = checklist sem ordem
+    # Etapas: lista de {ordem, tipo_ato, label, obrigatoria} — JSON em vez de
+    # tabela própria pq são só o esqueleto do caminho (sem data), igual ao
+    # padrão já usado em alocacao_recomendada/historico_aportes.
+    etapas = Column(JSON, default=list)
+    observacoes = Column(Text, nullable=True)
+    ativo = Column(Boolean, default=True)
+    data_criacao = Column(DateTime, default=datetime.now)
+    data_atualizacao = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    criado_por = Column(String(150), nullable=True)
+    atualizado_por = Column(String(150), nullable=True)
+
+    __table_args__ = (Index('idx_nome_cronologia', 'nome'),)
+
+
+class CarteiraAto(Base):
+    """Registro real (com data) de uma ação tomada — notificação, contra-
+    notificação, e-mail, ação judicial, parecer, solicitação de documento,
+    resposta etc. Sempre ligado a um cliente; ativo/estratégia/cronologia e
+    o ato anterior (encadeamento) são opcionais e independentes entre si."""
+    __tablename__ = 'carteira_ato'
+
+    id = Column(Integer, primary_key=True)
+    cliente_id = Column(Integer, ForeignKey('carteira_cliente.id'), nullable=False)
+
+    # Ativo relacionado (opcional) — mesmo padrão polimórfico de CarteiraUploadDocumento
+    ativo_tipo = Column(String(50), nullable=True)  # 'debenture' | 'imobiliario' | 'fundo'
+    ativo_id = Column(Integer, nullable=True)
+
+    estrategia_id = Column(Integer, ForeignKey('carteira_estrategia.id'), nullable=True)
+    cronologia_id = Column(Integer, ForeignKey('carteira_cronologia.id'), nullable=True)
+    ato_pai_id = Column(Integer, ForeignKey('carteira_ato.id'), nullable=True)  # encadeamento (ex: contra-notif. referencia o pedido de resgate)
+
+    tipo_ato = Column(String(50), nullable=False)  # notificacao | contra_notificacao | email | acao_judicial | parecer | solicitacao_documento | resposta | outro
+    titulo = Column(String(255), nullable=True)
+    descricao = Column(Text, nullable=True)
+    data_ato = Column(Date, nullable=False)
+
+    depende_resposta = Column(Boolean, default=False)
+    prazo_resposta = Column(Date, nullable=True)
+    respondido = Column(Boolean, default=False)
+    status = Column(String(50), default='aberto')  # aberto | aguardando_resposta | concluido
+
+    anexos = Column(JSON, default=list)  # [{nome, url}] — links do Drive
+    observacoes = Column(Text, nullable=True)
+    ativo = Column(Boolean, default=True)
+    data_criacao = Column(DateTime, default=datetime.now)
+    data_atualizacao = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    criado_por = Column(String(150), nullable=True)
+    atualizado_por = Column(String(150), nullable=True)
+
+    __table_args__ = (
+        Index('idx_ato_cliente', 'cliente_id'),
+        Index('idx_ato_ativo', 'ativo_tipo', 'ativo_id'),
+    )
+
+
+# ─────────────────────────────────────────────────────────────────
+# 7. AUXILIARES
 # ─────────────────────────────────────────────────────────────────
 
 class CarteiraSocioAval(Base):

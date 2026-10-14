@@ -20,6 +20,8 @@ from app.models.carteira import (
     CarteiraFundoReferencia,
     CarteiraFundoPosicao,
     CarteiraEstrategia,
+    CarteiraCronologia,
+    CarteiraAto,
     CarteiraSocioAval,
     CarteiraUploadDocumento,
 )
@@ -744,6 +746,160 @@ def buscar_estrategia(termo: str, db: Session = Depends(get_db)):
         CarteiraEstrategia.ativo == True,
     ).all()
     return estrategias
+
+
+# ─────────────────────────────────────────────────────────────────
+# CRONOLOGIAS (modelo reutilizável de etapas — vinculado a cliente/
+# estratégia/ativo via *_ids do lado de quem usa, igual estrategia_ids)
+# ─────────────────────────────────────────────────────────────────
+
+@router.get("/cronologias")
+def listar_cronologias(db: Session = Depends(get_db)):
+    """Lista cronologias (modelos de caminho de ações) disponíveis"""
+    cronologias = db.query(CarteiraCronologia).filter(
+        CarteiraCronologia.ativo == True
+    ).order_by(CarteiraCronologia.nome).all()
+    return cronologias
+
+
+@router.post("/cronologias")
+def criar_cronologia(data: dict, db: Session = Depends(get_db), current_user: Optional[Usuario] = Depends(get_optional_user)):
+    """Cria nova cronologia (caminho de ações reutilizável)"""
+    nome_usuario = _nome_usuario(current_user)
+    data["criado_por"] = nome_usuario
+    data["atualizado_por"] = nome_usuario
+    cronologia = CarteiraCronologia(**data)
+    db.add(cronologia)
+    _commit_amigavel(db, "cronologia")
+    db.refresh(cronologia)
+    return cronologia
+
+
+@router.get("/cronologias/{cronologia_id}")
+def obter_cronologia(cronologia_id: int, db: Session = Depends(get_db)):
+    cronologia = db.query(CarteiraCronologia).filter(CarteiraCronologia.id == cronologia_id).first()
+    if not cronologia:
+        raise HTTPException(status_code=404, detail="Cronologia não encontrada")
+    return cronologia
+
+
+@router.put("/cronologias/{cronologia_id}")
+def atualizar_cronologia(cronologia_id: int, data: dict, db: Session = Depends(get_db), current_user: Optional[Usuario] = Depends(get_optional_user)):
+    cronologia = db.query(CarteiraCronologia).filter(CarteiraCronologia.id == cronologia_id).first()
+    if not cronologia:
+        raise HTTPException(status_code=404, detail="Cronologia não encontrada")
+    data["atualizado_por"] = _nome_usuario(current_user)
+    for key, value in data.items():
+        setattr(cronologia, key, value)
+    _commit_amigavel(db, "cronologia")
+    db.refresh(cronologia)
+    return cronologia
+
+
+@router.delete("/cronologias/{cronologia_id}")
+def deletar_cronologia(cronologia_id: int, db: Session = Depends(get_db)):
+    cronologia = db.query(CarteiraCronologia).filter(CarteiraCronologia.id == cronologia_id).first()
+    if not cronologia:
+        raise HTTPException(status_code=404, detail="Cronologia não encontrada")
+    db.delete(cronologia)
+    db.commit()
+    return {"ok": True}
+
+
+# ─────────────────────────────────────────────────────────────────
+# AÇÕES (ATOS) — registro real, com data, do que foi feito por cliente/ativo
+# ─────────────────────────────────────────────────────────────────
+
+@router.get("/atos")
+def listar_atos(
+    cliente_id: Optional[int] = None,
+    ativo_tipo: Optional[str] = None,
+    ativo_id: Optional[int] = None,
+    estrategia_id: Optional[int] = None,
+    cronologia_id: Optional[int] = None,
+    status: Optional[str] = None,
+    busca: Optional[str] = None,
+    skip: int = Query(0),
+    limit: int = Query(500),
+    db: Session = Depends(get_db),
+):
+    """Lista atos (ações registradas) — visão global (aba Ações) ou filtrada
+    por cliente/ativo/estratégia/cronologia (ex: linha do tempo de 1 cliente)."""
+    query = db.query(CarteiraAto).filter(CarteiraAto.ativo == True)
+    if cliente_id is not None:
+        query = query.filter(CarteiraAto.cliente_id == cliente_id)
+    if ativo_tipo is not None:
+        query = query.filter(CarteiraAto.ativo_tipo == ativo_tipo)
+    if ativo_id is not None:
+        query = query.filter(CarteiraAto.ativo_id == ativo_id)
+    if estrategia_id is not None:
+        query = query.filter(CarteiraAto.estrategia_id == estrategia_id)
+    if cronologia_id is not None:
+        query = query.filter(CarteiraAto.cronologia_id == cronologia_id)
+    if status is not None:
+        query = query.filter(CarteiraAto.status == status)
+    if busca:
+        query = query.filter(or_(
+            CarteiraAto.titulo.ilike(f"%{busca}%"),
+            CarteiraAto.descricao.ilike(f"%{busca}%"),
+        ))
+
+    total = query.count()
+    atos = query.order_by(desc(CarteiraAto.data_ato)).offset(skip).limit(limit).all()
+
+    return {
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+        "data": atos,
+    }
+
+
+@router.post("/atos")
+def criar_ato(data: dict, db: Session = Depends(get_db), current_user: Optional[Usuario] = Depends(get_optional_user)):
+    """Registra um novo ato (notificação, contra-notificação, ação judicial etc.)"""
+    data = _limpar_numericos_vazios(CarteiraAto, data)
+    nome_usuario = _nome_usuario(current_user)
+    data["criado_por"] = nome_usuario
+    data["atualizado_por"] = nome_usuario
+    ato = CarteiraAto(**data)
+    db.add(ato)
+    _commit_amigavel(db, "ato")
+    db.refresh(ato)
+    return ato
+
+
+@router.get("/atos/{ato_id}")
+def obter_ato(ato_id: int, db: Session = Depends(get_db)):
+    ato = db.query(CarteiraAto).filter(CarteiraAto.id == ato_id).first()
+    if not ato:
+        raise HTTPException(status_code=404, detail="Ato não encontrado")
+    return ato
+
+
+@router.put("/atos/{ato_id}")
+def atualizar_ato(ato_id: int, data: dict, db: Session = Depends(get_db), current_user: Optional[Usuario] = Depends(get_optional_user)):
+    ato = db.query(CarteiraAto).filter(CarteiraAto.id == ato_id).first()
+    if not ato:
+        raise HTTPException(status_code=404, detail="Ato não encontrado")
+    data = _limpar_numericos_vazios(CarteiraAto, data)
+    data["atualizado_por"] = _nome_usuario(current_user)
+    for key, value in data.items():
+        setattr(ato, key, value)
+    ato.data_atualizacao = datetime.now()
+    _commit_amigavel(db, "ato")
+    db.refresh(ato)
+    return ato
+
+
+@router.delete("/atos/{ato_id}")
+def deletar_ato(ato_id: int, db: Session = Depends(get_db)):
+    ato = db.query(CarteiraAto).filter(CarteiraAto.id == ato_id).first()
+    if not ato:
+        raise HTTPException(status_code=404, detail="Ato não encontrado")
+    db.delete(ato)
+    db.commit()
+    return {"ok": True}
 
 
 # ─────────────────────────────────────────────────────────────────

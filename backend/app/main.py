@@ -1732,6 +1732,14 @@ def _run_migrations() -> None:
             "ALTER TABLE processos ADD COLUMN IF NOT EXISTS rito VARCHAR(40) NOT NULL DEFAULT 'comum'",
             # Motivo registrado quando um prazo é marcado como "perdido".
             "ALTER TABLE prazos ADD COLUMN IF NOT EXISTS motivo_perda TEXT",
+            # Cronologias (Ações): vínculo múltiplo (array de IDs) direto no
+            # cliente, na posição de cada ativo e na estratégia — mesmo padrão
+            # já usado em estrategia_ids.
+            "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS cronologia_ids JSONB DEFAULT '[]'",
+            "ALTER TABLE carteira_debenture_posicao ADD COLUMN IF NOT EXISTS cronologia_ids JSONB DEFAULT '[]'",
+            "ALTER TABLE carteira_imobiliario_posicao ADD COLUMN IF NOT EXISTS cronologia_ids JSONB DEFAULT '[]'",
+            "ALTER TABLE carteira_fundo_posicao ADD COLUMN IF NOT EXISTS cronologia_ids JSONB DEFAULT '[]'",
+            "ALTER TABLE carteira_estrategia ADD COLUMN IF NOT EXISTS cronologia_ids JSONB DEFAULT '[]'",
         ]:
             conn.execute(text(_col))
 
