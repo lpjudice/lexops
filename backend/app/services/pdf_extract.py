@@ -4,40 +4,117 @@ Compartilhado entre PrecedentCheck e a leitura de documentos do Drive pelo
 gestor jurídico (contexto do processo).
 """
 import io
+import json
 import logging
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
 logger = logging.getLogger(__name__)
 
-# pypdf/pdfminer não têm timeout nativo — são bibliotecas só-CPU que podem
-# ficar minutos (ou pra sempre, na prática) num PDF malformado/patológico.
-# Reproduzido de verdade: uma sincronização travou 2x seguidas no MESMO
-# documento, sempre no mesmo ponto ("tentando pdfminer..."), sem nunca
-# lançar exceção nem voltar — o resto do sistema não tem como saber que
-# aquilo não vai terminar. `_com_timeout` roda a chamada numa thread separada
-# e desiste de esperar após N segundos (a chamada original pode continuar
-# rodando "no vazio" em segundo plano — não dá para matar à força uma thread
-# Python travada em CPU puro — mas o restante da sincronização não fica mais
-# refém dela; a próxima tentativa da cascata assume a partir daí).
-_TIMEOUT_PYPDF_SEGUNDOS = 30.0
-_TIMEOUT_PDFMINER_SEGUNDOS = 60.0
+# pypdf/pdfminer não têm timeout nem limite de memória — são bibliotecas CPU/memória
+# que num PDF pesado ou patológico podem ficar minutos (ou pra sempre) e consumir
+# GBs. Reproduzido de verdade em produção (15/out): um PDF de 41 páginas
+# ("Demonstrações contábeis") fez o servidor inteiro ser morto por falta de memória
+# (oom_killed=true) 3x seguidas, sempre no mesmo documento — como ele só vira peça
+# depois de lido, TODA sincronização voltava a tropeçar nele, derrubando o app (e o
+# bot do Telegram, e as outras telas) a cada tentativa.
+#
+# Antes cada extração rodava numa THREAD com timeout. Só que uma thread presa não
+# pode ser morta: a chamada "continuava rodando no vazio" e, na cascata
+# pypdf → pdfminer → OCR, as duas bibliotecas acabavam parseando o mesmo PDF ao
+# mesmo tempo no processo do servidor. Agora cada etapa roda num PROCESSO FILHO
+# separado, com teto de memória (ulimit -v) e morte garantida (SIGKILL) no
+# timeout: um PDF ruim derruba só o filho, e a cascata segue pra próxima etapa ou
+# devolve vazio (a peça fica com o link do Drive e a descrição do andamento).
+_TIMEOUT_PYPDF_SEGUNDOS = 45.0
+_TIMEOUT_PDFMINER_SEGUNDOS = 75.0
+_TIMEOUT_DIVIDIR_SEGUNDOS = 90.0
+# Teto de memória VIRTUAL do filho. O servidor (2 GB de RAM) usa ~0,5–0,8 GB; o filho
+# precisa caber no que sobra com folga. Ajustável sem deploy de código pelo ambiente.
+_LIMITE_MEMORIA_FILHO_MB = int(os.environ.get("PDF_FILHO_LIMITE_MB", "800"))
+
+_CODIGO_FILHO = r"""
+import io, json, sys
+modo = sys.argv[1]
+dados = sys.stdin.buffer.read()
+if modo == "pypdf":
+    from pypdf import PdfReader
+    r = PdfReader(io.BytesIO(dados))
+    n = len(r.pages)
+    paginas = [p.extract_text() or "" for p in r.pages[:50]]
+    sys.stdout.write(json.dumps({"n": n, "texto": "\n\n".join(p.strip() for p in paginas if p.strip())}))
+elif modo == "pdfminer":
+    from pdfminer.high_level import extract_text
+    sys.stdout.write(json.dumps({"texto": extract_text(io.BytesIO(dados), maxpages=50) or ""}))
+elif modo == "dividir":
+    from pypdf import PdfReader, PdfWriter
+    destino, limite = sys.argv[2], int(sys.argv[3])
+    r = PdfReader(io.BytesIO(dados))
+    n = len(r.pages)
+    arquivos = []
+    for i, pagina in enumerate(r.pages[:limite]):
+        w = PdfWriter()
+        w.add_page(pagina)
+        caminho = destino + "/p%04d.pdf" % i
+        with open(caminho, "wb") as f:
+            w.write(f)
+        arquivos.append(caminho)
+    sys.stdout.write(json.dumps({"n": n, "arquivos": arquivos}))
+else:
+    raise SystemExit(2)
+"""
 
 
-def _com_timeout(fn, args: tuple, timeout_segundos: float):
-    # NÃO usar `with ThreadPoolExecutor(...)` aqui: o `__exit__` do context
-    # manager chama shutdown(wait=True), que bloqueia até a thread terminar —
-    # inclusive a que acabou de estourar o timeout. Isso anularia o timeout
-    # inteiro (a chamada voltaria a esperar pra sempre na saída do `with`).
-    executor = ThreadPoolExecutor(max_workers=1)
-    futuro = executor.submit(fn, *args)
+class ExtracaoPulada(Exception):
+    """O usuário clicou em "Pular este documento" enquanto uma etapa de extração rodava."""
+
+
+def _rodar_filho(
+    modo: str, content: bytes, timeout_segundos: float, *args: str,
+    deve_parar: Callable[[], bool] | None = None,
+) -> dict:
+    """Roda uma etapa de extração num processo Python separado e devolve o JSON que ele
+    imprime. Lança TimeoutError (filho morto à força), ExtracaoPulada (o usuário pediu
+    pra pular: filho morto na hora) ou RuntimeError (filho caiu — tipicamente
+    MemoryError por estourar o teto de memória, ou PDF inválido)."""
+    import time
+
+    kb = max(256, _LIMITE_MEMORIA_FILHO_MB) * 1024
+    # `ulimit -v` via sh (e não preexec_fn): preexec_fn não é seguro num servidor com threads.
+    cmd = ["sh", "-c", f'ulimit -v {kb} 2>/dev/null; exec "$0" "$@"', sys.executable, "-I", "-c", _CODIGO_FILHO, modo, *args]
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONDONTWRITEBYTECODE": "1"}
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    limite = time.monotonic() + timeout_segundos
+    entrada: bytes | None = content
     try:
-        resultado = futuro.result(timeout=timeout_segundos)
-    except FuturesTimeoutError:
-        executor.shutdown(wait=False)
-        raise TimeoutError(f"{fn.__name__} não retornou em {timeout_segundos:.0f}s") from None
-    executor.shutdown(wait=False)
-    return resultado
+        while True:
+            try:
+                saida, erro = proc.communicate(input=entrada, timeout=0.5)
+                break
+            except subprocess.TimeoutExpired:
+                entrada = None  # já entregue: nas próximas voltas só espera (comportamento documentado do communicate)
+                if deve_parar is not None and deve_parar():
+                    proc.kill()
+                    proc.communicate()
+                    raise ExtracaoPulada(f"{modo}: pulado a pedido do usuário") from None
+                if time.monotonic() > limite:
+                    proc.kill()
+                    proc.communicate()
+                    raise TimeoutError(f"{modo} não terminou em {timeout_segundos:.0f}s (processo encerrado)") from None
+    except BaseException:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        raise
+    if proc.returncode != 0:
+        detalhe = erro.decode("utf-8", "replace").strip().splitlines()[-1:] or ["sem detalhe"]
+        causa = "memória estourou o teto do processo" if proc.returncode in (-9, 137) or b"MemoryError" in erro else f"código {proc.returncode}"
+        raise RuntimeError(f"{modo} falhou ({causa}): {detalhe[0][:200]}")
+    return json.loads(saida.decode("utf-8"))
 
 
 def remover_nul(texto: str) -> str:
@@ -47,18 +124,6 @@ def remover_nul(texto: str) -> str:
     literal cannot contain NUL (0x00) characters", derrubando a peça (e a
     sincronização inteira, antes de qualquer rede de segurança) sem aviso."""
     return texto.replace("\x00", "") if texto else texto
-
-
-def _extrair_com_pypdf(content: bytes) -> str:
-    from pypdf import PdfReader
-    reader = PdfReader(io.BytesIO(content))
-    paginas = [page.extract_text() or "" for page in reader.pages[:50]]
-    return "\n\n".join(p.strip() for p in paginas if p.strip())
-
-
-def _extrair_com_pdfminer(content: bytes) -> str:
-    from pdfminer.high_level import extract_text as pdfminer_extract
-    return pdfminer_extract(io.BytesIO(content), maxpages=50) or ""
 
 
 # Cada chamada de OCR isola 1 página — nunca o documento inteiro numa chamada só.
@@ -139,35 +204,48 @@ def _extrair_com_claude_ocr(
     True, interrompe o OCR ANTES da próxima página (pedido de "pular este
     documento" do usuário) — as páginas já OCR'das ficam, o resto não é
     tentado."""
-    from pypdf import PdfReader, PdfWriter
-
     ocr_pagina = ocr_pagina or _ocr_pagina_claude
-    paginas = PdfReader(io.BytesIO(content)).pages
-    if len(paginas) > _OCR_MAX_PAGINAS:
-        logger.warning("PDF com %d páginas — OCR limitado às primeiras %d", len(paginas), _OCR_MAX_PAGINAS)
+    # A divisão em páginas (PdfReader/PdfWriter) é a parte pesada em memória: roda num
+    # processo filho, que grava 1 PDF por página numa pasta temporária — o servidor só
+    # lê cada página de lá, uma de cada vez, na hora do OCR.
+    pasta = tempfile.mkdtemp(prefix="ocr_paginas_")
+    try:
+        divisao = _rodar_filho("dividir", content, _TIMEOUT_DIVIDIR_SEGUNDOS, pasta, str(_OCR_MAX_PAGINAS), deve_parar=deve_parar)
+        total_paginas = int(divisao["n"])
+        arquivos_paginas: list[str] = divisao["arquivos"]
+        if total_paginas > _OCR_MAX_PAGINAS:
+            logger.warning("PDF com %d páginas — OCR limitado às primeiras %d", total_paginas, _OCR_MAX_PAGINAS)
+            if on_status:
+                on_status(f"PDF com {total_paginas} páginas — OCR limitado às primeiras {_OCR_MAX_PAGINAS} (link completo salvo)")
+
         if on_status:
-            on_status(f"PDF com {len(paginas)} páginas — OCR limitado às primeiras {_OCR_MAX_PAGINAS} (link completo salvo)")
-        paginas = paginas[:_OCR_MAX_PAGINAS]
+            on_status(
+                f"Sem texto nativo — dividindo em {len(arquivos_paginas)} página(s) para OCR"
+                if len(arquivos_paginas) != 1 else "Sem texto nativo — OCR de 1 página"
+            )
+        return _ocr_paginas_salvas(arquivos_paginas, on_custo, ocr_pagina, on_status, deve_parar)
+    finally:
+        shutil.rmtree(pasta, ignore_errors=True)
 
-    if on_status:
-        on_status(
-            f"Sem texto nativo — dividindo em {len(paginas)} página(s) para OCR"
-            if len(paginas) != 1 else "Sem texto nativo — OCR de 1 página"
-        )
 
+def _ocr_paginas_salvas(
+    arquivos_paginas: list[str],
+    on_custo: Callable[[float], None] | None,
+    ocr_pagina: Callable[..., str],
+    on_status: Callable[[str], None] | None,
+    deve_parar: Callable[[], bool] | None,
+) -> str:
     textos: list[str] = []
-    for indice, pagina in enumerate(paginas):
+    paginas = arquivos_paginas
+    for indice, caminho in enumerate(paginas):
         if deve_parar and deve_parar():
             logger.info("OCR interrompido a pedido do usuário na página %d/%d", indice + 1, len(paginas))
             if on_status:
                 on_status(f"Pulado a pedido do usuário na página {indice + 1}/{len(paginas)}")
             break
 
-        writer = PdfWriter()
-        writer.add_page(pagina)
-        buf = io.BytesIO()
-        writer.write(buf)
-        pagina_bytes = buf.getvalue()
+        with open(caminho, "rb") as f:
+            pagina_bytes = f.read()
         if len(pagina_bytes) > 5 * 1024 * 1024:
             logger.warning("Página %d grande demais para OCR (>5MB) — pulada", indice)
             if on_status:
@@ -211,36 +289,43 @@ def extrair_texto_pdf(
     travado num documento pequeno, sem informar sequer quantas páginas ele
     tem nem em qual das 3 tentativas está."""
     if on_status:
-        try:
-            from pypdf import PdfReader
-            n_paginas = len(PdfReader(io.BytesIO(content)).pages)
-            on_status(f"PDF com {n_paginas} página(s) — tentando extração nativa (pypdf)...")
-        except Exception:
-            on_status("Tentando extração nativa (pypdf)...")
+        on_status("Tentando extração nativa (pypdf)...")
 
     texto = ""
     try:
-        texto = _com_timeout(_extrair_com_pypdf, (content,), _TIMEOUT_PYPDF_SEGUNDOS)
+        resultado = _rodar_filho("pypdf", content, _TIMEOUT_PYPDF_SEGUNDOS, deve_parar=deve_parar)
+        texto = resultado.get("texto", "")
+        if on_status and not texto.strip():
+            on_status(f"PDF com {resultado.get('n', '?')} página(s) e sem texto nativo (pypdf)...")
+    except ExtracaoPulada:
+        logger.info("Extração pulada a pedido do usuário (pypdf)")
+        return ""
     except Exception as exc:
         logger.warning("pypdf falhou (%s): %s", exc.__class__.__name__, exc)
-        if on_status and isinstance(exc, TimeoutError):
-            on_status(f"pypdf não respondeu em {_TIMEOUT_PYPDF_SEGUNDOS:.0f}s — pulando para pdfminer...")
+        if on_status:
+            on_status(f"pypdf não conseguiu ler este PDF ({exc.__class__.__name__}) — tentando pdfminer...")
 
     if not texto.strip():
         if on_status:
             on_status("Sem texto nativo via pypdf — tentando pdfminer...")
         try:
-            texto = _com_timeout(_extrair_com_pdfminer, (content,), _TIMEOUT_PDFMINER_SEGUNDOS)
+            texto = _rodar_filho("pdfminer", content, _TIMEOUT_PDFMINER_SEGUNDOS, deve_parar=deve_parar).get("texto", "")
+        except ExtracaoPulada:
+            logger.info("Extração pulada a pedido do usuário (pdfminer)")
+            return ""
         except Exception as exc:
             logger.warning("pdfminer falhou (%s): %s", exc.__class__.__name__, exc)
-            if on_status and isinstance(exc, TimeoutError):
-                on_status(f"pdfminer não respondeu em {_TIMEOUT_PDFMINER_SEGUNDOS:.0f}s — indo para OCR...")
+            if on_status:
+                on_status(f"pdfminer não conseguiu ler este PDF ({exc.__class__.__name__}) — indo para OCR...")
 
     if not texto.strip():
         try:
             texto = _extrair_com_claude_ocr(
                 content, on_custo=on_custo, ocr_pagina=ocr_pagina, on_status=on_status, deve_parar=deve_parar,
             )
+        except ExtracaoPulada:
+            logger.info("Extração pulada a pedido do usuário (divisão em páginas)")
+            return ""
         except Exception as exc:
             logger.warning("OCR falhou: %s", exc)
 
