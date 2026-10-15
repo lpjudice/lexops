@@ -85,7 +85,11 @@ def _rodar_filho(
 
     kb = max(256, _LIMITE_MEMORIA_FILHO_MB) * 1024
     # `ulimit -v` via sh (e não preexec_fn): preexec_fn não é seguro num servidor com threads.
-    cmd = ["sh", "-c", f'ulimit -v {kb} 2>/dev/null; exec "$0" "$@"', sys.executable, "-I", "-c", _CODIGO_FILHO, modo, *args]
+    # `nice -n 15`: a máquina tem 1 vCPU compartilhada — sem isso o filho (100% de CPU por até
+    # 45–90 s num PDF pesado) deixava o site lento (health de 1–3 s, com timeouts) enquanto lia.
+    # (stderr do filho NÃO é redirecionado: é o que dá o diagnóstico "memória estourou".)
+    cmd = ["sh", "-c", f'ulimit -v {kb} 2>/dev/null; if command -v nice >/dev/null 2>&1; then exec nice -n 15 "$0" "$@"; else exec "$0" "$@"; fi',
+           sys.executable, "-I", "-c", _CODIGO_FILHO, modo, *args]
     env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONDONTWRITEBYTECODE": "1"}
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
     limite = time.monotonic() + timeout_segundos
