@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import inspect as sa_inspect
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -280,9 +281,34 @@ def criar_processo(data: ProcessoCreate, db: Session = Depends(get_db)):
     litis_in = data.clientes_litisconsorcio
     dump = data.model_dump(exclude={"clientes_litisconsorcio"})
     dump = _normalizar_payload_processo(dump)
+
+    # numero_cnj é único no sistema. Antes de inserir, avisa de quem é o processo
+    # já cadastrado (antes virava 500 e o front só mostrava "Erro ao salvar").
+    cnj = (dump.get("numero_cnj") or "").strip()
+    if cnj:
+        existente = db.query(Processo).filter(Processo.numero_cnj == cnj).first()
+        if existente:
+            nome_cliente = existente.cliente.nome if existente.cliente else "outro cliente"
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"O processo {cnj} já está cadastrado (cliente: {nome_cliente}). "
+                    "Para incluir outro cliente nele, edite o processo existente e "
+                    "adicione-o como litisconsorte."
+                ),
+            )
+
     processo = Processo(**dump)
     db.add(processo)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Corrida: outro cadastro do mesmo CNJ entrou entre a checagem e o commit.
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"O processo {cnj} já está cadastrado.",
+        )
     db.refresh(processo)
     if litis_in:
         _sync_litisconsorcio(processo, litis_in, db)
