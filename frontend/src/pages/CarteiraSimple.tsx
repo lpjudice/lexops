@@ -554,6 +554,11 @@ export default function CarteiraPage() {
   const [filtroAcoesStatus, setFiltroAcoesStatus] = useState('')
   const [filtroAcoesBusca, setFiltroAcoesBusca] = useState('')
   const [filtroAcoesCliente, setFiltroAcoesCliente] = useState<number | ''>('')
+  // PDF geral (todos os clientes de uma vez) — pergunta honorários + sigilo antes de gerar
+  const [pdfGeralAberto, setPdfGeralAberto] = useState(false)
+  const [pdfGeralHonorarios, setPdfGeralHonorarios] = useState(true)
+  const [pdfGeralRedigir, setPdfGeralRedigir] = useState(false)
+  const [pdfGeralGerando, setPdfGeralGerando] = useState(false)
   // Resgate antecipado modal
   const [resgateDebId, setResgateDebId] = useState<number | null>(null)
   // Drive modal
@@ -1205,6 +1210,25 @@ export default function CarteiraPage() {
     URL.revokeObjectURL(url)
   }
 
+  const gerarPdfGeral = async () => {
+    setPdfGeralGerando(true)
+    try {
+      const res = await api.get('/carteira/pdf-geral', {
+        params: { incluir_honorarios: pdfGeralHonorarios, redigir_nomes: pdfGeralRedigir },
+        responseType: 'blob',
+      })
+      const url = URL.createObjectURL(res.data)
+      const sufixo = [!pdfGeralHonorarios && 'sem_honorarios', pdfGeralRedigir && 'redigido'].filter(Boolean).join('_')
+      const a = document.createElement('a'); a.href = url; a.download = `carteira_geral${sufixo ? '_' + sufixo : ''}.pdf`; a.click()
+      URL.revokeObjectURL(url)
+      setPdfGeralAberto(false)
+    } catch (e: any) {
+      alert(e?.response?.data?.detail || 'Erro ao gerar PDF')
+    } finally {
+      setPdfGeralGerando(false)
+    }
+  }
+
   // ── Abrir edições ─────────────────────────────────────────────────
   const abrirEdicaoCliente = (c: any) => {
     const nome = c.nome ?? (c.observacoes?.startsWith('[IMPORTADO XLS] ') ? c.observacoes.replace('[IMPORTADO XLS] ', '') : '')
@@ -1611,6 +1635,7 @@ export default function CarteiraPage() {
                   onClick={() => setViewModePosicao('ativo')}>Por Ativo</button>
               </div>
               <button className={styles.btnSmall} onClick={exportarXlsx}>Exportar XLSX</button>
+              <button className={styles.btnSmall} onClick={() => { setPdfGeralHonorarios(true); setPdfGeralRedigir(false); setPdfGeralAberto(true) }}>PDF de todos</button>
             </div>
           </div>
           <div style={{ display: viewModePosicao === 'ativo' ? 'none' : undefined }}>
@@ -2937,6 +2962,26 @@ export default function CarteiraPage() {
           </Modal>
         )
       })()}
+
+      {/* ── MODAL PDF GERAL (todos os clientes de uma vez) ──────────── */}
+      {pdfGeralAberto && (
+        <Modal title="PDF de todos os clientes" onClose={() => !pdfGeralGerando && setPdfGeralAberto(false)} width={420}>
+          <p style={{ fontSize: 13, color: 'var(--gray-mid)', marginBottom: 14 }}>
+            Gera 1 PDF com todos os clientes que têm posição na carteira, no mesmo layout do relatório individual.
+          </p>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', marginBottom: 10 }}>
+            <input type="checkbox" checked={pdfGeralHonorarios} onChange={e => setPdfGeralHonorarios(e.target.checked)} />
+            Incluir informação de honorários
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', marginBottom: 16 }}>
+            <input type="checkbox" checked={pdfGeralRedigir} onChange={e => setPdfGeralRedigir(e.target.checked)} />
+            Ocultar nome dos clientes (substituir por identificador, por sigilo)
+          </label>
+          <button className={styles.btnPrimary} onClick={gerarPdfGeral} disabled={pdfGeralGerando}>
+            {pdfGeralGerando ? 'Gerando...' : 'Gerar PDF'}
+          </button>
+        </Modal>
+      )}
 
       {/* ── MODAL CONFIRM % ÊXITO OVERRIDE ──────────────────────── */}
       {confirmPctOverride !== null && (
