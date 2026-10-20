@@ -439,9 +439,38 @@ def _extrair_doc(message: dict) -> dict | None:
     return None
 
 
+def _vincular_responsavel(db: Session, message: dict, texto: str) -> bool:
+    """`/start resp_<token>`: a pessoa abriu o link gerado em Responsáveis. Vincula o
+    chat dela ao Responsavel pra receber avisos por DM. Roda ANTES do filtro de
+    autorização: quem se vincula não precisa estar na lista de usuários do bot — o
+    token de uso único é a prova. Retorna True se a mensagem era um vínculo."""
+    from app.models.responsavel import Responsavel
+    from app.routers.responsaveis import VINCULO_PREFIXO
+
+    partes = texto.split(maxsplit=1)
+    if len(partes) != 2 or not partes[0].lower().startswith("/start") or not partes[1].startswith(VINCULO_PREFIXO):
+        return False
+    chat_id = message["chat"]["id"]
+    if message["chat"].get("type") != "private":
+        telegram_api.send_message(chat_id, "Abra o link numa conversa privada com o bot (não em grupo).")
+        return True
+    token = partes[1][len(VINCULO_PREFIXO):].strip()
+    resp = db.query(Responsavel).filter(Responsavel.telegram_vinculo_token == token).first() if token else None
+    if not resp:
+        telegram_api.send_message(chat_id, "❌ Link inválido ou já utilizado. Peça um novo em Configurações → Responsáveis.")
+        return True
+    resp.telegram_chat_id = str(chat_id)
+    resp.telegram_vinculo_token = None
+    db.commit()
+    telegram_api.send_message(chat_id, f"✅ Pronto, *{resp.nome}*! Você vai receber aqui os avisos dos contratos em que for responsável.")
+    return True
+
+
 def _handle_message(db: Session, message: dict) -> None:
     user_id = message.get("from", {}).get("id")
     chat_id = message["chat"]["id"]
+    if _vincular_responsavel(db, message, (message.get("text") or "").strip()):
+        return
     if not _autorizado(user_id, chat_id):
         return
 

@@ -7,6 +7,7 @@ continuam existindo como cópia denormalizada (nome/email) — todo código que
 já lê esses campos continua funcionando sem mudança. `responsavel_id` é a
 referência de verdade usada pra evitar duplicidade e permitir mesclagem.
 """
+import secrets
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,11 +20,15 @@ from app.models.prazo import Prazo
 from app.models.responsavel import Responsavel
 from app.models.tarefa import Tarefa
 from app.models.tarefa_card import TarefaCard
+from app.services import telegram_api
 
 router = APIRouter(prefix="/responsaveis", tags=["responsaveis"],
                    dependencies=[Depends(get_current_user)])
 
 CATEGORIAS_VALIDAS = {"advogado", "terceiro", "colaborador", "financeiro"}
+
+# Prefixo do parâmetro /start do bot — o webhook (routers/telegram.py) usa o mesmo.
+VINCULO_PREFIXO = "resp_"
 
 
 def _resp_para_dict(r: Responsavel) -> dict:
@@ -38,6 +43,7 @@ def _resp_para_dict(r: Responsavel) -> dict:
         "usuario_id": str(r.usuario_id) if r.usuario_id else None,
         "eh_usuario_sistema": r.usuario_id is not None,
         "ativo": r.ativo,
+        "telegram_vinculado": bool(r.telegram_chat_id),
     }
 
 
@@ -133,6 +139,33 @@ def atualizar_responsavel(responsavel_id: uuid.UUID, body: ResponsavelUpdate, db
 
     db.commit()
     db.refresh(resp)
+    return _resp_para_dict(resp)
+
+
+@router.post("/{responsavel_id}/telegram/vinculo")
+def gerar_vinculo_telegram(responsavel_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Gera um link de uso único (t.me/<bot>?start=resp_<token>) pra pessoa abrir no
+    Telegram e vincular o próprio chat — o bot não pode iniciar conversa sozinho,
+    então sem isso não há DM. Gerar de novo invalida o link anterior."""
+    resp = db.query(Responsavel).filter(Responsavel.id == responsavel_id).first()
+    if not resp:
+        raise HTTPException(status_code=404, detail="Responsável não encontrado")
+    username = telegram_api.bot_username()
+    if not username:
+        raise HTTPException(status_code=503, detail="Bot do Telegram indisponível (token não configurado ou sem resposta)")
+    resp.telegram_vinculo_token = secrets.token_urlsafe(16)
+    db.commit()
+    return {"link": f"https://t.me/{username}?start={VINCULO_PREFIXO}{resp.telegram_vinculo_token}"}
+
+
+@router.delete("/{responsavel_id}/telegram")
+def desvincular_telegram(responsavel_id: uuid.UUID, db: Session = Depends(get_db)):
+    resp = db.query(Responsavel).filter(Responsavel.id == responsavel_id).first()
+    if not resp:
+        raise HTTPException(status_code=404, detail="Responsável não encontrado")
+    resp.telegram_chat_id = None
+    resp.telegram_vinculo_token = None
+    db.commit()
     return _resp_para_dict(resp)
 
 

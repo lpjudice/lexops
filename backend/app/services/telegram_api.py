@@ -29,6 +29,43 @@ def _post(method: str, payload: dict) -> dict | None:
         return None
 
 
+_BOT_USERNAME_CACHE: dict[str, str] = {}
+
+
+def bot_username() -> str | None:
+    """@ do bot (sem o @) — necessário pra montar links t.me/<bot>?start=... .
+    Cacheado: não muda enquanto o token for o mesmo."""
+    token = settings.telegram_bot_token
+    if not token:
+        return None
+    if token not in _BOT_USERNAME_CACHE:
+        info = _post("getMe", {})
+        if not info or not info.get("username"):
+            return None
+        _BOT_USERNAME_CACHE[token] = info["username"]
+    return _BOT_USERNAME_CACHE[token]
+
+
+def send_message_html(
+    chat_id: int | str,
+    text_html: str,
+    link_button: tuple[str, str] | None = None,
+) -> bool:
+    """Envia texto em HTML do Telegram (o chamador já escapa &, <, >) com, opcionalmente,
+    um botão de link (label, url). Retorna True se o Telegram aceitou."""
+    payload: dict[str, Any] = {
+        "chat_id": chat_id,
+        "text": text_html,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
+    if link_button:
+        payload["reply_markup"] = {
+            "inline_keyboard": [[{"text": link_button[0], "url": link_button[1]}]]
+        }
+    return _post("sendMessage", payload) is not None
+
+
 def send_message(
     chat_id: int,
     text: str,

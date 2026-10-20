@@ -59,6 +59,21 @@ function ResponsaveisTab() {
     mutationFn: ({ id, data }: { id: string; data: Partial<Responsavel> }) => responsaveisApi.atualizar(id, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['responsaveis'] }),
   })
+  // Link de vínculo do Telegram gerado (por responsável) — a pessoa abre no celular/desktop
+  // e manda /start pro bot; só então o sistema consegue mandar DM pra ela.
+  const [vinculo, setVinculo] = useState<{ id: string; link: string } | null>(null)
+  const gerarVinculo = useMutation({
+    mutationFn: (id: string) => responsaveisApi.gerarVinculoTelegram(id).then((r) => ({ id, link: r.link })),
+    onSuccess: (v) => {
+      setVinculo(v)
+      navigator.clipboard?.writeText(v.link).catch(() => {})
+    },
+    onError: (e: any) => alert(e?.response?.data?.detail || 'Não foi possível gerar o link do Telegram.'),
+  })
+  const desvincular = useMutation({
+    mutationFn: (id: string) => responsaveisApi.desvincularTelegram(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['responsaveis'] }),
+  })
   const criar = useMutation({
     mutationFn: () => responsaveisApi.criar({
       nome: novo.nome.trim(), email: novo.email.trim() || null, telefone: novo.telefone.trim() || null,
@@ -187,6 +202,32 @@ function ResponsaveisTab() {
                   <option key={c} value={c}>{CATEGORIA_LABEL[c]}</option>
                 ))}
               </select>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '6px 4px 2px 34px', fontSize: 12 }}>
+              {r.telegram_vinculado ? (
+                <>
+                  <span style={{ color: '#065f46' }}>✈ Telegram vinculado — recebe avisos por DM</span>
+                  <button type="button" className={styles.btnTable} disabled={desvincular.isPending}
+                    onClick={() => { if (confirm(`Desvincular o Telegram de ${r.nome}?`)) desvincular.mutate(r.id) }}>
+                    Desvincular
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span style={{ color: '#9ca3af' }}>Telegram não vinculado (só recebe por e-mail)</span>
+                  <button type="button" className={styles.btnTable} disabled={gerarVinculo.isPending}
+                    title="Gera um link de uso único — a pessoa abre no Telegram e toca em Iniciar"
+                    onClick={() => gerarVinculo.mutate(r.id)}>
+                    ✈ Vincular Telegram
+                  </button>
+                </>
+              )}
+              {vinculo?.id === r.id && !r.telegram_vinculado && (
+                <span style={{ color: '#374151' }}>
+                  Link copiado — envie para {r.nome.split(' ')[0]} abrir e tocar em <b>Iniciar</b>:{' '}
+                  <a href={vinculo.link} target="_blank" rel="noreferrer" style={{ color: '#0d9488', wordBreak: 'break-all' }}>{vinculo.link}</a>
+                </span>
+              )}
             </div>
           </div>
         ))}

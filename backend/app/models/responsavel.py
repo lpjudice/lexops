@@ -44,5 +44,11 @@ class Responsavel(Base):
 
     ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
+    # DM do Telegram: `telegram_chat_id` só existe depois que a própria pessoa
+    # abre o link de vínculo (o bot não pode iniciar conversa). O token é de uso
+    # único e some ao vincular.
+    telegram_chat_id: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    telegram_vinculo_token: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

@@ -1530,6 +1530,21 @@ def _run_migrations() -> None:
         conn.execute(text("ALTER TABLE signatarios ADD COLUMN IF NOT EXISTS cpf VARCHAR(18)"))
         conn.execute(text("ALTER TABLE signatarios ADD COLUMN IF NOT EXISTS data_nascimento DATE"))
         conn.execute(text("ALTER TABLE signatarios ADD COLUMN IF NOT EXISTS clicksign_erro TEXT"))
+        conn.execute(text("ALTER TABLE contratos ADD COLUMN IF NOT EXISTS responsaveis_ids JSONB NOT NULL DEFAULT '[]'::jsonb"))
+        conn.execute(text("ALTER TABLE contratos ADD COLUMN IF NOT EXISTS escopo_recomendacoes TEXT"))
+        conn.execute(text("ALTER TABLE contratos ADD COLUMN IF NOT EXISTS responsaveis_notificados_em TIMESTAMPTZ"))
+        conn.execute(text("ALTER TABLE responsaveis ADD COLUMN IF NOT EXISTS telegram_chat_id VARCHAR(30)"))
+        conn.execute(text("ALTER TABLE responsaveis ADD COLUMN IF NOT EXISTS telegram_vinculo_token VARCHAR(64)"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_responsaveis_telegram_vinculo_token ON responsaveis (telegram_vinculo_token)"))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS escopo_templates (
+                id UUID PRIMARY KEY,
+                nome VARCHAR(255) NOT NULL,
+                texto TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
         conn.execute(text("ALTER TABLE contratos ADD COLUMN IF NOT EXISTS doc_gerado_por VARCHAR(255)"))
         conn.execute(text("ALTER TABLE contratos ADD COLUMN IF NOT EXISTS doc_gerado_em TIMESTAMPTZ"))
         conn.execute(text("""

@@ -13,6 +13,7 @@ export interface Responsavel {
   usuario_id: string | null
   eh_usuario_sistema: boolean
   ativo: boolean
+  telegram_vinculado: boolean
 }
 
 export interface ResponsavelCreate {
@@ -43,6 +44,12 @@ export const responsaveisApi = {
 
   atualizar: (id: string, data: ResponsavelUpdate) =>
     api.patch<Responsavel>(`/responsaveis/${id}`, data).then((r) => r.data),
+
+  gerarVinculoTelegram: (id: string) =>
+    api.post<{ link: string }>(`/responsaveis/${id}/telegram/vinculo`).then((r) => r.data),
+
+  desvincularTelegram: (id: string) =>
+    api.delete<Responsavel>(`/responsaveis/${id}/telegram`).then((r) => r.data),
 
   mesclar: (sobreviventeId: string, mesclados: string[]) =>
     api.post('/responsaveis/mesclar', { sobrevivente_id: sobreviventeId, mesclados }).then((r) => r.data),
