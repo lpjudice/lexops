@@ -4,6 +4,7 @@ import { erroApi, informativosApi } from '../api/informativos'
 import type { Citacao, Informativo, StatusInformativo } from '../api/informativos'
 import { instagramApi } from '../api/instagram'
 import { conselhoApi } from '../api/conselho'
+import { clientesApi } from '../api/clientes'
 import ResponsavelComboBox from '../components/ResponsavelComboBox'
 import type { ResponsavelValue } from '../components/ResponsavelComboBox'
 import Modal from '../components/Modal'
@@ -675,7 +676,28 @@ function DistribuicaoPanel({ informativo }: { informativo: Informativo }) {
     queryFn: () => conselhoApi.listarContatos(),
     staleTime: 60_000,
   })
-  const contatosWhatsapp = contatos.filter((c) => c.whatsapp)
+  const { data: clientes = [] } = useQuery({
+    queryKey: ['clientes', 'whatsapp-informativo'],
+    queryFn: () => clientesApi.listar(),
+    staleTime: 60_000,
+  })
+  // Contatos da Expansão + Clientes do sistema numa lista só (cliente usa
+  // WhatsApp, ou o telefone quando não há). Prefixo no id evita colisão no
+  // "marcado como enviado" guardado no localStorage.
+  const contatosWhatsapp = [
+    ...contatos.filter((c) => c.whatsapp).map((c) => ({
+      id: `contato:${c.id}`,
+      nome: [c.primeiro_nome, c.sobrenome].filter(Boolean).join(' ') + (c.empresa ? ` | ${c.empresa}` : ''),
+      whatsapp: c.whatsapp as string,
+      origem: 'Expansão',
+    })),
+    ...clientes.filter((c) => c.whatsapp || c.telefone).map((c) => ({
+      id: `cliente:${c.id}`,
+      nome: c.nome,
+      whatsapp: (c.whatsapp || c.telefone) as string,
+      origem: 'Cliente',
+    })),
+  ]
 
   const enviarMutation = useMutation({
     mutationFn: () => informativosApi.enviarNewsletter(informativo.id),
@@ -793,8 +815,7 @@ function DistribuicaoPanel({ informativo }: { informativo: Informativo }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 220, overflowY: 'auto' }}>
             {contatosWhatsapp.map((c) => {
               const enviado = enviadosWhatsapp.has(c.id)
-              const nomeCompleto = [c.primeiro_nome, c.sobrenome].filter(Boolean).join(' ')
-              const nomeExibido = c.empresa ? `${nomeCompleto} | ${c.empresa}` : nomeCompleto
+              const nomeExibido = c.nome
               return (
                 <a
                   key={c.id}
@@ -811,6 +832,7 @@ function DistribuicaoPanel({ informativo }: { informativo: Informativo }) {
                 >
                   <span>{enviado ? '✅' : '💬'}</span>
                   <span>{nomeExibido}</span>
+                  <span style={{ marginLeft: 'auto', fontSize: 11, opacity: 0.7 }}>{c.origem}</span>
                 </a>
               )
             })}
