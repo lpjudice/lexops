@@ -293,13 +293,7 @@ export default function CadastroPublicoPage() {
           </div>
         </fieldset>
 
-        {isPF ? (
-          <label className={cs.label}>Empresas vinculadas ao seu CPF
-            <span className={cs.hint}>Opcional — uma por linha, se houver.</span>
-            <textarea className={cs.input} rows={2} value={form.empresas_vinculadas}
-              onChange={(e) => set({ empresas_vinculadas: e.target.value })} />
-          </label>
-        ) : (
+        {!isPF && (
           <fieldset className={cs.fieldset}>
             <legend className={cs.legend}>Responsável</legend>
             <label className={cs.label}>Nome
@@ -320,6 +314,12 @@ export default function CadastroPublicoPage() {
             </label>
           </fieldset>
         )}
+
+        <label className={cs.label}>Outras pessoas vinculadas
+          <span className={cs.hint}>Opcional — pessoas ou empresas ligadas a você (uma por linha).</span>
+          <textarea className={cs.input} rows={2} value={form.empresas_vinculadas}
+            onChange={(e) => set({ empresas_vinculadas: e.target.value })} />
+        </label>
 
         <label className={cs.label}>Observações
           <textarea className={cs.input} rows={2} value={form.observacoes} onChange={(e) => set({ observacoes: e.target.value })} />

@@ -222,6 +222,55 @@ def deletar_cliente(cliente_id: uuid.UUID, db: Session = Depends(get_db)):
     db.commit()
 
 
+# ── Vínculos entre clientes ("Outras pessoas vinculadas") ──────────────────────
+
+class VinculoBody(BaseModel):
+    vinculado_id: uuid.UUID
+
+
+def _ligar(db: Session, a: uuid.UUID, b: uuid.UUID) -> None:
+    from app.models.cliente_vinculo import ClienteVinculo
+    existe = db.query(ClienteVinculo).filter_by(cliente_id=a, vinculado_id=b).first()
+    if not existe:
+        db.add(ClienteVinculo(cliente_id=a, vinculado_id=b))
+
+
+@router.get("/{cliente_id}/vinculos", response_model=list[ClienteOut])
+def listar_vinculos(cliente_id: uuid.UUID, db: Session = Depends(get_db)):
+    from app.models.cliente_vinculo import ClienteVinculo
+    ids = [v.vinculado_id for v in
+           db.query(ClienteVinculo).filter(ClienteVinculo.cliente_id == cliente_id).all()]
+    if not ids:
+        return []
+    return db.query(Cliente).filter(Cliente.id.in_(ids)).order_by(Cliente.nome).all()
+
+
+@router.post("/{cliente_id}/vinculos", status_code=status.HTTP_201_CREATED)
+def adicionar_vinculo(cliente_id: uuid.UUID, body: VinculoBody, db: Session = Depends(get_db)):
+    if body.vinculado_id == cliente_id:
+        raise HTTPException(400, "Não é possível vincular o cliente a ele mesmo")
+    achados = db.query(Cliente.id).filter(Cliente.id.in_([cliente_id, body.vinculado_id])).count()
+    if achados < 2:
+        raise HTTPException(404, "Cliente não encontrado")
+    _ligar(db, cliente_id, body.vinculado_id)   # bidirecional
+    _ligar(db, body.vinculado_id, cliente_id)
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/{cliente_id}/vinculos/{vinculado_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remover_vinculo(cliente_id: uuid.UUID, vinculado_id: uuid.UUID, db: Session = Depends(get_db)):
+    from sqlalchemy import and_, or_
+    from app.models.cliente_vinculo import ClienteVinculo
+    db.query(ClienteVinculo).filter(
+        or_(
+            and_(ClienteVinculo.cliente_id == cliente_id, ClienteVinculo.vinculado_id == vinculado_id),
+            and_(ClienteVinculo.cliente_id == vinculado_id, ClienteVinculo.vinculado_id == cliente_id),
+        )
+    ).delete(synchronize_session=False)
+    db.commit()
+
+
 # ── Documentos PDF ────────────────────────────────────────────────────────────
 
 @router.post("/{cliente_id}/upload-pdf")

@@ -25,7 +25,7 @@ const LABELS: Record<string, string> = {
   bairro: 'Bairro',
   cidade: 'Cidade',
   uf: 'UF',
-  empresas_vinculadas: 'Empresas vinculadas',
+  empresas_vinculadas: 'Outras pessoas vinculadas (texto)',
   responsavel_nome: 'Responsável',
   responsavel_cpf: 'CPF do responsável',
   responsavel_email: 'E-mail do responsável',
@@ -105,7 +105,7 @@ const CAMPOS_TIPO: Record<Tipo, string[]> = {
   PJ: ['nome', 'nome_fantasia', 'cpf_cnpj', 'email', 'telefone', 'whatsapp',
     'cep', 'logradouro', 'numero', 'complemento', 'bairro', 'cidade', 'uf',
     'responsavel_nome', 'responsavel_cpf', 'responsavel_email', 'responsavel_telefone',
-    'observacoes'],
+    'empresas_vinculadas', 'observacoes'],
 }
 
 function labelCampo(campo: string, tipo: Tipo): string {

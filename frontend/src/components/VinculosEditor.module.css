@@ -1,0 +1,46 @@
+.root { display: flex; flex-direction: column; gap: 8px; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  border-radius: 999px;
+  padding: 3px 4px 3px 10px;
+  font-size: 13px;
+  color: #065f46;
+}
+
+.chipNome {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: none;
+}
+button.chipNome:hover { text-decoration: underline; }
+
+.chipTipo {
+  font-size: 10px;
+  font-weight: 700;
+  color: #0f766e;
+  border: 1px solid #a7f3d0;
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+.chipRemover {
+  border: none;
+  background: transparent;
+  color: #0f766e;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.chipRemover:hover { color: #b91c1c; }

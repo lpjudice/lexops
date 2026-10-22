@@ -40,8 +40,10 @@ CONSENTIMENTO_TEXTO = (
 
 # Campos cadastrais aceitos no envio (whitelist — descarta qualquer outra chave).
 CAMPOS_COMUNS = {"nome", "cpf_cnpj", "email", "telefone", "whatsapp", "observacoes",
-                 "cep", "logradouro", "numero", "complemento", "bairro", "cidade", "uf"}
-CAMPOS_PF = {"data_nascimento", "rg", "estado_civil", "profissao", "empresas_vinculadas"}
+                 "cep", "logradouro", "numero", "complemento", "bairro", "cidade", "uf",
+                 # "Outras pessoas vinculadas" (texto livre que o cliente digita no público).
+                 "empresas_vinculadas"}
+CAMPOS_PF = {"data_nascimento", "rg", "estado_civil", "profissao"}
 CAMPOS_PJ = {"nome_fantasia", "responsavel_nome", "responsavel_cpf",
              "responsavel_email", "responsavel_telefone"}
 MAX_ANEXOS = 5

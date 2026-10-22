@@ -2,10 +2,11 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { clientesApi } from '../api/clientes'
-import type { ClienteCreate } from '../api/clientes'
+import type { Cliente, ClienteCreate } from '../api/clientes'
 import CadastrosPendentes from '../components/CadastrosPendentes'
 import DuplicatasClientes from '../components/DuplicatasClientes'
 import EnviarLinkModal from '../components/EnviarLinkModal'
+import VinculosEditor, { ClienteVinculos } from '../components/VinculosEditor'
 import {
   applyDocMask, brParaIso, buscarCep, ESTADO_CIVIL_OPCOES, isoParaBr,
   maskCEP, maskCPF, maskDataBr, maskTelefone,
@@ -29,11 +30,21 @@ export default function ClientesPage() {
   const [busca, setBusca] = useState('')
   const [enviarPara, setEnviarPara] = useState<{ id: string; nome: string; email?: string } | null>(null)
   const [enviarGenerico, setEnviarGenerico] = useState(false)
+  // Vínculos pendentes do cliente que está sendo criado (aplicados após o POST).
+  const [novoVinculos, setNovoVinculos] = useState<Cliente[]>([])
 
   const { data: clientes = [], isLoading } = useQuery({
     queryKey: ['clientes'],
     queryFn: clientesApi.listar,
   })
+
+  // Cria um cliente inline a partir do combobox ("nome|tipo"); retorna o id.
+  const criarClienteInline = async (raw: string): Promise<string> => {
+    const [nome, tipo] = raw.split('|')
+    const c = await clientesApi.criar({ nome, tipo: (tipo as 'PF' | 'PJ') ?? 'PF', incompleto: true })
+    qc.invalidateQueries({ queryKey: ['clientes'] })
+    return c.id
+  }
 
   const clientesFiltrados = clientes.filter((c) => {
     if (!busca.trim()) return true
@@ -46,10 +57,16 @@ export default function ClientesPage() {
 
   const criar = useMutation({
     mutationFn: clientesApi.criar,
-    onSuccess: () => {
+    onSuccess: async (novo) => {
+      // Aplica os vínculos escolhidos no formulário de criação.
+      for (const v of novoVinculos) {
+        try { await clientesApi.adicionarVinculo(novo.id, v.id) } catch { /* segue */ }
+      }
       qc.invalidateQueries({ queryKey: ['clientes'] })
+      qc.invalidateQueries({ queryKey: ['vinculos'] })
       setShowForm(false)
       setForm(EMPTY)
+      setNovoVinculos([])
     },
   })
 
@@ -121,6 +138,21 @@ export default function ClientesPage() {
             form={form}
             onChange={(f) => { criar.reset(); setForm(f) }}
           />
+          <div className={styles.formRow}>
+            <label className={styles.formLabel}>Outras pessoas vinculadas</label>
+            <VinculosEditor
+              vinculados={novoVinculos}
+              clientes={clientes}
+              onCreateCliente={criarClienteInline}
+              onAdd={async (id) => {
+                if (novoVinculos.some((v) => v.id === id)) return
+                // Pode ser um cliente recém-criado inline (ainda fora do cache).
+                const c = clientes.find((x) => x.id === id) ?? await clientesApi.obter(id)
+                setNovoVinculos((prev) => prev.some((v) => v.id === id) ? prev : [...prev, c])
+              }}
+              onRemove={(id) => setNovoVinculos(novoVinculos.filter((v) => v.id !== id))}
+            />
+          </div>
           {criarErro && (
             <p style={{ color: '#b91c1c', fontSize: 13, margin: '4px 0' }}>
               ⚠ {String(criarErro)}
@@ -201,6 +233,15 @@ export default function ClientesPage() {
                     form={editForm as ClienteCreate}
                     onChange={(f) => setEditForm(f)}
                   />
+                  <div className={styles.formRow}>
+                    <label className={styles.formLabel}>Outras pessoas vinculadas</label>
+                    {c.empresas_vinculadas && (
+                      <p style={{ fontSize: 12, color: '#64748b', margin: '0 0 6px', whiteSpace: 'pre-wrap' }}>
+                        Informado no cadastro: {c.empresas_vinculadas}
+                      </p>
+                    )}
+                    <ClienteVinculos clienteId={c.id} clientes={clientes} onCreateCliente={criarClienteInline} />
+                  </div>
                   <button className={styles.btnPrimary} disabled={atualizar.isPending}
                     onClick={() => atualizar.mutate({ id: c.id, data: comDataIso({ ...editForm, incompleto: false }) })}>
                     {atualizar.isPending ? 'Salvando...' : 'Salvar alterações'}
@@ -352,14 +393,7 @@ function ClienteFormFields({ form, onChange }: { form: ClienteCreate; onChange: 
 
       <EnderecoFields form={form} onChange={onChange} />
 
-      {isPF ? (
-        <div className={styles.formRow}>
-          <label className={styles.formLabel}>Empresas vinculadas ao CPF</label>
-          <textarea className={styles.input} rows={2} placeholder="Uma por linha"
-            value={form.empresas_vinculadas ?? ''}
-            onChange={(e) => onChange({ ...form, empresas_vinculadas: e.target.value })} />
-        </div>
-      ) : (
+      {!isPF && (
         <>
           <div className={styles.formRow}>
             <label className={styles.formLabel}>Responsável</label>
