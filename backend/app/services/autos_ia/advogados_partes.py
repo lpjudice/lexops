@@ -277,6 +277,94 @@ def normalizar_partes(autor: str | None) -> list[tuple[str, str]]:
     return saida or [unica]
 
 
+# ── Partes listadas no texto (cabeçalho da petição ou anexo "Lista de investidores") ──────────
+# O campo `autor` costuma vir resumido pela IA ("Solano Madeira e outros 25 investidores"); a lista
+# de verdade está no cabeçalho ("NOME , já devidamente qualificado na procuração anexa, …") ou
+# num anexo do mesmo protocolo ("ANEXO I — NOME , brasileiro, … CPF …; NOME2 , …").
+_QUALIFICACAO = (
+    r"(?:j[aá]\s+(?:devidamente\s+)?(?:qualific|cadastrad)|devidamente\s+qualific|qualificad|brasileir|portador|inscrit|"
+    r"pessoa\s+jur[ií]dica|sociedade|casad|solteir|divorciad|vi[uú]v|uni[aã]o\s+est|empres[aá]ri|m[eé]dic|engenheir|"
+    r"advogad|aposentad|nacionalidade|CPF|CNPJ)"
+)
+_NOME_QUALIFICADO = re.compile(
+    rf"([{_MAIUSC}][{_MAIUSC}'’.&\-/ ]{{4,110}}?)\s*,\s*{_QUALIFICACAO}", re.U)
+_FIM_PREAMBULO = re.compile(r"\bv[êe]m\b|\bcomparecem?\b|\bvêm\b", re.I)
+_PREAMBULO_MAX = 15000
+# "… e peticionários do ID 104592369": só esse padrão herda a lista — um "ID …" qualquer no texto é só citação
+_RE_ID_REF = re.compile(r"peticion[aá]ri\w*\s+d[oae]s?\s+(?:peti[cç][aã]o\s+)?(?:de\s+)?ID\.?\s*(?:n[ºo°.]*\s*)?(\d{6,})", re.I)
+_GENERICO = re.compile(r"\b(?:investidores|credores|terceiros|requerentes|peticionantes|partes|sociedades|empresas|grupo|interessados)\b", re.I)
+
+
+def membro_do_lider(lider: str, lista: dict) -> str | None:
+    """Chave do membro da lista que é o mesmo que o líder do grupo ("solano madeira" =
+    "solano faria madeira": mesmo primeiro e último nome, ignorando nome do meio)."""
+    lt = lider.split()
+    for k in lista:
+        kt = k.split()
+        if k == lider or (len(lt) >= 2 and len(kt) >= 2 and lt[0] == kt[0] and lt[-1] == kt[-1]):
+            return k
+    return None
+
+
+_NAO_E_NOME = re.compile(r"^(?:EXCELENT|AO JU|PROCESSO|REQUERENTE|REQUERIDA|ESTADO|COMARCA|VARA|AUTOS)", re.I)
+
+
+_LIGATURAS = str.maketrans({"ﬁ": "fi", "ﬂ": "fl", "ﬀ": "ff", "ﬃ": "ffi", "ﬄ": "ffl"})   # PDF: "qualiﬁcado"
+
+
+_REPRESENTANTE = re.compile(
+    r"(?:representad[oa]s?\s+por|neste\s+ato|por\s+seu\s+(?:s[óo]cio|administrador|diretor|procurador|representante))[^;.]{0,80}$", re.I)
+
+
+def _nomes_em(trecho: str) -> list[str]:
+    # o texto dos PDFs vem com quebra de linha entre as palavras: normaliza antes de casar
+    trecho = re.sub(r"\s+", " ", trecho.translate(_LIGATURAS))
+    nomes: list[str] = []
+    for m in _NOME_QUALIFICADO.finditer(trecho):
+        if _REPRESENTANTE.search(trecho[max(0, m.start() - 110): m.start()]):
+            continue   # sócio/administrador que representa uma empresa — a parte é a empresa
+        n = re.sub(r"\s+", " ", m.group(1)).strip(" ,;.-")
+        n = re.sub(r"^E\s+(?=[A-Z])", "", n)           # ", E BELTRANO , já qualificado"
+        n = re.sub(r"^(?:ANEXO|DOC(?:UMENTO)?\.?)\s+[IVXLC\d]+[\s.:\-–]+", "", n)   # título "ANEXO I" colado no 1º nome
+        if len(n) < 5 or len(n.split()) < 2 and not _SUFIXO_EMPRESA.search(n) or _NAO_E_NOME.match(n):
+            continue
+        nomes.append(n)
+    return nomes
+
+
+def partes_do_cabecalho(texto: str | None) -> list[tuple[str, str]]:
+    """Partes qualificadas no cabeçalho da petição (até "vêm/comparecem")."""
+    if not texto:
+        return []
+    cab = re.sub(r"\s+", " ", texto[:_PREAMBULO_MAX].translate(_LIGATURAS))
+    fim = _FIM_PREAMBULO.search(cab)
+    if not fim:
+        return []   # sem "vêm/comparecem" não há cabeçalho de qualificação (não varre o corpo da petição)
+    return _dedup_partes(_nomes_em(cab[: fim.start()]))
+
+
+def partes_da_lista(texto: str | None) -> list[tuple[str, str]]:
+    """Partes de um anexo de lista (investidores/requerentes representados): o texto todo."""
+    return _dedup_partes(_nomes_em(texto or ""))
+
+
+def _dedup_partes(nomes: list[str]) -> list[tuple[str, str]]:
+    saida, vistos = [], set()
+    for n in nomes:
+        chave = _chave_parte(n)
+        if len(chave) >= 3 and chave not in vistos:
+            vistos.add(chave)
+            saida.append((chave, bonito(n)))
+    return saida
+
+
+_RE_ANEXO_LISTA = re.compile(r"lista|rela[cç][aã]o|investidores|representad|requerentes|peticionantes|outorgantes", re.I)
+
+
+def eh_anexo_de_lista(nome_arquivo: str | None) -> bool:
+    return bool(nome_arquivo and _RE_ANEXO_LISTA.search(nome_arquivo))
+
+
 def rotulo_mais_comum(rotulos: list[str]) -> str:
     return Counter(rotulos).most_common(1)[0][0]
 
@@ -384,6 +472,7 @@ def montar_relacao(db, caso_id) -> dict:
             P.id, P.id_processual, P.autor, P.titulo, P.titulo_customizado, P.texto_md, P.md_drive_file_id,
             AndamentoProcesso.arquivo_drive_link, AndamentoProcesso.data_andamento, P.data_peca,
             AndamentoProcesso.tipo, P.tipo, AndamentoProcesso.arquivo_nome, AndamentoProcesso.documento_id,
+            AndamentoProcesso.protocolado_em,
         )
         .outerjoin(AndamentoProcesso, P.andamento_id == AndamentoProcesso.id)
         .filter(P.caso_id == caso_id)
@@ -397,7 +486,23 @@ def montar_relacao(db, caso_id) -> dict:
         if (tipo_pje or "").strip().lower().startswith("peti") and not tem_arquivo:
             eventos_sem_arquivo += 1   # protocolo sem documento: não é a petição em si
         if eh_peticao(tipo_pje, tipo_ia, tem_arquivo, r[5]):
-            rows.append(r[:10] + (tipo_pje,))
+            rows.append(r[:10] + (tipo_pje, r[14]))
+
+    # anexos que listam as partes representadas ("1 - Anexo Lista de Investidores Representados.pdf"):
+    # do mesmo protocolo da petição (filhos dela ou mesma hora de protocolo)
+    anexos_q = (
+        db.query(P.id, P.peca_pai_id, P.texto_md, AndamentoProcesso.protocolado_em)
+        .join(AndamentoProcesso, P.andamento_id == AndamentoProcesso.id)
+        .filter(P.caso_id == caso_id, AndamentoProcesso.arquivo_nome.op("~*")(_RE_ANEXO_LISTA.pattern))
+        .all()
+    )
+    anexo_por_pai: dict = {}
+    anexo_por_prot: dict = {}
+    for aid, pai, atexto, aprot in anexos_q:
+        if pai:
+            anexo_por_pai.setdefault(pai, {})[aid] = atexto
+        if aprot:
+            anexo_por_prot.setdefault(aprot, {})[aid] = atexto
 
     uniao = _Uniao()
     nomes_por_oab: dict[str, list[str]] = {}
@@ -406,13 +511,39 @@ def montar_relacao(db, caso_id) -> dict:
     pets_da_parte: dict[str, dict] = {}                 # chave_parte → {peca_id: ref} (TODAS as petições da parte)
     sem_advogado: list[dict] = []
     com_texto = com_adv = 0
+    listas_conhecidas: list[dict] = []                  # listas explícitas vistas até aqui (ordem cronológica)
+    lista_por_id: dict[str, dict] = {}                  # id_processual da petição → sua lista de partes
 
-    for (pid, id_proc, autor, titulo, titulo_cust, texto, md_id, pdf, data_and, data_peca, tipo_pje) in rows:
+    for (pid, id_proc, autor, titulo, titulo_cust, texto, md_id, pdf, data_and, data_peca, tipo_pje, prot) in rows:
         ref = {
             "peca_id": pid, "id_processual": id_proc, "data": data_and or data_peca,
             "titulo": (titulo_cust or titulo or "Petição"), "link_pdf": pdf, "link_md": _link_md(md_id),
         }
-        partes_pet = normalizar_partes(autor) or [_SEM_PARTE]
+        base = normalizar_partes(autor)
+        # 1) partes listadas no próprio cabeçalho e nos anexos de lista do mesmo protocolo
+        explicitas = dict(partes_do_cabecalho(texto))
+        for atexto in {**anexo_por_pai.get(pid, {}), **(anexo_por_prot.get(prot, {}) if prot else {})}.values():
+            explicitas.update(dict(partes_da_lista(atexto)))
+        if len(explicitas) >= 2:
+            partes_dict = explicitas
+        else:
+            # 2) petição que só cita o grupo ("SOLANO MADEIRA e outros 25 …, peticionários do ID 104592369"
+            #    ou "… e outros terceiros interessados já cadastrados nos autos"): herda a lista conhecida
+            herdada = None
+            for ref_id in _RE_ID_REF.findall(re.sub(r"\s+", " ", (texto or "")[:3000])):
+                if ref_id in lista_por_id:
+                    herdada = lista_por_id[ref_id]
+                    break
+            if herdada is None and base:
+                herdada = next((l for l in reversed(listas_conhecidas) if membro_do_lider(base[0][0], l)), None)
+            partes_dict = dict(herdada) if herdada else dict(base)
+        if len(partes_dict) >= 2 and base and not _GENERICO.search(base[0][1]) and not membro_do_lider(base[0][0], partes_dict):
+            partes_dict[base[0][0]] = base[0][1]    # o líder (peticionante) é parte do grupo mesmo se a lista o grafa diferente
+        partes_pet = list(partes_dict.items()) or [_SEM_PARTE]
+        if len(partes_dict) >= 2:
+            listas_conhecidas.append(partes_dict)
+            if id_proc:
+                lista_por_id[id_proc] = partes_dict
         rotulo_autor = (normalizar_parte(autor) or (None, None))[1]
         for chave_p, rot_p in partes_pet:
             rotulos_parte.setdefault(chave_p, []).append(rot_p)
