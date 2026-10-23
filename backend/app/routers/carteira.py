@@ -1290,6 +1290,36 @@ def gerar_pdf_cliente(cliente_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.get("/pdf-geral")
+def gerar_pdf_geral(
+    incluir_honorarios: bool = Query(True),
+    redigir_nomes: bool = Query(False),
+    db: Session = Depends(get_db),
+):
+    """PDF único com todos os clientes que têm posição na carteira (1 por
+    cliente, mesmo layout do relatório individual), com honorários e nomes
+    opcionalmente ocultados."""
+    try:
+        pdf_bytes = CarteiraRelatoriosService.gerar_pdf_todos_clientes(
+            db, incluir_honorarios=incluir_honorarios, redigir_nomes=redigir_nomes,
+        )
+        date_str = datetime.now().strftime('%Y%m%d')
+        sufixo = []
+        if not incluir_honorarios:
+            sufixo.append('sem_honorarios')
+        if redigir_nomes:
+            sufixo.append('redigido')
+        sufixo_str = ('_' + '_'.join(sufixo)) if sufixo else ''
+        filename = f"carteira_geral{sufixo_str}_{date_str}.pdf"
+        return StreamingResponse(
+            iter([pdf_bytes]),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.post("/exportar-qualificacao")
 def exportar_qualificacao(cliente_ids: List[int], formato: str = "xlsx", db: Session = Depends(get_db)):
     """[V1.3] Exporta qualificação em XLSX ou PDF"""

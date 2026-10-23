@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { clientesApi, type Cliente, type EmailCliente } from '../api/clientes'
+import { ClienteVinculos } from '../components/VinculosEditor'
 import { isoParaBr } from '../utils/masks'
 import { useAuth } from '../contexts/AuthContext'
 import { processosApi } from '../api/processos'
@@ -1069,6 +1070,15 @@ export default function ClienteDetailPage() {
 }
 
 function DadosCadastraisAba({ cliente }: { cliente: Cliente }) {
+  const navigate = useNavigate()
+  const qc = useQueryClient()
+  const { data: clientes = [] } = useQuery({ queryKey: ['clientes'], queryFn: clientesApi.listar })
+  const criarClienteInline = async (raw: string): Promise<string> => {
+    const [nome, tipo] = raw.split('|')
+    const c = await clientesApi.criar({ nome, tipo: (tipo as 'PF' | 'PJ') ?? 'PF', incompleto: true })
+    qc.invalidateQueries({ queryKey: ['clientes'] })
+    return c.id
+  }
   const endereco = [
     cliente.logradouro,
     cliente.numero,
@@ -1091,7 +1101,7 @@ function DadosCadastraisAba({ cliente }: { cliente: Cliente }) {
     ['Telefone', cliente.telefone],
     ['WhatsApp', cliente.whatsapp],
     ['Endereço', endereco],
-    ['Empresas vinculadas', cliente.empresas_vinculadas],
+    ['Outras pessoas vinculadas (informado no cadastro)', cliente.empresas_vinculadas],
     ['Responsável', cliente.responsavel_nome],
     ['CPF do responsável', cliente.responsavel_cpf],
     ['E-mail do responsável', cliente.responsavel_email],
@@ -1115,6 +1125,18 @@ function DadosCadastraisAba({ cliente }: { cliente: Cliente }) {
           ))}
         </div>
       )}
+
+      <div style={{ marginTop: 20 }}>
+        <p style={{ fontSize: 13, fontWeight: 600, color: '#64748b', margin: '0 0 8px' }}>
+          Outras pessoas vinculadas
+        </p>
+        <ClienteVinculos
+          clienteId={cliente.id}
+          clientes={clientes}
+          onCreateCliente={criarClienteInline}
+          onAbrir={(vid) => navigate(`/clientes/${vid}`)}
+        />
+      </div>
     </div>
   )
 }

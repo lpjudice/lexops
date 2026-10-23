@@ -136,6 +136,14 @@ export const clientesApi = {
     api.patch<Cliente>(`/clientes/${id}`, data).then((r) => r.data),
   deletar: (id: string) => api.delete(`/clientes/${id}`),
 
+  // Vínculos entre clientes ("Outras pessoas vinculadas") — bidirecional.
+  listarVinculos: (id: string) =>
+    api.get<Cliente[]>(`/clientes/${id}/vinculos`).then((r) => r.data),
+  adicionarVinculo: (id: string, vinculado_id: string) =>
+    api.post(`/clientes/${id}/vinculos`, { vinculado_id }).then((r) => r.data),
+  removerVinculo: (id: string, vinculado_id: string) =>
+    api.delete(`/clientes/${id}/vinculos/${vinculado_id}`),
+
   uploadPdf: (id: string, file: File) => {
     const form = new FormData()
     form.append('file', file)

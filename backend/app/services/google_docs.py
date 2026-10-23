@@ -358,7 +358,7 @@ def _ler_valor_apos_heading(paras: list[tuple[str, int, int]], heading_texto: st
         return None
     heading_txt = paras[idx][0]
     pos = heading_txt.lower().find(heading_texto.lower())
-    resto = heading_txt[pos + len(heading_texto):].strip(" :\t\n")
+    resto = heading_txt[pos + len(heading_texto):].strip(" :?!.\t\n-–—")
     if resto:
         return resto
     if idx + 1 < len(paras):

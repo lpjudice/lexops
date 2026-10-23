@@ -1,14 +1,15 @@
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models.contrato import Contrato, PoderesTemplate, Signatario
+from app.models.contrato import Contrato, EscopoTemplate, PoderesTemplate, Signatario
 from app.schemas.contrato import (
     AplicarContratantesRequest, ContratoCreate, ContratoOut, ContratoUpdate,
+    EscopoTemplateCreate, EscopoTemplateOut,
     GerarPdfRequest, GerarProcuracaoRequest, PoderesTemplateCreate, PoderesTemplateOut,
     SignatarioCreate, SignatarioOut,
 )
@@ -139,11 +140,18 @@ def listar_contratos(
 
 
 @router.post("/", response_model=ContratoOut, status_code=status.HTTP_201_CREATED)
-def criar_contrato(data: ContratoCreate, db: Session = Depends(get_db)):
+def criar_contrato(
+    data: ContratoCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)
+):
     contrato = Contrato(**data.model_dump())
     db.add(contrato)
     db.commit()
     db.refresh(contrato)
+    if contrato.responsaveis_ids:
+        # Em segundo plano: e-mail/Telegram pra vários responsáveis não deve segurar
+        # a resposta do cadastro (nem derrubá-la se o Gmail estiver fora).
+        from app.services.contrato_notificacao import notificar_em_background
+        background_tasks.add_task(notificar_em_background, contrato.id)
     return contrato
 
 
@@ -224,6 +232,33 @@ def remover_poderes_template(template_id: uuid.UUID, db: Session = Depends(get_d
     db.commit()
 
 
+# ── Templates de escopo/recomendações (texto pré-formatado reaproveitável) ─────
+
+@router.get("/escopo-templates", response_model=list[EscopoTemplateOut])
+def listar_escopo_templates(db: Session = Depends(get_db)):
+    return db.query(EscopoTemplate).order_by(EscopoTemplate.nome).all()
+
+
+@router.post("/escopo-templates", response_model=EscopoTemplateOut, status_code=status.HTTP_201_CREATED)
+def criar_escopo_template(data: EscopoTemplateCreate, db: Session = Depends(get_db)):
+    if not data.nome.strip() or not data.texto.strip():
+        raise HTTPException(status_code=400, detail="Nome e texto são obrigatórios")
+    template = EscopoTemplate(nome=data.nome.strip(), texto=data.texto)
+    db.add(template)
+    db.commit()
+    db.refresh(template)
+    return template
+
+
+@router.delete("/escopo-templates/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remover_escopo_template(template_id: uuid.UUID, db: Session = Depends(get_db)):
+    template = db.query(EscopoTemplate).filter(EscopoTemplate.id == template_id).first()
+    if not template:
+        raise HTTPException(status_code=404, detail="Template não encontrado")
+    db.delete(template)
+    db.commit()
+
+
 @router.get("/{contrato_id}", response_model=ContratoOut)
 def obter_contrato(contrato_id: uuid.UUID, db: Session = Depends(get_db)):
     c = db.query(Contrato).filter(Contrato.id == contrato_id).first()
@@ -244,6 +279,25 @@ def atualizar_contrato(
     db.commit()
     db.refresh(c)
     return c
+
+
+@router.post("/{contrato_id}/notificar-responsaveis")
+def notificar_responsaveis_contrato(contrato_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Envia (ou reenvia) o aviso de e-mail + Telegram aos responsáveis escolhidos.
+    Síncrono de propósito: a tela mostra o resultado de cada pessoa/canal."""
+    from app.services.contrato_notificacao import listar_responsaveis, notificar_responsaveis
+
+    c = db.query(Contrato).filter(Contrato.id == contrato_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Contrato não encontrado")
+    if not listar_responsaveis(db, c):
+        raise HTTPException(status_code=400, detail="Nenhum responsável (ativo) selecionado neste contrato")
+    resultados = notificar_responsaveis(db, c)
+    db.refresh(c)
+    return {
+        "resultados": resultados,
+        "notificados_em": c.responsaveis_notificados_em,
+    }
 
 
 @router.delete("/{contrato_id}", status_code=status.HTTP_204_NO_CONTENT)

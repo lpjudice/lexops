@@ -6,7 +6,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle, Paragraph,
-    Spacer, HRFlowable, KeepTogether, Image,
+    Spacer, HRFlowable, KeepTogether, Image, PageBreak,
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
@@ -231,15 +231,19 @@ def _asset_table(headers: list, rows: list, col_widths: list,
     return t
 
 
-def _dark_footer_bar(total_geral: float, exito: float = 0) -> Table:
-    """Barra de rodapé (2º e último bloco escuro do documento) com o total em destaque."""
+def _dark_footer_bar(total_geral: float, exito: float = 0, incluir_honorarios: bool = True) -> Table:
+    """Barra de rodapé (2º e último bloco escuro do documento) com o total em destaque.
+    incluir_honorarios=False tira a linha de expectativa de exito e o aviso
+    legal sobre honorarios — pra quando o PDF foi pedido explicitamente sem
+    nenhuma mencao a honorarios, nem no rodape."""
+    mostrar_exito = exito > 0 and incluir_honorarios
     left_rows = [[_p("TOTAL APLICADO",
                       _s('fl', fontSize=7, leading=9, fontName='Helvetica-Bold',
                          textColor=colors.HexColor('#9CA3AF')))],
                  [_p(_brl(total_geral),
                       _s('fv', fontSize=20, leading=23, fontName='Helvetica-Bold',
                          textColor=WHITE))]]
-    if exito > 0:
+    if mostrar_exito:
         left_rows.append([_p(f"Expectativa de exito: {_brl(exito)}",
                               _s('fe', fontSize=8, leading=10, fontName='Helvetica',
                                  textColor=colors.HexColor('#9CA3AF')))])
@@ -250,13 +254,14 @@ def _dark_footer_bar(total_geral: float, exito: float = 0) -> Table:
         ('BOTTOMPADDING', (0, 0), (0, 0), 1),
         ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0),
     ]
-    if exito > 0:
+    if mostrar_exito:
         left_style.append(('TOPPADDING', (0, 2), (0, 2), 2))
     left.setStyle(TableStyle(left_style))
 
     right = _p(
         "Honorarios calculados sobre valores efetivamente recuperados.<br/>"
-        "Valores estimados nao constituem garantia de resultado.",
+        "Valores estimados nao constituem garantia de resultado."
+        if incluir_honorarios else "",
         _s('fn', fontSize=7, fontName='Helvetica',
            textColor=colors.HexColor('#9CA3AF'), alignment=2)
     )
@@ -269,6 +274,16 @@ def _dark_footer_bar(total_geral: float, exito: float = 0) -> Table:
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
     ]))
     return t
+
+
+def _redacted_note() -> Paragraph:
+    """Aviso logo abaixo do nome do cliente quando o PDF geral foi pedido com
+    nomes ocultados — deixa claro, junto do identificador, que ali era o nome
+    e foi trocado por sigilo (não é só um ID sem explicação)."""
+    return _p(
+        "Nome do cliente ocultado a pedido — substituido pelo identificador interno por sigilo.",
+        _s('rn', fontSize=7, fontName='Helvetica-Oblique', textColor=GRAY_MID)
+    )
 
 
 def _bottom_footer() -> Table:
@@ -492,6 +507,219 @@ class CarteiraRelatoriosService:
 
         doc.build(story)
         return buffer.getvalue(), nome_cliente
+
+    @staticmethod
+    def gerar_pdf_todos_clientes(db: Session, incluir_honorarios: bool = True,
+                                  redigir_nomes: bool = False) -> bytes:
+        """PDF unico com 1 pagina (ou mais) por cliente que tem alguma posicao
+        na carteira — mesmo layout do relatorio individual, repetido em
+        sequencia, controlado pelos 2 toggles pedidos: incluir honorarios
+        (se nao, nenhuma mencao a eles em lugar nenhum, nem no rodape) e
+        redigir nomes (troca o nome pelo ID interno + aviso de sigilo)."""
+        clientes = db.query(CarteiraCliente).order_by(CarteiraCliente.nome).all()
+
+        emissao_map = {e.id: e for e in db.query(CarteiraDebentureadotEmissao).all()}
+        emp_map = {e.id: e for e in db.query(CarteiraImobiliarioEmpreendimento).all()}
+        fundo_map = {f.id: f for f in db.query(CarteiraFundoReferencia).all()}
+
+        data_str = datetime.now().strftime('%d de %B de %Y').replace(
+            'January', 'Janeiro').replace('February', 'Fevereiro').replace(
+            'March', 'Marco').replace('April', 'Abril').replace(
+            'May', 'Maio').replace('June', 'Junho').replace(
+            'July', 'Julho').replace('August', 'Agosto').replace(
+            'September', 'Setembro').replace('October', 'Outubro').replace(
+            'November', 'Novembro').replace('December', 'Dezembro')
+
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(
+            buffer, pagesize=A4,
+            leftMargin=18 * mm, rightMargin=18 * mm,
+            topMargin=16 * mm, bottomMargin=18 * mm,
+        )
+        story = []
+        primeiro = True
+
+        for cliente in clientes:
+            debentures = db.query(CarteiraDebenturePosicao).filter(
+                CarteiraDebenturePosicao.cliente_id == cliente.id
+            ).all()
+            imobiliario = db.query(CarteiraImobiliarioPosicao).filter(
+                CarteiraImobiliarioPosicao.cliente_id == cliente.id
+            ).all()
+            fundos = db.query(CarteiraFundoPosicao).filter(
+                CarteiraFundoPosicao.cliente_id == cliente.id
+            ).all()
+
+            # Só entra no PDF geral quem tem alguma posicao — mesmo criterio
+            # da aba "Posicao por Cliente" (cliente sem ativo nao aparece la).
+            if not debentures and not imobiliario and not fundos:
+                continue
+
+            nome_real = cliente.nome or f"Cliente {cliente.id}"
+            nome_exibido = f"CLIENTE #{cliente.id}" if redigir_nomes else nome_real
+
+            total_deb   = sum(d.valor_aplicado or 0 for d in debentures)
+            total_imob  = sum(i.valor_total_compromissado or 0 for i in imobiliario)
+            total_fundo = sum(f.valor_aplicado or 0 for f in fundos)
+            total_fin   = total_deb + total_fundo
+            total_geral = total_imob + total_fin
+            n_ativos    = len(debentures) + len(imobiliario) + len(fundos)
+
+            pct_fin  = cliente.percentual_sucesso_fin or cliente.percentual_sucesso_geral or 0
+            pct_imob = cliente.percentual_sucesso_imob or cliente.percentual_sucesso_geral or 0
+            exito = total_fin * (pct_fin / 100) + total_imob * (pct_imob / 100)
+
+            if not primeiro:
+                story.append(PageBreak())
+            primeiro = False
+
+            story.append(_header_block(nome_exibido, data_str))
+            story.append(Spacer(1, 2 * mm))
+            story.append(HRFlowable(width='100%', thickness=0.5,
+                                    color=colors.HexColor('#e5e7eb'), spaceAfter=4))
+
+            story.append(_title_row(nome_exibido))
+            if redigir_nomes:
+                story.append(Spacer(1, 1 * mm))
+                story.append(_redacted_note())
+            story.append(Spacer(1, 5 * mm))
+
+            kpi_row = [[
+                _kpi_card("TOTAL GERAL", _brl(total_geral), accent=TEAL),
+                _kpi_card("IMOBILIARIO", _brl(total_imob), accent=AMBER),
+                _kpi_card("FINANCEIRO", _brl(total_fin), accent=TEAL),
+                _kpi_card("ATIVOS", str(n_ativos), accent=GRAY_MID),
+            ]]
+            kpi_table = Table(kpi_row, colWidths=[42.5 * mm] * 4)
+            kpi_table.setStyle(TableStyle([
+                ('TOPPADDING', (0, 0), (-1, -1), 0), ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+                ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ]))
+            story.append(kpi_table)
+            story.append(Spacer(1, 6 * mm))
+
+            if debentures:
+                for el in _section_hdr(f"DEBENTURES — {len(debentures)} POSICOES  |  {_brl(total_deb)}", accent=TEAL):
+                    story.append(el)
+                rows = []
+                for d in debentures:
+                    em = emissao_map.get(d.emissao_id)
+                    rows.append([
+                        d.numero_cautela or '-',
+                        em.nome_serie if em else f"#{d.emissao_id}",
+                        em.emissor if em else '-',
+                        d.data_aquisicao.strftime('%d/%m/%Y') if d.data_aquisicao else '-',
+                        _brl(d.valor_aplicado),
+                        _brl(d.valor_atual_estimado) if d.valor_atual_estimado else '-',
+                        d.status_resgate or 'Ativo',
+                    ])
+                rows.append([
+                    'TOTAL', '', '', '',
+                    _brl(total_deb),
+                    _brl(sum(d.valor_atual_estimado or d.valor_aplicado or 0 for d in debentures)),
+                    '',
+                ])
+                story.append(_asset_table(
+                    ['CAUTELA', 'EMISSAO', 'EMISSOR', 'AQUISICAO', 'APLICADO', 'ATUAL ESTIM.', 'STATUS'],
+                    rows,
+                    [22*mm, 38*mm, 30*mm, 20*mm, 24*mm, 24*mm, 16*mm],
+                    accent_cols=[4, 5], accent=TEAL, tint=TEAL_TINT,
+                ))
+                story.append(Spacer(1, 5 * mm))
+
+            if imobiliario:
+                for el in _section_hdr(f"IMOBILIARIO — {len(imobiliario)} POSICOES  |  {_brl(total_imob)}", accent=AMBER):
+                    story.append(el)
+                rows = []
+                for i in imobiliario:
+                    emp = emp_map.get(i.empreendimento_id)
+                    rows.append([
+                        emp.nome_venda if emp else f"#{i.empreendimento_id}",
+                        emp.localizacao if emp and emp.localizacao else '-',
+                        _brl(i.valor_total_compromissado),
+                        _brl(i.valor_efetivamente_investido) if i.valor_efetivamente_investido else '-',
+                        _pct(i.percentual_participacao),
+                    ])
+                rows.append([
+                    'TOTAL', '',
+                    _brl(total_imob),
+                    _brl(sum(i.valor_efetivamente_investido or 0 for i in imobiliario)),
+                    '',
+                ])
+                story.append(_asset_table(
+                    ['EMPREENDIMENTO', 'LOCALIZACAO', 'COMPROMETIDO', 'INVESTIDO', '% PART.'],
+                    rows,
+                    [55*mm, 30*mm, 30*mm, 30*mm, 25*mm],
+                    accent_cols=[2, 3], accent=AMBER, tint=AMBER_TINT,
+                ))
+                story.append(Spacer(1, 5 * mm))
+
+            if fundos:
+                for el in _section_hdr(f"FUNDOS — {len(fundos)} POSICOES  |  {_brl(total_fundo)}", accent=TEAL):
+                    story.append(el)
+                rows = []
+                for f in fundos:
+                    ref = fundo_map.get(f.fundo_id)
+                    nome_fundo = ref.nome_fundo if ref else f"#{f.fundo_id}"
+                    queda = ref.percentual_credito_recuperavel if ref else None
+                    recup_str = f"{100 - queda:.0f}% recup." if queda is not None else '-'
+                    rows.append([
+                        nome_fundo,
+                        ref.gestora if ref else '-',
+                        _brl(f.valor_aplicado),
+                        _brl(f.valor_atual_estimado) if f.valor_atual_estimado else '-',
+                        recup_str,
+                        f.data_aplicacao.strftime('%d/%m/%Y') if f.data_aplicacao else '-',
+                    ])
+                rows.append([
+                    'TOTAL', '',
+                    _brl(total_fundo),
+                    _brl(sum(f.valor_atual_estimado or f.valor_aplicado or 0 for f in fundos)),
+                    '', '',
+                ])
+                story.append(_asset_table(
+                    ['FUNDO', 'GESTORA', 'APLICADO', 'ATUAL ESTIM.', '% RECUP.', 'DATA APLIC.'],
+                    rows,
+                    [48*mm, 28*mm, 26*mm, 26*mm, 22*mm, 20*mm],
+                    accent_cols=[2, 3],
+                ))
+                story.append(Spacer(1, 5 * mm))
+
+            if incluir_honorarios and exito > 0 and (pct_fin > 0 or pct_imob > 0):
+                for el in _section_hdr("HONORARIOS DE EXITO"):
+                    story.append(el)
+                hon_rows = []
+                if total_fin > 0 and pct_fin > 0:
+                    hon_rows.append(['Ativos Financeiros (Deb. + Fundos)',
+                                      _brl(total_fin), _pct(pct_fin), _brl(total_fin * pct_fin / 100)])
+                if total_imob > 0 and pct_imob > 0:
+                    hon_rows.append(['Imobiliario',
+                                      _brl(total_imob), _pct(pct_imob), _brl(total_imob * pct_imob / 100)])
+                if len(hon_rows) > 1:
+                    hon_rows.append(['TOTAL', '', '', _brl(exito)])
+                story.append(_asset_table(
+                    ['BASE DE CALCULO', 'VALOR', '% EXITO', 'HONORARIOS ESP.'],
+                    hon_rows,
+                    [70*mm, 35*mm, 25*mm, 40*mm],
+                    accent_cols=[3],
+                ))
+                story.append(Spacer(1, 5 * mm))
+
+            story.append(KeepTogether([
+                Spacer(1, 4 * mm),
+                _dark_footer_bar(total_geral, exito, incluir_honorarios=incluir_honorarios),
+                Spacer(1, 3 * mm),
+                _bottom_footer(),
+            ]))
+
+        if primeiro:
+            # Nenhum cliente com posicao — documento vazio seria um PDF
+            # quebrado (SimpleDocTemplate exige pelo menos 1 flowable).
+            story.append(_p("Nenhum cliente com posicao na carteira.",
+                             _s('empty', fontSize=11, fontName='Helvetica', textColor=GRAY_MID)))
+
+        doc.build(story)
+        return buffer.getvalue()
 
     @staticmethod
     def exportar_xlsx_qualificacao(db: Session, cliente_ids: List[int]) -> bytes:

@@ -7,6 +7,9 @@ import { processosApi } from '../api/processos'
 import ComboBox from '../components/ComboBox'
 import ClienteCombobox from '../components/ClienteCombobox'
 import ContratantesIAModal from '../components/ContratantesIAModal'
+import ContratoResponsaveisEscopo from '../components/ContratoResponsaveisEscopo'
+import EscopoEditor from '../components/EscopoEditor'
+import ResponsaveisMulti from '../components/ResponsaveisMulti'
 import CurrencyInput, { formatBRL } from '../components/CurrencyInput'
 import styles from './Page.module.css'
 import cs from './ContratosPage.module.css'
@@ -24,7 +27,7 @@ const PAPEL_LABEL: Record<PapelSignatario, string> = {
   contratante: 'Contratante', contratado: 'Contratado', testemunha: 'Testemunha', outro: 'Outro',
 }
 
-const EMPTY_CONTRATO: ContratoCreate = { cliente_id: '', titulo: '' }
+const EMPTY_CONTRATO: ContratoCreate = { cliente_id: '', titulo: '', responsaveis_ids: [], escopo_recomendacoes: '' }
 const EMPTY_SIG: SignatarioCreate = { nome: '', email: '', papel: 'outro' }
 
 function formatDate(d: string) {
@@ -540,8 +543,25 @@ export default function ContratosPage() {
               placeholder="Buscar por CNJ ou cliente..."
             />
           </div>
+          <div className={styles.formRow}>
+            <label className={styles.formLabel}>Responsáveis pelo contrato/cliente</label>
+            <ResponsaveisMulti
+              value={form.responsaveis_ids ?? []}
+              onChange={(ids) => setForm({ ...form, responsaveis_ids: ids })}
+            />
+            <span style={{ fontSize: 11, color: '#6b7280' }}>
+              Ao salvar, cada responsável recebe um aviso por e-mail (e Telegram, se vinculado) com o escopo, as recomendações e o link da pasta do cliente — sem dados financeiros.
+            </span>
+          </div>
+          <div className={styles.formRow}>
+            <label className={styles.formLabel}>Escopo e recomendações</label>
+            <EscopoEditor
+              value={form.escopo_recomendacoes ?? ''}
+              onChange={(t) => setForm({ ...form, escopo_recomendacoes: t })}
+            />
+          </div>
           <button type="submit" className={styles.btnPrimary} disabled={criar.isPending}>
-            {criar.isPending ? 'Salvando...' : 'Criar Contrato'}
+            {criar.isPending ? 'Salvando...' : (form.responsaveis_ids?.length ? 'Criar e notificar responsáveis' : `Criar ${TIPO_LABEL[abaTipo]}`)}
           </button>
         </form>
       )}
@@ -649,6 +669,8 @@ export default function ContratosPage() {
 
                 {isOpen && (
                   <div className={cs.cardBody}>
+                    <ContratoResponsaveisEscopo contrato={c} />
+
                     {/* ── ARQUIVOS ────────────────────────────────────── */}
                     <div className={cs.section}>
                       <div className={cs.sectionHeader}>

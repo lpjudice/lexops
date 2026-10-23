@@ -39,11 +39,15 @@ class ContratoCreate(BaseModel):
     titulo: str
     descricao: str | None = None
     tipo_documento: TipoDocumento = "contrato"
+    responsaveis_ids: list[str] = []
+    escopo_recomendacoes: str | None = None
 
 
 class ContratoUpdate(BaseModel):
     titulo: str | None = None
     descricao: str | None = None
+    responsaveis_ids: list[str] | None = None
+    escopo_recomendacoes: str | None = None
     processo_id: uuid.UUID | None = None
     status: StatusContrato | None = None
 
@@ -130,6 +134,18 @@ class PoderesTemplateCreate(BaseModel):
     texto: str
 
 
+class EscopoTemplateCreate(BaseModel):
+    nome: str
+    texto: str
+
+
+class EscopoTemplateOut(EscopoTemplateCreate):
+    id: uuid.UUID
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class PoderesTemplateOut(PoderesTemplateCreate):
     id: uuid.UUID
     created_at: datetime
@@ -207,6 +223,7 @@ class ContratoOut(ContratoCreate):
     procuracao_dados: dict | None = None
     doc_gerado_por: str | None = None
     doc_gerado_em: datetime | None = None
+    responsaveis_notificados_em: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -40,6 +40,13 @@ class Contrato(Base):
     doc_gerado_por: Mapped[str | None] = mapped_column(String(255))
     doc_gerado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Equipe interna responsável pelo contrato/cliente (ids de Responsavel, como
+    # texto — JSONB em vez de tabela de junção, mesmo padrão de `arquivos`) e o
+    # escopo/recomendações que vão no aviso a eles. Nada financeiro entra aqui.
+    responsaveis_ids: Mapped[list] = mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))
+    escopo_recomendacoes: Mapped[str | None] = mapped_column(Text)
+    responsaveis_notificados_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     status: Mapped[str] = mapped_column(
         Enum(
             "rascunho",
@@ -121,6 +128,25 @@ class PoderesTemplate(Base):
     extra" na seção DOS PODERES da procuração. Reutilizável entre procurações —
     ver app/services/procuracao_pdf.py e o endpoint /contratos/poderes-templates."""
     __tablename__ = "poderes_templates"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    nome: Mapped[str] = mapped_column(String(255), nullable=False)
+    texto: Mapped[str] = mapped_column(Text, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class EscopoTemplate(Base):
+    """Texto salvo (com nome) de escopo/recomendações — pré-formatado pra reaproveitar
+    em vários contratos. Mesmo molde de PoderesTemplate."""
+    __tablename__ = "escopo_templates"
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4

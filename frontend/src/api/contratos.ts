@@ -49,6 +49,9 @@ export interface Contrato {
   procuracao_dados?: GerarProcuracaoRequest | null
   doc_gerado_por?: string | null
   doc_gerado_em?: string | null
+  responsaveis_ids: string[]
+  escopo_recomendacoes?: string | null
+  responsaveis_notificados_em?: string | null
   created_at: string
   updated_at: string
 }
@@ -77,6 +80,21 @@ export interface ContratoCreate {
   titulo: string
   descricao?: string
   tipo_documento?: TipoDocumento
+  responsaveis_ids?: string[]
+  escopo_recomendacoes?: string
+}
+
+export interface EscopoTemplate {
+  id: string
+  nome: string
+  texto: string
+  created_at: string
+}
+
+export interface ResultadoNotificacao {
+  responsavel: string
+  email: string      // 'enviado' | 'sem_email' | 'erro: ...'
+  telegram: string   // 'enviado' | 'nao_vinculado' | 'falhou'
 }
 
 export interface OutorgadoInput {
@@ -201,6 +219,20 @@ export const contratosApi = {
 
   templateProcuracao: () =>
     api.get<{ link: string | null }>('/contratos/template-procuracao').then((r) => r.data),
+
+  notificarResponsaveis: (id: string) =>
+    api.post<{ resultados: ResultadoNotificacao[]; notificados_em: string | null }>(
+      `/contratos/${id}/notificar-responsaveis`, undefined, { timeout: 60000 },
+    ).then((r) => r.data),
+
+  listarEscopoTemplates: () =>
+    api.get<EscopoTemplate[]>('/contratos/escopo-templates').then((r) => r.data),
+
+  criarEscopoTemplate: (data: { nome: string; texto: string }) =>
+    api.post<EscopoTemplate>('/contratos/escopo-templates', data).then((r) => r.data),
+
+  excluirEscopoTemplate: (id: string) =>
+    api.delete(`/contratos/escopo-templates/${id}`),
 
   listarPoderesTemplates: () =>
     api.get<PoderesTemplate[]>('/contratos/poderes-templates').then((r) => r.data),
