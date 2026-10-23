@@ -184,6 +184,19 @@ export interface FaqPergunta {
   criado_em: string
 }
 
+export interface ExportMdStatus {
+  estado: 'ocioso' | 'rodando' | 'concluido' | 'erro'
+  total: number
+  exportadas: number
+  feitos: number
+  enviados: number
+  ignorados: number
+  erros: number
+  mensagem: string | null
+  pasta_nome: string
+  pasta_link: string | null
+}
+
 export const autosIa = {
   listarCasos: () => api.get<CasoResumo[]>('/autos-ia/casos').then((r) => r.data),
 
@@ -318,6 +331,14 @@ export const autosIa = {
     }>(
       `/autos-ia/casos/${casoId}/alerta-teste`,
     ).then((r) => r.data),
+
+  statusExportMdDrive: (casoId: string) =>
+    api.get<ExportMdStatus>(`/autos-ia/casos/${casoId}/exportar-md-drive`).then((r) => r.data),
+
+  exportarMdDrive: (casoId: string, opts: { limite?: number; forcar?: boolean } = {}) =>
+    api.post<ExportMdStatus>(`/autos-ia/casos/${casoId}/exportar-md-drive`, null, {
+      params: { ...(opts.limite ? { limite: opts.limite } : {}), ...(opts.forcar ? { forcar: true } : {}) },
+    }).then((r) => r.data),
 
   relerPendentes: (casoId: string) =>
     api.post<Caso>(`/autos-ia/casos/${casoId}/reler-pendentes`).then((r) => r.data),

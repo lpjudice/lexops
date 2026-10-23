@@ -231,6 +231,20 @@ class FaqPerguntaOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ExportMdStatusOut(BaseModel):
+    """Exportação do resumo + inteiro teor das peças (.md) para o Drive."""
+    estado: Literal["ocioso", "rodando", "concluido", "erro"]
+    total: int
+    exportadas: int
+    feitos: int = 0
+    enviados: int = 0
+    ignorados: int = 0
+    erros: int = 0
+    mensagem: str | None = None
+    pasta_nome: str
+    pasta_link: str | None = None
+
+
 class AlertaConfigOut(BaseModel):
     ativo: bool
     # Destinatário padrão: usuário(s) master do sistema (não editável aqui).

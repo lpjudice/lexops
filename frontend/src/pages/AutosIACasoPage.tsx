@@ -5,6 +5,7 @@ import { autosIa, TIPOS_PECA } from '../api/autosIa'
 import type { Caso, Documento, DocumentoDrive, DocumentoDriveAnexo, FaqPergunta, GrafoAresta, GrafoNo, Peca, PecaDetalhe, TipoPeca } from '../api/autosIa'
 import ReferenciaHover from '../components/autosIa/ReferenciaHover'
 import GrafoRede from '../components/autosIa/GrafoRede'
+import ExportarMdDrive from '../components/autosIa/ExportarMdDrive'
 import Modal from '../components/Modal'
 import pageStyles from './Page.module.css'
 import { useColapsaveis } from '../utils/colapsaveis'
@@ -399,6 +400,7 @@ export default function AutosIACasoPage() {
                       >
                         {alertaTeste.isPending ? 'Enviando teste...' : 'Testar alerta'}
                       </button>
+                      <ExportarMdDrive casoId={casoId!} />
                     </>
                   )}
                 </>

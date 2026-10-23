@@ -102,6 +102,9 @@ def _sync_autos_ia_processos() -> None:
                 # lança; falha de envio não afeta a sincronização nem o próximo caso.
                 from app.services.autos_ia.alertas import enviar_alertas_pos_sync
                 enviar_alertas_pos_sync(caso_id)
+                # Mantém a pasta "Andamentos (MD)" do Drive em dia (só casos já exportados).
+                from app.services.autos_ia.export_md_drive import exportar_pos_sync
+                exportar_pos_sync(caso_id)
         finally:
             db.close()
     except Exception as exc:

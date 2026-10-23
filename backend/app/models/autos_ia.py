@@ -210,6 +210,13 @@ class AutosIAPeca(Base):
     # Custo real (USD) da chamada de IA que gerou o resumo desta peça.
     custo_usd: Mapped[float] = mapped_column(Float, nullable=False, default=0)
 
+    # Exportação do resumo + inteiro teor em .md para a pasta "Andamentos (MD)" do Drive
+    # (ver services/autos_ia/export_md_drive.py). `md_hash` = hash do nome+conteúdo do último
+    # envio — só reenvia quando algo muda.
+    md_drive_file_id: Mapped[str | None] = mapped_column(String(100))
+    md_hash: Mapped[str | None] = mapped_column(String(64))
+    md_exportado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     atualizado_em: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

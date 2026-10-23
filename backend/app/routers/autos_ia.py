@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, defer
@@ -18,11 +18,12 @@ from app.models.andamento import AndamentoProcesso
 from app.models.autos_ia import AutosIACaso, AutosIADocumento, AutosIAPeca, AutosIAPerguntaFaq, AutosIAReferencia
 from app.schemas.autos_ia import (
     AlertaConfigOut, AlertaConfigUpdate, CasoCreate, CasoOut, CasoResumo, CasoUpdate, DocumentoDriveAnexoOut, DocumentoDriveOut, DocumentoOut,
-    EstimativaImportacaoOut, FaqPerguntaCreate, FaqPerguntaOut, GrafoAresta, GrafoNo, GrafoOut, PecaAnotacaoUpdate,
+    EstimativaImportacaoOut, ExportMdStatusOut, FaqPerguntaCreate, FaqPerguntaOut, GrafoAresta, GrafoNo, GrafoOut, PecaAnotacaoUpdate,
     PecaDetalheOut, PecaOut, PecaTipoUpdate,
 )
 from app.services.autos_ia import faq as faq_service
 from app.services.autos_ia.busca import buscar_pecas
+from app.services.autos_ia import export_md_drive
 from app.services.autos_ia.estimativa import estimar_importacao_existentes, estimar_reclassificacao
 from app.services.autos_ia.ingestao import processar_documento, reclassificar_caso, retomar_documento
 from app.services.autos_ia.jusbr_import import (
@@ -291,6 +292,8 @@ def _executar_sync_em_background(caso_id: uuid.UUID) -> None:
             # Mesmo alerta (Telegram + e-mail) das sincronizações automáticas. Nunca lança.
             from app.services.autos_ia.alertas import enviar_alertas_pos_sync
             enviar_alertas_pos_sync(caso_id)
+            # Atualiza a pasta "Andamentos (MD)" do Drive (só em casos já exportados). Nunca lança.
+            export_md_drive.exportar_pos_sync(caso_id)
     except Exception as exc:
         logger.exception("Autos IA: sincronização do caso %s travou de forma inesperada", caso_id)
         _forcar_status_erro(caso_id, f"Interrompida por um erro inesperado: {exc}")
@@ -309,6 +312,34 @@ def sincronizar_agora(caso_id: uuid.UUID, background_tasks: BackgroundTasks, db:
     db.refresh(caso)
     background_tasks.add_task(_executar_sync_em_background, caso.id)
     return caso
+
+
+# ── Exportação .md (resumo + inteiro teor) para o Drive ──────────────────────
+
+@router.get("/casos/{caso_id}/exportar-md-drive", response_model=ExportMdStatusOut)
+def status_exportar_md_drive(caso_id: uuid.UUID, db: Session = Depends(get_db)):
+    _get_caso(db, caso_id)
+    return export_md_drive.status_exportacao(db, caso_id)
+
+
+@router.post("/casos/{caso_id}/exportar-md-drive", response_model=ExportMdStatusOut, status_code=status.HTTP_202_ACCEPTED)
+def exportar_md_drive(
+    caso_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
+    limite: int | None = Query(None, ge=1, le=5000, description="Máximo de envios (amostra)"),
+    forcar: bool = Query(False, description="Reenvia mesmo o que não mudou"),
+    db: Session = Depends(get_db),
+):
+    caso = _get_caso(db, caso_id)
+    if not caso.processo_id:
+        raise HTTPException(status_code=422, detail="Este caso não está vinculado a um processo (a pasta do Drive depende dele).")
+    atual = export_md_drive.status_exportacao(db, caso_id)
+    if atual["estado"] == "rodando":
+        return atual
+    background_tasks.add_task(export_md_drive.exportar_caso, caso.id, limite, forcar)
+    atual["estado"] = "rodando"
+    atual["mensagem"] = "Iniciando…"
+    return atual
 
 
 def _executar_atualizar_metadados_em_background(caso_id: uuid.UUID) -> None:
