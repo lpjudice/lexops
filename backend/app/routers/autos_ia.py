@@ -17,9 +17,9 @@ from app.dependencies import get_current_user
 from app.models.andamento import AndamentoProcesso
 from app.models.autos_ia import AutosIACaso, AutosIADocumento, AutosIAPeca, AutosIAPerguntaFaq, AutosIAReferencia
 from app.schemas.autos_ia import (
-    AdvogadosPartesOut, AlertaConfigOut, AlertaConfigUpdate, CasoCreate, CasoOut, CasoResumo, CasoUpdate, DocumentoDriveAnexoOut, DocumentoDriveOut, DocumentoOut,
+    AdicionarAdvogadoIn, AdvogadosPartesOut, AlertaConfigOut, AlertaConfigUpdate, CasoCreate, CasoOut, CasoResumo, CasoUpdate, DocumentoDriveAnexoOut, DocumentoDriveOut, DocumentoOut,
     EstimativaImportacaoOut, ExportMdStatusOut, FaqPerguntaCreate, PastasDriveOut, FaqPerguntaOut, GrafoAresta, GrafoNo, GrafoOut, PecaAnotacaoUpdate,
-    PecaDetalheOut, PecaOut, PecaTipoUpdate,
+    PecaDetalheOut, PecaOut, PecaTipoUpdate, PrincipalIn, RenomearAdvogadoIn, VinculoIn,
 )
 from app.services.autos_ia import faq as faq_service
 from app.services.autos_ia.busca import buscar_pecas
@@ -323,6 +323,44 @@ def advogados_e_partes(caso_id: uuid.UUID, db: Session = Depends(get_db)):
     return advogados_partes.montar_relacao(db, caso_id)
 
 
+def _editar_relacao(db: Session, caso_id: uuid.UUID, fn, *args):
+    _get_caso(db, caso_id)
+    try:
+        return fn(db, caso_id, *args)
+    except advogados_partes.RelacaoErro as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.post("/casos/{caso_id}/advogados-partes/renomear", response_model=AdvogadosPartesOut)
+def renomear_advogado(caso_id: uuid.UUID, data: RenomearAdvogadoIn, db: Session = Depends(get_db)):
+    """Muda o nome de exibição do advogado (com OAB, vale para todas as partes e casos)."""
+    return _editar_relacao(db, caso_id, advogados_partes.renomear_advogado, data.adv_id, data.nome)
+
+
+@router.post("/casos/{caso_id}/advogados-partes/adicionar", response_model=AdvogadosPartesOut)
+def adicionar_advogado(caso_id: uuid.UUID, data: AdicionarAdvogadoIn, db: Session = Depends(get_db)):
+    """Adiciona um advogado (com ou sem OAB) a uma parte já mapeada."""
+    return _editar_relacao(db, caso_id, advogados_partes.adicionar_advogado, data.parte_chave, data.nome, data.oab)
+
+
+@router.post("/casos/{caso_id}/advogados-partes/principal", response_model=AdvogadosPartesOut)
+def definir_advogado_principal(caso_id: uuid.UUID, data: PrincipalIn, db: Session = Depends(get_db)):
+    """Marca qual advogado é o principal da parte (um por parte); adv_id nulo desmarca."""
+    return _editar_relacao(db, caso_id, advogados_partes.definir_principal, data.parte_chave, data.adv_id)
+
+
+@router.post("/casos/{caso_id}/advogados-partes/remover", response_model=AdvogadosPartesOut)
+def remover_advogado(caso_id: uuid.UUID, data: VinculoIn, db: Session = Depends(get_db)):
+    """Tira o advogado da parte (dá para restaurar)."""
+    return _editar_relacao(db, caso_id, advogados_partes.remover_advogado, data.parte_chave, data.adv_id)
+
+
+@router.post("/casos/{caso_id}/advogados-partes/restaurar", response_model=AdvogadosPartesOut)
+def restaurar_advogado(caso_id: uuid.UUID, data: VinculoIn, db: Session = Depends(get_db)):
+    return _editar_relacao(db, caso_id, advogados_partes.restaurar_advogado, data.parte_chave, data.adv_id)
+
+
 @router.get("/casos/{caso_id}/pastas-drive", response_model=PastasDriveOut)
 def pastas_drive(caso_id: uuid.UUID, db: Session = Depends(get_db)):
     _get_caso(db, caso_id)
@@ -366,6 +404,8 @@ def _executar_atualizar_metadados_em_background(caso_id: uuid.UUID) -> None:
         _forcar_status_erro(caso_id, f"Interrompida por um erro inesperado: {exc}")
     finally:
         db.close()
+        # O que mudou nas peças vai pro .md do Drive (só casos já exportados; nunca lança).
+        export_md_drive.agendar_exportacao(caso_id)
 
 
 @router.post("/casos/{caso_id}/atualizar-metadados", response_model=CasoOut, status_code=status.HTTP_202_ACCEPTED)
@@ -408,6 +448,8 @@ def _executar_reagrupar_em_background(caso_id: uuid.UUID) -> None:
         _forcar_status_erro(caso_id, f"Interrompida por um erro inesperado: {exc}")
     finally:
         db.close()
+        # O que mudou nas peças vai pro .md do Drive (só casos já exportados; nunca lança).
+        export_md_drive.agendar_exportacao(caso_id)
 
 
 @router.post("/casos/{caso_id}/reagrupar", response_model=CasoOut, status_code=status.HTTP_202_ACCEPTED)
@@ -445,6 +487,8 @@ def _executar_recalcular_ids_em_background(caso_id: uuid.UUID) -> None:
         _forcar_status_erro(caso_id, f"Interrompida por um erro inesperado: {exc}")
     finally:
         db.close()
+        # O que mudou nas peças vai pro .md do Drive (só casos já exportados; nunca lança).
+        export_md_drive.agendar_exportacao(caso_id)
 
 
 @router.post("/casos/{caso_id}/recalcular-ids", response_model=CasoOut, status_code=status.HTTP_202_ACCEPTED)
@@ -480,6 +524,8 @@ def _executar_importacao_existentes_em_background(caso_id: uuid.UUID) -> None:
         _forcar_status_erro(caso_id, f"Interrompida por um erro inesperado: {exc}")
     finally:
         db.close()
+        # O que mudou nas peças vai pro .md do Drive (só casos já exportados; nunca lança).
+        export_md_drive.agendar_exportacao(caso_id)
 
 
 @router.post("/casos/{caso_id}/importar-existentes", response_model=CasoOut, status_code=status.HTTP_202_ACCEPTED)
@@ -509,6 +555,8 @@ def _executar_resumir_pendentes_em_background(caso_id: uuid.UUID) -> None:
         _forcar_status_erro(caso_id, f"Interrompida por um erro inesperado: {exc}")
     finally:
         db.close()
+        # O que mudou nas peças vai pro .md do Drive (só casos já exportados; nunca lança).
+        export_md_drive.agendar_exportacao(caso_id)
 
 
 @router.post("/casos/{caso_id}/resumir-pendentes", response_model=CasoOut, status_code=status.HTTP_202_ACCEPTED)
@@ -551,6 +599,8 @@ def _executar_reler_pendentes_em_background(caso_id: uuid.UUID) -> None:
         _forcar_status_erro(caso_id, f"Interrompida por um erro inesperado: {exc}")
     finally:
         db.close()
+        # O que mudou nas peças vai pro .md do Drive (só casos já exportados; nunca lança).
+        export_md_drive.agendar_exportacao(caso_id)
 
 
 @router.post("/casos/{caso_id}/reler-pendentes", response_model=CasoOut, status_code=status.HTTP_202_ACCEPTED)
@@ -659,6 +709,8 @@ def _executar_reclassificacao_em_background(caso_id: uuid.UUID) -> None:
         _forcar_status_erro(caso_id, f"Interrompida por um erro inesperado: {exc}")
     finally:
         db.close()
+        # O que mudou nas peças vai pro .md do Drive (só casos já exportados; nunca lança).
+        export_md_drive.agendar_exportacao(caso_id)
 
 
 @router.post("/casos/{caso_id}/reclassificar", response_model=CasoOut, status_code=status.HTTP_202_ACCEPTED)
@@ -915,6 +967,7 @@ def atualizar_tipo_peca(peca_id: uuid.UUID, data: PecaTipoUpdate, db: Session = 
     peca.tipo = data.tipo
     db.commit()
     db.refresh(peca)
+    export_md_drive.agendar_exportacao(peca.caso_id, [peca.id])
     return peca
 
 
@@ -931,6 +984,7 @@ def atualizar_anotacao_peca(peca_id: uuid.UUID, data: PecaAnotacaoUpdate, db: Se
         setattr(peca, campo, valor)
     db.commit()
     db.refresh(peca)
+    export_md_drive.agendar_exportacao(peca.caso_id, [peca.id])
     return peca
 
 
@@ -1028,12 +1082,15 @@ def _executar_reler_peca_em_background(peca_id: uuid.UUID) -> None:
         peca = db.query(AutosIAPeca).filter(AutosIAPeca.id == peca_id).first()
         if not peca:
             return
+        caso_id = peca.caso_id
         try:
             reler_peca(db, peca)
         except Exception as exc:
             peca.status = "erro"
             peca.erro_mensagem = str(exc)[:2000]
             db.commit()
+        # Texto/resumo novos → atualiza o .md desta peça no Drive (no lugar, sem duplicar).
+        export_md_drive.agendar_exportacao(caso_id, [peca_id])
     finally:
         db.close()
 

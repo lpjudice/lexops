@@ -213,8 +213,9 @@ export interface AdvPessoa {
 }
 
 export interface RelacaoAdvogado extends AdvPessoa {
+  manual: boolean
   total_peticoes: number
-  partes: { chave: string; nome: string; variantes: string[]; peticoes: PeticaoRef[] }[]
+  partes: { chave: string; nome: string; variantes: string[]; principal: boolean; manual: boolean; peticoes: PeticaoRef[] }[]
 }
 
 export interface RelacaoParte {
@@ -222,8 +223,12 @@ export interface RelacaoParte {
   nome: string
   variantes: string[]
   total_peticoes: number
-  advogados: (AdvPessoa & { peticoes: PeticaoRef[] })[]
+  peticoes: PeticaoRef[]
+  advogados: (AdvPessoa & { principal: boolean; sugerido: boolean; manual: boolean; peticoes: PeticaoRef[] })[]
+  removidos: AdvPessoa[]
 }
+
+export type MotivoSemAdvogado = 'sem_texto' | 'texto_incompleto' | 'ministerio_publico' | 'administrador_judicial' | 'sem_oab'
 
 export interface AdvogadosPartes {
   resumo: {
@@ -231,12 +236,13 @@ export interface AdvogadosPartes {
     peticoes_sem_texto: number
     peticoes_com_advogado: number
     peticoes_sem_advogado: number
+    eventos_sem_arquivo: number
     advogados: number
     partes: number
   }
   advogados: RelacaoAdvogado[]
   partes: RelacaoParte[]
-  sem_advogado: { motivo: 'sem_texto' | 'sem_oab'; parte: string | null; peticao: PeticaoRef }[]
+  sem_advogado: { motivo: MotivoSemAdvogado; parte: string | null; assinante: string | null; peticao: PeticaoRef }[]
 }
 
 export interface PastasDrive {
@@ -382,6 +388,21 @@ export const autosIa = {
 
   advogadosPartes: (casoId: string) =>
     api.get<AdvogadosPartes>(`/autos-ia/casos/${casoId}/advogados-partes`).then((r) => r.data),
+
+  renomearAdvogado: (casoId: string, advId: string, nome: string) =>
+    api.post<AdvogadosPartes>(`/autos-ia/casos/${casoId}/advogados-partes/renomear`, { adv_id: advId, nome }).then((r) => r.data),
+
+  adicionarAdvogado: (casoId: string, parteChave: string, nome: string, oab?: string) =>
+    api.post<AdvogadosPartes>(`/autos-ia/casos/${casoId}/advogados-partes/adicionar`, { parte_chave: parteChave, nome, oab: oab || null }).then((r) => r.data),
+
+  definirAdvogadoPrincipal: (casoId: string, parteChave: string, advId: string | null) =>
+    api.post<AdvogadosPartes>(`/autos-ia/casos/${casoId}/advogados-partes/principal`, { parte_chave: parteChave, adv_id: advId }).then((r) => r.data),
+
+  removerAdvogadoDaParte: (casoId: string, parteChave: string, advId: string) =>
+    api.post<AdvogadosPartes>(`/autos-ia/casos/${casoId}/advogados-partes/remover`, { parte_chave: parteChave, adv_id: advId }).then((r) => r.data),
+
+  restaurarAdvogadoDaParte: (casoId: string, parteChave: string, advId: string) =>
+    api.post<AdvogadosPartes>(`/autos-ia/casos/${casoId}/advogados-partes/restaurar`, { parte_chave: parteChave, adv_id: advId }).then((r) => r.data),
 
   pastasDrive: (casoId: string) =>
     api.get<PastasDrive>(`/autos-ia/casos/${casoId}/pastas-drive`).then((r) => r.data),

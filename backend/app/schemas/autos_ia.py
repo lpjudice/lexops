@@ -251,15 +251,21 @@ class ParteDoAdvogadoOut(BaseModel):
     chave: str
     nome: str
     variantes: list[str] = []
+    principal: bool = False        # marcado à mão como o advogado principal desta parte
+    manual: bool = False           # adicionado à mão (sem petição que o ligue a esta parte)
     peticoes: list[PeticaoRefOut]
 
 
 class AdvogadoRelacaoOut(AdvPessoaOut):
+    manual: bool = False
     total_peticoes: int
     partes: list[ParteDoAdvogadoOut]
 
 
 class AdvogadoDaParteOut(AdvPessoaOut):
+    principal: bool = False
+    sugerido: bool = False         # nenhum principal marcado: o de mais petições nesta parte
+    manual: bool = False
     peticoes: list[PeticaoRefOut]
 
 
@@ -268,12 +274,17 @@ class ParteRelacaoOut(BaseModel):
     nome: str
     variantes: list[str] = []
     total_peticoes: int
+    peticoes: list[PeticaoRefOut] = []        # todas as petições da parte, com ou sem advogado
     advogados: list[AdvogadoDaParteOut]
+    removidos: list[AdvPessoaOut] = []        # vínculos removidos à mão (dá para restaurar)
 
 
 class PeticaoSemAdvogadoOut(BaseModel):
-    motivo: Literal["sem_texto", "sem_oab"]   # arquivo não lido | texto sem OAB na assinatura/qualificação
+    # sem_texto: arquivo não lido · texto_incompleto: texto cortado (assinatura ficou de fora) ·
+    # ministerio_publico / administrador_judicial: quem assina não é advogado · sem_oab: sem OAB no texto
+    motivo: Literal["sem_texto", "texto_incompleto", "ministerio_publico", "administrador_judicial", "sem_oab"]
     parte: str | None = None
+    assinante: str | None = None
     peticao: PeticaoRefOut
 
 
@@ -282,8 +293,30 @@ class RelacaoResumoOut(BaseModel):
     peticoes_sem_texto: int
     peticoes_com_advogado: int
     peticoes_sem_advogado: int
+    eventos_sem_arquivo: int = 0   # protocolos "Petição" sem documento — não são a petição em si
     advogados: int
     partes: int
+
+
+class RenomearAdvogadoIn(BaseModel):
+    adv_id: str
+    nome: str
+
+
+class AdicionarAdvogadoIn(BaseModel):
+    parte_chave: str
+    nome: str
+    oab: str | None = None
+
+
+class PrincipalIn(BaseModel):
+    parte_chave: str
+    adv_id: str | None = None      # None = desmarca o principal
+
+
+class VinculoIn(BaseModel):
+    parte_chave: str
+    adv_id: str
 
 
 class AdvogadosPartesOut(BaseModel):

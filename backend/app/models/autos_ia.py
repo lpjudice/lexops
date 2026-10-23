@@ -19,7 +19,7 @@ principal por padrão.
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import ARRAY, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import ARRAY, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -303,6 +303,41 @@ class AutosIAAlertaConfig(Base):
     ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     emails_extras: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
     inicio_alertas_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    atualizado_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class AutosIAAdvogadoNome(Base):
+    """Nome de exibição de um advogado, por OAB ("OAB/ES 4939") — editado à mão; vale em todos os casos."""
+    __tablename__ = "autos_ia_advogados_nomes"
+
+    oab: Mapped[str] = mapped_column(String(40), primary_key=True)
+    nome: Mapped[str] = mapped_column(String(255), nullable=False)
+    atualizado_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class AutosIAParteAdvogado(Base):
+    """Ajuste manual do vínculo advogado ↔ parte num caso: advogado adicionado à mão, qual é o
+    PRINCIPAL da parte e vínculo removido (oculto). `adv_ref` = OAB ("OAB/ES 4939") ou
+    "manual:<uuid>" (advogado sem OAB informada)."""
+    __tablename__ = "autos_ia_parte_advogados"
+    __table_args__ = (UniqueConstraint("caso_id", "parte_chave", "adv_ref", name="uq_autos_ia_parte_adv"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    caso_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("autos_ia_casos.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    parte_chave: Mapped[str] = mapped_column(String(255), nullable=False)
+    adv_ref: Mapped[str] = mapped_column(String(120), nullable=False)
+    nome: Mapped[str | None] = mapped_column(String(255))
+    oab: Mapped[str | None] = mapped_column(String(40))
+    manual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    principal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    oculto: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     atualizado_em: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

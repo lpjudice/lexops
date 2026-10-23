@@ -302,10 +302,15 @@ def links_pastas(db, caso_id: uuid.UUID) -> dict:
     return out
 
 
-def exportar_caso(caso_id: uuid.UUID, limite: int | None = None, forcar: bool = False) -> dict:
+def exportar_caso(
+    caso_id: uuid.UUID, limite: int | None = None, forcar: bool = False,
+    peca_ids: set | None = None, esperar: bool = False,
+) -> dict:
     """Exporta as peças do caso que ainda não estão no Drive ou que mudaram. `limite` corta
-    a quantidade de ENVIOS (para uma amostra); `forcar` reenvia mesmo sem mudança. Nunca lança."""
-    if not _LOCK.acquire(blocking=False):
+    a quantidade de ENVIOS (para uma amostra); `forcar` reenvia mesmo sem mudança; `peca_ids`
+    restringe a essas peças (ex.: uma peça relida); `esperar` aguarda outra exportação em
+    andamento terminar em vez de desistir. Nunca lança."""
+    if not _LOCK.acquire(blocking=esperar, timeout=3600 if esperar else -1):
         return {"estado": "rodando", "mensagem": "Já há uma exportação em andamento."}
     db = SessionLocal()
     try:
@@ -343,8 +348,8 @@ def exportar_caso(caso_id: uuid.UUID, limite: int | None = None, forcar: bool = 
             )
             .all()
         )
-        nomes = _nomes_unicos([tuple(r) for r in linhas])
-        ids = [r[0] for r in linhas]
+        nomes = _nomes_unicos([tuple(r) for r in linhas])   # desempate "(2)" olha TODAS as peças
+        ids = [r[0] for r in linhas if peca_ids is None or r[0] in peca_ids]
         _progresso(caso_id, total=len(ids), mensagem="Enviando…")
 
         enviados_total = falhas_seguidas = 0
@@ -423,10 +428,32 @@ def exportar_caso(caso_id: uuid.UUID, limite: int | None = None, forcar: bool = 
         _LOCK.release()
 
 
-def exportar_pos_sync(caso_id: uuid.UUID) -> None:
-    """Gancho do fim de cada sincronização. Só age em casos que JÁ tiveram a primeira
-    exportação (feita de propósito pelo botão) — nunca escreve no Drive de surpresa — e roda
-    numa thread própria para não segurar o sync seguinte. Nunca lança."""
+_FILA: dict[str, set | None] = {}   # caso_id → ids pendentes (None = o caso inteiro, incremental)
+_FILA_LOCK = threading.Lock()
+_TRABALHADOR_ATIVO = False
+
+
+def _trabalhador() -> None:
+    global _TRABALHADOR_ATIVO
+    while True:
+        with _FILA_LOCK:
+            if not _FILA:
+                _TRABALHADOR_ATIVO = False
+                return
+            chave = next(iter(_FILA))
+            ids = _FILA.pop(chave)
+        try:
+            exportar_caso(uuid.UUID(chave), peca_ids=ids, esperar=True)
+        except Exception:  # noqa: BLE001
+            logger.exception("Export MD (fila) do caso %s falhou", chave)
+
+
+def agendar_exportacao(caso_id: uuid.UUID, peca_ids=None) -> None:
+    """Atualiza o .md no Drive depois de algo que mudou peças (sincronização, reler, resumir,
+    reclassificar, editar anotação…). Só age em casos que JÁ tiveram a primeira exportação
+    (feita de propósito pelo botão) — nunca escreve no Drive de surpresa. Junta pedidos
+    seguidos numa fila e roda numa thread própria, sem segurar quem chamou. Nunca lança."""
+    global _TRABALHADOR_ATIVO
     try:
         with SessionLocal() as db:
             ja_exportou = db.query(AutosIAPeca.id).filter(
@@ -434,6 +461,19 @@ def exportar_pos_sync(caso_id: uuid.UUID) -> None:
             ).first()
         if not ja_exportou:
             return
-        threading.Thread(target=exportar_caso, args=(caso_id,), daemon=True, name=f"export-md-{caso_id}").start()
+        chave = str(caso_id)
+        with _FILA_LOCK:
+            if peca_ids is None or (chave in _FILA and _FILA[chave] is None):
+                _FILA[chave] = None
+            else:
+                _FILA[chave] = (_FILA.get(chave) or set()) | set(peca_ids)
+            if not _TRABALHADOR_ATIVO:
+                _TRABALHADOR_ATIVO = True
+                threading.Thread(target=_trabalhador, daemon=True, name="export-md-fila").start()
     except Exception:  # noqa: BLE001
-        logger.exception("Export MD pós-sync do caso %s falhou ao iniciar", caso_id)
+        logger.exception("Export MD: falha ao agendar o caso %s", caso_id)
+
+
+def exportar_pos_sync(caso_id: uuid.UUID) -> None:
+    """Compat: gancho do fim de cada sincronização (ver agendar_exportacao)."""
+    agendar_exportacao(caso_id)
