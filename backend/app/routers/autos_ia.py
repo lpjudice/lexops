@@ -18,7 +18,7 @@ from app.models.andamento import AndamentoProcesso
 from app.models.autos_ia import AutosIACaso, AutosIADocumento, AutosIAPeca, AutosIAPerguntaFaq, AutosIAReferencia
 from app.schemas.autos_ia import (
     AlertaConfigOut, AlertaConfigUpdate, CasoCreate, CasoOut, CasoResumo, CasoUpdate, DocumentoDriveAnexoOut, DocumentoDriveOut, DocumentoOut,
-    EstimativaImportacaoOut, ExportMdStatusOut, FaqPerguntaCreate, FaqPerguntaOut, GrafoAresta, GrafoNo, GrafoOut, PecaAnotacaoUpdate,
+    EstimativaImportacaoOut, ExportMdStatusOut, FaqPerguntaCreate, PastasDriveOut, FaqPerguntaOut, GrafoAresta, GrafoNo, GrafoOut, PecaAnotacaoUpdate,
     PecaDetalheOut, PecaOut, PecaTipoUpdate,
 )
 from app.services.autos_ia import faq as faq_service
@@ -315,6 +315,12 @@ def sincronizar_agora(caso_id: uuid.UUID, background_tasks: BackgroundTasks, db:
 
 
 # ── Exportação .md (resumo + inteiro teor) para o Drive ──────────────────────
+
+@router.get("/casos/{caso_id}/pastas-drive", response_model=PastasDriveOut)
+def pastas_drive(caso_id: uuid.UUID, db: Session = Depends(get_db)):
+    _get_caso(db, caso_id)
+    return export_md_drive.links_pastas(db, caso_id)
+
 
 @router.get("/casos/{caso_id}/exportar-md-drive", response_model=ExportMdStatusOut)
 def status_exportar_md_drive(caso_id: uuid.UUID, db: Session = Depends(get_db)):

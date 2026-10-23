@@ -231,6 +231,13 @@ class FaqPerguntaOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PastasDriveOut(BaseModel):
+    """Links das pastas do caso no Drive (None = a pasta ainda não existe)."""
+    processo: str | None = None   # pasta do processo — raiz das duas abaixo
+    pdfs: str | None = None       # "Andamentos" (PDFs / peças originais)
+    md: str | None = None         # "Andamentos (MD)" (resumo + inteiro teor)
+
+
 class ExportMdStatusOut(BaseModel):
     """Exportação do resumo + inteiro teor das peças (.md) para o Drive."""
     estado: Literal["ocioso", "rodando", "concluido", "erro"]

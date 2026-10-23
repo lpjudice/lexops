@@ -15,6 +15,14 @@ export default function ExportarMdDrive({ casoId }: { casoId: string }) {
     refetchInterval: (q) => (q.state.data?.estado === 'rodando' ? 3000 : false),
   })
 
+  // Links das pastas (raiz do processo, PDFs e .md). Recarrega ao terminar uma exportação,
+  // porque a pasta "Andamentos (MD)" só passa a existir na primeira.
+  const { data: pastas } = useQuery({
+    queryKey: ['autos-ia', 'pastas-drive', casoId, st?.estado === 'concluido' ? st.exportadas : 0],
+    queryFn: () => autosIa.pastasDrive(casoId),
+    staleTime: 5 * 60 * 1000,
+  })
+
   const exportar = useMutation({
     mutationFn: (opts: { limite?: number; forcar?: boolean }) => autosIa.exportarMdDrive(casoId, opts),
     onSuccess: (r) => qc.setQueryData(chave, r),
@@ -56,13 +64,22 @@ export default function ExportarMdDrive({ casoId }: { casoId: string }) {
       {linha && (
         <span className={st?.estado === 'erro' ? styles.erro : styles.status}>
           {linha}
-          {st?.pasta_link && !rodando && (
-            <>
-              {' · '}
-              <a href={st.pasta_link} target="_blank" rel="noreferrer">abrir pasta ↗</a>
-            </>
-          )}
         </span>
+      )}
+      {pastas?.pdfs && (
+        <a className={styles.pasta} href={pastas.pdfs} target="_blank" rel="noreferrer" title='Pasta "Andamentos" — os PDFs/peças originais no Drive'>
+          📁 PDFs (peças) ↗
+        </a>
+      )}
+      {pastas?.md && (
+        <a className={styles.pasta} href={pastas.md} target="_blank" rel="noreferrer" title='Pasta "Andamentos (MD)" — resumo + inteiro teor de cada peça'>
+          📁 Resumos .md ↗
+        </a>
+      )}
+      {pastas?.processo && (
+        <a className={styles.pasta} href={pastas.processo} target="_blank" rel="noreferrer" title="Pasta do processo no Drive — contém as duas pastas acima">
+          📁 Pasta do processo ↗
+        </a>
       )}
     </>
   )

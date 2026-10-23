@@ -273,6 +273,35 @@ def status_exportacao(db, caso_id: uuid.UUID) -> dict:
     }
 
 
+_CACHE_PASTAS: dict[str, tuple[float, dict]] = {}
+_CACHE_PASTAS_SEGUNDOS = 600
+
+
+def links_pastas(db, caso_id: uuid.UUID) -> dict:
+    """Links das pastas do caso no Drive: do processo (raiz das duas), dos PDFs ("Andamentos")
+    e dos .md ("Andamentos (MD)"). Só devolve pasta que JÁ existe (não cria nada) e guarda
+    o resultado por alguns minutos — são 3 consultas ao Drive."""
+    chave = str(caso_id)
+    hit = _CACHE_PASTAS.get(chave)
+    if hit and time.monotonic() - hit[0] < _CACHE_PASTAS_SEGUNDOS:
+        return hit[1]
+    vazio = {"processo": None, "pdfs": None, "md": None}
+    caso = db.query(AutosIACaso).filter(AutosIACaso.id == caso_id).first()
+    processo = db.query(Processo).filter(Processo.id == caso.processo_id).first() if caso and caso.processo_id else None
+    cliente = db.query(Cliente).filter(Cliente.id == processo.cliente_id).first() if processo else None
+    if not processo or not cliente or not processo.numero_cnj:
+        return vazio
+    nome, cnj = cliente.nome, processo.numero_cnj
+    out = {
+        "processo": gd.find_folder_link(nome, cnj),
+        "pdfs": gd.find_folder_link(nome, cnj, "Andamentos"),
+        "md": gd.find_folder_link(nome, cnj, PASTA_MD),
+    }
+    if any(out.values()):  # não guarda falha total (Drive fora do ar) no cache
+        _CACHE_PASTAS[chave] = (time.monotonic(), out)
+    return out
+
+
 def exportar_caso(caso_id: uuid.UUID, limite: int | None = None, forcar: bool = False) -> dict:
     """Exporta as peças do caso que ainda não estão no Drive ou que mudaram. `limite` corta
     a quantidade de ENVIOS (para uma amostra); `forcar` reenvia mesmo sem mudança. Nunca lança."""

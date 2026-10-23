@@ -197,6 +197,12 @@ export interface ExportMdStatus {
   pasta_link: string | null
 }
 
+export interface PastasDrive {
+  processo: string | null
+  pdfs: string | null
+  md: string | null
+}
+
 export const autosIa = {
   listarCasos: () => api.get<CasoResumo[]>('/autos-ia/casos').then((r) => r.data),
 
@@ -331,6 +337,9 @@ export const autosIa = {
     }>(
       `/autos-ia/casos/${casoId}/alerta-teste`,
     ).then((r) => r.data),
+
+  pastasDrive: (casoId: string) =>
+    api.get<PastasDrive>(`/autos-ia/casos/${casoId}/pastas-drive`).then((r) => r.data),
 
   statusExportMdDrive: (casoId: string) =>
     api.get<ExportMdStatus>(`/autos-ia/casos/${casoId}/exportar-md-drive`).then((r) => r.data),
