@@ -197,6 +197,48 @@ export interface ExportMdStatus {
   pasta_link: string | null
 }
 
+export interface PeticaoRef {
+  peca_id: string
+  id_processual: string | null
+  data: string | null
+  titulo: string
+  link_pdf: string | null
+  link_md: string | null
+}
+
+export interface AdvPessoa {
+  id: string
+  nome: string | null
+  oabs: string[]
+}
+
+export interface RelacaoAdvogado extends AdvPessoa {
+  total_peticoes: number
+  partes: { chave: string; nome: string; variantes: string[]; peticoes: PeticaoRef[] }[]
+}
+
+export interface RelacaoParte {
+  chave: string
+  nome: string
+  variantes: string[]
+  total_peticoes: number
+  advogados: (AdvPessoa & { peticoes: PeticaoRef[] })[]
+}
+
+export interface AdvogadosPartes {
+  resumo: {
+    peticoes_total: number
+    peticoes_sem_texto: number
+    peticoes_com_advogado: number
+    peticoes_sem_advogado: number
+    advogados: number
+    partes: number
+  }
+  advogados: RelacaoAdvogado[]
+  partes: RelacaoParte[]
+  sem_advogado: { motivo: 'sem_texto' | 'sem_oab'; parte: string | null; peticao: PeticaoRef }[]
+}
+
 export interface PastasDrive {
   processo: string | null
   pdfs: string | null
@@ -337,6 +379,9 @@ export const autosIa = {
     }>(
       `/autos-ia/casos/${casoId}/alerta-teste`,
     ).then((r) => r.data),
+
+  advogadosPartes: (casoId: string) =>
+    api.get<AdvogadosPartes>(`/autos-ia/casos/${casoId}/advogados-partes`).then((r) => r.data),
 
   pastasDrive: (casoId: string) =>
     api.get<PastasDrive>(`/autos-ia/casos/${casoId}/pastas-drive`).then((r) => r.data),

@@ -17,13 +17,13 @@ from app.dependencies import get_current_user
 from app.models.andamento import AndamentoProcesso
 from app.models.autos_ia import AutosIACaso, AutosIADocumento, AutosIAPeca, AutosIAPerguntaFaq, AutosIAReferencia
 from app.schemas.autos_ia import (
-    AlertaConfigOut, AlertaConfigUpdate, CasoCreate, CasoOut, CasoResumo, CasoUpdate, DocumentoDriveAnexoOut, DocumentoDriveOut, DocumentoOut,
+    AdvogadosPartesOut, AlertaConfigOut, AlertaConfigUpdate, CasoCreate, CasoOut, CasoResumo, CasoUpdate, DocumentoDriveAnexoOut, DocumentoDriveOut, DocumentoOut,
     EstimativaImportacaoOut, ExportMdStatusOut, FaqPerguntaCreate, PastasDriveOut, FaqPerguntaOut, GrafoAresta, GrafoNo, GrafoOut, PecaAnotacaoUpdate,
     PecaDetalheOut, PecaOut, PecaTipoUpdate,
 )
 from app.services.autos_ia import faq as faq_service
 from app.services.autos_ia.busca import buscar_pecas
-from app.services.autos_ia import export_md_drive
+from app.services.autos_ia import advogados_partes, export_md_drive
 from app.services.autos_ia.estimativa import estimar_importacao_existentes, estimar_reclassificacao
 from app.services.autos_ia.ingestao import processar_documento, reclassificar_caso, retomar_documento
 from app.services.autos_ia.jusbr_import import (
@@ -315,6 +315,13 @@ def sincronizar_agora(caso_id: uuid.UUID, background_tasks: BackgroundTasks, db:
 
 
 # ── Exportação .md (resumo + inteiro teor) para o Drive ──────────────────────
+
+@router.get("/casos/{caso_id}/advogados-partes", response_model=AdvogadosPartesOut)
+def advogados_e_partes(caso_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Relação advogados × partes (só petições): por advogado → partes e por parte → advogados."""
+    _get_caso(db, caso_id)
+    return advogados_partes.montar_relacao(db, caso_id)
+
 
 @router.get("/casos/{caso_id}/pastas-drive", response_model=PastasDriveOut)
 def pastas_drive(caso_id: uuid.UUID, db: Session = Depends(get_db)):

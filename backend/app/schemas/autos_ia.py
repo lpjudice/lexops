@@ -231,6 +231,68 @@ class FaqPerguntaOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PeticaoRefOut(BaseModel):
+    """Referência a uma petição: o ID processual leva ao PDF (ou, sem PDF, ao .md) no Drive."""
+    peca_id: uuid.UUID
+    id_processual: str | None = None
+    data: date | None = None
+    titulo: str
+    link_pdf: str | None = None
+    link_md: str | None = None
+
+
+class AdvPessoaOut(BaseModel):
+    id: str                       # OAB "cabeça" da pessoa (chave estável)
+    nome: str | None = None
+    oabs: list[str]
+
+
+class ParteDoAdvogadoOut(BaseModel):
+    chave: str
+    nome: str
+    variantes: list[str] = []
+    peticoes: list[PeticaoRefOut]
+
+
+class AdvogadoRelacaoOut(AdvPessoaOut):
+    total_peticoes: int
+    partes: list[ParteDoAdvogadoOut]
+
+
+class AdvogadoDaParteOut(AdvPessoaOut):
+    peticoes: list[PeticaoRefOut]
+
+
+class ParteRelacaoOut(BaseModel):
+    chave: str
+    nome: str
+    variantes: list[str] = []
+    total_peticoes: int
+    advogados: list[AdvogadoDaParteOut]
+
+
+class PeticaoSemAdvogadoOut(BaseModel):
+    motivo: Literal["sem_texto", "sem_oab"]   # arquivo não lido | texto sem OAB na assinatura/qualificação
+    parte: str | None = None
+    peticao: PeticaoRefOut
+
+
+class RelacaoResumoOut(BaseModel):
+    peticoes_total: int
+    peticoes_sem_texto: int
+    peticoes_com_advogado: int
+    peticoes_sem_advogado: int
+    advogados: int
+    partes: int
+
+
+class AdvogadosPartesOut(BaseModel):
+    resumo: RelacaoResumoOut
+    advogados: list[AdvogadoRelacaoOut]
+    partes: list[ParteRelacaoOut]
+    sem_advogado: list[PeticaoSemAdvogadoOut]
+
+
 class PastasDriveOut(BaseModel):
     """Links das pastas do caso no Drive (None = a pasta ainda não existe)."""
     processo: str | None = None   # pasta do processo — raiz das duas abaixo
