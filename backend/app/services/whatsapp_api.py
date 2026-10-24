@@ -57,11 +57,14 @@ def send_template_message(
     template_name: str,
     language_code: str = "pt_BR",
     parametros: dict[str, str] | None = None,
+    botao_url_param: str | None = None,
 ) -> dict | None:
     """Envia mensagem de template aprovado (categoria Utility/Marketing/Auth).
     `parametros` preenche as variáveis nomeadas do corpo (ex.: {{cliente_nome}}) —
     esta conta usa a experiência de templates com parâmetros nomeados da Meta,
-    não a posicional ({{1}}, {{2}})."""
+    não a posicional ({{1}}, {{2}}).
+    `botao_url_param` preenche o sufixo {{1}} do botão de link (único botão do
+    template): a Meta sempre usa posicional pra botão, mesmo em template nomeado."""
     numero = normalizar_telefone(to)
     if not numero:
         return None
@@ -73,6 +76,13 @@ def send_template_message(
                 {"type": "text", "parameter_name": nome, "text": valor}
                 for nome, valor in parametros.items()
             ],
+        })
+    if botao_url_param:
+        components.append({
+            "type": "button",
+            "sub_type": "url",
+            "index": "0",
+            "parameters": [{"type": "text", "text": botao_url_param}],
         })
     payload: dict[str, Any] = {
         "messaging_product": "whatsapp",

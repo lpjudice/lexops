@@ -14,6 +14,7 @@ from app.schemas.contrato import (
     SignatarioCreate, SignatarioOut,
 )
 from app.services import clicksign
+from app.services.contrato_whatsapp import avisar_assinatura_pendente
 
 UPLOADS_DIR = Path("/app/uploads/contratos")
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
@@ -1064,7 +1065,9 @@ def lembrar_signatario(contrato_id: uuid.UUID, sig_id: uuid.UUID, db: Session = 
         raise HTTPException(status_code=400, detail="Este signatário ainda não foi enviado para assinatura.")
     if not clicksign.notificar_signatario(sig.clicksign_request_key):
         raise HTTPException(status_code=502, detail="Falha ao enviar lembrete pelo ClickSign.")
-    return {"ok": True}
+    # `whatsapp`: None = signatário sem número; True/False = aviso aceito/recusado pela Meta.
+    whatsapp = avisar_assinatura_pendente(sig, sig.contrato) if sig.whatsapp else None
+    return {"ok": True, "whatsapp": whatsapp}
 
 
 # ── Envio para ClickSign ──────────────────────────────────────────────────────
@@ -1144,6 +1147,7 @@ def enviar_para_assinatura(contrato_id: uuid.UUID, db: Session = Depends(get_db)
                 sig.clicksign_request_key = req_key          # armazena por signatário
                 c.clicksign_request_signature_key = req_key
                 clicksign.notificar_signatario(req_key)      # dispara email de convite
+                avisar_assinatura_pendente(sig, c)           # + WhatsApp, só se tiver número (nunca levanta)
             sig.clicksign_erro = None
         except Exception as e:
             msg = str(e)[:500]

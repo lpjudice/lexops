@@ -17,6 +17,7 @@ class SignatarioCreate(BaseModel):
     papel: PapelSignatario = "outro"
     cpf: str | None = None
     data_nascimento: date | None = None
+    whatsapp: str | None = None
 
 
 class SignatarioOut(SignatarioCreate):

@@ -105,6 +105,9 @@ class Signatario(Base):
     # Opcionais — ajudam o ClickSign a pré-preencher os dados na hora de assinar.
     cpf: Mapped[str | None] = mapped_column(String(18))
     data_nascimento: Mapped[date | None] = mapped_column(Date)
+    # Preenchido = opt-in pro aviso de assinatura por WhatsApp (template
+    # `assinatura_pendente`), além do e-mail do ClickSign. Vazio = só e-mail.
+    whatsapp: Mapped[str | None] = mapped_column(String(30))
 
     # ClickSign
     clicksign_signer_key: Mapped[str | None] = mapped_column(String(255))

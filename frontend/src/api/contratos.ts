@@ -15,6 +15,7 @@ export interface Signatario {
   papel: PapelSignatario
   cpf?: string | null
   data_nascimento?: string | null
+  whatsapp?: string | null
   clicksign_signer_key?: string
   clicksign_erro?: string | null
   status_assinatura: StatusAssinatura
@@ -152,6 +153,7 @@ export interface SignatarioCreate {
   papel: PapelSignatario
   cpf?: string
   data_nascimento?: string
+  whatsapp?: string
 }
 
 export const contratosApi = {
@@ -198,8 +200,9 @@ export const contratosApi = {
   removerSignatario: (contratoId: string, sigId: string) =>
     api.delete(`/contratos/${contratoId}/signatarios/${sigId}`),
 
+  // whatsapp: null = signatário sem número; true/false = aviso aceito/recusado pela Meta
   lembrarSignatario: (contratoId: string, sigId: string) =>
-    api.post(`/contratos/${contratoId}/signatarios/${sigId}/lembrar`).then((r) => r.data),
+    api.post<{ ok: boolean; whatsapp: boolean | null }>(`/contratos/${contratoId}/signatarios/${sigId}/lembrar`).then((r) => r.data),
 
   enviar: (id: string) =>
     api.post<Contrato>(`/contratos/${id}/enviar`).then((r) => r.data),

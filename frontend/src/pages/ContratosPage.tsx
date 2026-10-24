@@ -11,6 +11,7 @@ import ContratoResponsaveisEscopo from '../components/ContratoResponsaveisEscopo
 import EscopoEditor from '../components/EscopoEditor'
 import ResponsaveisMulti from '../components/ResponsaveisMulti'
 import CurrencyInput, { formatBRL } from '../components/CurrencyInput'
+import { maskTelefone } from '../utils/masks'
 import styles from './Page.module.css'
 import cs from './ContratosPage.module.css'
 
@@ -294,7 +295,11 @@ export default function ContratosPage() {
   const lembrarSig = useMutation({
     mutationFn: ({ cid, sid }: { cid: string; sid: string }) =>
       contratosApi.lembrarSignatario(cid, sid),
-    onSuccess: () => alert('Lembrete enviado.'),
+    onSuccess: (r) => alert(
+      r.whatsapp === true ? 'Lembrete enviado por e-mail e WhatsApp.'
+      : r.whatsapp === false ? 'Lembrete enviado por e-mail. O aviso por WhatsApp não foi aceito pela Meta (veja os logs).'
+      : 'Lembrete enviado por e-mail.'
+    ),
     onError: (e: any) => alert(`Erro ao enviar lembrete:\n${e?.response?.data?.detail || e?.message || 'Erro desconhecido'}`),
   })
 
@@ -451,7 +456,7 @@ export default function ContratosPage() {
     if (!cliente?.email) return
     adicionarSig.mutate({
       id: cid,
-      data: { nome: cliente.nome, email: cliente.email, papel: 'contratante' },
+      data: { nome: cliente.nome, email: cliente.email, papel: 'contratante', whatsapp: cliente.whatsapp || undefined },
     })
   }
 
@@ -1277,13 +1282,14 @@ export default function ContratosPage() {
                       {c.signatarios.length > 0 && (
                         <table className={cs.sigTable}>
                           <thead>
-                            <tr><th>Nome</th><th>Email</th><th>Papel</th><th>Status</th><th></th></tr>
+                            <tr><th>Nome</th><th>Email</th><th>WhatsApp</th><th>Papel</th><th>Status</th><th></th></tr>
                           </thead>
                           <tbody>
                             {c.signatarios.map((s) => (
                               <tr key={s.id}>
                                 <td>{s.nome}</td>
                                 <td>{s.email}</td>
+                                <td>{s.whatsapp || '—'}</td>
                                 <td>{PAPEL_LABEL[s.papel as PapelSignatario] || s.papel}</td>
                                 <td>
                                   {s.clicksign_erro ? (
@@ -1332,6 +1338,9 @@ export default function ContratosPage() {
                             onChange={(e) => setSigForms({ ...sigForms, [c.id]: { ...sf, papel: e.target.value as PapelSignatario } })}>
                             {PAPEIS.map((p) => <option key={p} value={p}>{PAPEL_LABEL[p]}</option>)}
                           </select>
+                          <input className={styles.input} placeholder="WhatsApp (opcional — avisa também por WhatsApp)"
+                            value={sf.whatsapp ?? ''}
+                            onChange={(e) => setSigForms({ ...sigForms, [c.id]: { ...sf, whatsapp: maskTelefone(e.target.value) } })} />
                           <input className={styles.input} placeholder="CPF (opcional)"
                             value={sf.cpf ?? ''}
                             onChange={(e) => setSigForms({ ...sigForms, [c.id]: { ...sf, cpf: maskCPFCNPJ(e.target.value) } })} />
@@ -1343,7 +1352,7 @@ export default function ContratosPage() {
                             title={sf.nome && !nomeCompletoValido(sf.nome) ? 'O ClickSign exige nome e sobrenome — só um nome não é aceito' : undefined}
                             onClick={() => adicionarSig.mutate({
                               id: c.id,
-                              data: { ...sf, cpf: sf.cpf?.trim() || undefined, data_nascimento: sf.data_nascimento?.trim() || undefined },
+                              data: { ...sf, cpf: sf.cpf?.trim() || undefined, data_nascimento: sf.data_nascimento?.trim() || undefined, whatsapp: sf.whatsapp?.trim() || undefined },
                             })}>
                             + Adicionar
                           </button>

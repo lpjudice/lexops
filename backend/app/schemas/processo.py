@@ -67,6 +67,9 @@ class ProcessoBase(BaseModel):
     rito: RitoProcesso = "comum"
     # Push diário do @jusbr_andamentos_bot — pode silenciar por processo.
     notificar_telegram: bool = True
+    # Opt-in por processo do template `andamento_novo` (WhatsApp ao CLIENTE) —
+    # desligado por padrão: cada mensagem é cobrada pela Meta.
+    notificar_whatsapp: bool = False
 
 
 class ProcessoCreate(ProcessoBase):
@@ -93,6 +96,7 @@ class ProcessoUpdate(BaseModel):
     grau_texto: str | None = None
     rito: RitoProcesso | None = None
     notificar_telegram: bool | None = None
+    notificar_whatsapp: bool | None = None
     clientes_litisconsorcio: list[ProcessoClienteIn] | None = None
 
 
