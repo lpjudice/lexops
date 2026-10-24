@@ -4,10 +4,10 @@ Quando o assistente do WhatsApp percebe que o cliente precisa do advogado (anál
 jurídica, pedido pra falar com alguém, assunto fora do que ele enxerga, financeiro),
 em vez de prometer algo que ninguém cumpre, o sistema AVISA a equipe de verdade:
 
-  - quem recebe: SÓ os responsáveis que alguém indicou no cliente (Cliente.responsaveis_ids)
-    + sempre a cópia obrigatória do escritório. Não herda os responsáveis dos contratos:
-    eles existem pra outro fim (aviso de contrato novo) e receber recado de cliente que
-    ninguém atribuiu a eles pegava a equipe de surpresa;
+  - quem recebe: os responsáveis do CLIENTE (Cliente.responsaveis_ids) + sempre a cópia
+    obrigatória do escritório. A lista do cliente é alimentada também pelos responsáveis
+    escolhidos nos contratos/procurações (ver cliente_responsaveis.py), e o usuário edita
+    direto na página do cliente — não há leitura "escondida" dos contratos aqui;
   - por onde: e-mail SEMPRE; Telegram também, pra quem tiver o Telegram vinculado;
   - fica registrado em `whatsapp_recados`, com o resultado de cada canal.
 

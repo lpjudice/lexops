@@ -146,6 +146,8 @@ def criar_contrato(
 ):
     contrato = Contrato(**data.model_dump())
     db.add(contrato)
+    from app.services.cliente_responsaveis import carregar_responsaveis_do_contrato
+    carregar_responsaveis_do_contrato(db, contrato)  # responsável do contrato/procuração vira responsável do cliente
     db.commit()
     db.refresh(contrato)
     if contrato.responsaveis_ids:
@@ -275,8 +277,12 @@ def atualizar_contrato(
     c = db.query(Contrato).filter(Contrato.id == contrato_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Contrato não encontrado")
-    for field, value in data.model_dump(exclude_unset=True).items():
+    campos_contrato = data.model_dump(exclude_unset=True)
+    for field, value in campos_contrato.items():
         setattr(c, field, value)
+    if "responsaveis_ids" in campos_contrato:
+        from app.services.cliente_responsaveis import carregar_responsaveis_do_contrato
+        carregar_responsaveis_do_contrato(db, c)
     db.commit()
     db.refresh(c)
     return c

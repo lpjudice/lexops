@@ -284,7 +284,7 @@ export default function ClienteDetailPage() {
           </div>
           <div style={{ marginTop: 8, maxWidth: 520 }}>
             <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}
-              title="Recebem (por e-mail e, se vinculado, Telegram) os recados que o assistente de WhatsApp repassa quando este cliente precisa do advogado. Se ninguém for indicado aqui, só a cópia obrigatória do escritório (pj@) recebe.">
+              title="Recebem (por e-mail e, se vinculado, Telegram) os recados que o assistente de WhatsApp repassa quando este cliente precisa do advogado. Quem for escolhido como responsável num contrato ou procuração deste cliente entra aqui automaticamente (e você pode ajustar). Se ficar vazio, só a cópia obrigatória do escritório (pj@) recebe.">
               Responsáveis pelo cliente
             </div>
             <ResponsaveisMulti value={cliente.responsaveis_ids ?? []} onChange={(ids) => salvarResponsaveis.mutate(ids)} />

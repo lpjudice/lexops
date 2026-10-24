@@ -246,6 +246,9 @@ export default function ContratosPage() {
     mutationFn: contratosApi.criar,
     onSuccess: (novo) => {
       qc.invalidateQueries({ queryKey: ['contratos'] })
+      // responsáveis do contrato/procuração também entram no cadastro do cliente
+      qc.invalidateQueries({ queryKey: ['clientes'] })
+      qc.invalidateQueries({ queryKey: ['cliente'] })
       setShowForm(false)
       setForm(EMPTY_CONTRATO)
       setExpandido(novo.id)
