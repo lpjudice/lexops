@@ -9,6 +9,8 @@ sistema e direciona qualquer outra coisa para o escritório.
 O que o bot enxerga (e SÓ isso): processos ATIVOS do cliente identificado —
 como cliente principal ou como litisconsorte — e os últimos andamentos de cada
 um. Não acessa financeiro, contratos, documentos nem processos de outro cliente.
+DECISÃO DO LUCAS (25/10/2026): o bot NUNCA terá acesso a financeiro — não adicionar consultas a
+Honorario/Parcela/Recebivel aqui, nem no contexto do modelo, sob nenhum pretexto.
 """
 from __future__ import annotations
 

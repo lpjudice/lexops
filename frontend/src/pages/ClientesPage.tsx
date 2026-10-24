@@ -7,6 +7,7 @@ import CadastrosPendentes from '../components/CadastrosPendentes'
 import DuplicatasClientes from '../components/DuplicatasClientes'
 import EnviarLinkModal from '../components/EnviarLinkModal'
 import ConfirmarWhatsappModal from '../components/ConfirmarWhatsappModal'
+import WhatsappBadge from '../components/WhatsappBadge'
 import VinculosEditor, { ClienteVinculos } from '../components/VinculosEditor'
 import {
   applyDocMask, brParaIso, buscarCep, ESTADO_CIVIL_OPCOES, isoParaBr,
@@ -199,7 +200,7 @@ export default function ClientesPage() {
                     </span>
                   )}
                   {c.email && <span className={cs.meta}>✉ {c.email}</span>}
-                  {c.telefone && <span className={cs.meta}>☏ {c.telefone}</span>}
+                  {c.telefone && <span className={cs.meta}>☏ {c.telefone} <WhatsappBadge cliente={c} /></span>}
                 </div>
                 <div className={cs.cardActions}>
                   <button

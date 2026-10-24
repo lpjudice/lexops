@@ -1,3 +1,4 @@
+import WhatsappBadge from '../components/WhatsappBadge'
 import { useRef, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -264,7 +265,7 @@ export default function ClienteDetailPage() {
             {cliente.nome_fantasia && <span>🏷️ {cliente.nome_fantasia}</span>}
             {cliente.cpf_cnpj && <span>{cliente.cpf_cnpj}</span>}
             {cliente.email && <span>✉️ {cliente.email}</span>}
-            {cliente.telefone && <span>📞 {cliente.telefone}</span>}
+            {cliente.telefone && <span>📞 {cliente.telefone} <WhatsappBadge cliente={cliente} interativo /></span>}
             {cliente.whatsapp && <span>📱 {cliente.whatsapp}</span>}
             {(cliente.cidade || cliente.uf) && (
               <span>📍 {[cliente.cidade, cliente.uf].filter(Boolean).join('/')}</span>

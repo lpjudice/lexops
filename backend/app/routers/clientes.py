@@ -236,8 +236,14 @@ def atualizar_cliente(
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
     nome_antigo = cliente.nome
-    for field, value in data.model_dump(exclude_unset=True).items():
+    telefone_antigo = (cliente.telefone or "").strip()
+    campos = data.model_dump(exclude_unset=True)
+    for field, value in campos.items():
         setattr(cliente, field, value)
+    # "Este telefone é WhatsApp?" foi respondido pro número ANTIGO: se o telefone mudou
+    # (e a resposta não veio junto), volta a ficar sem confirmação.
+    if "telefone" in campos and (campos["telefone"] or "").strip() != telefone_antigo and "telefone_whatsapp" not in campos:
+        cliente.telefone_whatsapp = None
     # Atualiza projeto se nome mudou
     if data.nome:
         cliente.projeto_nome, cliente.worktree_nome = _gerar_projeto(data.nome)
