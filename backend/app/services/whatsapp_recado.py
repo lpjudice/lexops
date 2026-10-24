@@ -121,11 +121,17 @@ def repassar_recado(
         status_email = f"erro: {str(exc)[:200]}"
     resultado.append({"destinatario": ", ".join([para] + cc), "email": status_email, "telegram": "-"})
 
-    # Telegram: DM pra cada pessoa com o Telegram vinculado.
+    # Telegram: DM pra cada pessoa com o Telegram vinculado. A mesma pessoa pode ter dois
+    # cadastros de responsável (ex.: pj@ e Gmail) vinculados ao MESMO chat: manda uma vez só.
+    chats_ja_avisados: set[str] = set()
     for r in pessoas:
         if not r.telegram_chat_id:
             resultado.append({"destinatario": r.nome, "email": "-", "telegram": "nao_vinculado"})
             continue
+        if r.telegram_chat_id in chats_ja_avisados:
+            resultado.append({"destinatario": r.nome, "email": "-", "telegram": "mesmo_chat"})
+            continue
+        chats_ja_avisados.add(r.telegram_chat_id)
         try:
             ok = telegram_api.send_message_html(r.telegram_chat_id, corpo_tg)
         except Exception:
