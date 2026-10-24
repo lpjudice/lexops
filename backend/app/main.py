@@ -22,6 +22,7 @@ from app.models import processo_telegram_extra as _processo_telegram_extra_model
 from app.models import processo_parte as _processo_parte_model  # noqa: F401
 from app.models import andamento_telegram_extra as _andamento_telegram_extra_model  # noqa: F401
 from app.models import nota_fiscal as _nota_fiscal_model  # noqa: F401
+from app.models import whatsapp_optout as _whatsapp_optout_model  # noqa: F401 — WhatsappOptOut
 from app.models import config_fiscal as _config_fiscal_model  # noqa: F401
 from app.models import relatorio_fiscal_log as _relatorio_fiscal_log_model  # noqa: F401
 from app.models import telegram_task as _telegram_task_model  # noqa: F401 — TelegramTaskBatch/Item/Session
@@ -1272,6 +1273,18 @@ def _run_migrations() -> None:
         conn.execute(text(
             "ALTER TABLE signatarios ADD COLUMN IF NOT EXISTS assinar_via_whatsapp BOOLEAN NOT NULL DEFAULT false"
         ))
+        for _ddl in (
+            "ALTER TABLE conselho_contatos ADD COLUMN IF NOT EXISTS whatsapp_optin BOOLEAN NOT NULL DEFAULT false",
+            "ALTER TABLE conselho_contatos ADD COLUMN IF NOT EXISTS whatsapp_optin_em TIMESTAMPTZ",
+            "ALTER TABLE conselho_evento_convidados ADD COLUMN IF NOT EXISTS convite_whatsapp_em TIMESTAMPTZ",
+            "ALTER TABLE conselho_evento_convidados ADD COLUMN IF NOT EXISTS convite_whatsapp_msg_id VARCHAR(120)",
+            "ALTER TABLE conselho_evento_convidados ADD COLUMN IF NOT EXISTS convite_whatsapp_status VARCHAR(20)",
+            "ALTER TABLE conselho_evento_convidados ADD COLUMN IF NOT EXISTS convite_whatsapp_erro TEXT",
+            "ALTER TABLE informativo_assinantes ADD COLUMN IF NOT EXISTS whatsapp VARCHAR(30)",
+            "ALTER TABLE informativo_assinantes ADD COLUMN IF NOT EXISTS whatsapp_optin BOOLEAN NOT NULL DEFAULT false",
+            "ALTER TABLE informativo_assinantes ADD COLUMN IF NOT EXISTS whatsapp_optin_em TIMESTAMPTZ",
+        ):
+            conn.execute(text(_ddl))
 
         conn.execute(text(
             "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS vinculo_confirmado BOOLEAN NOT NULL DEFAULT false"

@@ -66,6 +66,7 @@ def listar_assinantes(db: Session = Depends(get_db)):
     return [
         {
             "id": str(a.id), "email": a.email, "nome": a.nome, "ativo": a.ativo,
+            "whatsapp": a.whatsapp, "whatsapp_optin": a.whatsapp_optin,
             "created_at": a.created_at.isoformat(), "fonte": a.fonte,
             "criado_por": nomes_usuario.get(a.criado_por_usuario_id) if a.criado_por_usuario_id else None,
         }

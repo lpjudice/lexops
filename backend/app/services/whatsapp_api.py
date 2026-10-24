@@ -58,13 +58,16 @@ def send_template_message(
     language_code: str = "pt_BR",
     parametros: dict[str, str] | None = None,
     botao_url_param: str | None = None,
+    botoes_resposta_payload: list[str] | None = None,
 ) -> dict | None:
     """Envia mensagem de template aprovado (categoria Utility/Marketing/Auth).
     `parametros` preenche as variáveis nomeadas do corpo (ex.: {{cliente_nome}}) —
     esta conta usa a experiência de templates com parâmetros nomeados da Meta,
     não a posicional ({{1}}, {{2}}).
     `botao_url_param` preenche o sufixo {{1}} do botão de link (único botão do
-    template): a Meta sempre usa posicional pra botão, mesmo em template nomeado."""
+    template): a Meta sempre usa posicional pra botão, mesmo em template nomeado.
+    `botoes_resposta_payload`: um payload por botão de resposta rápida, na ordem em que
+    foram criados no template — voltam no webhook (type="button") quando a pessoa toca."""
     numero = normalizar_telefone(to)
     if not numero:
         return None
@@ -83,6 +86,13 @@ def send_template_message(
             "sub_type": "url",
             "index": "0",
             "parameters": [{"type": "text", "text": botao_url_param}],
+        })
+    for i, payload_botao in enumerate(botoes_resposta_payload or []):
+        components.append({
+            "type": "button",
+            "sub_type": "quick_reply",
+            "index": str(i),
+            "parameters": [{"type": "payload", "payload": payload_botao}],
         })
     payload: dict[str, Any] = {
         "messaging_product": "whatsapp",
@@ -133,3 +143,11 @@ def verify_signature(raw_body: bytes, signature_header: str | None) -> bool:
     ).hexdigest()
     recebido = signature_header.split("=", 1)[1]
     return hmac.compare_digest(expected, recebido)
+
+
+def id_da_mensagem(resultado: dict | None) -> str | None:
+    """wamid da mensagem aceita pela Meta (resposta de /messages), ou None."""
+    try:
+        return (resultado or {}).get("messages", [{}])[0].get("id")
+    except (AttributeError, IndexError, TypeError):
+        return None
