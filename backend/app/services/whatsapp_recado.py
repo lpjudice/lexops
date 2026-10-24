@@ -4,8 +4,10 @@ Quando o assistente do WhatsApp percebe que o cliente precisa do advogado (anál
 jurídica, pedido pra falar com alguém, assunto fora do que ele enxerga, financeiro),
 em vez de prometer algo que ninguém cumpre, o sistema AVISA a equipe de verdade:
 
-  - quem recebe: os responsáveis do cliente (campo Cliente.responsaveis_ids; se vazio,
-    os responsáveis dos contratos dele) + sempre a cópia obrigatória do escritório;
+  - quem recebe: SÓ os responsáveis que alguém indicou no cliente (Cliente.responsaveis_ids)
+    + sempre a cópia obrigatória do escritório. Não herda os responsáveis dos contratos:
+    eles existem pra outro fim (aviso de contrato novo) e receber recado de cliente que
+    ninguém atribuiu a eles pegava a equipe de surpresa;
   - por onde: e-mail SEMPRE; Telegram também, pra quem tiver o Telegram vinculado;
   - fica registrado em `whatsapp_recados`, com o resultado de cada canal.
 
@@ -23,7 +25,6 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.cliente import Cliente
-from app.models.contrato import Contrato
 from app.models.responsavel import Responsavel
 from app.models.whatsapp_bot import WhatsappRecado
 
@@ -55,12 +56,8 @@ def _ids_validos(brutos) -> list[uuid.UUID]:
 
 
 def responsaveis_do_cliente(db: Session, cliente: Cliente) -> list[Responsavel]:
-    """Responsáveis ativos do cliente (campo próprio primeiro; depois os dos contratos)."""
+    """Responsáveis ativos indicados no cliente (vazio = só a cópia obrigatória recebe)."""
     ids = _ids_validos(cliente.responsaveis_ids)
-    for (rids,) in db.query(Contrato.responsaveis_ids).filter(Contrato.cliente_id == cliente.id).all():
-        for u in _ids_validos(rids):
-            if u not in ids:
-                ids.append(u)
     if not ids:
         return []
     por_id = {r.id: r for r in db.query(Responsavel).filter(Responsavel.id.in_(ids), Responsavel.ativo.is_(True)).all()}
