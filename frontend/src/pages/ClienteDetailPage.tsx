@@ -1,4 +1,5 @@
 import WhatsappBadge from '../components/WhatsappBadge'
+import ResponsaveisMulti from '../components/ResponsaveisMulti'
 import { useRef, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -218,6 +219,11 @@ export default function ClienteDetailPage() {
     },
   })
 
+  const salvarResponsaveis = useMutation({
+    mutationFn: (ids: string[]) => clientesApi.atualizar(id!, { responsaveis_ids: ids }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['cliente', id] }),
+  })
+
   const atualizarCliente = useMutation({
     mutationFn: (data: { email?: string }) => clientesApi.atualizar(id!, data),
     onSuccess: () => {
@@ -275,6 +281,13 @@ export default function ClienteDetailPage() {
                 autocadastro
               </span>
             )}
+          </div>
+          <div style={{ marginTop: 8, maxWidth: 520 }}>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}
+              title="Recebem (por e-mail e, se vinculado, Telegram) os recados que o assistente de WhatsApp repassa quando este cliente precisa do advogado. A cópia obrigatória do escritório sempre recebe.">
+              Responsáveis pelo cliente
+            </div>
+            <ResponsaveisMulti value={cliente.responsaveis_ids ?? []} onChange={(ids) => salvarResponsaveis.mutate(ids)} />
           </div>
         </div>
       </div>

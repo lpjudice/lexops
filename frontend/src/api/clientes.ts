@@ -6,6 +6,8 @@ export interface ClienteCadastroFields {
   whatsapp?: string
   // Resposta a "este telefone é WhatsApp?" (null/undefined = ainda não perguntado)
   telefone_whatsapp?: boolean | null
+  // Equipe responsável por este cliente (ids de Responsavel) — recebe os recados do assistente de WhatsApp
+  responsaveis_ids?: string[]
   // Endereço estruturado
   cep?: string
   logradouro?: string

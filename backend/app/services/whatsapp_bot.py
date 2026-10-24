@@ -27,6 +27,7 @@ from app.models.andamento import AndamentoProcesso
 from app.models.cliente import Cliente
 from app.models.processo import Processo, processo_clientes
 from app.models.whatsapp_bot import WhatsappBotMensagem
+from app.services import whatsapp_recado
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,20 @@ _MEMORIA_RETENCAO = timedelta(hours=24)
 
 # Número CNJ com ou sem pontuação: NNNNNNN-DD.AAAA.J.TR.OOOO (20 dígitos)
 _RE_CNJ = re.compile(r"\d{7}-?\d{2}\.?\d{4}\.?\d\.?\d{2}\.?\d{4}")
+# Sinal que o modelo escreve quando o caso é de recado pro advogado: [[RECADO: resumo]]
+_RE_RECADO = re.compile(r"\[\[\s*RECADO\s*:?(.*?)\]\]", re.S | re.I)
+
+_MSG_RECADO_OK = (
+    "Passei seu recado ao advogado responsável, que retornará assim que possível. "
+    "Se for urgente, ligue (27) 3345-5501."
+)
+_MSG_RECADO_JA_REPASSADO = (
+    "Seu recado já foi repassado ao advogado responsável. Se for urgente, ligue (27) 3345-5501."
+)
+_MSG_RECADO_FALHOU = (
+    "No momento não consegui repassar seu recado. Por favor, fale com o escritório: "
+    "telefone (27) 3345-5501 ou e-mail pj@pimentajudice.com.br."
+)
 
 
 def _apenas_digitos(numero: str) -> str:
@@ -157,12 +172,12 @@ _SYSTEM_PROMPT = """Você é o assistente automático de WhatsApp do escritório
 Responda SOMENTE com base nos andamentos listados abaixo — não invente informação
 nem opine sobre estratégia, prazo, chance de êxito ou qualquer aconselhamento jurídico.
 Se a pergunta for sobre status/andamento do processo, responda de forma objetiva e curta.
-Se a pergunta exigir análise jurídica, interpretação de decisão, ou qualquer coisa fora do
-que está listado, diga que isso precisa ser tratado diretamente com o escritório — telefone
-(27) 3345-5501 ou e-mail pj@pimentajudice.com.br — e não tente responder. NUNCA prometa
-"anotar", "encaminhar" ou que alguém vai entrar em contato: você não consegue acionar ninguém.
-Você não tem acesso a informações financeiras, contratos nem documentos: se perguntarem,
-diga que isso é tratado direto com o escritório, com o mesmo telefone e e-mail.
+Quando o cliente precisar do advogado — análise jurídica, interpretação de decisão, pedido para
+falar com alguém, dúvida sobre valores/honorários/contratos/documentos (você não tem acesso a
+financeiro, contratos nem documentos) ou qualquer coisa fora do que está listado — NÃO tente
+responder: escreva SOMENTE uma linha no formato [[RECADO: resumo curto do que o cliente precisa]].
+O sistema repassa o recado à equipe e responde ao cliente por você; por isso não escreva
+promessas, telefones nem despedidas nessa resposta.
 Nunca mencione que você é uma IA/modelo de linguagem; apresente-se como "assistente do escritório".
 Respostas curtas (mensagem de WhatsApp), sem markdown.
 
@@ -229,6 +244,24 @@ def responder_mensagem(telefone: str, texto: str) -> str:
         blocos_texto = [b.text for b in resposta.content if getattr(b, "type", None) == "text"]
         # WhatsApp usa *negrito* com um asterisco; o modelo às vezes manda **markdown**.
         final = ("\n".join(blocos_texto).strip() or _MSG_SEM_PROCESSO).replace("**", "*")
+        marca = _RE_RECADO.search(final)
+        if marca:
+            # Caso de recado: a resposta ao cliente é decidida pelo SISTEMA (só diz "passei" se
+            # um canal realmente avisou a equipe); o texto do modelo é descartado.
+            resumo = marca.group(1).strip()[:500]
+            if whatsapp_recado.recados_na_ultima_hora(db, cliente.id) >= whatsapp_recado.LIMITE_RECADOS_POR_HORA:
+                final = _MSG_RECADO_JA_REPASSADO
+            else:
+                cnj = next((_formatar_cnj(c) for c in citados if c in meus), None)
+                try:
+                    ok = whatsapp_recado.repassar_recado(db, cliente, telefone, texto, resumo, cnj)
+                except Exception:
+                    db.rollback()
+                    logger.exception("whatsapp_bot: erro repassando recado de %s", telefone)
+                    ok = False
+                final = _MSG_RECADO_OK if ok else _MSG_RECADO_FALHOU
+            _lembrar(db, telefone8, texto, final)
+            return final
         # Mistura de números: o modelo responde sobre os do cliente; avisamos dos demais.
         if de_outros:
             final += "\n\nObs.: " + ", ".join(_formatar_cnj(c) for c in de_outros[:3]) + " não está(ão) vinculado(s) ao seu cadastro."

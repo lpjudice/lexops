@@ -1,8 +1,8 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, Enum, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Boolean, Date, DateTime, Enum, String, Text, func, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -26,6 +26,9 @@ class Cliente(Base):
     # Resposta do usuário a "este telefone é WhatsApp?": None = ainda não perguntado,
     # True = é (whatsapp recebe o número), False = não é (não perguntar de novo).
     telefone_whatsapp: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Responsáveis (equipe) por este cliente: recebem os recados que o assistente de WhatsApp
+    # repassa. Vazio = cai nos responsáveis dos contratos do cliente + cópia obrigatória.
+    responsaveis_ids: Mapped[list] = mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))
     endereco: Mapped[str | None] = mapped_column(Text)
     observacoes: Mapped[str | None] = mapped_column(Text)
 
