@@ -1032,6 +1032,12 @@ def adicionar_signatario(
     c = db.query(Contrato).filter(Contrato.id == contrato_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Contrato não encontrado")
+    if data.assinar_via_whatsapp:
+        # Falha cedo, na hora de cadastrar: o ClickSign só aceita DDD + número.
+        try:
+            clicksign.telefone_para_clicksign(data.whatsapp)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
     sig = Signatario(contrato_id=contrato_id, **data.model_dump())
     db.add(sig)
     db.commit()
@@ -1065,9 +1071,12 @@ def lembrar_signatario(contrato_id: uuid.UUID, sig_id: uuid.UUID, db: Session = 
         raise HTTPException(status_code=400, detail="Este signatário ainda não foi enviado para assinatura.")
     if not clicksign.notificar_signatario(sig.clicksign_request_key):
         raise HTTPException(status_code=502, detail="Falha ao enviar lembrete pelo ClickSign.")
-    # `whatsapp`: None = signatário sem número; True/False = aviso aceito/recusado pela Meta.
-    whatsapp = avisar_assinatura_pendente(sig, sig.contrato) if sig.whatsapp else None
-    return {"ok": True, "whatsapp": whatsapp}
+    # Assina via WhatsApp do ClickSign: o lembrete acima JÁ foi por WhatsApp (e cobrado por eles).
+    if sig.assinar_via_whatsapp:
+        return {"ok": True, "whatsapp": None, "via_clicksign_whatsapp": True}
+    # `whatsapp`: None = sem número ou aviso desmarcado; True/False = aceito/recusado pela Meta.
+    whatsapp = avisar_assinatura_pendente(sig, sig.contrato) if (sig.whatsapp and sig.avisar_whatsapp) else None
+    return {"ok": True, "whatsapp": whatsapp, "via_clicksign_whatsapp": False}
 
 
 # ── Envio para ClickSign ──────────────────────────────────────────────────────
@@ -1138,6 +1147,7 @@ def enviar_para_assinatura(contrato_id: uuid.UUID, db: Session = Depends(get_db)
             signer_key = clicksign.criar_signatario(
                 sig.nome, sig.email, cpf=sig.cpf,
                 data_nascimento=sig.data_nascimento.isoformat() if sig.data_nascimento else None,
+                whatsapp=sig.whatsapp, via_whatsapp=sig.assinar_via_whatsapp,
             )
             sig.clicksign_signer_key = signer_key
             req_key = clicksign.adicionar_signatario_ao_documento(

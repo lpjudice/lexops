@@ -33,6 +33,10 @@ def avisar_assinatura_pendente(sig: Signatario, contrato: Contrato) -> bool:
     signatário não tem WhatsApp/ainda não está no ClickSign ou se o envio falhou."""
     if not sig.whatsapp or not sig.clicksign_request_key:
         return False
+    # Desmarcado pelo usuário, ou o próprio ClickSign já convida por WhatsApp
+    # (mandar o nosso também duplicaria a mensagem).
+    if not sig.avisar_whatsapp or sig.assinar_via_whatsapp:
+        return False
     try:
         resultado = whatsapp_api.send_template_message(
             to=sig.whatsapp,

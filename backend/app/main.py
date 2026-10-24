@@ -1266,6 +1266,12 @@ def _run_migrations() -> None:
         conn.execute(text(
             "ALTER TABLE signatarios ADD COLUMN IF NOT EXISTS whatsapp VARCHAR(30)"
         ))
+        conn.execute(text(
+            "ALTER TABLE signatarios ADD COLUMN IF NOT EXISTS avisar_whatsapp BOOLEAN NOT NULL DEFAULT true"
+        ))
+        conn.execute(text(
+            "ALTER TABLE signatarios ADD COLUMN IF NOT EXISTS assinar_via_whatsapp BOOLEAN NOT NULL DEFAULT false"
+        ))
 
         conn.execute(text(
             "ALTER TABLE publicacoes ADD COLUMN IF NOT EXISTS vinculo_confirmado BOOLEAN NOT NULL DEFAULT false"

@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Enum, ForeignKey, String, Text, func, text
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -108,6 +108,13 @@ class Signatario(Base):
     # Preenchido = opt-in pro aviso de assinatura por WhatsApp (template
     # `assinatura_pendente`), além do e-mail do ClickSign. Vazio = só e-mail.
     whatsapp: Mapped[str | None] = mapped_column(String(30))
+    # Com número preenchido, o PADRÃO é avisar por WhatsApp (nossa mensagem com o
+    # link, além do e-mail do ClickSign). Desmarcar = só e-mail.
+    avisar_whatsapp: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
+    # Opcional: o próprio ClickSign convida e autentica por WhatsApp (communicate_by
+    # + auths=whatsapp). Exige o recurso habilitado na conta/plano e cobra por
+    # mensagem do ClickSign — por isso nunca é padrão. Exclui o nosso aviso (duplicaria).
+    assinar_via_whatsapp: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
 
     # ClickSign
     clicksign_signer_key: Mapped[str | None] = mapped_column(String(255))

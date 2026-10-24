@@ -18,6 +18,8 @@ class SignatarioCreate(BaseModel):
     cpf: str | None = None
     data_nascimento: date | None = None
     whatsapp: str | None = None
+    avisar_whatsapp: bool = True
+    assinar_via_whatsapp: bool = False
 
 
 class SignatarioOut(SignatarioCreate):

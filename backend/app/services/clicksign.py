@@ -63,14 +63,31 @@ def upload_documento(arquivo_path: str, nome_arquivo: str) -> str | None:
 
 # ── 2. Criar signatário ───────────────────────────────────────────────────────
 
+def telefone_para_clicksign(numero: str | None) -> str:
+    """Só DDD + número (10 ou 11 dígitos, sem 55) — formato que o ClickSign exige
+    em `phone_number` quando o canal é WhatsApp. Levanta ValueError se não der."""
+    digitos = "".join(ch for ch in (numero or "") if ch.isdigit())
+    if digitos.startswith("55") and len(digitos) in (12, 13):
+        digitos = digitos[2:]
+    if len(digitos) not in (10, 11):
+        raise ValueError(
+            f"WhatsApp inválido para o ClickSign ({numero!r}): informe DDD + número."
+        )
+    return digitos
+
+
 def criar_signatario(
     nome: str, email: str, cpf: str | None = None, data_nascimento: str | None = None,
+    whatsapp: str | None = None, via_whatsapp: bool = False,
 ) -> str | None:
     """
     Cria um signatário no ClickSign e retorna seu signer_key.
-    Autenticação por e-mail (link de assinatura enviado ao email do signatário).
+    Padrão: autenticação por e-mail (link de assinatura enviado ao email do signatário).
     `cpf`/`data_nascimento` são opcionais — quando informados, vêm pré-preenchidos
     na tela de assinatura do ClickSign (`data_nascimento` em formato YYYY-MM-DD).
+    `via_whatsapp=True`: o ClickSign convida (communicate_by) e autentica (auths) por
+    WhatsApp, usando `whatsapp`. Recurso do plano/conta do ClickSign, cobrado por
+    mensagem — se a conta não tiver habilitado, o ClickSign recusa e levanta ValueError.
     """
     payload = {
         "signer": {
@@ -83,6 +100,10 @@ def criar_signatario(
             "has_documentation": bool(cpf),
         }
     }
+    if via_whatsapp:
+        payload["signer"]["auths"] = ["whatsapp"]
+        payload["signer"]["communicate_by"] = "whatsapp"
+        payload["signer"]["phone_number"] = telefone_para_clicksign(whatsapp)
     resp = httpx.post(_url("/api/v1/signers"), json=payload, headers=_h(), timeout=15)
 
     if resp.is_success:

@@ -29,7 +29,7 @@ const PAPEL_LABEL: Record<PapelSignatario, string> = {
 }
 
 const EMPTY_CONTRATO: ContratoCreate = { cliente_id: '', titulo: '', responsaveis_ids: [], escopo_recomendacoes: '' }
-const EMPTY_SIG: SignatarioCreate = { nome: '', email: '', papel: 'outro' }
+const EMPTY_SIG: SignatarioCreate = { nome: '', email: '', papel: 'outro', avisar_whatsapp: true, assinar_via_whatsapp: false }
 
 function formatDate(d: string) {
   return new Date(d).toLocaleDateString('pt-BR')
@@ -284,6 +284,7 @@ export default function ContratosPage() {
       qc.invalidateQueries({ queryKey: ['contratos'] })
       setSigForms((prev) => ({ ...prev, [vars.id]: EMPTY_SIG }))
     },
+    onError: (e: any) => alert(`Erro ao adicionar signatário:\n${e?.response?.data?.detail || e?.message || 'Erro desconhecido'}`),
   })
 
   const removerSig = useMutation({
@@ -296,7 +297,8 @@ export default function ContratosPage() {
     mutationFn: ({ cid, sid }: { cid: string; sid: string }) =>
       contratosApi.lembrarSignatario(cid, sid),
     onSuccess: (r) => alert(
-      r.whatsapp === true ? 'Lembrete enviado por e-mail e WhatsApp.'
+      r.via_clicksign_whatsapp ? 'Lembrete enviado por WhatsApp (pelo ClickSign).'
+      : r.whatsapp === true ? 'Lembrete enviado por e-mail e WhatsApp.'
       : r.whatsapp === false ? 'Lembrete enviado por e-mail. O aviso por WhatsApp não foi aceito pela Meta (veja os logs).'
       : 'Lembrete enviado por e-mail.'
     ),
@@ -456,7 +458,7 @@ export default function ContratosPage() {
     if (!cliente?.email) return
     adicionarSig.mutate({
       id: cid,
-      data: { nome: cliente.nome, email: cliente.email, papel: 'contratante', whatsapp: cliente.whatsapp || undefined },
+      data: { nome: cliente.nome, email: cliente.email, papel: 'contratante', whatsapp: cliente.whatsapp || undefined, avisar_whatsapp: true },
     })
   }
 
@@ -1289,7 +1291,16 @@ export default function ContratosPage() {
                               <tr key={s.id}>
                                 <td>{s.nome}</td>
                                 <td>{s.email}</td>
-                                <td>{s.whatsapp || '—'}</td>
+                                <td>
+                                  {s.whatsapp || '—'}
+                                  {s.whatsapp && (
+                                    <div style={{ fontSize: 10.5, color: '#6b7280' }}>
+                                      {s.assinar_via_whatsapp ? 'assina via WhatsApp (ClickSign)'
+                                        : s.avisar_whatsapp === false ? 'sem aviso por WhatsApp'
+                                        : 'avisa por WhatsApp + e-mail'}
+                                    </div>
+                                  )}
+                                </td>
                                 <td>{PAPEL_LABEL[s.papel as PapelSignatario] || s.papel}</td>
                                 <td>
                                   {s.clicksign_erro ? (
@@ -1341,6 +1352,23 @@ export default function ContratosPage() {
                           <input className={styles.input} placeholder="WhatsApp (opcional — avisa também por WhatsApp)"
                             value={sf.whatsapp ?? ''}
                             onChange={(e) => setSigForms({ ...sigForms, [c.id]: { ...sf, whatsapp: maskTelefone(e.target.value) } })} />
+                          {sf.whatsapp?.trim() && (
+                            <div style={{ flexBasis: '100%', display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
+                              <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                <input type="checkbox" style={{ flex: 'none', minWidth: 0 }}
+                                  checked={!sf.assinar_via_whatsapp && sf.avisar_whatsapp !== false}
+                                  disabled={!!sf.assinar_via_whatsapp}
+                                  onChange={(e) => setSigForms({ ...sigForms, [c.id]: { ...sf, avisar_whatsapp: e.target.checked } })} />
+                                Avisar também por WhatsApp (mensagem do escritório com o link; a assinatura segue por e-mail)
+                              </label>
+                              <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                <input type="checkbox" style={{ flex: 'none', minWidth: 0 }}
+                                  checked={!!sf.assinar_via_whatsapp}
+                                  onChange={(e) => setSigForms({ ...sigForms, [c.id]: { ...sf, assinar_via_whatsapp: e.target.checked } })} />
+                                Assinar via WhatsApp pelo ClickSign (convite e token por WhatsApp; cobrado pelo ClickSign — exige o recurso ativo na conta)
+                              </label>
+                            </div>
+                          )}
                           <input className={styles.input} placeholder="CPF (opcional)"
                             value={sf.cpf ?? ''}
                             onChange={(e) => setSigForms({ ...sigForms, [c.id]: { ...sf, cpf: maskCPFCNPJ(e.target.value) } })} />

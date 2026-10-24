@@ -16,6 +16,8 @@ export interface Signatario {
   cpf?: string | null
   data_nascimento?: string | null
   whatsapp?: string | null
+  avisar_whatsapp?: boolean
+  assinar_via_whatsapp?: boolean
   clicksign_signer_key?: string
   clicksign_erro?: string | null
   status_assinatura: StatusAssinatura
@@ -154,6 +156,10 @@ export interface SignatarioCreate {
   cpf?: string
   data_nascimento?: string
   whatsapp?: string
+  // Padrão true: com número, avisa por WhatsApp (mensagem do escritório com o link)
+  avisar_whatsapp?: boolean
+  // Opcional: o ClickSign convida e autentica por WhatsApp (custo do ClickSign)
+  assinar_via_whatsapp?: boolean
 }
 
 export const contratosApi = {
@@ -202,7 +208,7 @@ export const contratosApi = {
 
   // whatsapp: null = signatário sem número; true/false = aviso aceito/recusado pela Meta
   lembrarSignatario: (contratoId: string, sigId: string) =>
-    api.post<{ ok: boolean; whatsapp: boolean | null }>(`/contratos/${contratoId}/signatarios/${sigId}/lembrar`).then((r) => r.data),
+    api.post<{ ok: boolean; whatsapp: boolean | null; via_clicksign_whatsapp?: boolean }>(`/contratos/${contratoId}/signatarios/${sigId}/lembrar`).then((r) => r.data),
 
   enviar: (id: string) =>
     api.post<Contrato>(`/contratos/${id}/enviar`).then((r) => r.data),
