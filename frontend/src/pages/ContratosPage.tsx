@@ -422,6 +422,7 @@ export default function ContratosPage() {
       contratante_cpf_cnpj: cliente?.cpf_cnpj || '',
       contratante_endereco: '',
       contratante_email: cliente?.email || '',
+      contratante_whatsapp: cliente?.whatsapp || '',
       objeto_tipo: 'PPS',
       objeto_texto_livre: '',
       valor_honorarios: '',
@@ -450,6 +451,7 @@ export default function ContratosPage() {
           nome: cliente?.nome || '',
           cpf_cnpj: cliente?.cpf_cnpj || '',
           email: cliente?.email || '',
+          whatsapp: cliente?.whatsapp || '',
           endereco: cliente?.endereco || '',
           estado_civil: cliente?.estado_civil || '',
           profissao: cliente?.profissao || '',
@@ -494,6 +496,10 @@ export default function ContratosPage() {
       data: { nome: 'Monielly Moreira Vieira', email: 'moni@pimentajudice.com.br', papel: 'testemunha', whatsapp: whatsappDoResponsavel('moni@pimentajudice.com.br'), avisar_whatsapp: true },
     })
   }
+
+  // Outorgantes já salvos na procuração (nome + e-mail preenchidos) viram atalhos de signatário.
+  const outorgantesComEmail = (c: (typeof contratos)[0]) =>
+    (c.procuracao_dados?.outorgantes ?? []).filter((o) => o.nome?.trim() && o.email?.trim())
 
   const temArquivos = (c: (typeof contratos)[0]) =>
     (c.arquivos?.length ?? 0) > 0 || !!c.arquivo_path
@@ -829,6 +835,11 @@ export default function ContratosPage() {
                           </div>
                         </div>
                         <div className={styles.formRow}>
+                          <label className={styles.formLabel}>WhatsApp (aviso de assinatura)</label>
+                          <input className={styles.input} placeholder="(27) 9XXXX-XXXX" value={gerarForm.contratante_whatsapp ?? ''}
+                            onChange={(e) => setGerarForm({ ...gerarForm, contratante_whatsapp: maskTelefone(e.target.value) })} />
+                        </div>
+                        <div className={styles.formRow}>
                           <label className={styles.formLabel}>Endereço</label>
                           <input className={styles.input} value={gerarForm.contratante_endereco}
                             onChange={(e) => setGerarForm({ ...gerarForm, contratante_endereco: e.target.value })} />
@@ -1015,6 +1026,11 @@ export default function ContratosPage() {
                                   <input type="email" className={styles.input} value={og.email}
                                     onChange={(e) => atualizar({ email: e.target.value })} />
                                 </div>
+                              </div>
+                              <div className={styles.formRow}>
+                                <label className={styles.formLabel}>WhatsApp (aviso de assinatura)</label>
+                                <input className={styles.input} placeholder="(27) 9XXXX-XXXX" value={og.whatsapp ?? ''}
+                                  onChange={(e) => atualizar({ whatsapp: maskTelefone(e.target.value) })} />
                               </div>
                               <div className={styles.formRow}>
                                 <label className={styles.formLabel}>Endereço ({og.tipo === 'PJ' ? 'sede' : 'residencial'})</label>
@@ -1294,7 +1310,17 @@ export default function ContratosPage() {
                             onClick={() => adicionarContratadoAutomatico(c.id)}>
                             + Lucas Júdice (Contratado)
                           </button>
-                          {cliente?.email && (
+                          {c.tipo_documento === 'procuracao' && outorgantesComEmail(c).map((o, i) => (
+                            <button key={`og-${i}`} className={cs.btnAtalho}
+                              title="Dados da procuração gerada (e-mail e WhatsApp do outorgante)"
+                              onClick={() => adicionarSig.mutate({
+                                id: c.id,
+                                data: { nome: o.nome, email: o.email!, papel: 'contratante', whatsapp: o.whatsapp?.trim() || undefined, avisar_whatsapp: true },
+                              })}>
+                              + {o.nome} (Outorgante)
+                            </button>
+                          ))}
+                          {cliente?.email && !(c.tipo_documento === 'procuracao' && outorgantesComEmail(c).length > 0) && (
                             <button className={cs.btnAtalho}
                               onClick={() => adicionarClienteComoContratante(c.id, c.cliente_id)}>
                               + {cliente.nome} (Contratante)

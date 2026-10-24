@@ -23,6 +23,7 @@ from app.models import processo_parte as _processo_parte_model  # noqa: F401
 from app.models import andamento_telegram_extra as _andamento_telegram_extra_model  # noqa: F401
 from app.models import nota_fiscal as _nota_fiscal_model  # noqa: F401
 from app.models import whatsapp_optout as _whatsapp_optout_model  # noqa: F401 — WhatsappOptOut
+from app.models import whatsapp_bot as _whatsapp_bot_model  # noqa: F401 — WhatsappBotMensagem
 from app.models import config_fiscal as _config_fiscal_model  # noqa: F401
 from app.models import relatorio_fiscal_log as _relatorio_fiscal_log_model  # noqa: F401
 from app.models import telegram_task as _telegram_task_model  # noqa: F401 — TelegramTaskBatch/Item/Session

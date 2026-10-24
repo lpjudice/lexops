@@ -65,6 +65,7 @@ export interface GerarPdfRequest {
   contratante_cpf_cnpj?: string
   contratante_endereco?: string
   contratante_email?: string
+  contratante_whatsapp?: string
   objeto_tipo?: string
   objeto_texto_livre?: string
   valor_honorarios?: string
@@ -121,6 +122,7 @@ export interface OutorganteInput {
   cpf_cnpj?: string
   endereco?: string
   email?: string
+  whatsapp?: string
   representante_nome?: string
   representante_cpf?: string
   representante_cargo?: string

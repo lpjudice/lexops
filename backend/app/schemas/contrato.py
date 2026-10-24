@@ -67,6 +67,7 @@ class GerarPdfRequest(BaseModel):
     contratante_cpf_cnpj: str = ""
     contratante_endereco: str = ""
     contratante_email: str = ""
+    contratante_whatsapp: str = ""
     objeto_tipo: str = "PPS"          # "PPS" | "Personalizado"
     objeto_texto_livre: str = ""
     valor_honorarios: str = ""
@@ -109,6 +110,7 @@ class OutorganteInput(BaseModel):
     cpf_cnpj: str = ""
     endereco: str = ""
     email: str = ""
+    whatsapp: str = ""
     # Só relevante quando tipo == "PJ" (representante legal da empresa).
     representante_nome: str = ""
     representante_cpf: str = ""

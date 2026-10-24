@@ -203,6 +203,21 @@ function ResponsaveisTab() {
                 ))}
               </select>
             </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '6px 4px 0 34px', fontSize: 12 }}>
+              <label style={{ color: '#6b7280' }}>Telefone / WhatsApp</label>
+              <input
+                key={`${r.id}-${r.telefone ?? ''}`}
+                className={styles.input}
+                style={{ width: 170, fontSize: 12 }}
+                placeholder="(27) 9XXXX-XXXX"
+                defaultValue={r.telefone ?? ''}
+                title="Usado nos avisos de assinatura por WhatsApp (atalhos de signatário nos contratos)"
+                onBlur={(e) => {
+                  const v = maskTelefone(e.target.value.trim())
+                  if (v !== (r.telefone ?? '')) atualizar.mutate({ id: r.id, data: { telefone: v || null } })
+                }}
+              />
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '6px 4px 2px 34px', fontSize: 12 }}>
               {r.telegram_vinculado ? (
                 <>

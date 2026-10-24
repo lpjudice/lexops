@@ -794,6 +794,11 @@ async def gerar_pdf_contrato(
             if not cli.email and novo_email:
                 cli.email = novo_email
                 mudou = True
+            novo_wa = (body.contratante_whatsapp or "").strip()
+            if not (cli.whatsapp or "").strip() and novo_wa:
+                cli.whatsapp = novo_wa
+                cli.telefone_whatsapp = True
+                mudou = True
             novo_end = (body.contratante_endereco or "").strip()
             if not cli.endereco and novo_end:
                 cli.endereco = novo_end
