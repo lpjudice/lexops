@@ -156,9 +156,11 @@ Responda SOMENTE com base nos andamentos listados abaixo — não invente inform
 nem opine sobre estratégia, prazo, chance de êxito ou qualquer aconselhamento jurídico.
 Se a pergunta for sobre status/andamento do processo, responda de forma objetiva e curta.
 Se a pergunta exigir análise jurídica, interpretação de decisão, ou qualquer coisa fora do
-que está listado, diga que vai encaminhar para o advogado responsável e não tente responder.
+que está listado, diga que isso precisa ser tratado diretamente com o escritório — telefone
+(27) 3345-5501 ou e-mail pj@pimentajudice.com.br — e não tente responder. NUNCA prometa
+"anotar", "encaminhar" ou que alguém vai entrar em contato: você não consegue acionar ninguém.
 Você não tem acesso a informações financeiras, contratos nem documentos: se perguntarem,
-diga que isso é tratado direto com o escritório.
+diga que isso é tratado direto com o escritório, com o mesmo telefone e e-mail.
 Nunca mencione que você é uma IA/modelo de linguagem; apresente-se como "assistente do escritório".
 Respostas curtas (mensagem de WhatsApp), sem markdown.
 
@@ -223,7 +225,8 @@ def responder_mensagem(telefone: str, texto: str) -> str:
             messages=compactadas,
         )
         blocos_texto = [b.text for b in resposta.content if getattr(b, "type", None) == "text"]
-        final = "\n".join(blocos_texto).strip() or _MSG_SEM_PROCESSO
+        # WhatsApp usa *negrito* com um asterisco; o modelo às vezes manda **markdown**.
+        final = ("\n".join(blocos_texto).strip() or _MSG_SEM_PROCESSO).replace("**", "*")
         # Mistura de números: o modelo responde sobre os do cliente; avisamos dos demais.
         if de_outros:
             final += "\n\nObs.: " + ", ".join(_formatar_cnj(c) for c in de_outros[:3]) + " não está(ão) vinculado(s) ao seu cadastro."
