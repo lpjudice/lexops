@@ -513,6 +513,13 @@ def enviar_convites_whatsapp(
         raise HTTPException(status_code=503, detail="WhatsApp não está configurado neste ambiente.")
     evento = _evento_com_convidados(db, evento_id)
 
+    status_tpl = whatsapp_api.status_template(wm.TEMPLATE_CONVITE_EVENTO)
+    if status_tpl not in (None, "APPROVED"):
+        raise HTTPException(status_code=409, detail=(
+            f"O template do convite ainda não foi aprovado pela Meta (status: {status_tpl}). "
+            "Tente de novo quando estiver aprovado."
+        ))
+
     if data.modo == "teste":
         if not wm.telefone8(data.telefone_teste):
             raise HTTPException(status_code=400, detail="Informe o número de teste (DDD + número).")

@@ -25,6 +25,7 @@ class _CadastroFields(BaseModel):
     """Campos cadastrais estendidos, compartilhados por Base/Update/Out."""
 
     whatsapp: str | None = None
+    telefone_whatsapp: bool | None = None
     # Endereço estruturado
     cep: str | None = None
     logradouro: str | None = None

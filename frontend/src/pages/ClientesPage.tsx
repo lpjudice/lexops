@@ -6,6 +6,7 @@ import type { Cliente, ClienteCreate } from '../api/clientes'
 import CadastrosPendentes from '../components/CadastrosPendentes'
 import DuplicatasClientes from '../components/DuplicatasClientes'
 import EnviarLinkModal from '../components/EnviarLinkModal'
+import ConfirmarWhatsappModal from '../components/ConfirmarWhatsappModal'
 import VinculosEditor, { ClienteVinculos } from '../components/VinculosEditor'
 import {
   applyDocMask, brParaIso, buscarCep, ESTADO_CIVIL_OPCOES, isoParaBr,
@@ -33,6 +34,11 @@ export default function ClientesPage() {
   // Vínculos pendentes do cliente que está sendo criado (aplicados após o POST).
   const [novoVinculos, setNovoVinculos] = useState<Cliente[]>([])
 
+  const [confirmarWa, setConfirmarWa] = useState(false)
+  const { data: waPendentes = [] } = useQuery({
+    queryKey: ['clientes-whatsapp-pendentes'],
+    queryFn: clientesApi.whatsappPendentes,
+  })
   const { data: clientes = [], isLoading } = useQuery({
     queryKey: ['clientes'],
     queryFn: clientesApi.listar,
@@ -96,6 +102,7 @@ export default function ClientesPage() {
 
   return (
     <div>
+      {confirmarWa && <ConfirmarWhatsappModal onClose={() => setConfirmarWa(false)} />}
       <div className={styles.pageHeader}>
         <h1 className={styles.pageTitle}>Clientes</h1>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -104,6 +111,13 @@ export default function ClientesPage() {
             onClick={() => setEnviarGenerico(true)}>
             🔗 Link de cadastro
           </button>
+          {waPendentes.length > 0 && (
+            <button className={styles.btnTable}
+              title="Clientes com celular cadastrado, sem confirmação de que é WhatsApp"
+              onClick={() => setConfirmarWa(true)}>
+              📱 Confirmar WhatsApp ({waPendentes.length})
+            </button>
+          )}
           <button className={styles.btnPrimary} onClick={() => setShowForm(!showForm)}>
             {showForm ? 'Cancelar' : '+ Novo Cliente'}
           </button>

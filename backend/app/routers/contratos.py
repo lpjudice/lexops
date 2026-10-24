@@ -14,7 +14,7 @@ from app.schemas.contrato import (
     SignatarioCreate, SignatarioOut,
 )
 from app.services import clicksign
-from app.services.contrato_whatsapp import avisar_assinatura_pendente
+from app.services.contrato_whatsapp import avisar_assinatura_pendente, avisar_assinatura_pendente_detalhe
 
 UPLOADS_DIR = Path("/app/uploads/contratos")
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
@@ -1032,6 +1032,12 @@ def adicionar_signatario(
     c = db.query(Contrato).filter(Contrato.id == contrato_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Contrato não encontrado")
+    if data.assinar_via_whatsapp and not clicksign.WHATSAPP_HABILITADO:
+        raise HTTPException(status_code=400, detail=(
+            "O ClickSign deste escritório ainda não tem envio por WhatsApp habilitado "
+            "(o teste de 24/10 foi recusado com 403/422). Peça a ativação ao ClickSign e, depois, "
+            "defina CLICKSIGN_WHATSAPP_HABILITADO=true. Por ora use \"E-mail + aviso por WhatsApp\"."
+        ))
     if data.assinar_via_whatsapp:
         # Falha cedo, na hora de cadastrar: o ClickSign só aceita DDD + número.
         try:
@@ -1075,8 +1081,10 @@ def lembrar_signatario(contrato_id: uuid.UUID, sig_id: uuid.UUID, db: Session = 
     if sig.assinar_via_whatsapp:
         return {"ok": True, "whatsapp": None, "via_clicksign_whatsapp": True}
     # `whatsapp`: None = sem número ou aviso desmarcado; True/False = aceito/recusado pela Meta.
-    whatsapp = avisar_assinatura_pendente(sig, sig.contrato) if (sig.whatsapp and sig.avisar_whatsapp) else None
-    return {"ok": True, "whatsapp": whatsapp, "via_clicksign_whatsapp": False}
+    whatsapp, motivo = (None, None)
+    if sig.whatsapp and sig.avisar_whatsapp:
+        whatsapp, motivo = avisar_assinatura_pendente_detalhe(sig, sig.contrato)
+    return {"ok": True, "whatsapp": whatsapp, "whatsapp_motivo": motivo, "via_clicksign_whatsapp": False}
 
 
 # ── Envio para ClickSign ──────────────────────────────────────────────────────

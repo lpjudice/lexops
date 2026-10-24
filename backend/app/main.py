@@ -1363,6 +1363,7 @@ def _run_migrations() -> None:
         # Cliente: cadastro enriquecido (autocadastro via link público — Fase 1)
         for col_sql in [
             "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS whatsapp VARCHAR(30)",
+            "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS telefone_whatsapp BOOLEAN",
             "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS cep VARCHAR(9)",
             "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS logradouro VARCHAR(255)",
             "ALTER TABLE clientes ADD COLUMN IF NOT EXISTS numero VARCHAR(20)",

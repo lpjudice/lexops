@@ -21,6 +21,10 @@ import httpx
 
 BASE_URL = os.getenv("CLICKSIGN_BASE_URL", "https://app.clicksign.com")
 API_KEY  = os.getenv("CLICKSIGN_API_KEY", "")
+# Envio/autenticação por WhatsApp é recurso da conta (testado em 24/10/2026: auths=whatsapp
+# devolve 403 e communicate_by=whatsapp devolve 422 "não é válido"). Só liga depois que o
+# ClickSign ativar — defina CLICKSIGN_WHATSAPP_HABILITADO=true no Fly.
+WHATSAPP_HABILITADO = os.getenv("CLICKSIGN_WHATSAPP_HABILITADO", "").strip().lower() in ("1", "true", "sim", "yes")
 
 
 def _url(path: str) -> str:
@@ -109,6 +113,11 @@ def criar_signatario(
     if resp.is_success:
         return resp.json().get("signer", {}).get("key")
 
+    if via_whatsapp and resp.status_code in (403, 422):
+        raise ValueError(
+            f"O ClickSign recusou o convite/autenticação por WhatsApp (HTTP {resp.status_code}): "
+            "esse recurso não está habilitado na conta. Peça a ativação ao ClickSign ou use e-mail."
+        )
     raise ValueError(f"ClickSign signer falhou ({resp.status_code}): {resp.text[:300]}")
 
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import re
+import time
 from typing import Any
 
 import httpx
@@ -16,6 +17,34 @@ import httpx
 from app.config import settings
 
 GRAPH_BASE = "https://graph.facebook.com"
+
+_cache_status_template: dict[str, tuple[float, str | None]] = {}
+
+
+def status_template(nome: str, idioma: str = "pt_BR") -> str | None:
+    """Status do template na Meta: APPROVED, PENDING, REJECTED, PAUSED... ou
+    "INEXISTENTE". None = não deu pra consultar (sem config/erro de rede) — quem
+    chama deve seguir em frente e deixar a própria Meta responder. Cache de 60s."""
+    waba = settings.whatsapp_business_account_id
+    if not (waba and settings.whatsapp_access_token):
+        return None
+    chave, agora = f"{nome}:{idioma}", time.time()
+    em_cache = _cache_status_template.get(chave)
+    if em_cache and agora - em_cache[0] < 60:
+        return em_cache[1]
+    try:
+        r = httpx.get(
+            f"{GRAPH_BASE}/{settings.whatsapp_api_version}/{waba}/message_templates",
+            params={"name": nome, "fields": "name,status,language", "limit": 20},
+            headers={"Authorization": f"Bearer {settings.whatsapp_access_token}"},
+            timeout=15.0,
+        )
+        itens = [t for t in r.json().get("data", []) if t.get("language") == idioma]
+        status = itens[0].get("status") if itens else "INEXISTENTE"
+    except Exception:
+        status = None
+    _cache_status_template[chave] = (agora, status)
+    return status
 
 
 def _messages_url() -> str:

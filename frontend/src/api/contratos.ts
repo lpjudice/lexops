@@ -208,7 +208,7 @@ export const contratosApi = {
 
   // whatsapp: null = signatário sem número; true/false = aviso aceito/recusado pela Meta
   lembrarSignatario: (contratoId: string, sigId: string) =>
-    api.post<{ ok: boolean; whatsapp: boolean | null; via_clicksign_whatsapp?: boolean }>(`/contratos/${contratoId}/signatarios/${sigId}/lembrar`).then((r) => r.data),
+    api.post<{ ok: boolean; whatsapp: boolean | null; whatsapp_motivo?: string | null; via_clicksign_whatsapp?: boolean }>(`/contratos/${contratoId}/signatarios/${sigId}/lembrar`).then((r) => r.data),
 
   enviar: (id: string) =>
     api.post<Contrato>(`/contratos/${id}/enviar`).then((r) => r.data),

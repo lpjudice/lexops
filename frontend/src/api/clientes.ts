@@ -4,6 +4,8 @@ import { confirmarNomeSimilar, isNomeSimilarConflict } from '../utils/nomeSimila
 /** Campos cadastrais estendidos (PF + PJ), preenchíveis no autocadastro. */
 export interface ClienteCadastroFields {
   whatsapp?: string
+  // Resposta a "este telefone é WhatsApp?" (null/undefined = ainda não perguntado)
+  telefone_whatsapp?: boolean | null
   // Endereço estruturado
   cep?: string
   logradouro?: string
@@ -113,6 +115,10 @@ export interface ClienteDuplicataGrupo {
 
 export const clientesApi = {
   listar: () => api.get<Cliente[]>('/clientes/').then((r) => r.data),
+  whatsappPendentes: () =>
+    api.get<{ id: string; nome: string; telefone: string }[]>('/clientes/whatsapp/pendentes').then((r) => r.data),
+  responderWhatsapp: (respostas: { cliente_id: string; e_whatsapp: boolean }[]) =>
+    api.post<{ atualizados: number }>('/clientes/whatsapp/responder', { respostas }).then((r) => r.data),
   duplicatasCadastro: () =>
     api.get<{ duplicatas: ClienteDuplicataGrupo[] }>('/clientes/admin/duplicatas-cadastro')
       .then((r) => r.data.duplicatas),

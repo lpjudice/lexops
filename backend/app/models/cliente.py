@@ -23,6 +23,9 @@ class Cliente(Base):
     telefone: Mapped[str | None] = mapped_column(String(30))
     # Contato adicional (WhatsApp), comum a PF e PJ.
     whatsapp: Mapped[str | None] = mapped_column(String(30))
+    # Resposta do usuário a "este telefone é WhatsApp?": None = ainda não perguntado,
+    # True = é (whatsapp recebe o número), False = não é (não perguntar de novo).
+    telefone_whatsapp: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     endereco: Mapped[str | None] = mapped_column(Text)
     observacoes: Mapped[str | None] = mapped_column(Text)
 

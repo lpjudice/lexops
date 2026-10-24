@@ -28,15 +28,19 @@ def _rotulo_documento(tipo_documento: str | None) -> str:
     return "Procuração" if tipo_documento == "procuracao" else "Contrato"
 
 
-def avisar_assinatura_pendente(sig: Signatario, contrato: Contrato) -> bool:
-    """Manda o aviso por WhatsApp. True se a Meta aceitou o envio; False se o
-    signatário não tem WhatsApp/ainda não está no ClickSign ou se o envio falhou."""
+def avisar_assinatura_pendente_detalhe(sig: Signatario, contrato: Contrato) -> tuple[bool, str | None]:
+    """(enviou, motivo). `motivo` explica por que NÃO enviou, quando faz sentido
+    mostrar ao usuário (template em análise, Meta recusou); None se simplesmente
+    não se aplica (sem número, aviso desmarcado, assina via ClickSign)."""
     if not sig.whatsapp or not sig.clicksign_request_key:
-        return False
+        return False, None
     # Desmarcado pelo usuário, ou o próprio ClickSign já convida por WhatsApp
     # (mandar o nosso também duplicaria a mensagem).
     if not sig.avisar_whatsapp or sig.assinar_via_whatsapp:
-        return False
+        return False, None
+    status = whatsapp_api.status_template(TEMPLATE_ASSINATURA_PENDENTE)
+    if status not in (None, "APPROVED"):
+        return False, f"o template de aviso ainda não foi aprovado pela Meta (status: {status})"
     try:
         resultado = whatsapp_api.send_template_message(
             to=sig.whatsapp,
@@ -49,8 +53,13 @@ def avisar_assinatura_pendente(sig: Signatario, contrato: Contrato) -> bool:
         )
     except Exception:
         logger.exception("assinatura_pendente: erro inesperado ao avisar %s", sig.nome)
-        return False
+        return False, "erro inesperado ao enviar (veja os logs)"
     if not resultado or resultado.get("erro"):
         logger.warning("assinatura_pendente: falha ao avisar %s: %s", sig.nome, resultado)
-        return False
-    return True
+        return False, "a Meta recusou o envio (veja os logs)"
+    return True, None
+
+
+def avisar_assinatura_pendente(sig: Signatario, contrato: Contrato) -> bool:
+    """Manda o aviso por WhatsApp. True se a Meta aceitou o envio."""
+    return avisar_assinatura_pendente_detalhe(sig, contrato)[0]
