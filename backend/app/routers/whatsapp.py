@@ -50,6 +50,10 @@ def _processar_mensagem(telefone: str, texto: str, message_id: str | None) -> No
         if whatsapp_marketing.eh_contato_do_conselho_sem_ser_cliente(db, telefone):
             logger.info("whatsapp webhook: texto de contato do Conselho (%s) sem resposta automática", telefone)
             return
+    except Exception:
+        # Falha nas checagens extras nunca pode calar o bot que atende o cliente.
+        db.rollback()
+        logger.exception("whatsapp webhook: erro nas checagens de marketing — seguindo pro bot")
     finally:
         db.close()
     resposta = whatsapp_bot.responder_mensagem(telefone, texto)
