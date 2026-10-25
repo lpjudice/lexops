@@ -40,20 +40,35 @@ PARALELO = 3
 _TEXTO_MIN = 200
 
 TEMAS = [
-    "ativo_total", "passivo_total", "passivo_concursal", "patrimonio_liquido", "caixa_ou_saldo",
-    "valor_investido_aporte", "valor_em_risco_prejuizo", "ativos_sob_custodia", "credito_ou_divida",
-    "valor_da_causa_ou_pedido", "pagamento_ou_restituicao", "captacao_ou_emissao", "honorarios_custas",
-    "receita_ou_faturamento", "outro",
+    "ativo_total", "passivo_total", "endividamento_bruto", "divida_liquida", "passivo_debentures",
+    "passivo_cashback", "passivo_bancario", "passivo_tributario", "passivo_concursal", "patrimonio_liquido",
+    "caixa_ou_saldo", "valor_investido_aporte", "valor_em_risco_prejuizo", "ativos_sob_custodia",
+    "credito_ou_divida", "valor_da_causa_ou_pedido", "pagamento_ou_restituicao", "captacao_ou_emissao",
+    "honorarios_custas", "receita_ou_faturamento", "outro",
 ]
 TEMA_ROTULO = {
-    "ativo_total": "Ativo", "passivo_total": "Passivo total", "passivo_concursal": "Passivo concursal",
+    "ativo_total": "Ativo", "passivo_total": "Passivo total", "endividamento_bruto": "Endividamento bruto",
+    "divida_liquida": "Dívida líquida", "passivo_debentures": "Debêntures", "passivo_cashback": "Cashback / recompra",
+    "passivo_bancario": "Dívida bancária", "passivo_tributario": "Passivo tributário", "passivo_concursal": "Passivo concursal",
     "patrimonio_liquido": "Patrimônio líquido", "caixa_ou_saldo": "Caixa / saldo",
     "valor_investido_aporte": "Valor investido / aporte", "valor_em_risco_prejuizo": "Valor em risco / prejuízo",
-    "ativos_sob_custodia": "Ativos sob custódia", "credito_ou_divida": "Crédito / dívida",
+    "ativos_sob_custodia": "Ativos sob custódia", "credito_ou_divida": "Crédito / dívida (outros)",
     "valor_da_causa_ou_pedido": "Valor da causa / pedido", "pagamento_ou_restituicao": "Pagamento / restituição",
     "captacao_ou_emissao": "Captação / emissão", "honorarios_custas": "Honorários / custas",
     "receita_ou_faturamento": "Receita / faturamento", "outro": "Outro",
 }
+_DEFINICAO_TEMAS = (
+    "ativo_total = ativo (total ou consolidado) · passivo_total = passivo total/obrigações totais declaradas · "
+    "endividamento_bruto = dívida bruta/endividamento total declarado (antes de abater caixa) · divida_liquida = dívida "
+    "menos caixa · passivo_debentures = saldo de debêntures · passivo_cashback = obrigações de cashback/recompra com "
+    "clientes · passivo_bancario = empréstimos/dívida bancária · passivo_tributario = tributos e parcelamentos · "
+    "passivo_concursal = créditos sujeitos à recuperação judicial · caixa_ou_saldo = caixa, equivalentes ou saldo de "
+    "conta · valor_investido_aporte = quanto uma pessoa/grupo aportou ou investiu · valor_em_risco_prejuizo = quanto "
+    "está em risco, foi perdido ou desviado · ativos_sob_custodia = ativos geridos/custodiados · credito_ou_divida = "
+    "outro crédito/dívida específico que não se encaixa acima · valor_da_causa_ou_pedido = valor da causa ou "
+    "quantia postulada · pagamento_ou_restituicao = pagamento, restituição ou repasse efetuado · captacao_ou_emissao = "
+    "captação/emissão de valores mobiliários · receita_ou_faturamento · honorarios_custas · outro."
+)
 NATUREZAS = [
     "afirmacao_propria", "citacao_de_terceiro", "determinacao_ou_decisao", "estimativa_ou_calculo",
     "pedido", "irrelevante",
@@ -158,7 +173,7 @@ TOOL_ROTULOS = {
                     "properties": {
                         "i": {"type": "integer", "description": "Índice [i] do valor, como numerado no pedido."},
                         "tema": {"type": "string", "enum": TEMAS,
-                                 "description": "O que o valor representa. Use 'outro' se nenhum se aplica."},
+                                 "description": "O que o valor representa. " + _DEFINICAO_TEMAS},
                         "sujeito": {"type": ["string", "null"],
                                     "description": "Pessoa/empresa/veículo (SPE, SCP, fundo, grupo) a quem o valor se refere, "
                                                    "do jeito que a peça o escreve. Null se não identificável."},
