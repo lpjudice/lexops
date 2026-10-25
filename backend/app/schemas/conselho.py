@@ -167,6 +167,7 @@ class ConvidadoUpdate(BaseModel):
     pendente_obs: str | None = None
     followup_data: date | None = None
     mensagem_pessoal: str | None = None
+    lembrete_whatsapp_ativo: bool | None = None
 
 
 class ConvidadoOut(BaseModel):
@@ -187,7 +188,14 @@ class ConvidadoOut(BaseModel):
     confirmacao_origem: str | None = None
     confirmacao_em: datetime | None = None
     lembrete_whatsapp_em: datetime | None = None
+    lembrete_whatsapp_ativo: bool = True
     contato: ContatoOut
+
+
+class LembretesWhatsappRequest(BaseModel):
+    """Liga/desliga o lembrete por WhatsApp de vários convidados de uma vez."""
+    ativo: bool
+    convidado_ids: list[uuid.UUID] | None = None  # None = todos os convidados do evento
 
 
 class ConviteWhatsappRequest(BaseModel):
@@ -213,6 +221,7 @@ class EventoCreate(BaseModel):
     local_evento: str | None = None
     endereco: str | None = None
     detalhes: str | None = None
+    lembrete_whatsapp_ativo: bool = True
 
 
 class EventoUpdate(BaseModel):
@@ -230,6 +239,7 @@ class EventoUpdate(BaseModel):
     local_evento: str | None = None
     endereco: str | None = None
     detalhes: str | None = None
+    lembrete_whatsapp_ativo: bool | None = None
 
 
 class EventoOut(BaseModel):
@@ -249,6 +259,7 @@ class EventoOut(BaseModel):
     local_evento: str | None = None
     endereco: str | None = None
     detalhes: str | None = None
+    lembrete_whatsapp_ativo: bool = True
     created_at: datetime
     updated_at: datetime
     convidados: list[ConvidadoOut] = []

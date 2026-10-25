@@ -207,7 +207,7 @@ def tratar_resposta_botao(db: Session, telefone: str, payload: str) -> str | Non
     cv.confirmacao_origem, cv.confirmacao_em = "whatsapp_botao", agora
     if acao == "sim":
         cv.presenca_confirmada, cv.recusou = True, False
-        resposta = mensagem_confirmacao(cv.evento)
+        resposta = mensagem_confirmacao(cv.evento, cv)
     else:
         cv.presenca_confirmada, cv.recusou = False, True
         resposta = "Sem problemas, obrigado por avisar. Esperamos você em uma próxima oportunidade."
@@ -230,10 +230,12 @@ def _linhas_detalhes_evento(ev: ConselhoEvento) -> list[str]:
     return linhas
 
 
-def mensagem_confirmacao(ev: ConselhoEvento) -> str:
-    """Texto enviado quando o convidado toca em "Vou participar": confirma e traz os dados do evento."""
+def mensagem_confirmacao(ev: ConselhoEvento, cv: ConselhoEventoConvidado | None = None) -> str:
+    """Texto enviado quando o convidado toca em "Vou participar": confirma e traz os dados do evento.
+    Só promete o lembrete se ele realmente vai sair (ligado no evento e neste convidado)."""
     partes = ["Presença confirmada, obrigado! ✅", f"*{ev.nome}*"] + _linhas_detalhes_evento(ev)
-    if ev.data and ev.data >= date.today() and (ev.dias_lembrete or 0) > 0:
+    vai_lembrar = ev.lembrete_whatsapp_ativo is not False and (cv is None or cv.lembrete_whatsapp_ativo is not False)
+    if vai_lembrar and ev.data and ev.data >= date.today() and (ev.dias_lembrete or 0) > 0:
         partes.append(f"Vamos te enviar um lembrete {ev.dias_lembrete} dia(s) antes do evento.")
     return "\n".join(partes)
 
@@ -256,12 +258,12 @@ def enviar_lembretes_evento(hoje: date | None = None) -> dict:
         eventos = db.query(ConselhoEvento).filter(ConselhoEvento.data.isnot(None), ConselhoEvento.data >= hoje).all()
         for ev in eventos:
             restam = (ev.data - hoje).days
-            if restam > (ev.dias_lembrete or 0):
+            if restam > (ev.dias_lembrete or 0) or ev.lembrete_whatsapp_ativo is False:
                 continue
             local = ", ".join(x.strip() for x in (ev.local_evento, ev.endereco) if x and x.strip()) or "local a confirmar"
             for cv in ev.convidados:
                 c = cv.contato
-                if not cv.presenca_confirmada or cv.recusou or cv.lembrete_whatsapp_em:
+                if not cv.presenca_confirmada or cv.recusou or cv.lembrete_whatsapp_em or cv.lembrete_whatsapp_ativo is False:
                     continue
                 if not telefone8(c.whatsapp) or esta_optout(db, c.whatsapp):
                     continue

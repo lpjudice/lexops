@@ -123,6 +123,7 @@ export interface Convidado {
   confirmacao_origem?: string | null
   confirmacao_em?: string | null
   lembrete_whatsapp_em?: string | null
+  lembrete_whatsapp_ativo?: boolean
   contato: Contato
 }
 
@@ -168,6 +169,7 @@ export interface Evento {
   local_evento?: string | null
   endereco?: string | null
   detalhes?: string | null
+  lembrete_whatsapp_ativo?: boolean
   created_at: string
   updated_at: string
   convidados: Convidado[]
@@ -287,6 +289,8 @@ export const conselhoApi = {
   atualizarContato: (id: string, data: Partial<ContatoCreate>) =>
     api.patch<Contato>(`/conselho/contatos/${id}`, data).then((r) => r.data),
   deletarContato: (id: string) => api.delete(`/conselho/contatos/${id}`),
+  definirLembretesWhatsapp: (eventoId: string, data: { ativo: boolean; convidado_ids?: string[] }) =>
+    api.post<{ atualizados: number; ativo: boolean }>(`/conselho/eventos/${eventoId}/lembretes-whatsapp`, data).then((r) => r.data),
   previewConvitesWhatsapp: (eventoId: string, reenviar = false) =>
     api.get<ConvitesWhatsappPreview>(`/conselho/eventos/${eventoId}/convites-whatsapp/preview`, { params: { reenviar } }).then((r) => r.data),
   enviarConvitesWhatsapp: (eventoId: string, data: ConviteWhatsappRequest) =>
@@ -304,7 +308,7 @@ export const conselhoApi = {
   deletarEvento: (id: string) => api.delete(`/conselho/eventos/${id}`),
   addConvidado: (eventoId: string, contatoId: string) =>
     api.post<Evento>(`/conselho/eventos/${eventoId}/convidados`, { contato_id: contatoId }).then((r) => r.data),
-  atualizarConvidado: (convidadoId: string, data: { presenca_confirmada?: boolean; participacao_confirmada?: boolean; recusou?: boolean; pendente?: boolean; pendente_obs?: string; followup_data?: string | null; mensagem_pessoal?: string }) =>
+  atualizarConvidado: (convidadoId: string, data: { presenca_confirmada?: boolean; participacao_confirmada?: boolean; recusou?: boolean; pendente?: boolean; pendente_obs?: string; followup_data?: string | null; mensagem_pessoal?: string; lembrete_whatsapp_ativo?: boolean }) =>
     api.patch<Convidado>(`/conselho/eventos/convidados/${convidadoId}`, data).then((r) => r.data),
   removerConvidado: (convidadoId: string) => api.delete(`/conselho/eventos/convidados/${convidadoId}`),
 

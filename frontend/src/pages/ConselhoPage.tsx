@@ -53,6 +53,16 @@ function origemConfirmacao(cv: Convidado): string | null {
   return quando ? `${quem} · ${quando}` : quem
 }
 
+const CUSTO_LEMBRETE_UTILIDADE = 0.035 // estimativa (utilidade, Brasil) — cada lembrete é uma mensagem cobrada
+
+/** Lembretes que o sistema ainda vai mandar: confirmados, com WhatsApp e aval, ligados e ainda não enviados. */
+function lembretesProgramados(ev: Evento): Convidado[] {
+  if (ev.lembrete_whatsapp_ativo === false) return []
+  return ev.convidados.filter((cv) =>
+    cv.presenca_confirmada && !cv.recusou && cv.lembrete_whatsapp_ativo !== false && !cv.lembrete_whatsapp_em &&
+    !!cv.contato.whatsapp && (cv.contato.whatsapp_optin || cv.confirmacao_origem === 'whatsapp_botao'))
+}
+
 function aplicarPlaceholders(template: string, primeiro: string, ultimo: string, evento: string) {
   return template
     .replaceAll('{primeiro}', primeiro)
@@ -790,6 +800,10 @@ function EventosSubTab() {
     mutationFn: ({ id, payload }: { id: string; payload: Partial<Evento> }) => conselhoApi.atualizarEvento(id, payload as never),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['conselho-eventos'] }),
   })
+  const desligarTodos = useMutation({
+    mutationFn: ({ eventoId, ativo }: { eventoId: string; ativo: boolean }) => conselhoApi.definirLembretesWhatsapp(eventoId, { ativo }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['conselho-eventos'] }),
+  })
   const deletar = useMutation({
     mutationFn: conselhoApi.deletarEvento,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['conselho-eventos'] }),
@@ -799,7 +813,7 @@ function EventosSubTab() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['conselho-eventos'] }),
   })
   const atualizarConvidado = useMutation({
-    mutationFn: ({ id, payload }: { id: string; payload: { presenca_confirmada?: boolean; participacao_confirmada?: boolean; recusou?: boolean; pendente?: boolean; pendente_obs?: string; followup_data?: string | null; mensagem_pessoal?: string } }) =>
+    mutationFn: ({ id, payload }: { id: string; payload: { presenca_confirmada?: boolean; participacao_confirmada?: boolean; recusou?: boolean; pendente?: boolean; pendente_obs?: string; followup_data?: string | null; mensagem_pessoal?: string; lembrete_whatsapp_ativo?: boolean } }) =>
       conselhoApi.atualizarConvidado(id, payload),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['conselho-eventos'] }),
   })
@@ -872,6 +886,27 @@ function EventosSubTab() {
                 defaultValue={eventoExpandido.dias_lembrete}
                 onBlur={(e) => atualizar.mutate({ id: eventoExpandido.id, payload: { dias_lembrete: Number(e.target.value) } })}
               />
+            </div>
+            <div className={styles.fieldGroup} style={{ flexBasis: '100%' }}>
+              <span>Lembrete por WhatsApp aos confirmados</span>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginTop: 4, fontSize: 12.5 }}>
+                <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <input type="checkbox" checked={eventoExpandido.lembrete_whatsapp_ativo !== false}
+                    onChange={(e) => atualizar.mutate({ id: eventoExpandido.id, payload: { lembrete_whatsapp_ativo: e.target.checked } })} />
+                  Enviar {eventoExpandido.dias_lembrete} dia(s) antes do evento (padrão: ligado)
+                </label>
+                {(() => {
+                  const n = lembretesProgramados(eventoExpandido).length
+                  return <span style={{ color: '#6b7280' }}>
+                    {n} lembrete(s) programado(s){n > 0 ? ` ≈ ${(n * CUSTO_LEMBRETE_UTILIDADE).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}` : ''}
+                  </span>
+                })()}
+                <button className={styles.btnSmall} onClick={() => desligarTodos.mutate({ eventoId: eventoExpandido.id, ativo: false })}
+                  title="Desliga o lembrete de todos os convidados deste evento">Desligar para todos</button>
+                <button className={styles.btnSmall} onClick={() => desligarTodos.mutate({ eventoId: eventoExpandido.id, ativo: true })}
+                  title="Liga o lembrete de todos os convidados deste evento">Ligar para todos</button>
+              </div>
+              <span style={{ fontSize: 11, color: '#9ca3af' }}>Para um convidado só, use o sino 🔔 no card dele.</span>
             </div>
             <div className={styles.fieldGroup} style={{ flexBasis: '100%' }}>
               <span title="Vão na mensagem de confirmação (quando o convidado toca em &quot;Vou participar&quot;) e no lembrete por WhatsApp">Detalhes do evento para o WhatsApp</span>
@@ -972,6 +1007,15 @@ function EventosSubTab() {
                         )}
                       </div>
                       <div className={cs.guestCardActions}>
+                        {cv.contato.whatsapp && (
+                          <button className={styles.btnSmall} style={{ padding: '3px 6px', fontSize: 11 }}
+                            title={cv.lembrete_whatsapp_ativo === false
+                              ? 'Lembrete por WhatsApp DESLIGADO para este convidado (clique para ligar)'
+                              : 'Lembrete por WhatsApp ligado para este convidado (clique para desligar e evitar o custo)'}
+                            onClick={() => atualizarConvidado.mutate({ id: cv.id, payload: { lembrete_whatsapp_ativo: cv.lembrete_whatsapp_ativo === false } })}>
+                            {cv.lembrete_whatsapp_ativo === false ? '🔕' : '🔔'}
+                          </button>
+                        )}
                         {cv.contato.whatsapp && (
                           <>
                             <a className={`${cs.linkBtn} ${cs.linkWhatsapp}`} style={{ padding: '3px 8px', fontSize: 11 }} target="_blank" rel="noreferrer"

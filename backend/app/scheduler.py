@@ -165,6 +165,17 @@ def _push_andamentos_whatsapp() -> None:
         logger.warning("Scheduler: push_andamentos_whatsapp falhou: %s", exc)
 
 
+def _sincronizar_assinaturas_clicksign() -> None:
+    """A cada 30 min — sincroniza com o ClickSign os contratos que esperam assinatura (antes só
+    atualizava ao abrir o card, porque o webhook não chega). Alimenta status, PDF assinado e os
+    lembretes por WhatsApp, que só saem depois de confirmar no ClickSign."""
+    try:
+        from app.services.clicksign_estado import sincronizar_todos
+        sincronizar_todos()
+    except Exception as exc:
+        logger.warning("Scheduler: sincronizar_assinaturas_clicksign falhou: %s", exc)
+
+
 def _lembretes_evento_whatsapp() -> None:
     """09h BRT — lembrete por WhatsApp (template lembrete_evento) a quem confirmou presença,
     `dias_lembrete` dias antes do evento. Não faz nada se o template não estiver aprovado."""
@@ -904,6 +915,12 @@ def start_scheduler() -> None:
         _push_andamentos_whatsapp,
         trigger=CronTrigger(hour=19, minute=5, timezone="America/Sao_Paulo"),
         id="push_andamentos_whatsapp",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _sincronizar_assinaturas_clicksign,
+        trigger=CronTrigger(minute="*/30", timezone="America/Sao_Paulo"),
+        id="sincronizar_assinaturas_clicksign",
         replace_existing=True,
     )
     scheduler.add_job(
