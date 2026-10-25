@@ -843,3 +843,53 @@ class SugestaoLinhaOut(BaseModel):
     valor: str
     afirmante: str
     peticao: PeticaoRefOut
+
+
+# ── Perfil do Juízo / MP / Administradora Judicial ───────────────────────────
+
+class PecaDoOrgaoOut(BaseModel):
+    peca_id: uuid.UUID
+    id_processual: str | None = None
+    tipo_pje: str
+    data: date | None = None
+    titulo: str | None = None
+    link_pdf: str | None = None
+    link_md: str | None = None
+
+
+class PosicaoTemaOut(BaseModel):
+    tema: str
+    tema_rotulo: str
+    atual: str
+    atual_rotulo: str
+    n: int
+    mudou: bool
+    ultima: PosicaoOut
+
+
+class OrdensDoJuizoOut(BaseModel):
+    total: int
+    por_destinatario: list[dict]
+    prazo_medio_dias: float | None = None
+    com_prazo: int
+    ligadas_a_mediacao: int
+    com_sancao: int
+    por_status: dict[str, int]
+    decisoes: int
+
+
+class OrgaoPerfilOut(BaseModel):
+    chave: str
+    rotulo: str
+    n_pecas: int
+    primeira: str | None = None
+    ultima: str | None = None
+    tipos: list[dict]
+    recentes: list[PecaDoOrgaoOut]
+    valores: dict
+    posicoes: list[PosicaoTemaOut]
+    ordens: OrdensDoJuizoOut | None = None
+
+
+class PerfilOrgaosOut(BaseModel):
+    orgaos: list[OrgaoPerfilOut]

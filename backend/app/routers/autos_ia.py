@@ -17,13 +17,13 @@ from app.dependencies import get_current_user
 from app.models.andamento import AndamentoProcesso
 from app.models.autos_ia import AutosIACaso, AutosIADocumento, AutosIAPeca, AutosIAPerguntaFaq, AutosIAReferencia
 from app.schemas.autos_ia import (
-    AdicionarAdvogadoIn, AdvogadosPartesOut, CenarioCreateIn, CenarioOut, CenarioUpdateIn, MapaEntidadesOut, SugestaoLinhaOut, ConflitosAdvogadosOut, ContradicoesOut, CruzamentosAdvogadosOut, MatrizPosicoesOut, OpcoesPosicoesOut, PosicaoOut, PosicaoUpdateIn, PosicoesListaOut, PosicoesStatusOut, DeterminacaoOut, DeterminacaoUpdateIn, DeterminacoesListaOut, DeterminacoesStatusOut, IntimacaoIn, MinutaOut, OpcoesDeterminacoesOut, AnexoCorroboracaoOut, FatoValorOut, FatoValorUpdateIn, FatosValoresListaOut, FatosValoresStatusOut, ReconciliacaoOut, RenomearSujeitoIn, TemaOut, AlertaConfigOut, AlertaConfigUpdate, CasoCreate, CasoOut, CasoResumo, CasoUpdate, DocumentoDriveAnexoOut, DocumentoDriveOut, DocumentoOut,
+    AdicionarAdvogadoIn, AdvogadosPartesOut, PerfilOrgaosOut, CenarioCreateIn, CenarioOut, CenarioUpdateIn, MapaEntidadesOut, SugestaoLinhaOut, ConflitosAdvogadosOut, ContradicoesOut, CruzamentosAdvogadosOut, MatrizPosicoesOut, OpcoesPosicoesOut, PosicaoOut, PosicaoUpdateIn, PosicoesListaOut, PosicoesStatusOut, DeterminacaoOut, DeterminacaoUpdateIn, DeterminacoesListaOut, DeterminacoesStatusOut, IntimacaoIn, MinutaOut, OpcoesDeterminacoesOut, AnexoCorroboracaoOut, FatoValorOut, FatoValorUpdateIn, FatosValoresListaOut, FatosValoresStatusOut, ReconciliacaoOut, RenomearSujeitoIn, TemaOut, AlertaConfigOut, AlertaConfigUpdate, CasoCreate, CasoOut, CasoResumo, CasoUpdate, DocumentoDriveAnexoOut, DocumentoDriveOut, DocumentoOut,
     EstimativaImportacaoOut, ExportMdStatusOut, FaqPerguntaCreate, PastasDriveOut, FaqPerguntaOut, GrafoAresta, GrafoNo, GrafoOut, PecaAnotacaoUpdate,
     PecaDetalheOut, PecaOut, PecaTipoUpdate, PrincipalIn, RenomearAdvogadoIn, VinculoIn,
 )
 from app.services.autos_ia import faq as faq_service
 from app.services.autos_ia.busca import buscar_pecas
-from app.services.autos_ia import advogados_partes, cenarios, cruzamentos_advogados, mapa_entidades, export_md_drive, fatos_determinacoes, fatos_posicoes, fatos_valores
+from app.services.autos_ia import advogados_partes, perfil_orgaos, cenarios, cruzamentos_advogados, mapa_entidades, export_md_drive, fatos_determinacoes, fatos_posicoes, fatos_valores
 from app.services.autos_ia.estimativa import estimar_importacao_existentes, estimar_reclassificacao
 from app.services.autos_ia.ingestao import processar_documento, reclassificar_caso, retomar_documento
 from app.services.autos_ia.jusbr_import import (
@@ -624,6 +624,13 @@ def atualizar_posicao(caso_id: uuid.UUID, fato_id: uuid.UUID, data: PosicaoUpdat
 
 
 # ── Mapa de entidades (ativo × passivo) e cenários de recuperação ─────────────
+
+@router.get("/casos/{caso_id}/perfil-orgaos", response_model=PerfilOrgaosOut)
+def perfil_dos_orgaos(caso_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Perfil do Juízo, do Ministério Público e da Administradora Judicial (peças, ordens, valores, posições)."""
+    _get_caso(db, caso_id)
+    return perfil_orgaos.perfil(db, caso_id)
+
 
 @router.get("/casos/{caso_id}/mapa-entidades", response_model=MapaEntidadesOut)
 def mapa_de_entidades(caso_id: uuid.UUID, db: Session = Depends(get_db)):

@@ -313,6 +313,17 @@ export interface Cenario {
 }
 export interface SugestaoLinha { fato_id: string; lado: 'ativo' | 'passivo'; rotulo: string; valor_centavos: number; valor: string; afirmante: string; peticao: PeticaoRef }
 
+export interface PerfilOrgaos {
+  orgaos: {
+    chave: string; rotulo: string; n_pecas: number; primeira: string | null; ultima: string | null
+    tipos: { tipo: string; n: number }[]
+    recentes: { peca_id: string; id_processual: string | null; tipo_pje: string; data: string | null; titulo: string | null; link_pdf: string | null; link_md: string | null }[]
+    valores: { n: number; principais: FatoValor[] }
+    posicoes: { tema: string; tema_rotulo: string; atual: string; atual_rotulo: string; n: number; mudou: boolean; ultima: Posicao }[]
+    ordens: { total: number; por_destinatario: { destinatario: string; n: number }[]; prazo_medio_dias: number | null; com_prazo: number; ligadas_a_mediacao: number; com_sancao: number; por_status: Record<string, number>; decisoes: number } | null
+  }[]
+}
+
 export interface Determinacao {
   id: string
   ordem: string | null
@@ -612,6 +623,9 @@ export const autosIa = {
 
   cruzamentosAdvogados: (casoId: string, minPartes = 2) =>
     api.get<CruzamentosAdvogados>(`/autos-ia/casos/${casoId}/advogados-cruzamentos`, { params: { min_partes: minPartes } }).then((r) => r.data),
+
+  perfilOrgaos: (casoId: string) =>
+    api.get<PerfilOrgaos>(`/autos-ia/casos/${casoId}/perfil-orgaos`).then((r) => r.data),
 
   mapaEntidades: (casoId: string) =>
     api.get<MapaEntidades>(`/autos-ia/casos/${casoId}/mapa-entidades`).then((r) => r.data),

@@ -2,10 +2,11 @@ import { useState } from 'react'
 import EstrategiaAdvogados from './EstrategiaAdvogados'
 import EstrategiaCenarios from './EstrategiaCenarios'
 import EstrategiaMapa from './EstrategiaMapa'
+import EstrategiaOrgaos from './EstrategiaOrgaos'
 import EstrategiaPosicoes from './EstrategiaPosicoes'
 import styles from './Estrategia.module.css'
 
-type Sub = 'advogados' | 'posicoes' | 'mapa' | 'cenarios'
+type Sub = 'advogados' | 'posicoes' | 'mapa' | 'cenarios' | 'orgaos'
 
 /** Cruzamentos para a estratégia de uma eventual mediação incidental. Cada visão é um módulo próprio
  *  (nada aqui altera a leitura dos autos): entram aos poucos nesta aba. */
@@ -18,11 +19,13 @@ export default function Estrategia({ casoId }: { casoId: string }) {
         <button role="tab" aria-selected={sub === 'posicoes'} className={sub === 'posicoes' ? styles.segOn : ''} onClick={() => setSub('posicoes')}>Posições</button>
         <button role="tab" aria-selected={sub === 'mapa'} className={sub === 'mapa' ? styles.segOn : ''} onClick={() => setSub('mapa')}>Ativo × passivo</button>
         <button role="tab" aria-selected={sub === 'cenarios'} className={sub === 'cenarios' ? styles.segOn : ''} onClick={() => setSub('cenarios')}>Cenários</button>
+        <button role="tab" aria-selected={sub === 'orgaos'} className={sub === 'orgaos' ? styles.segOn : ''} onClick={() => setSub('orgaos')}>Juízo · MP · AJ</button>
       </div>
       {sub === 'advogados' && <EstrategiaAdvogados casoId={casoId} />}
       {sub === 'posicoes' && <EstrategiaPosicoes casoId={casoId} />}
       {sub === 'mapa' && <EstrategiaMapa casoId={casoId} />}
       {sub === 'cenarios' && <EstrategiaCenarios casoId={casoId} />}
+      {sub === 'orgaos' && <EstrategiaOrgaos casoId={casoId} />}
     </div>
   )
 }
