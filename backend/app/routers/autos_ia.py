@@ -17,13 +17,13 @@ from app.dependencies import get_current_user
 from app.models.andamento import AndamentoProcesso
 from app.models.autos_ia import AutosIACaso, AutosIADocumento, AutosIAPeca, AutosIAPerguntaFaq, AutosIAReferencia
 from app.schemas.autos_ia import (
-    AdicionarAdvogadoIn, AdvogadosPartesOut, AnexoCorroboracaoOut, FatoValorOut, FatoValorUpdateIn, FatosValoresListaOut, FatosValoresStatusOut, ReconciliacaoOut, RenomearSujeitoIn, TemaOut, AlertaConfigOut, AlertaConfigUpdate, CasoCreate, CasoOut, CasoResumo, CasoUpdate, DocumentoDriveAnexoOut, DocumentoDriveOut, DocumentoOut,
+    AdicionarAdvogadoIn, AdvogadosPartesOut, DeterminacaoOut, DeterminacaoUpdateIn, DeterminacoesListaOut, DeterminacoesStatusOut, IntimacaoIn, MinutaOut, OpcoesDeterminacoesOut, AnexoCorroboracaoOut, FatoValorOut, FatoValorUpdateIn, FatosValoresListaOut, FatosValoresStatusOut, ReconciliacaoOut, RenomearSujeitoIn, TemaOut, AlertaConfigOut, AlertaConfigUpdate, CasoCreate, CasoOut, CasoResumo, CasoUpdate, DocumentoDriveAnexoOut, DocumentoDriveOut, DocumentoOut,
     EstimativaImportacaoOut, ExportMdStatusOut, FaqPerguntaCreate, PastasDriveOut, FaqPerguntaOut, GrafoAresta, GrafoNo, GrafoOut, PecaAnotacaoUpdate,
     PecaDetalheOut, PecaOut, PecaTipoUpdate, PrincipalIn, RenomearAdvogadoIn, VinculoIn,
 )
 from app.services.autos_ia import faq as faq_service
 from app.services.autos_ia.busca import buscar_pecas
-from app.services.autos_ia import advogados_partes, export_md_drive, fatos_valores
+from app.services.autos_ia import advogados_partes, export_md_drive, fatos_determinacoes, fatos_valores
 from app.services.autos_ia.estimativa import estimar_importacao_existentes, estimar_reclassificacao
 from app.services.autos_ia.ingestao import processar_documento, reclassificar_caso, retomar_documento
 from app.services.autos_ia.jusbr_import import (
@@ -447,6 +447,94 @@ def atualizar_valor(caso_id: uuid.UUID, fato_id: uuid.UUID, data: FatoValorUpdat
     except fatos_valores.FatoErro as exc:
         db.rollback()
         raise HTTPException(status_code=422 if "não encontrado" not in str(exc) else 404, detail=str(exc))
+
+
+# ── Banco de fatos: determinações do Juízo e quadro de cumprimento ───────────
+
+STATUS_ROTULO = {
+    "cumprida": "Cumprida", "parcial": "Cumprida em parte", "nao_localizada": "Cumprimento não localizado",
+    "em_prazo": "Em prazo", "prejudicada": "Prejudicada", "nao_aplicavel": "Sem ato a verificar",
+    "vencida_sem_cumprimento": "Vencida sem cumprimento", "nao_avaliada": "Ainda não avaliada",
+}
+
+
+@router.get("/fatos/determinacoes/opcoes", response_model=OpcoesDeterminacoesOut)
+def opcoes_determinacoes():
+    return {
+        "destinatarios": [{"chave": k, "rotulo": v} for k, v in fatos_determinacoes.DEST_ROTULO.items()],
+        "temas": [{"chave": k, "rotulo": v} for k, v in fatos_determinacoes.TEMA_DET_ROTULO.items()],
+        "status": [{"chave": k, "rotulo": v} for k, v in STATUS_ROTULO.items()],
+    }
+
+
+@router.get("/casos/{caso_id}/fatos/determinacoes/status", response_model=DeterminacoesStatusOut)
+def status_determinacoes(caso_id: uuid.UUID, db: Session = Depends(get_db)):
+    _get_caso(db, caso_id)
+    return fatos_determinacoes.status_extracao(db, caso_id)
+
+
+@router.post("/casos/{caso_id}/fatos/determinacoes/extrair", response_model=DeterminacoesStatusOut, status_code=status.HTTP_202_ACCEPTED)
+def extrair_determinacoes(
+    caso_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
+    forcar: bool = Query(False, description="Relê também os atos já lidos"),
+    db: Session = Depends(get_db),
+):
+    """Lê as ordens dos atos do Juízo ainda não lidos e reavalia o cumprimento contra as peças posteriores (usa IA)."""
+    _get_caso(db, caso_id)
+    atual = fatos_determinacoes.status_extracao(db, caso_id)
+    if atual["estado"] == "rodando":
+        return atual
+    background_tasks.add_task(fatos_determinacoes.extrair_caso, caso_id, forcar, True)
+    atual["estado"] = "rodando"
+    atual["mensagem"] = "Iniciando…"
+    return atual
+
+
+@router.get("/casos/{caso_id}/fatos/determinacoes/minuta", response_model=MinutaOut)
+def minuta_determinacoes(caso_id: uuid.UUID, destinatario_tipo: str | None = None, db: Session = Depends(get_db)):
+    """Quadro de ordens vencidas/sem cumprimento comprovado, em Markdown, para colar numa petição."""
+    _get_caso(db, caso_id)
+    return {"markdown": fatos_determinacoes.minuta_descumprimento(db, caso_id, destinatario_tipo)}
+
+
+@router.post("/casos/{caso_id}/fatos/determinacoes/decisao/{peca_id}/intimacao")
+def intimacao_da_decisao(caso_id: uuid.UUID, peca_id: uuid.UUID, data: IntimacaoIn, db: Session = Depends(get_db)):
+    """Informa a data de intimação (início da contagem) das ordens de uma decisão."""
+    _get_caso(db, caso_id)
+    try:
+        return {"atualizadas": fatos_determinacoes.definir_intimacao(db, caso_id, peca_id, data.data)}
+    except fatos_determinacoes.DeterminacaoErro as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.get("/casos/{caso_id}/fatos/determinacoes", response_model=DeterminacoesListaOut)
+def listar_determinacoes(
+    caso_id: uuid.UUID,
+    destinatario_tipo: str | None = None, status_cumprimento: str | None = Query(None, alias="status"),
+    tema: str | None = None, decisao: str | None = None, mediacao: bool = False, q: str | None = None,
+    db: Session = Depends(get_db),
+):
+    _get_caso(db, caso_id)
+    return fatos_determinacoes.listar(db, caso_id, {
+        "destinatario_tipo": destinatario_tipo, "status": status_cumprimento, "tema": tema,
+        "decisao": decisao, "mediacao": mediacao, "q": q,
+    })
+
+
+@router.patch("/casos/{caso_id}/fatos/determinacoes/{fato_id}", response_model=DeterminacaoOut)
+def atualizar_determinacao(caso_id: uuid.UUID, fato_id: uuid.UUID, data: DeterminacaoUpdateIn, db: Session = Depends(get_db)):
+    """Decisão humana sobre uma ordem: status manual (prevalece sobre a IA), nota, validar ou rejeitar."""
+    _get_caso(db, caso_id)
+    try:
+        return fatos_determinacoes.atualizar(
+            db, caso_id, fato_id, status_manual=data.status_manual, nota=data.nota,
+            nota_definida="nota" in data.model_fields_set, rejeitar=data.rejeitar, validar=data.validar,
+        )
+    except fatos_determinacoes.DeterminacaoErro as exc:
+        db.rollback()
+        raise HTTPException(status_code=404 if "não encontrada" in str(exc) else 422, detail=str(exc))
 
 
 @router.get("/casos/{caso_id}/pastas-drive", response_model=PastasDriveOut)

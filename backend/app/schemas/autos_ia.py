@@ -462,3 +462,77 @@ class AnexoCorroboracaoOut(BaseModel):
 class TemaOut(BaseModel):
     chave: str
     rotulo: str
+
+
+# ── Banco de fatos: determinações do Juízo e quadro de cumprimento ───────────
+
+class DeterminacaoOut(BaseModel):
+    id: uuid.UUID
+    ordem: str | None = None
+    capitulo: str | None = None
+    destinatario: str | None = None
+    destinatario_tipo: str | None = None
+    destinatario_rotulo: str
+    acao: str | None = None
+    tema: str | None = None
+    tema_rotulo: str
+    prazo_dias: int | None = None
+    prazo_tipo: str | None = None
+    prazo_condicao: str | None = None
+    sancao: str | None = None
+    ligada_a_mediacao: bool = False
+    trecho: str | None = None
+    decisao_data: str | None = None
+    intimacao_data: str | None = None
+    vencimento: str | None = None
+    vencimento_estimado: bool = True
+    vencimento_motivo: str | None = None
+    dias_para_vencer: int | None = None
+    status_ia: str | None = None
+    status_manual: str | None = None
+    status: str
+    justificativa: str | None = None
+    nota: str | None = None
+    confianca: float | None = None
+    validado: bool = False
+    evidencias: list[PeticaoRefOut] = []
+    decisao: PeticaoRefOut
+
+
+class DeterminacoesListaOut(BaseModel):
+    total: int
+    resumo: dict[str, int]
+    itens: list[DeterminacaoOut]
+
+
+class DeterminacoesStatusOut(BaseModel):
+    estado: Literal["ocioso", "rodando", "concluido", "erro"]
+    total_determinacoes: int
+    atos_pendentes: int
+    total: int = 0
+    feitos: int = 0
+    novas: int = 0
+    erros: int = 0
+    custo_usd: float = 0.0
+    mensagem: str | None = None
+
+
+class DeterminacaoUpdateIn(BaseModel):
+    status_manual: str | None = None     # cumprida | parcial | nao_localizada | em_prazo | prejudicada | nao_aplicavel | automatico
+    nota: str | None = None
+    rejeitar: bool = False
+    validar: bool | None = None
+
+
+class IntimacaoIn(BaseModel):
+    data: str | None = None              # AAAA-MM-DD; nulo volta a contar da data da decisão
+
+
+class MinutaOut(BaseModel):
+    markdown: str
+
+
+class OpcoesDeterminacoesOut(BaseModel):
+    destinatarios: list[TemaOut]
+    temas: list[TemaOut]
+    status: list[TemaOut]

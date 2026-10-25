@@ -245,6 +245,63 @@ export interface AdvogadosPartes {
   sem_advogado: { motivo: MotivoSemAdvogado; parte: string | null; assinante: string | null; peticao: PeticaoRef }[]
 }
 
+export interface Determinacao {
+  id: string
+  ordem: string | null
+  capitulo: string | null
+  destinatario: string | null
+  destinatario_tipo: string | null
+  destinatario_rotulo: string
+  acao: string | null
+  tema: string | null
+  tema_rotulo: string
+  prazo_dias: number | null
+  prazo_tipo: string | null
+  prazo_condicao: string | null
+  sancao: string | null
+  ligada_a_mediacao: boolean
+  trecho: string | null
+  decisao_data: string | null
+  intimacao_data: string | null
+  vencimento: string | null
+  vencimento_estimado: boolean
+  vencimento_motivo: string | null
+  dias_para_vencer: number | null
+  status_ia: string | null
+  status_manual: string | null
+  status: string
+  justificativa: string | null
+  nota: string | null
+  confianca: number | null
+  validado: boolean
+  evidencias: PeticaoRef[]
+  decisao: PeticaoRef
+}
+
+export interface DeterminacoesLista { total: number; resumo: Record<string, number>; itens: Determinacao[] }
+
+export interface DeterminacoesStatus {
+  estado: 'ocioso' | 'rodando' | 'concluido' | 'erro'
+  total_determinacoes: number
+  atos_pendentes: number
+  total: number
+  feitos: number
+  novas: number
+  erros: number
+  custo_usd: number
+  mensagem: string | null
+}
+
+export interface FiltrosDeterminacoes {
+  destinatario_tipo?: string; status?: string; tema?: string; decisao?: string; mediacao?: boolean; q?: string
+}
+
+export interface OpcoesDeterminacoes {
+  destinatarios: { chave: string; rotulo: string }[]
+  temas: { chave: string; rotulo: string }[]
+  status: { chave: string; rotulo: string }[]
+}
+
 export interface FatoValor {
   id: string
   valor_centavos: number
@@ -484,6 +541,33 @@ export const autosIa = {
 
   ondeMaisApareceValor: (casoId: string, fatoId: string) =>
     api.get<OndeMaisAparece[]>(`/autos-ia/casos/${casoId}/fatos/valores/${fatoId}/anexos`).then((r) => r.data),
+
+  opcoesDeterminacoes: () =>
+    api.get<OpcoesDeterminacoes>('/autos-ia/fatos/determinacoes/opcoes').then((r) => r.data),
+
+  statusDeterminacoes: (casoId: string) =>
+    api.get<DeterminacoesStatus>(`/autos-ia/casos/${casoId}/fatos/determinacoes/status`).then((r) => r.data),
+
+  extrairDeterminacoes: (casoId: string, forcar = false) =>
+    api.post<DeterminacoesStatus>(`/autos-ia/casos/${casoId}/fatos/determinacoes/extrair`, null, {
+      params: forcar ? { forcar: true } : {},
+    }).then((r) => r.data),
+
+  listarDeterminacoes: (casoId: string, f: FiltrosDeterminacoes = {}) =>
+    api.get<DeterminacoesLista>(`/autos-ia/casos/${casoId}/fatos/determinacoes`, {
+      params: Object.fromEntries(Object.entries(f).filter(([, v]) => v)),
+    }).then((r) => r.data),
+
+  atualizarDeterminacao: (casoId: string, fatoId: string, body: { status_manual?: string | null; nota?: string | null; rejeitar?: boolean; validar?: boolean }) =>
+    api.patch<Determinacao>(`/autos-ia/casos/${casoId}/fatos/determinacoes/${fatoId}`, body).then((r) => r.data),
+
+  intimacaoDaDecisao: (casoId: string, pecaId: string, data: string | null) =>
+    api.post<{ atualizadas: number }>(`/autos-ia/casos/${casoId}/fatos/determinacoes/decisao/${pecaId}/intimacao`, { data }).then((r) => r.data),
+
+  minutaDeterminacoes: (casoId: string, destinatarioTipo?: string) =>
+    api.get<{ markdown: string }>(`/autos-ia/casos/${casoId}/fatos/determinacoes/minuta`, {
+      params: destinatarioTipo ? { destinatario_tipo: destinatarioTipo } : {},
+    }).then((r) => r.data),
 
   pastasDrive: (casoId: string) =>
     api.get<PastasDrive>(`/autos-ia/casos/${casoId}/pastas-drive`).then((r) => r.data),
