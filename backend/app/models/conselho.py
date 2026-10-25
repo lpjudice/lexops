@@ -123,6 +123,11 @@ class ConselhoEvento(Base):
     fechados: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
     mensagem_master: Mapped[str | None] = mapped_column(Text, nullable=True)
     dias_lembrete: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    # Detalhes que vão na mensagem de confirmação e no lembrete por WhatsApp.
+    horario: Mapped[str | None] = mapped_column(String(40), nullable=True)   # texto livre: "19h", "19h às 21h"
+    local_evento: Mapped[str | None] = mapped_column(String(300), nullable=True)    # nome do local
+    endereco: Mapped[str | None] = mapped_column(Text, nullable=True)
+    detalhes: Mapped[str | None] = mapped_column(Text, nullable=True)        # orientações extras (estacionamento, traje...)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -152,6 +157,11 @@ class ConselhoEventoConvidado(Base):
     convite_whatsapp_msg_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     convite_whatsapp_status: Mapped[str | None] = mapped_column(String(20), nullable=True)  # enviado|entregue|lido|falhou
     convite_whatsapp_erro: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # De onde veio a resposta de presença: 'whatsapp_botao' ou 'manual (Nome)'; e quando.
+    confirmacao_origem: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    confirmacao_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Lembrete (template lembrete_evento) já enviado a este convidado.
+    lembrete_whatsapp_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     evento: Mapped["ConselhoEvento"] = relationship("ConselhoEvento", back_populates="convidados")

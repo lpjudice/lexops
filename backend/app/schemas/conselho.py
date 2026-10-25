@@ -184,6 +184,9 @@ class ConvidadoOut(BaseModel):
     convite_whatsapp_em: datetime | None = None
     convite_whatsapp_status: str | None = None
     convite_whatsapp_erro: str | None = None
+    confirmacao_origem: str | None = None
+    confirmacao_em: datetime | None = None
+    lembrete_whatsapp_em: datetime | None = None
     contato: ContatoOut
 
 
@@ -206,6 +209,10 @@ class EventoCreate(BaseModel):
     receita: float | None = None
     mensagem_master: str | None = None
     dias_lembrete: int = 2
+    horario: str | None = None
+    local_evento: str | None = None
+    endereco: str | None = None
+    detalhes: str | None = None
 
 
 class EventoUpdate(BaseModel):
@@ -219,6 +226,10 @@ class EventoUpdate(BaseModel):
     fechados: int | None = None
     mensagem_master: str | None = None
     dias_lembrete: int | None = None
+    horario: str | None = None
+    local_evento: str | None = None
+    endereco: str | None = None
+    detalhes: str | None = None
 
 
 class EventoOut(BaseModel):
@@ -234,6 +245,10 @@ class EventoOut(BaseModel):
     fechados: int | None
     mensagem_master: str | None
     dias_lembrete: int
+    horario: str | None = None
+    local_evento: str | None = None
+    endereco: str | None = None
+    detalhes: str | None = None
     created_at: datetime
     updated_at: datetime
     convidados: list[ConvidadoOut] = []

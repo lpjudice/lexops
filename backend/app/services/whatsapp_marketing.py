@@ -20,7 +20,7 @@ import logging
 import re
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy.orm import Session
 
@@ -31,6 +31,7 @@ from app.services import whatsapp_api
 logger = logging.getLogger(__name__)
 
 TEMPLATE_CONVITE_EVENTO = "convite_evento"
+TEMPLATE_LEMBRETE_EVENTO = "lembrete_evento"
 # Estimativa pra mostrar na tela (Meta, marketing Brasil, tabela de out/2026) — não é cobrança exata.
 CUSTO_MARKETING_ESTIMADO_BRL = 0.3217
 
@@ -112,7 +113,7 @@ def enviar_teste(telefone: str, evento: ConselhoEvento) -> dict | None:
         to=telefone,
         template_name=TEMPLATE_CONVITE_EVENTO,
         parametros=_parametros_convite("Teste", evento.nome, _data_para_texto(evento)),
-        botoes_resposta_payload=[f"{_PAYLOAD_PREFIXO}:teste:{a}" for a in _ACOES],
+        botoes_resposta_payload=[f"{_PAYLOAD_PREFIXO}:t-{getattr(evento, 'id', '') or 'x'}:{a}" for a in _ACOES],
     )
 
 
@@ -180,9 +181,19 @@ def tratar_resposta_botao(db: Session, telefone: str, payload: str) -> str | Non
         return None
     _, alvo, acao = partes
     # Convite de TESTE nunca grava nada — nem o "Parar de receber" (senão testar o botão
-    # tiraria o próprio número de quem testa da lista de marketing).
-    if alvo == "teste":
-        return f"Teste recebido: o botão \"{ {'sim': 'Vou participar', 'nao': 'Não poderei', 'parar': 'Parar de receber'}[acao] }\" funcionou. Nada foi registrado."
+    # tiraria o próprio número de quem testa da lista de marketing). Mostra a prévia do que
+    # o convidado receberia ao confirmar, com os dados reais do evento.
+    if alvo.startswith("t-") or alvo == "teste":
+        nome_botao = {"sim": "Vou participar", "nao": "Não poderei", "parar": "Parar de receber"}[acao]
+        texto = f"Teste recebido: o botão \"{nome_botao}\" funcionou. Nada foi registrado."
+        if acao == "sim" and alvo.startswith("t-"):
+            try:
+                ev = db.get(ConselhoEvento, uuid.UUID(alvo[2:]))
+            except ValueError:
+                ev = None
+            if ev:
+                texto += "\n\nPrévia da mensagem que o convidado recebe ao confirmar:\n\n" + mensagem_confirmacao(ev)
+        return texto
     if acao == "parar":
         registrar_optout(db, telefone, origem="botao")
         return "Combinado, você não receberá mais convites por WhatsApp. Obrigado!"
@@ -192,14 +203,95 @@ def tratar_resposta_botao(db: Session, telefone: str, payload: str) -> str | Non
         return None
     if not cv:
         return None
+    agora = datetime.now(timezone.utc)
+    cv.confirmacao_origem, cv.confirmacao_em = "whatsapp_botao", agora
     if acao == "sim":
         cv.presenca_confirmada, cv.recusou = True, False
-        resposta = "Presença confirmada, obrigado!"
+        resposta = mensagem_confirmacao(cv.evento)
     else:
         cv.presenca_confirmada, cv.recusou = False, True
         resposta = "Sem problemas, obrigado por avisar. Esperamos você em uma próxima oportunidade."
     db.commit()
     return resposta
+
+
+def _linhas_detalhes_evento(ev: ConselhoEvento) -> list[str]:
+    linhas: list[str] = []
+    if ev.data:
+        linhas.append(f"📅 Data: {ev.data.strftime('%d/%m/%Y')}")
+    if ev.horario:
+        linhas.append(f"🕒 Horário: {ev.horario}")
+    if ev.local_evento:
+        linhas.append(f"📍 Local: {ev.local_evento}")
+    if ev.endereco:
+        linhas.append(f"🗺️ Endereço: {ev.endereco}")
+    if ev.detalhes and ev.detalhes.strip():
+        linhas.append(ev.detalhes.strip())
+    return linhas
+
+
+def mensagem_confirmacao(ev: ConselhoEvento) -> str:
+    """Texto enviado quando o convidado toca em "Vou participar": confirma e traz os dados do evento."""
+    partes = ["Presença confirmada, obrigado! ✅", f"*{ev.nome}*"] + _linhas_detalhes_evento(ev)
+    if ev.data and ev.data >= date.today() and (ev.dias_lembrete or 0) > 0:
+        partes.append(f"Vamos te enviar um lembrete {ev.dias_lembrete} dia(s) antes do evento.")
+    return "\n".join(partes)
+
+
+def enviar_lembretes_evento(hoje: date | None = None) -> dict:
+    """Roda todo dia: pra cada evento a até `dias_lembrete` dias da data, manda o lembrete a quem
+    CONFIRMOU presença (e ainda não recebeu). Só vai pra quem tem WhatsApp, não pediu pra parar e
+    deu aval — opt-in cadastrado OU confirmou pelo próprio botão do convite. Se o template ainda
+    não foi aprovado, não envia nada (e tenta de novo no dia seguinte)."""
+    from app.database import SessionLocal
+
+    hoje = hoje or date.today()
+    status = whatsapp_api.status_template(TEMPLATE_LEMBRETE_EVENTO)
+    if status not in (None, "APPROVED"):
+        logger.warning("lembrete_evento: template não aprovado (%s) — nada enviado", status)
+        return {"enviados": 0, "motivo": f"template {status}"}
+    db = SessionLocal()
+    enviados = falhas = 0
+    try:
+        eventos = db.query(ConselhoEvento).filter(ConselhoEvento.data.isnot(None), ConselhoEvento.data >= hoje).all()
+        for ev in eventos:
+            restam = (ev.data - hoje).days
+            if restam > (ev.dias_lembrete or 0):
+                continue
+            local = ", ".join(x.strip() for x in (ev.local_evento, ev.endereco) if x and x.strip()) or "local a confirmar"
+            for cv in ev.convidados:
+                c = cv.contato
+                if not cv.presenca_confirmada or cv.recusou or cv.lembrete_whatsapp_em:
+                    continue
+                if not telefone8(c.whatsapp) or esta_optout(db, c.whatsapp):
+                    continue
+                if not (c.whatsapp_optin or cv.confirmacao_origem == "whatsapp_botao"):
+                    continue
+                resp = whatsapp_api.send_template_message(
+                    to=c.whatsapp, template_name=TEMPLATE_LEMBRETE_EVENTO,
+                    parametros={
+                        "primeiro_nome": c.primeiro_nome.strip() or "convidado",
+                        "evento": ev.nome.strip(),
+                        "data": ev.data.strftime("%d/%m/%Y"),
+                        "horario": (ev.horario or "").strip() or "horário a confirmar",
+                        "local": local,
+                    },
+                )
+                if whatsapp_api.id_da_mensagem(resp):
+                    cv.lembrete_whatsapp_em = datetime.now(timezone.utc)
+                    enviados += 1
+                else:
+                    falhas += 1
+                    logger.warning("lembrete_evento: falha com %s: %s", c.primeiro_nome, resp)
+                db.commit()
+                time.sleep(0.15)
+    except Exception:
+        db.rollback()
+        logger.exception("lembrete_evento: erro")
+    finally:
+        db.close()
+    logger.info("lembrete_evento: %d enviado(s), %d falha(s)", enviados, falhas)
+    return {"enviados": enviados, "falhas": falhas}
 
 
 def atualizar_status_entrega(db: Session, msg_id: str, status: str, erro: str | None = None) -> None:

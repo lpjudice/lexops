@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { conselhoApi } from '../api/conselho'
 import type {
-  CategoriaDiretriz, Contato, Diretriz, Evento, LogDiario, Parceiro, PipelineItem,
+  CategoriaDiretriz, Contato, Convidado, Diretriz, Evento, LogDiario, Parceiro, PipelineItem,
   StatusDiretriz, StatusParceiro, TipoParceiro,
 } from '../api/conselho'
 import ComboBox from '../components/ComboBox'
@@ -41,6 +41,16 @@ function encodeWaText(text: string): string {
     /%[Ff][0-4](?:%[89ABab][0-9A-Fa-f]){3}/g,
     m => decodeURIComponent(m),
   )
+}
+
+/** "via WhatsApp · 25/10 14:03" / "manual (Nome) · 25/10 14:03" — de onde veio a resposta de presença. */
+function origemConfirmacao(cv: Convidado): string | null {
+  if (!cv.confirmacao_origem) return null
+  const quem = cv.confirmacao_origem === 'whatsapp_botao' ? 'via WhatsApp' : cv.confirmacao_origem
+  const quando = cv.confirmacao_em
+    ? new Date(cv.confirmacao_em).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+    : ''
+  return quando ? `${quem} · ${quando}` : quem
 }
 
 function aplicarPlaceholders(template: string, primeiro: string, ultimo: string, evento: string) {
@@ -863,6 +873,20 @@ function EventosSubTab() {
                 onBlur={(e) => atualizar.mutate({ id: eventoExpandido.id, payload: { dias_lembrete: Number(e.target.value) } })}
               />
             </div>
+            <div className={styles.fieldGroup} style={{ flexBasis: '100%' }}>
+              <span title="Vão na mensagem de confirmação (quando o convidado toca em &quot;Vou participar&quot;) e no lembrete por WhatsApp">Detalhes do evento para o WhatsApp</span>
+              <div key={eventoExpandido.id} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 8, marginTop: 4 }}>
+                <input className={styles.input} placeholder="Horário (ex.: 19h às 21h)" defaultValue={eventoExpandido.horario ?? ''}
+                  onBlur={(e) => atualizar.mutate({ id: eventoExpandido.id, payload: { horario: e.target.value.trim() } })} />
+                <input className={styles.input} placeholder="Local (ex.: Auditório PJ)" defaultValue={eventoExpandido.local_evento ?? ''}
+                  onBlur={(e) => atualizar.mutate({ id: eventoExpandido.id, payload: { local_evento: e.target.value.trim() } })} />
+                <input className={styles.input} placeholder="Endereço completo" defaultValue={eventoExpandido.endereco ?? ''}
+                  onBlur={(e) => atualizar.mutate({ id: eventoExpandido.id, payload: { endereco: e.target.value.trim() } })} />
+              </div>
+              <textarea className={styles.input} style={{ marginTop: 8, minHeight: 56, width: '100%' }} placeholder="Orientações extras (estacionamento, traje, o que levar…)"
+                key={`${eventoExpandido.id}-det`} defaultValue={eventoExpandido.detalhes ?? ''}
+                onBlur={(e) => atualizar.mutate({ id: eventoExpandido.id, payload: { detalhes: e.target.value.trim() } })} />
+            </div>
             <button className={styles.btnSmall} onClick={() => setMasterMsg(TEMPLATE_LEMBRETE(eventoExpandido.dias_lembrete))}>
               Usar modelo: Lembrete
             </button>
@@ -925,10 +949,18 @@ function EventosSubTab() {
                     {/* Linha 2: badges + ações */}
                     <div className={cs.guestCardBottomRow} onClick={(e) => e.stopPropagation()}>
                       <div className={cs.guestCardBadges}>
-                        {cv.presenca_confirmada && <span className={`${cs.badge} ${cs.badgeConfirmado}`}>✓ Conf.</span>}
+                        {cv.presenca_confirmada && <span className={`${cs.badge} ${cs.badgeConfirmado}`} title={origemConfirmacao(cv) ?? 'Confirmado'}>✓ Conf.</span>}
                         {cv.recusou && <span className={`${cs.badge} ${cs.badgeRecusou}`}>✗ Recus.</span>}
                         {cv.participacao_confirmada && <span className={`${cs.badge} ${cs.badgeParticipou}`}>✓ Part.</span>}
                         {cv.pendente && <span className={`${cs.badge} ${cs.badgePendente}`}>⏳ Pend.</span>}
+                        {(cv.presenca_confirmada || cv.recusou) && origemConfirmacao(cv) && (
+                          <span style={{ fontSize: 10, color: '#6b7280' }} title="De onde veio a resposta de presença">{origemConfirmacao(cv)}</span>
+                        )}
+                        {cv.lembrete_whatsapp_em && (
+                          <span style={{ fontSize: 10, color: '#15803d' }} title="Lembrete por WhatsApp enviado">
+                            🔔 lembrete {new Date(cv.lembrete_whatsapp_em).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                          </span>
+                        )}
                         {cv.convite_whatsapp_status && (
                           <span className={cs.badge} style={{ background: cv.convite_whatsapp_status === 'falhou' ? '#fee2e2' : '#dcfce7', color: cv.convite_whatsapp_status === 'falhou' ? '#b91c1c' : '#15803d' }}
                             title={cv.convite_whatsapp_erro || `Convite por WhatsApp: ${cv.convite_whatsapp_status}`}>

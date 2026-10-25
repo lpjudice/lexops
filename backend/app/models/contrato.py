@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, String, Text, func, text
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -70,6 +70,8 @@ class Contrato(Base):
     # ClickSign
     clicksign_document_key: Mapped[str | None] = mapped_column(String(255), unique=True)
     clicksign_request_signature_key: Mapped[str | None] = mapped_column(String(255))
+    # Quando foi enviado ao ClickSign — base dos lembretes automáticos de assinatura.
+    assinatura_enviada_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -110,6 +112,10 @@ class Signatario(Base):
     whatsapp: Mapped[str | None] = mapped_column(String(30))
     # Com número preenchido, o PADRÃO é avisar por WhatsApp (nossa mensagem com o
     # link, além do e-mail do ClickSign). Desmarcar = só e-mail.
+    # Lembretes automáticos por WhatsApp já enviados (estágio 0..4) e quando; aviso de cancelamento.
+    lembretes_whatsapp: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    ultimo_lembrete_whatsapp_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelamento_avisado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     avisar_whatsapp: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
     # Opcional: o próprio ClickSign convida e autentica por WhatsApp (communicate_by
     # + auths=whatsapp). Exige o recurso habilitado na conta/plano e cobra por

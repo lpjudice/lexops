@@ -165,6 +165,25 @@ def _push_andamentos_whatsapp() -> None:
         logger.warning("Scheduler: push_andamentos_whatsapp falhou: %s", exc)
 
 
+def _lembretes_evento_whatsapp() -> None:
+    """09h BRT — lembrete por WhatsApp (template lembrete_evento) a quem confirmou presença,
+    `dias_lembrete` dias antes do evento. Não faz nada se o template não estiver aprovado."""
+    try:
+        from app.services.whatsapp_marketing import enviar_lembretes_evento
+        enviar_lembretes_evento()
+    except Exception as exc:
+        logger.warning("Scheduler: lembretes_evento_whatsapp falhou: %s", exc)
+
+
+def _lembretes_assinatura_whatsapp() -> None:
+    """10h BRT — lembra por WhatsApp quem ainda não assinou (3, 7, 14 e 27 dias após o envio)."""
+    try:
+        from app.services.contrato_whatsapp import enviar_lembretes_assinatura
+        enviar_lembretes_assinatura()
+    except Exception as exc:
+        logger.warning("Scheduler: lembretes_assinatura_whatsapp falhou: %s", exc)
+
+
 def _faxina_codex() -> None:
     """19h15 BRT — após o push, varre documentos recentes salvos com o erro do
     repositório PDPJ ("Codex") no lugar do binário, re-baixa os corretos e avisa
@@ -885,6 +904,18 @@ def start_scheduler() -> None:
         _push_andamentos_whatsapp,
         trigger=CronTrigger(hour=19, minute=5, timezone="America/Sao_Paulo"),
         id="push_andamentos_whatsapp",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _lembretes_evento_whatsapp,
+        trigger=CronTrigger(hour=9, minute=0, timezone="America/Sao_Paulo"),
+        id="lembretes_evento_whatsapp",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _lembretes_assinatura_whatsapp,
+        trigger=CronTrigger(hour=10, minute=0, timezone="America/Sao_Paulo"),
+        id="lembretes_assinatura_whatsapp",
         replace_existing=True,
     )
     scheduler.add_job(

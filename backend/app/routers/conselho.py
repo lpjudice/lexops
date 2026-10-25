@@ -621,6 +621,14 @@ def atualizar_convidado(
     for field, value in updates.items():
         setattr(cv, field, value)
 
+    # Registra de onde veio a resposta de presença quando alguém marca/desmarca na tela.
+    if "presenca_confirmada" in updates or "recusou" in updates:
+        if cv.presenca_confirmada or cv.recusou:
+            cv.confirmacao_origem = f"manual ({getattr(usuario, 'nome', None) or 'usuário'})"[:80]
+            cv.confirmacao_em = datetime.now(timezone.utc)
+        else:
+            cv.confirmacao_origem, cv.confirmacao_em = None, None
+
     # Cria tarefa para Monielly quando followup_data é definida pela primeira vez
     nova_followup = updates.get("followup_data")
     if nova_followup and nova_followup != followup_anterior:

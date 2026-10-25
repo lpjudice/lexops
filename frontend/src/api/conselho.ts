@@ -120,6 +120,9 @@ export interface Convidado {
   convite_whatsapp_em?: string | null
   convite_whatsapp_status?: 'enviado' | 'entregue' | 'lido' | 'falhou' | null
   convite_whatsapp_erro?: string | null
+  confirmacao_origem?: string | null
+  confirmacao_em?: string | null
+  lembrete_whatsapp_em?: string | null
   contato: Contato
 }
 
@@ -161,6 +164,10 @@ export interface Evento {
   fechados?: number | null
   mensagem_master?: string | null
   dias_lembrete: number
+  horario?: string | null
+  local_evento?: string | null
+  endereco?: string | null
+  detalhes?: string | null
   created_at: string
   updated_at: string
   convidados: Convidado[]
@@ -174,6 +181,10 @@ export interface EventoCreate {
   receita?: number
   mensagem_master?: string
   dias_lembrete?: number
+  horario?: string
+  local_evento?: string
+  endereco?: string
+  detalhes?: string
 }
 
 export interface Parceiro {

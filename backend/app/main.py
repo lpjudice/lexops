@@ -1284,6 +1284,17 @@ def _run_migrations() -> None:
             "ALTER TABLE informativo_assinantes ADD COLUMN IF NOT EXISTS whatsapp VARCHAR(30)",
             "ALTER TABLE informativo_assinantes ADD COLUMN IF NOT EXISTS whatsapp_optin BOOLEAN NOT NULL DEFAULT false",
             "ALTER TABLE informativo_assinantes ADD COLUMN IF NOT EXISTS whatsapp_optin_em TIMESTAMPTZ",
+            "ALTER TABLE conselho_eventos ADD COLUMN IF NOT EXISTS horario VARCHAR(40)",
+            "ALTER TABLE conselho_eventos ADD COLUMN IF NOT EXISTS local_evento VARCHAR(300)",
+            "ALTER TABLE conselho_eventos ADD COLUMN IF NOT EXISTS endereco TEXT",
+            "ALTER TABLE conselho_eventos ADD COLUMN IF NOT EXISTS detalhes TEXT",
+            "ALTER TABLE conselho_evento_convidados ADD COLUMN IF NOT EXISTS confirmacao_origem VARCHAR(80)",
+            "ALTER TABLE conselho_evento_convidados ADD COLUMN IF NOT EXISTS confirmacao_em TIMESTAMPTZ",
+            "ALTER TABLE conselho_evento_convidados ADD COLUMN IF NOT EXISTS lembrete_whatsapp_em TIMESTAMPTZ",
+            "ALTER TABLE contratos ADD COLUMN IF NOT EXISTS assinatura_enviada_em TIMESTAMPTZ",
+            "ALTER TABLE signatarios ADD COLUMN IF NOT EXISTS lembretes_whatsapp INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE signatarios ADD COLUMN IF NOT EXISTS ultimo_lembrete_whatsapp_em TIMESTAMPTZ",
+            "ALTER TABLE signatarios ADD COLUMN IF NOT EXISTS cancelamento_avisado_em TIMESTAMPTZ",
         ):
             conn.execute(text(_ddl))
 
