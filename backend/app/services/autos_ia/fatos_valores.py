@@ -225,12 +225,14 @@ def _tool_input(resp, nome: str) -> dict:
 
 
 def rotular(info: dict, cands: list[Candidato], cliente=None) -> tuple[dict[int, dict], float]:
-    """Rotula os candidatos de UMA peça (em lotes). Devolve ({índice: rótulo}, custo_usd)."""
+    """Rotula os candidatos de UMA peça (em lotes). Devolve ({índice: rótulo}, custo_usd).
+    Se a resposta da IA estourar o limite de saída (lote grande), o lote é dividido ao meio — um lote
+    cortado nunca é tratado como completo, senão valores sumiriam da peça sem aviso."""
     cliente = cliente or _cliente()
     saida: dict[int, dict] = {}
     custo = 0.0
-    for ini in range(0, len(cands), LOTE_CANDIDATOS):
-        lote = cands[ini: ini + LOTE_CANDIDATOS]
+
+    def _lote(ini: int, lote: list[Candidato]) -> float:
         linhas = [
             f"[{ini + k}] {fmt_brl(c.valor_centavos)} (escrito: “{c.rotulo}”) — contexto: «{c.contexto}»"
             for k, c in enumerate(lote)
@@ -241,15 +243,19 @@ def rotular(info: dict, cands: list[Candidato], cliente=None) -> tuple[dict[int,
             "Valores a rotular:\n" + "\n".join(linhas)
         )
         resp = cliente.messages.create(
-            model=MODELO, max_tokens=4096, system=SISTEMA_ROTULOS, tools=[TOOL_ROTULOS],
+            model=MODELO, max_tokens=8192, system=SISTEMA_ROTULOS, tools=[TOOL_ROTULOS],
             tool_choice={"type": "tool", "name": "registrar_rotulos"},
             messages=[{"role": "user", "content": prompt}],
         )
-        custo += calcular_custo_usd(resp.usage.input_tokens, resp.usage.output_tokens)
-        dados = _tool_input(resp, "registrar_rotulos")
-        itens = dados.get("rotulos")
+        c_ = calcular_custo_usd(resp.usage.input_tokens, resp.usage.output_tokens)
+        if getattr(resp, "stop_reason", None) == "max_tokens":
+            if len(lote) <= 1:
+                raise RuntimeError("A resposta da IA foi cortada num único valor; peça não rotulada.")
+            meio = len(lote) // 2
+            return c_ + _lote(ini, lote[:meio]) + _lote(ini + meio, lote[meio:])
+        itens = _tool_input(resp, "registrar_rotulos").get("rotulos")
         if not isinstance(itens, list):
-            continue
+            return c_
         for it in itens:
             try:
                 i = int(it.get("i"))
@@ -272,6 +278,10 @@ def rotular(info: dict, cands: list[Candidato], cliente=None) -> tuple[dict[int,
                 "data_ref": dr if isinstance(dr, str) and _RE_DATA_REF.match(dr) else None,
                 "confianca": conf,
             }
+        return c_
+
+    for ini in range(0, len(cands), LOTE_CANDIDATOS):
+        custo += _lote(ini, cands[ini: ini + LOTE_CANDIDATOS])
     return saida, custo
 
 

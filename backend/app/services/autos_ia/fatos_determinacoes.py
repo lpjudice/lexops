@@ -75,7 +75,7 @@ TOOL_DET = {
             "prazo_data": {"type": ["string", "null"], "description": "Data-limite explícita AAAA-MM-DD, se o ato a fixar."},
             "sancao": {"type": ["string", "null"], "description": "Consequência de descumprir, se declarada (ex.: 'extinção quanto à sociedade irregularmente representada')."},
             "ligada_a_mediacao": {"type": "boolean", "description": "True se a ordem trata da mediação ou de pressuposto dela (representação com poderes para transigir, legitimidade, relação de credores, composição dos participantes)."},
-            "trecho": {"type": "string", "description": "Trecho LITERAL do ato que contém a ordem (máx. 500 caracteres)."},
+            "trecho": {"type": "string", "description": "Trecho LITERAL do ato que contém a ordem (máx. 250 caracteres; só o essencial)."},
         }, "required": ["destinatario_tipo", "acao", "tema", "ligada_a_mediacao", "trecho"]}}},
         "required": ["determinacoes"],
     },
@@ -85,7 +85,7 @@ SISTEMA_DET = (
     "cumprimento. Liste só obrigações impostas a alguém (determino, ordeno, intime-se para manifestar, fixo prazo para "
     "indicar/juntar/esclarecer, advirto sob pena…). NÃO liste fundamentação, relatório, nem deferimentos que não impõem "
     "ato a ninguém. Cada ordem separada (cada alínea com destinatário, ato ou prazo diferente) é um item. Copie o trecho "
-    "literalmente; não invente prazos nem destinatários — use null quando o ato não diz."
+    "literalmente; não invente prazos nem destinatários — use null quando o ato não diz. Seja conciso: ação em uma frase curta e trecho de até 250 caracteres."
 )
 
 TOOL_CUMPRIMENTO = {
@@ -162,22 +162,72 @@ def _grupos_de_atos(db, caso_id) -> list[dict]:
     return list(grupos.values())
 
 
-def _montar_prompt_ato(g: dict) -> str:
-    return (f"Ato do Juízo — ID {g['id_processual'] or 's/ ID'}, de {g['data'] or 'data não informada'}.\n\n"
-            f"Texto integral:\n\n{g['texto'][:300_000]}")
+_CHUNK_CHARS = 40_000      # acima disso o ato é lido em partes (a lista de ordens de uma decisão longa estoura a resposta)
+_CHUNK_MIN = 6_000
+_SOBREPOSICAO = 1_500
+
+
+def _montar_prompt_ato(g: dict, texto: str | None = None, parte: tuple[int, int] | None = None) -> str:
+    cab = f"Ato do Juízo — ID {g['id_processual'] or 's/ ID'}, de {g['data'] or 'data não informada'}."
+    if parte and parte[1] > 1:
+        cab += (f"\nVocê recebe a PARTE {parte[0]} de {parte[1]} do texto. Liste as ordens que aparecem nesta parte; "
+                "o início pode repetir o fim da parte anterior (contexto) — não liste de novo ordens que só aparecem nessa repetição.")
+    return f"{cab}\n\nTexto integral:\n\n{(texto if texto is not None else g['texto'])[:300_000]}"
+
+
+def _dividir(texto: str, max_chars: int) -> list[str]:
+    """Quebra em partes de até `max_chars`, preferindo limites de parágrafo, com um trecho de sobreposição."""
+    if len(texto) <= max_chars:
+        return [texto]
+    partes, ini = [], 0
+    while ini < len(texto):
+        fim = min(len(texto), ini + max_chars)
+        if fim < len(texto):
+            corte = texto.rfind("\n\n", ini + max_chars // 2, fim)
+            fim = corte if corte > ini else fim
+        partes.append(texto[max(0, ini - _SOBREPOSICAO if ini else 0): fim])
+        ini = fim
+    return partes
+
+
+def _chamar_det(g: dict, texto: str, parte: tuple[int, int], cliente) -> tuple[list, float, bool]:
+    resp = cliente.messages.create(
+        model=MODELO, max_tokens=12000, system=SISTEMA_DET, tools=[TOOL_DET],
+        tool_choice={"type": "tool", "name": "registrar_determinacoes"},
+        messages=[{"role": "user", "content": _montar_prompt_ato(g, texto, parte)}],
+    )
+    custo = calcular_custo_usd(resp.usage.input_tokens, resp.usage.output_tokens)
+    truncado = getattr(resp, "stop_reason", None) == "max_tokens"
+    itens = [] if truncado else (_tool_input(resp, "registrar_determinacoes").get("determinacoes") or [])
+    return itens, custo, truncado
+
+
+def _ler_trecho(g: dict, texto: str, parte: tuple[int, int], cliente) -> tuple[list, float]:
+    """Lê uma parte; se a resposta estourar o limite (muitas ordens), divide ao meio e junta. Nunca devolve
+    resultado truncado como se fosse completo."""
+    itens, custo, truncado = _chamar_det(g, texto, parte, cliente)
+    if not truncado:
+        return itens, custo
+    if len(texto) <= _CHUNK_MIN * 2:
+        raise RuntimeError("A resposta da IA foi cortada mesmo em trecho curto; ato não lido.")
+    meio = len(texto) // 2
+    corte = texto.rfind("\n\n", meio - 2_000, meio + 2_000)
+    meio = corte if corte > 0 else meio
+    a, ca = _ler_trecho(g, texto[:meio], parte, cliente)
+    b, cb = _ler_trecho(g, texto[max(0, meio - _SOBREPOSICAO):], parte, cliente)
+    return a + b, custo + ca + cb
 
 
 def extrair_determinacoes_ato(g: dict, cliente=None) -> tuple[list[dict], float]:
     cliente = cliente or _cliente()
-    resp = cliente.messages.create(
-        model=MODELO, max_tokens=12000, system=SISTEMA_DET, tools=[TOOL_DET],
-        tool_choice={"type": "tool", "name": "registrar_determinacoes"},
-        messages=[{"role": "user", "content": _montar_prompt_ato(g)}],
-    )
-    custo = calcular_custo_usd(resp.usage.input_tokens, resp.usage.output_tokens)
-    itens = _tool_input(resp, "registrar_determinacoes").get("determinacoes")
-    out = []
-    for it in itens if isinstance(itens, list) else []:
+    partes = _dividir(g["texto"], _CHUNK_CHARS)
+    itens, custo = [], 0.0
+    for k, trecho in enumerate(partes, 1):
+        it, c = _ler_trecho(g, trecho, (k, len(partes)), cliente)
+        itens += it
+        custo += c
+    out, vistos = [], set()
+    for it in itens:
         if not isinstance(it, dict) or not str(it.get("acao") or "").strip():
             continue
         try:
@@ -185,7 +235,7 @@ def extrair_determinacoes_ato(g: dict, cliente=None) -> tuple[list[dict], float]
         except (TypeError, ValueError):
             dias = None
         pd_ = it.get("prazo_data")
-        out.append({
+        item = {
             "ordem": (str(it["ordem"]).strip()[:20] if it.get("ordem") else None),
             "capitulo": (str(it["capitulo"]).strip()[:200] if it.get("capitulo") else None),
             "destinatario_tipo": it.get("destinatario_tipo") if it.get("destinatario_tipo") in DEST_TIPOS else "outro",
@@ -199,7 +249,12 @@ def extrair_determinacoes_ato(g: dict, cliente=None) -> tuple[list[dict], float]
             "sancao": (str(it["sancao"]).strip()[:300] if it.get("sancao") else None),
             "ligada_a_mediacao": bool(it.get("ligada_a_mediacao")),
             "trecho": str(it.get("trecho") or "").strip()[:600],
-        })
+        }
+        chave = (item["ordem"] or "", item["destinatario_tipo"], (item["destinatario_nome"] or "").casefold(), re.sub(r"\W+", " ", item["acao"].casefold())[:60])
+        if chave in vistos:                    # a sobreposição entre partes pode repetir a mesma ordem
+            continue
+        vistos.add(chave)
+        out.append(item)
     return out, custo
 
 
@@ -290,7 +345,12 @@ def _candidatas(db, caso_id, g_data: date | None, id_decisao: str | None, prazo_
     return cand[:_MAX_CANDIDATAS]
 
 
+_LOTE_ORDENS = 20
+
+
 def avaliar_cumprimento_ato(ordens: list[AutosIAFato], cand: list[dict], hoje: date, cliente=None) -> tuple[dict[int, dict], float]:
+    """Avalia, em lotes de ordens, se as peças candidatas as cumprem. Resposta cortada pela IA → o lote é
+    dividido (uma decisão longa tem dezenas de ordens); nunca se aceita avaliação truncada como completa."""
     cliente = cliente or _cliente()
     linhas = []
     for k, f in enumerate(ordens):
@@ -300,29 +360,41 @@ def avaliar_cumprimento_ato(ordens: list[AutosIAFato], cand: list[dict], hoje: d
                       f"{' · vence ' + v['vencimento'] if v['vencimento'] else ''}"
                       f"{' · Sanção: ' + d['sancao'] if d.get('sancao') else ''} · Trecho: «{(f.trecho or '')[:350]}»")
     pecas = [f"- ID {c['id_processual']} · {c['data']} · {c['afirmante']} · {c['tipo_pje'] or '—'}: {c['resumo']}" for c in cand]
-    prompt = (f"Hoje: {hoje.isoformat()}.\n\nORDENS DO JUÍZO:\n" + "\n".join(linhas) +
-              "\n\nPEÇAS POSTERIORES (candidatas a cumprimento):\n" + ("\n".join(pecas) or "(nenhuma peça posterior com resumo)"))
-    resp = cliente.messages.create(
-        model=MODELO, max_tokens=8000, system=SISTEMA_CUMPRIMENTO, tools=[TOOL_CUMPRIMENTO],
-        tool_choice={"type": "tool", "name": "registrar_cumprimento"},
-        messages=[{"role": "user", "content": prompt}],
-    )
-    custo = calcular_custo_usd(resp.usage.input_tokens, resp.usage.output_tokens)
+    bloco_pecas = "\n\nPEÇAS POSTERIORES (candidatas a cumprimento):\n" + ("\n".join(pecas) or "(nenhuma peça posterior com resumo)")
     validos = {c["id_processual"] for c in cand if c["id_processual"]}
     out: dict[int, dict] = {}
-    for a in _tool_input(resp, "registrar_cumprimento").get("avaliacoes") or []:
-        try:
-            i = int(a.get("i"))
-        except (TypeError, ValueError):
-            continue
-        if not (0 <= i < len(ordens)):
-            continue
-        out[i] = {
-            "status": a.get("status") if a.get("status") in STATUS_CUMPRIMENTO else "nao_localizada",
-            "evidencias": [e for e in (a.get("evidencias") or []) if isinstance(e, str) and e in validos][:8],
-            "justificativa": str(a.get("justificativa") or "").strip()[:500],
-            "confianca": max(0.0, min(1.0, float(a["confianca"]))) if isinstance(a.get("confianca"), (int, float)) else None,
-        }
+
+    def _lote(ini: int, fim: int) -> float:
+        prompt = f"Hoje: {hoje.isoformat()}.\n\nORDENS DO JUÍZO:\n" + "\n".join(linhas[ini:fim]) + bloco_pecas
+        resp = cliente.messages.create(
+            model=MODELO, max_tokens=8000, system=SISTEMA_CUMPRIMENTO, tools=[TOOL_CUMPRIMENTO],
+            tool_choice={"type": "tool", "name": "registrar_cumprimento"},
+            messages=[{"role": "user", "content": prompt}],
+        )
+        custo = calcular_custo_usd(resp.usage.input_tokens, resp.usage.output_tokens)
+        if getattr(resp, "stop_reason", None) == "max_tokens":
+            if fim - ini <= 1:
+                raise RuntimeError("A resposta da IA foi cortada numa única ordem; cumprimento não avaliado.")
+            meio = (ini + fim) // 2
+            return custo + _lote(ini, meio) + _lote(meio, fim)
+        for a in _tool_input(resp, "registrar_cumprimento").get("avaliacoes") or []:
+            try:
+                i = int(a.get("i"))
+            except (TypeError, ValueError):
+                continue
+            if not (ini <= i < fim):
+                continue
+            out[i] = {
+                "status": a.get("status") if a.get("status") in STATUS_CUMPRIMENTO else "nao_localizada",
+                "evidencias": [e for e in (a.get("evidencias") or []) if isinstance(e, str) and e in validos][:8],
+                "justificativa": str(a.get("justificativa") or "").strip()[:500],
+                "confianca": max(0.0, min(1.0, float(a["confianca"]))) if isinstance(a.get("confianca"), (int, float)) else None,
+            }
+        return custo
+
+    custo = 0.0
+    for ini in range(0, len(ordens), _LOTE_ORDENS):
+        custo += _lote(ini, min(len(ordens), ini + _LOTE_ORDENS))
     return out, custo
 
 
