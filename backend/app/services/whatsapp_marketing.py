@@ -179,11 +179,13 @@ def tratar_resposta_botao(db: Session, telefone: str, payload: str) -> str | Non
     if len(partes) != 3 or partes[0] != _PAYLOAD_PREFIXO or partes[2] not in _ACOES:
         return None
     _, alvo, acao = partes
+    # Convite de TESTE nunca grava nada — nem o "Parar de receber" (senão testar o botão
+    # tiraria o próprio número de quem testa da lista de marketing).
+    if alvo == "teste":
+        return f"Teste recebido: o botão \"{ {'sim': 'Vou participar', 'nao': 'Não poderei', 'parar': 'Parar de receber'}[acao] }\" funcionou. Nada foi registrado."
     if acao == "parar":
         registrar_optout(db, telefone, origem="botao")
         return "Combinado, você não receberá mais convites por WhatsApp. Obrigado!"
-    if alvo == "teste":
-        return "Teste recebido: o botão funcionou. Nada foi registrado."
     try:
         cv = db.get(ConselhoEventoConvidado, uuid.UUID(alvo))
     except ValueError:
