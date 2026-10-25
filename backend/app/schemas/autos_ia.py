@@ -417,6 +417,7 @@ class DivergenciaOut(BaseModel):
     afirmantes: list[str]
     razao: float | None = None
     n_fatos: int
+    ruidosa: bool = False
 
 
 class CorroboracaoValorOut(BaseModel):

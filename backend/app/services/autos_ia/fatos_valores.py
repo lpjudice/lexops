@@ -594,6 +594,9 @@ def _clusters(valores: list[int], tolerancia: float = 0.01) -> list[list[int]]:
 
 
 _TEMAS_COMPARAVEIS = set(TEMAS) - {"outro", "honorarios_custas"}
+# Temas que costumam reunir itens DIFERENTES sob o mesmo sujeito (cada crédito, pagamento ou aporte é um
+# número próprio): a diferença entre eles raramente é divergência — vão para o fim da fila e ficam sinalizados.
+_TEMAS_RUIDOSOS = {"credito_ou_divida", "pagamento_ou_restituicao", "captacao_ou_emissao", "valor_investido_aporte", "valor_da_causa_ou_pedido"}
 
 
 def reconciliar(db, caso_id) -> dict:
@@ -625,8 +628,9 @@ def reconciliar(db, caso_id) -> dict:
             "tema": tema, "tema_rotulo": TEMA_ROTULO[tema], "sujeito": itens[0]["sujeito_canonico"],
             "valores": valores, "afirmantes": sorted({a for v in valores for a in v["afirmantes"]}),
             "razao": round(maior / menor, 2) if menor > 0 else None, "n_fatos": len(itens),
+            "ruidosa": tema in _TEMAS_RUIDOSOS,
         })
-    divergencias.sort(key=lambda d: (-len(d["afirmantes"]), -(d["razao"] or 0), -d["n_fatos"]))
+    divergencias.sort(key=lambda d: (d["ruidosa"], -len(d["afirmantes"]), -(d["razao"] or 0), -d["n_fatos"]))
 
     por_valor: dict[int, list[dict]] = defaultdict(list)
     for x in fatos:

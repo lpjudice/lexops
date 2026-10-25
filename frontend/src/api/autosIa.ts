@@ -341,7 +341,7 @@ export interface FatosValoresStatus {
 export interface Reconciliacao {
   resumo: { fatos: number; divergencias: number; corroboracoes: number; validados: number }
   divergencias: {
-    tema: string; tema_rotulo: string; sujeito: string | null; afirmantes: string[]; razao: number | null; n_fatos: number
+    tema: string; tema_rotulo: string; sujeito: string | null; afirmantes: string[]; razao: number | null; n_fatos: number; ruidosa?: boolean
     valores: { valor_centavos: number; valor: string; afirmantes: string[]; fatos: FatoValor[] }[]
   }[]
   corroboracoes: {

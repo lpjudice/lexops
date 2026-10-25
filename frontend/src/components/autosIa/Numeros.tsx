@@ -217,6 +217,7 @@ export default function Numeros({ casoId }: { casoId: string }) {
                   <span className={styles.chevron}>{abertos.has(k) ? '▾' : '▸'}</span>
                   <span className={styles.chipTema}>{d.tema_rotulo}</span>
                   <span className={styles.titulo}>{d.sujeito}</span>
+                  {d.ruidosa && <span className={styles.chipNat} title="Este tema reúne itens distintos (cada crédito, pagamento ou aporte é um número próprio): a diferença pode não ser divergência">itens distintos?</span>}
                   <span className={styles.conta}>{d.valores.length} números · {d.afirmantes.length} afirmante(s){d.razao ? ` · ×${String(d.razao).replace('.', ',')}` : ''}</span>
                 </button>
                 {abertos.has(k) && (
