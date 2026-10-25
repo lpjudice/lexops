@@ -49,11 +49,13 @@ def assinou(estado: dict, sig: Signatario) -> bool:
 def sincronizar(contrato_id: uuid.UUID) -> bool:
     """Roda a MESMA sincronização de abrir o card (status, quem assinou, baixa o PDF assinado, cancelamento),
     em sessão própria. False se falhou — o chamador decide o que fazer (lembrete: não envia)."""
-    from app.routers.contratos import sincronizar_status
-
     db = SessionLocal()
     try:
-        sincronizar_status(contrato_id, db)
+        # Import e chamada DENTRO do try: qualquer falha aqui vira "False" (lembrete não sai) e nunca
+        # uma exceção que derruba o job ou o botão "Lembrar".
+        from app.routers.contratos import sincronizar_status_clicksign
+
+        sincronizar_status_clicksign(contrato_id, db)
         return True
     except HTTPException as e:
         logger.warning("clicksign_estado: sincronizar %s -> %s %s", contrato_id, e.status_code, e.detail)
