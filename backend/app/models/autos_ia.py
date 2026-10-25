@@ -382,3 +382,21 @@ class AutosIAFato(Base):
     atualizado_em: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class AutosIACenario(Base):
+    """Cenário de recuperação: planilha editável de ativos e passivos, cada linha com um valor e um percentual
+    (de realização do ativo ou de reconhecimento do passivo). Linhas podem apontar para o fato de origem."""
+    __tablename__ = "autos_ia_cenarios"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    caso_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("autos_ia_casos.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    nome: Mapped[str] = mapped_column(String(160), nullable=False)
+    notas: Mapped[str | None] = mapped_column(Text)
+    linhas: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    atualizado_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

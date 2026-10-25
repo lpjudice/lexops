@@ -17,13 +17,13 @@ from app.dependencies import get_current_user
 from app.models.andamento import AndamentoProcesso
 from app.models.autos_ia import AutosIACaso, AutosIADocumento, AutosIAPeca, AutosIAPerguntaFaq, AutosIAReferencia
 from app.schemas.autos_ia import (
-    AdicionarAdvogadoIn, AdvogadosPartesOut, ConflitosAdvogadosOut, ContradicoesOut, CruzamentosAdvogadosOut, MatrizPosicoesOut, OpcoesPosicoesOut, PosicaoOut, PosicaoUpdateIn, PosicoesListaOut, PosicoesStatusOut, DeterminacaoOut, DeterminacaoUpdateIn, DeterminacoesListaOut, DeterminacoesStatusOut, IntimacaoIn, MinutaOut, OpcoesDeterminacoesOut, AnexoCorroboracaoOut, FatoValorOut, FatoValorUpdateIn, FatosValoresListaOut, FatosValoresStatusOut, ReconciliacaoOut, RenomearSujeitoIn, TemaOut, AlertaConfigOut, AlertaConfigUpdate, CasoCreate, CasoOut, CasoResumo, CasoUpdate, DocumentoDriveAnexoOut, DocumentoDriveOut, DocumentoOut,
+    AdicionarAdvogadoIn, AdvogadosPartesOut, CenarioCreateIn, CenarioOut, CenarioUpdateIn, MapaEntidadesOut, SugestaoLinhaOut, ConflitosAdvogadosOut, ContradicoesOut, CruzamentosAdvogadosOut, MatrizPosicoesOut, OpcoesPosicoesOut, PosicaoOut, PosicaoUpdateIn, PosicoesListaOut, PosicoesStatusOut, DeterminacaoOut, DeterminacaoUpdateIn, DeterminacoesListaOut, DeterminacoesStatusOut, IntimacaoIn, MinutaOut, OpcoesDeterminacoesOut, AnexoCorroboracaoOut, FatoValorOut, FatoValorUpdateIn, FatosValoresListaOut, FatosValoresStatusOut, ReconciliacaoOut, RenomearSujeitoIn, TemaOut, AlertaConfigOut, AlertaConfigUpdate, CasoCreate, CasoOut, CasoResumo, CasoUpdate, DocumentoDriveAnexoOut, DocumentoDriveOut, DocumentoOut,
     EstimativaImportacaoOut, ExportMdStatusOut, FaqPerguntaCreate, PastasDriveOut, FaqPerguntaOut, GrafoAresta, GrafoNo, GrafoOut, PecaAnotacaoUpdate,
     PecaDetalheOut, PecaOut, PecaTipoUpdate, PrincipalIn, RenomearAdvogadoIn, VinculoIn,
 )
 from app.services.autos_ia import faq as faq_service
 from app.services.autos_ia.busca import buscar_pecas
-from app.services.autos_ia import advogados_partes, cruzamentos_advogados, export_md_drive, fatos_determinacoes, fatos_posicoes, fatos_valores
+from app.services.autos_ia import advogados_partes, cenarios, cruzamentos_advogados, mapa_entidades, export_md_drive, fatos_determinacoes, fatos_posicoes, fatos_valores
 from app.services.autos_ia.estimativa import estimar_importacao_existentes, estimar_reclassificacao
 from app.services.autos_ia.ingestao import processar_documento, reclassificar_caso, retomar_documento
 from app.services.autos_ia.jusbr_import import (
@@ -621,6 +621,70 @@ def atualizar_posicao(caso_id: uuid.UUID, fato_id: uuid.UUID, data: PosicaoUpdat
     except fatos_posicoes.PosicaoErro as exc:
         db.rollback()
         raise HTTPException(status_code=404 if "não encontrada" in str(exc) else 422, detail=str(exc))
+
+
+# ── Mapa de entidades (ativo × passivo) e cenários de recuperação ─────────────
+
+@router.get("/casos/{caso_id}/mapa-entidades", response_model=MapaEntidadesOut)
+def mapa_de_entidades(caso_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Ativo × passivo por entidade/grupo, com o valor mais sustentado, as alternativas e as peças de origem."""
+    _get_caso(db, caso_id)
+    return mapa_entidades.mapa(db, caso_id)
+
+
+@router.get("/casos/{caso_id}/cenarios/sugestoes", response_model=list[SugestaoLinhaOut])
+def sugestoes_de_linhas(caso_id: uuid.UUID, q: str | None = None, db: Session = Depends(get_db)):
+    """Valores do banco de fatos que podem virar linha de um cenário."""
+    _get_caso(db, caso_id)
+    return cenarios.sugestoes(db, caso_id, q)
+
+
+@router.get("/casos/{caso_id}/cenarios", response_model=list[CenarioOut])
+def listar_cenarios(caso_id: uuid.UUID, db: Session = Depends(get_db)):
+    _get_caso(db, caso_id)
+    return cenarios.listar(db, caso_id)
+
+
+@router.post("/casos/{caso_id}/cenarios", response_model=CenarioOut, status_code=status.HTTP_201_CREATED)
+def criar_cenario(caso_id: uuid.UUID, data: CenarioCreateIn, db: Session = Depends(get_db)):
+    _get_caso(db, caso_id)
+    try:
+        return cenarios.criar(db, caso_id, data.nome, [l.model_dump() for l in data.linhas], data.notas)
+    except cenarios.CenarioErro as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.post("/casos/{caso_id}/cenarios/{cenario_id}/duplicar", response_model=CenarioOut, status_code=status.HTTP_201_CREATED)
+def duplicar_cenario(caso_id: uuid.UUID, cenario_id: uuid.UUID, db: Session = Depends(get_db)):
+    _get_caso(db, caso_id)
+    try:
+        return cenarios.duplicar(db, caso_id, cenario_id)
+    except cenarios.CenarioErro as exc:
+        db.rollback()
+        raise HTTPException(status_code=404 if "não encontrado" in str(exc) else 422, detail=str(exc))
+
+
+@router.put("/casos/{caso_id}/cenarios/{cenario_id}", response_model=CenarioOut)
+def atualizar_cenario(caso_id: uuid.UUID, cenario_id: uuid.UUID, data: CenarioUpdateIn, db: Session = Depends(get_db)):
+    """Salva o nome, as notas e/ou a lista COMPLETA de linhas (a planilha inteira)."""
+    _get_caso(db, caso_id)
+    try:
+        return cenarios.atualizar(db, caso_id, cenario_id, nome=data.nome, notas=data.notas, notas_definida="notas" in data.model_fields_set,
+                                  linhas=None if data.linhas is None else [l.model_dump() for l in data.linhas])
+    except cenarios.CenarioErro as exc:
+        db.rollback()
+        raise HTTPException(status_code=404 if "não encontrado" in str(exc) else 422, detail=str(exc))
+
+
+@router.delete("/casos/{caso_id}/cenarios/{cenario_id}", status_code=status.HTTP_204_NO_CONTENT)
+def excluir_cenario(caso_id: uuid.UUID, cenario_id: uuid.UUID, db: Session = Depends(get_db)):
+    _get_caso(db, caso_id)
+    try:
+        cenarios.excluir(db, caso_id, cenario_id)
+    except cenarios.CenarioErro as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc))
 
 
 @router.get("/casos/{caso_id}/pastas-drive", response_model=PastasDriveOut)

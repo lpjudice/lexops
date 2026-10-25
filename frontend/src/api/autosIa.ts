@@ -290,6 +290,29 @@ export interface ConflitosAdvogados {
 }
 export interface OpcoesPosicoes { temas: { chave: string; rotulo: string }[]; posicoes: { chave: string; rotulo: string }[] }
 
+export interface ValorEntidade {
+  valor_centavos: number; valor: string; n_pecas: number; n_fatos: number; afirmantes: string[]; data_mais_recente: string | null; fatos: FatoValor[]
+}
+export interface MapaEntidades {
+  resumo: Record<string, number>
+  medidas: { chave: string; rotulo: string; lado: string }[]
+  entidades: {
+    chave: string; nome: string; variantes: string[]; grupo: boolean; maior_valor: number; n_fatos: number
+    celulas: Record<string, { principal: ValorEntidade; alternativas: ValorEntidade[]; n_valores: number }>
+    saldo: { valor_centavos: number; valor: string; negativo: boolean; cobertura: number | null; mesma_fonte: boolean } | null
+  }[]
+}
+export interface LinhaCenario {
+  id?: string | null; lado: 'ativo' | 'passivo'; rotulo: string; valor_centavos: number; percentual: number; fato_id?: string | null; nota?: string | null
+  fonte?: { id_processual: string | null; link_pdf: string | null; link_md: string | null; peca_id: string; data: string | null; titulo: string | null; trecho: string | null; afirmante: string | null; valor: string | null } | null
+}
+export interface Cenario {
+  id: string; nome: string; notas: string | null; linhas: LinhaCenario[]
+  resultado: { ativo_bruto_centavos: number; passivo_bruto_centavos: number; ativo_realizavel_centavos: number; passivo_reconhecido_centavos: number; saldo_centavos: number; cobertura: number | null; recuperacao_por_real: number | null }
+  criado_em: string | null; atualizado_em: string | null
+}
+export interface SugestaoLinha { fato_id: string; lado: 'ativo' | 'passivo'; rotulo: string; valor_centavos: number; valor: string; afirmante: string; peticao: PeticaoRef }
+
 export interface Determinacao {
   id: string
   ordem: string | null
@@ -589,6 +612,27 @@ export const autosIa = {
 
   cruzamentosAdvogados: (casoId: string, minPartes = 2) =>
     api.get<CruzamentosAdvogados>(`/autos-ia/casos/${casoId}/advogados-cruzamentos`, { params: { min_partes: minPartes } }).then((r) => r.data),
+
+  mapaEntidades: (casoId: string) =>
+    api.get<MapaEntidades>(`/autos-ia/casos/${casoId}/mapa-entidades`).then((r) => r.data),
+
+  listarCenarios: (casoId: string) =>
+    api.get<Cenario[]>(`/autos-ia/casos/${casoId}/cenarios`).then((r) => r.data),
+
+  sugestoesCenario: (casoId: string, q?: string) =>
+    api.get<SugestaoLinha[]>(`/autos-ia/casos/${casoId}/cenarios/sugestoes`, { params: q ? { q } : {} }).then((r) => r.data),
+
+  criarCenario: (casoId: string, body: { nome: string; notas?: string | null; linhas?: LinhaCenario[] }) =>
+    api.post<Cenario>(`/autos-ia/casos/${casoId}/cenarios`, body).then((r) => r.data),
+
+  salvarCenario: (casoId: string, id: string, body: { nome?: string; notas?: string | null; linhas?: LinhaCenario[] }) =>
+    api.put<Cenario>(`/autos-ia/casos/${casoId}/cenarios/${id}`, body).then((r) => r.data),
+
+  duplicarCenario: (casoId: string, id: string) =>
+    api.post<Cenario>(`/autos-ia/casos/${casoId}/cenarios/${id}/duplicar`).then((r) => r.data),
+
+  excluirCenario: (casoId: string, id: string) =>
+    api.delete(`/autos-ia/casos/${casoId}/cenarios/${id}`).then((r) => r.data),
 
   opcoesPosicoes: () =>
     api.get<OpcoesPosicoes>('/autos-ia/fatos/posicoes/opcoes').then((r) => r.data),

@@ -65,3 +65,24 @@ button.pBadge { cursor: pointer; }
 .editor label { display: flex; flex-direction: column; gap: 3px; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--gray-mid); }
 .editor select, .editor input { padding: 6px 10px; border: 1px solid var(--gray-border); border-radius: 8px; font: inherit; font-size: 13px; background: var(--white); text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--dark); min-width: 160px; }
 .notaCampo input { min-width: 260px; }
+.celulaValor { background: none; border: 1px solid transparent; border-radius: 6px; padding: 2px 6px; font: inherit; font-size: 12.5px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--dark); cursor: pointer; text-align: left; white-space: nowrap; }
+.celulaValor:hover { background: var(--light); }
+.cenEditor { display: flex; flex-direction: column; gap: 12px; }
+.cenGrade { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px; }
+.cenBloco { background: var(--white); border: 1px solid var(--gray-border); border-radius: 12px; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; }
+.cenBloco h4 { margin: 0 0 4px; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--gray-mid); }
+.cenLinha { display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap; }
+.inputRotulo { flex: 1; min-width: 180px; padding: 6px 10px; border: 1px solid var(--gray-border); border-radius: 8px; font: inherit; font-size: 13px; background: var(--white); color: var(--dark); }
+.inputValor { width: 150px; padding: 6px 10px; border: 1px solid var(--gray-border); border-radius: 8px; font: inherit; font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; background: var(--white); color: var(--dark); }
+.pct { display: inline-flex; align-items: center; gap: 2px; font-size: 13px; }
+.pct input { width: 58px; padding: 6px 6px; border: 1px solid var(--gray-border); border-radius: 8px; font: inherit; font-size: 13px; text-align: right; background: var(--white); color: var(--dark); }
+.ajustado { font-size: 12.5px; font-weight: 700; font-variant-numeric: tabular-nums; min-width: 130px; text-align: right; }
+.cenResultado { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; background: var(--light); border-radius: 12px; padding: 12px 14px; }
+.cenResultado > div { display: flex; flex-direction: column; gap: 2px; }
+.cenResultado strong { font-size: 16px; font-variant-numeric: tabular-nums; }
+.neg { color: #991b1b; }
+.pos { color: #166534; }
+.sugestoes { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; max-height: 340px; overflow-y: auto; padding: 10px; border: 1px solid var(--gray-border); border-radius: 12px; background: var(--white); }
+.sugestoes input { padding: 7px 10px; border: 1px solid var(--gray-border); border-radius: 8px; font: inherit; font-size: 13px; background: var(--white); color: var(--dark); }
+.sugLinha { display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; font-size: 13px; }
+.notaCampo textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--gray-border); border-radius: 8px; font: inherit; font-size: 13px; box-sizing: border-box; background: var(--white); color: var(--dark); resize: vertical; }

@@ -726,3 +726,120 @@ class ConflitosAdvogadosOut(BaseModel):
 class OpcoesPosicoesOut(BaseModel):
     temas: list[TemaOut]
     posicoes: list[TemaOut]
+
+
+# ── Mapa de entidades (ativo × passivo) e cenários de recuperação ────────────
+
+class ValorEntidadeOut(BaseModel):
+    valor_centavos: int
+    valor: str
+    n_pecas: int
+    n_fatos: int
+    afirmantes: list[str]
+    data_mais_recente: str | None = None
+    fatos: list[FatoValorOut]
+
+
+class CelulaEntidadeOut(BaseModel):
+    principal: ValorEntidadeOut
+    alternativas: list[ValorEntidadeOut]
+    n_valores: int
+
+
+class SaldoOut(BaseModel):
+    valor_centavos: int
+    valor: str
+    negativo: bool
+    cobertura: float | None = None
+    mesma_fonte: bool
+
+
+class EntidadeOut(BaseModel):
+    chave: str
+    nome: str
+    variantes: list[str]
+    grupo: bool
+    celulas: dict[str, CelulaEntidadeOut]
+    saldo: SaldoOut | None = None
+    maior_valor: int
+    n_fatos: int
+
+
+class MedidaOut(BaseModel):
+    chave: str
+    rotulo: str
+    lado: str
+
+
+class MapaEntidadesOut(BaseModel):
+    resumo: dict[str, int]
+    medidas: list[MedidaOut]
+    entidades: list[EntidadeOut]
+
+
+class LinhaCenarioIn(BaseModel):
+    id: str | None = None
+    lado: Literal["ativo", "passivo"]
+    rotulo: str
+    valor_centavos: int
+    percentual: float = 100
+    fato_id: str | None = None
+    nota: str | None = None
+
+
+class FonteLinhaOut(BaseModel):
+    id_processual: str | None = None
+    link_pdf: str | None = None
+    link_md: str | None = None
+    peca_id: uuid.UUID
+    data: date | None = None
+    titulo: str | None = None
+    trecho: str | None = None
+    afirmante: str | None = None
+    valor: str | None = None
+
+
+class LinhaCenarioOut(LinhaCenarioIn):
+    fonte: FonteLinhaOut | None = None
+
+
+class ResultadoCenarioOut(BaseModel):
+    ativo_bruto_centavos: int
+    passivo_bruto_centavos: int
+    ativo_realizavel_centavos: int
+    passivo_reconhecido_centavos: int
+    saldo_centavos: int
+    cobertura: float | None = None
+    recuperacao_por_real: float | None = None
+
+
+class CenarioOut(BaseModel):
+    id: uuid.UUID
+    nome: str
+    notas: str | None = None
+    linhas: list[LinhaCenarioOut]
+    resultado: ResultadoCenarioOut
+    criado_em: datetime | None = None
+    atualizado_em: datetime | None = None
+
+
+class CenarioCreateIn(BaseModel):
+    nome: str
+    notas: str | None = None
+    linhas: list[LinhaCenarioIn] = []
+
+
+class CenarioUpdateIn(BaseModel):
+    nome: str | None = None
+    notas: str | None = None
+    linhas: list[LinhaCenarioIn] | None = None
+
+
+class SugestaoLinhaOut(BaseModel):
+    fato_id: uuid.UUID
+    lado: Literal["ativo", "passivo"]
+    rotulo: str
+    valor_centavos: int
+    valor: str
+    afirmante: str
+    peticao: PeticaoRefOut
