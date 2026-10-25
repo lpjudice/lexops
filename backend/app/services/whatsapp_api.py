@@ -88,6 +88,7 @@ def send_template_message(
     parametros: dict[str, str] | None = None,
     botao_url_param: str | None = None,
     botoes_resposta_payload: list[str] | None = None,
+    header_documento: tuple[str, str] | None = None,
 ) -> dict | None:
     """Envia mensagem de template aprovado (categoria Utility/Marketing/Auth).
     `parametros` preenche as variáveis nomeadas do corpo (ex.: {{cliente_nome}}) —
@@ -101,6 +102,13 @@ def send_template_message(
     if not numero:
         return None
     components: list[dict[str, Any]] = []
+    if header_documento:
+        # (media_id, nome do arquivo) — template com cabeçalho DOCUMENT (ex.: contrato_assinado).
+        media_id, nome_arquivo = header_documento
+        components.append({
+            "type": "header",
+            "parameters": [{"type": "document", "document": {"id": media_id, "filename": nome_arquivo}}],
+        })
     if parametros:
         components.append({
             "type": "body",
@@ -172,6 +180,26 @@ def verify_signature(raw_body: bytes, signature_header: str | None) -> bool:
     ).hexdigest()
     recebido = signature_header.split("=", 1)[1]
     return hmac.compare_digest(expected, recebido)
+
+
+def upload_media(conteudo: bytes, mime: str, nome_arquivo: str) -> str | None:
+    """Sobe um arquivo pra Meta (válido por 30 dias) e devolve o media_id, ou None se falhar.
+    O arquivo vai direto do servidor pra Meta e só chega a quem receber a mensagem — sem link público."""
+    if not settings.whatsapp_access_token or not settings.whatsapp_phone_number_id:
+        return None
+    try:
+        resp = httpx.post(
+            f"{GRAPH_BASE}/{settings.whatsapp_api_version}/{settings.whatsapp_phone_number_id}/media",
+            headers={"Authorization": f"Bearer {settings.whatsapp_access_token}"},
+            data={"messaging_product": "whatsapp", "type": mime},
+            files={"file": (nome_arquivo, conteudo, mime)},
+            timeout=90.0,
+        )
+        if resp.status_code >= 400:
+            return None
+        return resp.json().get("id")
+    except Exception:
+        return None
 
 
 def id_da_mensagem(resultado: dict | None) -> str | None:
