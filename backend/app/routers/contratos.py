@@ -14,7 +14,7 @@ from app.schemas.contrato import (
     SignatarioCreate, SignatarioOut,
 )
 from app.services import clicksign
-from app.services.contrato_whatsapp import avisar_assinatura_pendente, avisar_assinatura_pendente_detalhe
+from app.services.contrato_whatsapp import avisar_assinatura_pendente, avisar_assinatura_pendente_detalhe, avisar_cancelamento
 
 UPLOADS_DIR = Path("/app/uploads/contratos")
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
@@ -1187,6 +1187,10 @@ def enviar_para_assinatura(contrato_id: uuid.UUID, db: Session = Depends(get_db)
     #  auto_close=True já encerra ao receber todas as assinaturas.)
 
     c.status = "aguardando_assinatura"
+    from datetime import datetime as _dt, timezone as _tz
+    c.assinatura_enviada_em = _dt.now(_tz.utc)
+    for _s in c.signatarios:
+        _s.lembretes_whatsapp, _s.cancelamento_avisado_em = 0, None  # reenvio recomeça a contagem
     db.commit()
     db.refresh(c)
 
@@ -1298,6 +1302,7 @@ def cancelar_contrato_clicksign(contrato_id: uuid.UUID, db: Session = Depends(ge
     if c.clicksign_document_key:
         clicksign.cancelar_documento(c.clicksign_document_key)
     c.status = "cancelado"
+    avisar_cancelamento(db, c)
     db.commit()
     db.refresh(c)
     return c
@@ -1328,6 +1333,7 @@ def sincronizar_status_clicksign(contrato_id: uuid.UUID, db: Session = Depends(g
 
     if doc_status == "canceled":
         c.status = "cancelado"
+        avisar_cancelamento(db, c)
         db.commit()
         db.refresh(c)
         return c
@@ -1432,6 +1438,7 @@ async def webhook_clicksign(request: Request, db: Session = Depends(get_db)):
 
     elif nome_evento == "cancel":
         contrato.status = "cancelado"
+        avisar_cancelamento(db, contrato)
 
     elif nome_evento == "close":
         # Mesma regra do sincronizar-status: só marca "assinado" com todo mundo

@@ -63,3 +63,111 @@ def avisar_assinatura_pendente_detalhe(sig: Signatario, contrato: Contrato) -> t
 def avisar_assinatura_pendente(sig: Signatario, contrato: Contrato) -> bool:
     """Manda o aviso por WhatsApp. True se a Meta aceitou o envio."""
     return avisar_assinatura_pendente_detalhe(sig, contrato)[0]
+
+
+# ── Cancelamento ─────────────────────────────────────────────────────────────
+
+TEMPLATE_ASSINATURA_CANCELADA = "assinatura_cancelada"
+
+
+def avisar_cancelamento(db, contrato: Contrato) -> int:
+    """Avisa por WhatsApp quem recebeu o link e tem número, quando o documento é cancelado.
+    Idempotente por signatário (`cancelamento_avisado_em`), porque o cancelamento chega por até
+    três caminhos (botão do sistema, webhook e sincronização do ClickSign). Quem assina pelo
+    WhatsApp do ClickSign também é avisado: o ClickSign só manda o cancelamento por e-mail.
+    Devolve quantos avisos saíram; falha aqui nunca derruba o cancelamento. O commit é de quem chama."""
+    from datetime import datetime, timezone
+
+    candidatos = [
+        s for s in contrato.signatarios
+        if s.whatsapp and s.clicksign_request_key and not s.cancelamento_avisado_em
+        and (s.avisar_whatsapp or s.assinar_via_whatsapp)
+    ]
+    if not candidatos:
+        return 0
+    status = whatsapp_api.status_template(TEMPLATE_ASSINATURA_CANCELADA)
+    if status not in (None, "APPROVED"):
+        logger.warning("assinatura_cancelada: template não aprovado (%s) — avisos não enviados", status)
+        return 0
+    enviados = 0
+    for sig in candidatos:
+        try:
+            resp = whatsapp_api.send_template_message(
+                to=sig.whatsapp,
+                template_name=TEMPLATE_ASSINATURA_CANCELADA,
+                parametros={"nome": sig.nome, "documento": _rotulo_documento(contrato.tipo_documento)},
+            )
+        except Exception:
+            logger.exception("assinatura_cancelada: erro avisando %s", sig.nome)
+            continue
+        if whatsapp_api.id_da_mensagem(resp):
+            sig.cancelamento_avisado_em = datetime.now(timezone.utc)
+            enviados += 1
+        else:
+            logger.warning("assinatura_cancelada: falha avisando %s: %s", sig.nome, resp)
+    return enviados
+
+
+# ── Lembretes automáticos ────────────────────────────────────────────────────
+
+# Dias depois do envio em que o signatário que ainda não assinou recebe lembrete por WhatsApp.
+# O ClickSign dá 30 dias (prazo padrão do documento): o último cai 3 dias antes de vencer.
+ESTAGIOS_LEMBRETE_DIAS = (3, 7, 14, 27)
+PRAZO_ASSINATURA_DIAS = 30
+
+
+def estagio_devido(dias_desde_envio: int, ja_enviados: int) -> int:
+    """Estágio (1..4) a enviar agora, ou 0 se nada é devido. Se vários estágios passaram sem
+    envio (ex.: servidor parado), manda UM lembrete só — nunca uma rajada."""
+    if dias_desde_envio < 0 or dias_desde_envio >= PRAZO_ASSINATURA_DIAS:
+        return 0
+    alcancados = sum(1 for d in ESTAGIOS_LEMBRETE_DIAS if dias_desde_envio >= d)
+    return alcancados if alcancados > ja_enviados else 0
+
+
+def enviar_lembretes_assinatura(hoje=None) -> dict:
+    """Roda todo dia: lembra por WhatsApp (template assinatura_pendente) quem tem número, não assinou
+    e ainda está dentro do prazo do ClickSign. Só contratos enviados DEPOIS desta função existir
+    (precisam de `assinatura_enviada_em`) — os antigos não recebem nada."""
+    from datetime import date, datetime, timezone
+
+    from app.database import SessionLocal
+
+    hoje = hoje or date.today()
+    status = whatsapp_api.status_template(TEMPLATE_ASSINATURA_PENDENTE)
+    if status not in (None, "APPROVED"):
+        logger.warning("lembrete assinatura: template não aprovado (%s) — nada enviado", status)
+        return {"enviados": 0, "motivo": f"template {status}"}
+    db = SessionLocal()
+    enviados = 0
+    try:
+        contratos = (
+            db.query(Contrato)
+            .filter(Contrato.status.in_(("aguardando_assinatura", "parcialmente_assinado")),
+                    Contrato.assinatura_enviada_em.isnot(None))
+            .all()
+        )
+        for c in contratos:
+            dias = (hoje - c.assinatura_enviada_em.date()).days
+            for sig in c.signatarios:
+                if (sig.status_assinatura != "pendente" or not sig.whatsapp or not sig.avisar_whatsapp
+                        or sig.assinar_via_whatsapp or not sig.clicksign_request_key or sig.clicksign_erro):
+                    continue
+                estagio = estagio_devido(dias, sig.lembretes_whatsapp or 0)
+                if not estagio:
+                    continue
+                ok, motivo = avisar_assinatura_pendente_detalhe(sig, c)
+                if ok:
+                    sig.lembretes_whatsapp = estagio
+                    sig.ultimo_lembrete_whatsapp_em = datetime.now(timezone.utc)
+                    enviados += 1
+                    db.commit()
+                else:
+                    logger.warning("lembrete assinatura: %s não recebeu (%s)", sig.nome, motivo)
+    except Exception:
+        db.rollback()
+        logger.exception("lembrete assinatura: erro")
+    finally:
+        db.close()
+    logger.info("lembrete assinatura: %d enviado(s)", enviados)
+    return {"enviados": enviados}
