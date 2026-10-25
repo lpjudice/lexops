@@ -134,6 +134,7 @@ class ContatoUpdate(BaseModel):
     email: str | None = None
     whatsapp: str | None = None
     mensagem_global: str | None = None
+    whatsapp_optin: bool | None = None
 
 
 class ContatoOut(BaseModel):
@@ -145,6 +146,7 @@ class ContatoOut(BaseModel):
     email: str | None
     whatsapp: str | None
     mensagem_global: str | None
+    whatsapp_optin: bool = False
     created_at: datetime
     updated_at: datetime
     notas: list[ContatoNotaOut] = []
@@ -179,7 +181,21 @@ class ConvidadoOut(BaseModel):
     pendente_obs: str | None
     followup_data: date | None
     mensagem_pessoal: str | None
+    convite_whatsapp_em: datetime | None = None
+    convite_whatsapp_status: str | None = None
+    convite_whatsapp_erro: str | None = None
     contato: ContatoOut
+
+
+class ConviteWhatsappRequest(BaseModel):
+    """Disparo de convites pela API do WhatsApp (template de marketing, cobrado)."""
+    modo: Literal["teste", "real"]
+    telefone_teste: str | None = None          # modo "teste": só pra este número
+    convidado_ids: list[uuid.UUID] | None = None  # modo "real": restringe (None = todos os elegíveis)
+    # Lucas atesta que estes contatos autorizaram receber WhatsApp; grava o opt-in.
+    marcar_optin_ids: list[uuid.UUID] = []
+    atesto_autorizacao: bool = False
+    reenviar: bool = False
 
 
 class EventoCreate(BaseModel):

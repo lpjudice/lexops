@@ -73,6 +73,9 @@ class ValidarCitacoesResponse(BaseModel):
 class AssinanteRequest(BaseModel):
     email: str
     nome: str | None = None
+    # Opt-in explícito: só vale se `aceita_whatsapp` vier true junto com o número.
+    whatsapp: str | None = None
+    aceita_whatsapp: bool = False
 
 
 class OptOutRequest(BaseModel):

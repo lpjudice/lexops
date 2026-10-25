@@ -46,6 +46,9 @@ export default function ContratoResponsaveisEscopo({ contrato }: { contrato: Con
     mutationFn: () => contratosApi.atualizar(contrato.id, { responsaveis_ids: ids, escopo_recomendacoes: escopo }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['contratos'] })
+      // os responsáveis escolhidos aqui também entram no cadastro do cliente
+      qc.invalidateQueries({ queryKey: ['clientes'] })
+      qc.invalidateQueries({ queryKey: ['cliente'] })
       setEditando(false)
     },
     onError: (e: any) => alert(`Erro ao salvar:\n${e?.response?.data?.detail || e?.message || 'Erro desconhecido'}`),

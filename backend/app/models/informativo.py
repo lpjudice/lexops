@@ -159,6 +159,10 @@ class InformativoAssinante(Base):
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     nome: Mapped[str | None] = mapped_column(String(255), nullable=True)
     ativo: Mapped[bool] = mapped_column(nullable=False, default=True, server_default="true")
+    # Só preenchido se a pessoa marcou "quero receber por WhatsApp" ao se inscrever.
+    whatsapp: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    whatsapp_optin: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
+    whatsapp_optin_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # 'formulario_publico' | 'manual' | 'csv' | 'xls'
     fonte: Mapped[str] = mapped_column(String(30), nullable=False, default="formulario_publico", server_default="formulario_publico")
     criado_por_usuario_id: Mapped[uuid.UUID | None] = mapped_column(

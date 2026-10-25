@@ -166,6 +166,53 @@ def dispensar_duplicata_cadastro(
     return {"ok": True}
 
 
+def _eh_celular(telefone: str | None) -> bool:
+    """DDD + 9 dígitos começando com 9 (com ou sem 55) — candidato a ter WhatsApp."""
+    d = re.sub(r"\D", "", telefone or "")
+    if d.startswith("55") and len(d) in (12, 13):
+        d = d[2:]
+    return len(d) == 11 and d[2] == "9"
+
+
+class WhatsappResposta(BaseModel):
+    cliente_id: uuid.UUID
+    e_whatsapp: bool
+
+
+class WhatsappRespostasIn(BaseModel):
+    respostas: list[WhatsappResposta]
+
+
+# Rotas fixas ANTES de /{cliente_id}, senão o FastAPI tenta casar "whatsapp" como UUID.
+@router.get("/whatsapp/pendentes")
+def whatsapp_pendentes(db: Session = Depends(get_db), current=Depends(get_current_user)):
+    """Clientes com celular cadastrado mas sem WhatsApp definido e ainda não
+    perguntados — o usuário confirma se o número é WhatsApp."""
+    itens = db.query(Cliente).filter(Cliente.telefone.isnot(None), Cliente.telefone_whatsapp.is_(None)).all()
+    return [
+        {"id": str(c.id), "nome": c.nome, "telefone": c.telefone}
+        for c in sorted(itens, key=lambda x: (x.nome or "").lower())
+        if not (c.whatsapp or "").strip() and _eh_celular(c.telefone)
+    ]
+
+
+@router.post("/whatsapp/responder")
+def whatsapp_responder(body: WhatsappRespostasIn, db: Session = Depends(get_db), current=Depends(get_current_user)):
+    """"É WhatsApp": copia o telefone pro campo WhatsApp. "Não é": guarda a
+    resposta pra não perguntar de novo. Nunca sobrescreve um WhatsApp já preenchido."""
+    n = 0
+    for r in body.respostas:
+        c = db.get(Cliente, r.cliente_id)
+        if not c:
+            continue
+        c.telefone_whatsapp = r.e_whatsapp
+        if r.e_whatsapp and c.telefone and not (c.whatsapp or "").strip():
+            c.whatsapp = c.telefone
+        n += 1
+    db.commit()
+    return {"atualizados": n}
+
+
 @router.get("/{cliente_id}", response_model=ClienteWithProcessos)
 def obter_cliente(cliente_id: uuid.UUID, db: Session = Depends(get_db)):
     from app.routers.processos import _processo_to_out
@@ -189,8 +236,14 @@ def atualizar_cliente(
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
     nome_antigo = cliente.nome
-    for field, value in data.model_dump(exclude_unset=True).items():
+    telefone_antigo = (cliente.telefone or "").strip()
+    campos = data.model_dump(exclude_unset=True)
+    for field, value in campos.items():
         setattr(cliente, field, value)
+    # "Este telefone é WhatsApp?" foi respondido pro número ANTIGO: se o telefone mudou
+    # (e a resposta não veio junto), volta a ficar sem confirmação.
+    if "telefone" in campos and (campos["telefone"] or "").strip() != telefone_antigo and "telefone_whatsapp" not in campos:
+        cliente.telefone_whatsapp = None
     # Atualiza projeto se nome mudou
     if data.nome:
         cliente.projeto_nome, cliente.worktree_nome = _gerar_projeto(data.nome)

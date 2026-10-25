@@ -2,7 +2,9 @@ import uuid
 from datetime import date, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
@@ -23,6 +25,7 @@ from app.models.tarefa import Tarefa
 from app.models.usuario import Usuario
 from app.schemas.conselho import (
     AnexoLibOut,
+    ConviteWhatsappRequest,
     ContatoCreate,
     ContatoNotaCreate,
     ContatoNotaOut,
@@ -355,8 +358,11 @@ def atualizar_contato(
     c = db.query(ConselhoContato).filter(ConselhoContato.id == contato_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Contato não encontrado")
-    for field, value in data.model_dump(exclude_unset=True).items():
+    campos = data.model_dump(exclude_unset=True)
+    for field, value in campos.items():
         setattr(c, field, value)
+    if "whatsapp_optin" in campos:
+        c.whatsapp_optin_em = datetime.now(timezone.utc) if campos["whatsapp_optin"] else None
     db.commit()
     db.refresh(c)
     return _contato_out(c, db)
@@ -450,6 +456,95 @@ def obter_evento(
     if not evento:
         raise HTTPException(status_code=404, detail="Evento não encontrado")
     return evento
+
+
+def _evento_com_convidados(db: Session, evento_id: uuid.UUID) -> ConselhoEvento:
+    evento = (
+        db.query(ConselhoEvento)
+        .options(selectinload(ConselhoEvento.convidados).selectinload(ConselhoEventoConvidado.contato))
+        .filter(ConselhoEvento.id == evento_id)
+        .first()
+    )
+    if not evento:
+        raise HTTPException(status_code=404, detail="Evento não encontrado")
+    return evento
+
+
+def _nome_convidado(cv: ConselhoEventoConvidado) -> dict:
+    c = cv.contato
+    return {"id": str(cv.id), "nome": f"{c.primeiro_nome} {c.sobrenome or ''}".strip(),
+            "whatsapp": c.whatsapp, "contato_id": str(c.id)}
+
+
+@router.get("/eventos/{evento_id}/convites-whatsapp/preview")
+def preview_convites_whatsapp(
+    evento_id: uuid.UUID,
+    reenviar: bool = Query(False),
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Quem receberia o convite pela API do WhatsApp, quem fica de fora e o custo
+    estimado (marketing, cobrado por mensagem entregue)."""
+    from app.services import whatsapp_marketing as wm
+
+    grupos = wm.classificar_convidados(db, _evento_com_convidados(db, evento_id), reenviar=reenviar)
+    n = len(grupos["enviar"])
+    return {
+        **{k: [_nome_convidado(cv) for cv in v] for k, v in grupos.items()},
+        "custo_unitario_estimado": wm.CUSTO_MARKETING_ESTIMADO_BRL,
+        "custo_total_estimado": round(n * wm.CUSTO_MARKETING_ESTIMADO_BRL, 2),
+    }
+
+
+@router.post("/eventos/{evento_id}/convites-whatsapp")
+def enviar_convites_whatsapp(
+    evento_id: uuid.UUID,
+    data: ConviteWhatsappRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """modo=teste: manda UM convite ao número informado (nada é gravado).
+    modo=real: dispara em background aos elegíveis (opt-in, sem opt-out, ainda não enviados)."""
+    from app.config import settings
+    from app.services import whatsapp_api, whatsapp_marketing as wm
+
+    if not (settings.whatsapp_access_token and settings.whatsapp_phone_number_id):
+        raise HTTPException(status_code=503, detail="WhatsApp não está configurado neste ambiente.")
+    evento = _evento_com_convidados(db, evento_id)
+
+    status_tpl = whatsapp_api.status_template(wm.TEMPLATE_CONVITE_EVENTO)
+    if status_tpl not in (None, "APPROVED"):
+        raise HTTPException(status_code=409, detail=(
+            f"O template do convite ainda não foi aprovado pela Meta (status: {status_tpl}). "
+            "Tente de novo quando estiver aprovado."
+        ))
+
+    if data.modo == "teste":
+        if not wm.telefone8(data.telefone_teste):
+            raise HTTPException(status_code=400, detail="Informe o número de teste (DDD + número).")
+        resp = wm.enviar_teste(whatsapp_api.normalizar_telefone(data.telefone_teste or "") or "", evento)
+        if not whatsapp_api.id_da_mensagem(resp):
+            raise HTTPException(status_code=502, detail=f"A Meta recusou o envio de teste: {(resp or {}).get('erro', 'sem resposta')}")
+        return {"ok": True, "modo": "teste"}
+
+    if data.marcar_optin_ids:
+        if not data.atesto_autorizacao:
+            raise HTTPException(status_code=400, detail="Para gravar o opt-in é preciso atestar que os contatos autorizaram.")
+        agora = datetime.now(timezone.utc)
+        for cv in evento.convidados:
+            if cv.id in data.marcar_optin_ids and wm.telefone8(cv.contato.whatsapp) and not wm.esta_optout(db, cv.contato.whatsapp):
+                cv.contato.whatsapp_optin, cv.contato.whatsapp_optin_em = True, agora
+        db.commit()
+        db.refresh(evento)
+
+    grupos = wm.classificar_convidados(db, evento, reenviar=data.reenviar)
+    alvo = [cv for cv in grupos["enviar"] if data.convidado_ids is None or cv.id in data.convidado_ids]
+    if not alvo:
+        raise HTTPException(status_code=400, detail="Nenhum convidado elegível (precisa de WhatsApp, opt-in e ainda não ter recebido).")
+    background_tasks.add_task(wm.enviar_convites_em_lote, evento.id, [cv.id for cv in alvo])
+    return {"ok": True, "modo": "real", "agendados": len(alvo),
+            "custo_total_estimado": round(len(alvo) * wm.CUSTO_MARKETING_ESTIMADO_BRL, 2)}
 
 
 @router.patch("/eventos/{evento_id}", response_model=EventoOut)

@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Query, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, Response
 
 from app.config import settings
-from app.services import whatsapp_api, whatsapp_bot
+from app.database import SessionLocal
+from app.dependencies import get_current_user
+from app.services import whatsapp_api, whatsapp_bot, whatsapp_marketing
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +38,43 @@ def verificar_webhook(
 def _processar_mensagem(telefone: str, texto: str, message_id: str | None) -> None:
     if message_id:
         whatsapp_api.mark_as_read(message_id)
+    db = SessionLocal()
+    try:
+        # Pedido de sair da lista de marketing vale pra qualquer remetente.
+        if whatsapp_marketing.eh_pedido_de_parar(texto):
+            whatsapp_marketing.registrar_optout(db, telefone, origem="texto")
+            whatsapp_api.send_text_message(telefone, "Combinado, você não receberá mais mensagens de divulgação por WhatsApp. Obrigado!")
+            return
+        # Convidado de evento que responde por texto não é cliente: o bot de
+        # processos não tem o que dizer a ele. Fica no log até existir caixa de entrada.
+        if whatsapp_marketing.eh_contato_do_conselho_sem_ser_cliente(db, telefone):
+            logger.info("whatsapp webhook: texto de contato do Conselho (%s) sem resposta automática", telefone)
+            return
+    except Exception:
+        # Falha nas checagens extras nunca pode calar o bot que atende o cliente.
+        db.rollback()
+        logger.exception("whatsapp webhook: erro nas checagens de marketing — seguindo pro bot")
+    finally:
+        db.close()
     resposta = whatsapp_bot.responder_mensagem(telefone, texto)
     whatsapp_api.send_text_message(telefone, resposta)
+
+
+def _processar_botao(telefone: str, payload: str, message_id: str | None) -> None:
+    """Clique em botão de resposta rápida de um template (ex.: convite de evento)."""
+    db = SessionLocal()
+    try:
+        resposta = whatsapp_marketing.tratar_resposta_botao(db, telefone, payload)
+    except Exception:
+        db.rollback()
+        logger.exception("whatsapp webhook: erro tratando botão %r de %s", payload, telefone)
+        resposta = None
+    finally:
+        db.close()
+    if resposta:
+        whatsapp_api.send_text_message(telefone, resposta)
+    else:
+        logger.info("whatsapp webhook: botão %r de %s sem tratamento", payload, telefone)
 
 
 @router.post("/webhook")
@@ -56,6 +93,11 @@ async def receber_webhook(request: Request, background_tasks: BackgroundTasks):
                 for msg in valor.get("messages", []):
                     telefone = msg.get("from")
                     message_id = msg.get("id")
+                    if msg.get("type") == "button":
+                        payload_botao = (msg.get("button") or {}).get("payload") or ""
+                        if telefone and payload_botao:
+                            background_tasks.add_task(_processar_botao, telefone, payload_botao, message_id)
+                        continue
                     if msg.get("type") == "text":
                         texto = msg.get("text", {}).get("body", "")
                     else:
@@ -81,6 +123,16 @@ async def receber_webhook(request: Request, background_tasks: BackgroundTasks):
                             "whatsapp status: msg=%s destinatario=%s status=%s",
                             st.get("id"), destinatario, status_tipo,
                         )
+                    # Casa o status com o convite de evento (se for um).
+                    db = SessionLocal()
+                    try:
+                        titulo_erro = ((erro or [{}])[0] or {}).get("title") if erro else None
+                        whatsapp_marketing.atualizar_status_entrega(db, st.get("id") or "", status_tipo or "", titulo_erro)
+                    except Exception:
+                        db.rollback()
+                        logger.exception("whatsapp status: erro atualizando convite")
+                    finally:
+                        db.close()
     except Exception:
         logger.exception("whatsapp webhook: erro processando payload")
 
@@ -98,7 +150,7 @@ def status():
     }
 
 
-@router.post("/push/executar")
+@router.post("/push/executar", dependencies=[Depends(get_current_user)])
 def executar_push_manual():
     """Dispara agora a notificação de andamentos por WhatsApp — sem esperar o
     cron. Útil pra validar o template com o número de teste."""

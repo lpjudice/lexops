@@ -98,3 +98,10 @@ export async function buscarCep(cep: string): Promise<ViaCepResult | null> {
     return null
   }
 }
+
+/** DDD + 9 dígitos começando com 9 (com ou sem 55) — candidato a ter WhatsApp. */
+export function ehCelular(tel?: string | null): boolean {
+  let d = (tel || '').replace(/\D/g, '')
+  if (d.startsWith('55') && (d.length === 12 || d.length === 13)) d = d.slice(2)
+  return d.length === 11 && d[2] === '9'
+}

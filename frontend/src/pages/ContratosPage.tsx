@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { contratosApi } from '../api/contratos'
 import type { ContratoCreate, SignatarioCreate, PapelSignatario, StatusContrato, GerarPdfRequest, TipoDocumento, GerarProcuracaoRequest, OutorgadoInput, OutorganteInput, PoderEspecial, PoderesModo, TipoOutorgante } from '../api/contratos'
 import { clientesApi } from '../api/clientes'
+import { responsaveisApi } from '../api/responsaveis'
 import { processosApi } from '../api/processos'
 import ComboBox from '../components/ComboBox'
 import ClienteCombobox from '../components/ClienteCombobox'
@@ -11,6 +12,7 @@ import ContratoResponsaveisEscopo from '../components/ContratoResponsaveisEscopo
 import EscopoEditor from '../components/EscopoEditor'
 import ResponsaveisMulti from '../components/ResponsaveisMulti'
 import CurrencyInput, { formatBRL } from '../components/CurrencyInput'
+import { maskTelefone } from '../utils/masks'
 import styles from './Page.module.css'
 import cs from './ContratosPage.module.css'
 
@@ -28,7 +30,14 @@ const PAPEL_LABEL: Record<PapelSignatario, string> = {
 }
 
 const EMPTY_CONTRATO: ContratoCreate = { cliente_id: '', titulo: '', responsaveis_ids: [], escopo_recomendacoes: '' }
-const EMPTY_SIG: SignatarioCreate = { nome: '', email: '', papel: 'outro' }
+/** DDD + 9 dígitos começando com 9 (com ou sem 55) — candidato a ter WhatsApp. */
+function ehCelular(tel?: string | null): boolean {
+  let d = (tel || '').replace(/\D/g, '')
+  if (d.startsWith('55') && (d.length === 12 || d.length === 13)) d = d.slice(2)
+  return d.length === 11 && d[2] === '9'
+}
+
+const EMPTY_SIG: SignatarioCreate = { nome: '', email: '', papel: 'outro', avisar_whatsapp: true, assinar_via_whatsapp: false }
 
 function formatDate(d: string) {
   return new Date(d).toLocaleDateString('pt-BR')
@@ -186,6 +195,14 @@ export default function ContratosPage() {
     queryKey: ['contratos'],
     queryFn: () => contratosApi.listar(),
   })
+  const { data: responsaveis = [] } = useQuery({
+    queryKey: ['responsaveis-contratos'],
+    queryFn: () => responsaveisApi.listar({ apenas_ativos: true }),
+  })
+  // Telefone (WhatsApp) da equipe vem do cadastro em Configurações → Responsáveis, casando pelo e-mail.
+  const whatsappDoResponsavel = (email: string) =>
+    responsaveis.find((r) => (r.email || '').toLowerCase() === email.toLowerCase())?.telefone || undefined
+
   const { data: clientes = [] } = useQuery({
     queryKey: ['clientes'],
     queryFn: () => clientesApi.listar(),
@@ -229,6 +246,9 @@ export default function ContratosPage() {
     mutationFn: contratosApi.criar,
     onSuccess: (novo) => {
       qc.invalidateQueries({ queryKey: ['contratos'] })
+      // responsáveis do contrato/procuração também entram no cadastro do cliente
+      qc.invalidateQueries({ queryKey: ['clientes'] })
+      qc.invalidateQueries({ queryKey: ['cliente'] })
       setShowForm(false)
       setForm(EMPTY_CONTRATO)
       setExpandido(novo.id)
@@ -283,6 +303,7 @@ export default function ContratosPage() {
       qc.invalidateQueries({ queryKey: ['contratos'] })
       setSigForms((prev) => ({ ...prev, [vars.id]: EMPTY_SIG }))
     },
+    onError: (e: any) => alert(`Erro ao adicionar signatário:\n${e?.response?.data?.detail || e?.message || 'Erro desconhecido'}`),
   })
 
   const removerSig = useMutation({
@@ -294,7 +315,12 @@ export default function ContratosPage() {
   const lembrarSig = useMutation({
     mutationFn: ({ cid, sid }: { cid: string; sid: string }) =>
       contratosApi.lembrarSignatario(cid, sid),
-    onSuccess: () => alert('Lembrete enviado.'),
+    onSuccess: (r) => alert(
+      r.via_clicksign_whatsapp ? 'Lembrete enviado por WhatsApp (pelo ClickSign).'
+      : r.whatsapp === true ? 'Lembrete enviado por e-mail e WhatsApp.'
+      : r.whatsapp === false ? `Lembrete enviado por e-mail. O aviso por WhatsApp não saiu: ${r.whatsapp_motivo || 'a Meta não aceitou o envio'}.`
+      : 'Lembrete enviado por e-mail.'
+    ),
     onError: (e: any) => alert(`Erro ao enviar lembrete:\n${e?.response?.data?.detail || e?.message || 'Erro desconhecido'}`),
   })
 
@@ -399,6 +425,7 @@ export default function ContratosPage() {
       contratante_cpf_cnpj: cliente?.cpf_cnpj || '',
       contratante_endereco: '',
       contratante_email: cliente?.email || '',
+      contratante_whatsapp: cliente?.whatsapp || '',
       objeto_tipo: 'PPS',
       objeto_texto_livre: '',
       valor_honorarios: '',
@@ -427,6 +454,7 @@ export default function ContratosPage() {
           nome: cliente?.nome || '',
           cpf_cnpj: cliente?.cpf_cnpj || '',
           email: cliente?.email || '',
+          whatsapp: cliente?.whatsapp || '',
           endereco: cliente?.endereco || '',
           estado_civil: cliente?.estado_civil || '',
           profissao: cliente?.profissao || '',
@@ -442,25 +470,39 @@ export default function ContratosPage() {
   const adicionarContratadoAutomatico = (cid: string) => {
     adicionarSig.mutate({
       id: cid,
-      data: { nome: 'Lucas Pimenta Júdice', email: 'pj@pimentajudice.com.br', papel: 'contratado' },
+      data: { nome: 'Lucas Pimenta Júdice', email: 'pj@pimentajudice.com.br', papel: 'contratado', whatsapp: whatsappDoResponsavel('pj@pimentajudice.com.br'), avisar_whatsapp: true },
     })
   }
 
-  const adicionarClienteComoContratante = (cid: string, clienteId: string) => {
+  const adicionarClienteComoContratante = async (cid: string, clienteId: string) => {
     const cliente = clientePorId(clienteId)
     if (!cliente?.email) return
+    let whatsapp = cliente.whatsapp || undefined
+    // Tem celular mas ninguém disse se é WhatsApp: pergunta agora e guarda a resposta no cadastro.
+    if (!whatsapp && cliente.telefone && cliente.telefone_whatsapp == null && ehCelular(cliente.telefone)) {
+      const ehWa = window.confirm(`O número ${cliente.telefone} de ${cliente.nome} é WhatsApp?\n\nOK = sim (fica salvo no cadastro)\nCancelar = não`)
+      try {
+        await clientesApi.responderWhatsapp([{ cliente_id: cliente.id, e_whatsapp: ehWa }])
+        qc.invalidateQueries({ queryKey: ['clientes'] })
+      } catch { /* a resposta é conveniência: se falhar, segue sem gravar */ }
+      if (ehWa) whatsapp = cliente.telefone
+    }
     adicionarSig.mutate({
       id: cid,
-      data: { nome: cliente.nome, email: cliente.email, papel: 'contratante' },
+      data: { nome: cliente.nome, email: cliente.email, papel: 'contratante', whatsapp, avisar_whatsapp: true },
     })
   }
 
   const adicionarTestemunhaMonielly = (cid: string) => {
     adicionarSig.mutate({
       id: cid,
-      data: { nome: 'Monielly Moreira Vieira', email: 'moni@pimentajudice.com.br', papel: 'testemunha' },
+      data: { nome: 'Monielly Moreira Vieira', email: 'moni@pimentajudice.com.br', papel: 'testemunha', whatsapp: whatsappDoResponsavel('moni@pimentajudice.com.br'), avisar_whatsapp: true },
     })
   }
+
+  // Outorgantes já salvos na procuração (nome + e-mail preenchidos) viram atalhos de signatário.
+  const outorgantesComEmail = (c: (typeof contratos)[0]) =>
+    (c.procuracao_dados?.outorgantes ?? []).filter((o) => o.nome?.trim() && o.email?.trim())
 
   const temArquivos = (c: (typeof contratos)[0]) =>
     (c.arquivos?.length ?? 0) > 0 || !!c.arquivo_path
@@ -796,6 +838,11 @@ export default function ContratosPage() {
                           </div>
                         </div>
                         <div className={styles.formRow}>
+                          <label className={styles.formLabel}>WhatsApp (aviso de assinatura)</label>
+                          <input className={styles.input} placeholder="(27) 9XXXX-XXXX" value={gerarForm.contratante_whatsapp ?? ''}
+                            onChange={(e) => setGerarForm({ ...gerarForm, contratante_whatsapp: maskTelefone(e.target.value) })} />
+                        </div>
+                        <div className={styles.formRow}>
                           <label className={styles.formLabel}>Endereço</label>
                           <input className={styles.input} value={gerarForm.contratante_endereco}
                             onChange={(e) => setGerarForm({ ...gerarForm, contratante_endereco: e.target.value })} />
@@ -982,6 +1029,11 @@ export default function ContratosPage() {
                                   <input type="email" className={styles.input} value={og.email}
                                     onChange={(e) => atualizar({ email: e.target.value })} />
                                 </div>
+                              </div>
+                              <div className={styles.formRow}>
+                                <label className={styles.formLabel}>WhatsApp (aviso de assinatura)</label>
+                                <input className={styles.input} placeholder="(27) 9XXXX-XXXX" value={og.whatsapp ?? ''}
+                                  onChange={(e) => atualizar({ whatsapp: maskTelefone(e.target.value) })} />
                               </div>
                               <div className={styles.formRow}>
                                 <label className={styles.formLabel}>Endereço ({og.tipo === 'PJ' ? 'sede' : 'residencial'})</label>
@@ -1261,7 +1313,17 @@ export default function ContratosPage() {
                             onClick={() => adicionarContratadoAutomatico(c.id)}>
                             + Lucas Júdice (Contratado)
                           </button>
-                          {cliente?.email && (
+                          {c.tipo_documento === 'procuracao' && outorgantesComEmail(c).map((o, i) => (
+                            <button key={`og-${i}`} className={cs.btnAtalho}
+                              title="Dados da procuração gerada (e-mail e WhatsApp do outorgante)"
+                              onClick={() => adicionarSig.mutate({
+                                id: c.id,
+                                data: { nome: o.nome, email: o.email!, papel: 'contratante', whatsapp: o.whatsapp?.trim() || undefined, avisar_whatsapp: true },
+                              })}>
+                              + {o.nome} (Outorgante)
+                            </button>
+                          ))}
+                          {cliente?.email && !(c.tipo_documento === 'procuracao' && outorgantesComEmail(c).length > 0) && (
                             <button className={cs.btnAtalho}
                               onClick={() => adicionarClienteComoContratante(c.id, c.cliente_id)}>
                               + {cliente.nome} (Contratante)
@@ -1277,13 +1339,23 @@ export default function ContratosPage() {
                       {c.signatarios.length > 0 && (
                         <table className={cs.sigTable}>
                           <thead>
-                            <tr><th>Nome</th><th>Email</th><th>Papel</th><th>Status</th><th></th></tr>
+                            <tr><th>Nome</th><th>Email</th><th>WhatsApp</th><th>Papel</th><th>Status</th><th></th></tr>
                           </thead>
                           <tbody>
                             {c.signatarios.map((s) => (
                               <tr key={s.id}>
                                 <td>{s.nome}</td>
                                 <td>{s.email}</td>
+                                <td>
+                                  {s.whatsapp || '—'}
+                                  {s.whatsapp && (
+                                    <div style={{ fontSize: 10.5, color: '#6b7280' }}>
+                                      {s.assinar_via_whatsapp ? 'assina via WhatsApp (ClickSign)'
+                                        : s.avisar_whatsapp === false ? 'sem aviso por WhatsApp'
+                                        : 'avisa por WhatsApp + e-mail'}
+                                    </div>
+                                  )}
+                                </td>
                                 <td>{PAPEL_LABEL[s.papel as PapelSignatario] || s.papel}</td>
                                 <td>
                                   {s.clicksign_erro ? (
@@ -1332,6 +1404,21 @@ export default function ContratosPage() {
                             onChange={(e) => setSigForms({ ...sigForms, [c.id]: { ...sf, papel: e.target.value as PapelSignatario } })}>
                             {PAPEIS.map((p) => <option key={p} value={p}>{PAPEL_LABEL[p]}</option>)}
                           </select>
+                          <input className={styles.input} placeholder="WhatsApp (opcional — avisa também por WhatsApp)"
+                            value={sf.whatsapp ?? ''}
+                            onChange={(e) => setSigForms({ ...sigForms, [c.id]: { ...sf, whatsapp: maskTelefone(e.target.value) } })} />
+                          <select className={styles.input} disabled={!sf.whatsapp?.trim()}
+                            title="Como este signatário assina e é avisado"
+                            value={sf.assinar_via_whatsapp ? 'clicksign' : sf.avisar_whatsapp === false || !sf.whatsapp?.trim() ? 'email' : 'aviso'}
+                            onChange={(e) => setSigForms({ ...sigForms, [c.id]: {
+                              ...sf,
+                              avisar_whatsapp: e.target.value === 'aviso',
+                              assinar_via_whatsapp: e.target.value === 'clicksign',
+                            } })}>
+                            <option value="aviso">E-mail + aviso por WhatsApp</option>
+                            <option value="email">Só e-mail</option>
+                            <option value="clicksign">Assinar via WhatsApp (ClickSign — exige ativação)</option>
+                          </select>
                           <input className={styles.input} placeholder="CPF (opcional)"
                             value={sf.cpf ?? ''}
                             onChange={(e) => setSigForms({ ...sigForms, [c.id]: { ...sf, cpf: maskCPFCNPJ(e.target.value) } })} />
@@ -1343,7 +1430,7 @@ export default function ContratosPage() {
                             title={sf.nome && !nomeCompletoValido(sf.nome) ? 'O ClickSign exige nome e sobrenome — só um nome não é aceito' : undefined}
                             onClick={() => adicionarSig.mutate({
                               id: c.id,
-                              data: { ...sf, cpf: sf.cpf?.trim() || undefined, data_nascimento: sf.data_nascimento?.trim() || undefined },
+                              data: { ...sf, cpf: sf.cpf?.trim() || undefined, data_nascimento: sf.data_nascimento?.trim() || undefined, whatsapp: sf.whatsapp?.trim() || undefined },
                             })}>
                             + Adicionar
                           </button>

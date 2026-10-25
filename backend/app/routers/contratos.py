@@ -14,6 +14,7 @@ from app.schemas.contrato import (
     SignatarioCreate, SignatarioOut,
 )
 from app.services import clicksign
+from app.services.contrato_whatsapp import avisar_assinatura_pendente, avisar_assinatura_pendente_detalhe
 
 UPLOADS_DIR = Path("/app/uploads/contratos")
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
@@ -145,6 +146,8 @@ def criar_contrato(
 ):
     contrato = Contrato(**data.model_dump())
     db.add(contrato)
+    from app.services.cliente_responsaveis import carregar_responsaveis_do_contrato
+    carregar_responsaveis_do_contrato(db, contrato)  # responsável do contrato/procuração vira responsável do cliente
     db.commit()
     db.refresh(contrato)
     if contrato.responsaveis_ids:
@@ -274,8 +277,12 @@ def atualizar_contrato(
     c = db.query(Contrato).filter(Contrato.id == contrato_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Contrato não encontrado")
-    for field, value in data.model_dump(exclude_unset=True).items():
+    campos_contrato = data.model_dump(exclude_unset=True)
+    for field, value in campos_contrato.items():
         setattr(c, field, value)
+    if "responsaveis_ids" in campos_contrato:
+        from app.services.cliente_responsaveis import carregar_responsaveis_do_contrato
+        carregar_responsaveis_do_contrato(db, c)
     db.commit()
     db.refresh(c)
     return c
@@ -793,6 +800,11 @@ async def gerar_pdf_contrato(
             if not cli.email and novo_email:
                 cli.email = novo_email
                 mudou = True
+            novo_wa = (body.contratante_whatsapp or "").strip()
+            if not (cli.whatsapp or "").strip() and novo_wa:
+                cli.whatsapp = novo_wa
+                cli.telefone_whatsapp = True
+                mudou = True
             novo_end = (body.contratante_endereco or "").strip()
             if not cli.endereco and novo_end:
                 cli.endereco = novo_end
@@ -1031,6 +1043,18 @@ def adicionar_signatario(
     c = db.query(Contrato).filter(Contrato.id == contrato_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Contrato não encontrado")
+    if data.assinar_via_whatsapp and not clicksign.WHATSAPP_HABILITADO:
+        raise HTTPException(status_code=400, detail=(
+            "O ClickSign deste escritório ainda não tem envio por WhatsApp habilitado "
+            "(o teste de 24/10 foi recusado com 403/422). Peça a ativação ao ClickSign e, depois, "
+            "defina CLICKSIGN_WHATSAPP_HABILITADO=true. Por ora use \"E-mail + aviso por WhatsApp\"."
+        ))
+    if data.assinar_via_whatsapp:
+        # Falha cedo, na hora de cadastrar: o ClickSign só aceita DDD + número.
+        try:
+            clicksign.telefone_para_clicksign(data.whatsapp)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
     sig = Signatario(contrato_id=contrato_id, **data.model_dump())
     db.add(sig)
     db.commit()
@@ -1064,7 +1088,14 @@ def lembrar_signatario(contrato_id: uuid.UUID, sig_id: uuid.UUID, db: Session = 
         raise HTTPException(status_code=400, detail="Este signatário ainda não foi enviado para assinatura.")
     if not clicksign.notificar_signatario(sig.clicksign_request_key):
         raise HTTPException(status_code=502, detail="Falha ao enviar lembrete pelo ClickSign.")
-    return {"ok": True}
+    # Assina via WhatsApp do ClickSign: o lembrete acima JÁ foi por WhatsApp (e cobrado por eles).
+    if sig.assinar_via_whatsapp:
+        return {"ok": True, "whatsapp": None, "via_clicksign_whatsapp": True}
+    # `whatsapp`: None = sem número ou aviso desmarcado; True/False = aceito/recusado pela Meta.
+    whatsapp, motivo = (None, None)
+    if sig.whatsapp and sig.avisar_whatsapp:
+        whatsapp, motivo = avisar_assinatura_pendente_detalhe(sig, sig.contrato)
+    return {"ok": True, "whatsapp": whatsapp, "whatsapp_motivo": motivo, "via_clicksign_whatsapp": False}
 
 
 # ── Envio para ClickSign ──────────────────────────────────────────────────────
@@ -1135,6 +1166,7 @@ def enviar_para_assinatura(contrato_id: uuid.UUID, db: Session = Depends(get_db)
             signer_key = clicksign.criar_signatario(
                 sig.nome, sig.email, cpf=sig.cpf,
                 data_nascimento=sig.data_nascimento.isoformat() if sig.data_nascimento else None,
+                whatsapp=sig.whatsapp, via_whatsapp=sig.assinar_via_whatsapp,
             )
             sig.clicksign_signer_key = signer_key
             req_key = clicksign.adicionar_signatario_ao_documento(
@@ -1144,6 +1176,7 @@ def enviar_para_assinatura(contrato_id: uuid.UUID, db: Session = Depends(get_db)
                 sig.clicksign_request_key = req_key          # armazena por signatário
                 c.clicksign_request_signature_key = req_key
                 clicksign.notificar_signatario(req_key)      # dispara email de convite
+                avisar_assinatura_pendente(sig, c)           # + WhatsApp, só se tiver número (nunca levanta)
             sig.clicksign_erro = None
         except Exception as e:
             msg = str(e)[:500]

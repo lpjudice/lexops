@@ -88,6 +88,7 @@ export interface Contato {
   email?: string | null
   whatsapp?: string | null
   mensagem_global?: string | null
+  whatsapp_optin?: boolean
   created_at: string
   updated_at: string
   notas: ContatoNota[]
@@ -102,6 +103,7 @@ export interface ContatoCreate {
   whatsapp?: string
   mensagem_global?: string
   evento_id?: string
+  whatsapp_optin?: boolean
 }
 
 export interface Convidado {
@@ -115,7 +117,36 @@ export interface Convidado {
   pendente_obs?: string | null
   followup_data?: string | null
   mensagem_pessoal?: string | null
+  convite_whatsapp_em?: string | null
+  convite_whatsapp_status?: 'enviado' | 'entregue' | 'lido' | 'falhou' | null
+  convite_whatsapp_erro?: string | null
   contato: Contato
+}
+
+export interface ConviteWhatsappItem {
+  id: string
+  nome: string
+  whatsapp?: string | null
+  contato_id: string
+}
+
+export interface ConvitesWhatsappPreview {
+  enviar: ConviteWhatsappItem[]
+  sem_whatsapp: ConviteWhatsappItem[]
+  sem_optin: ConviteWhatsappItem[]
+  optout: ConviteWhatsappItem[]
+  ja_enviado: ConviteWhatsappItem[]
+  custo_unitario_estimado: number
+  custo_total_estimado: number
+}
+
+export interface ConviteWhatsappRequest {
+  modo: 'teste' | 'real'
+  telefone_teste?: string
+  convidado_ids?: string[]
+  marcar_optin_ids?: string[]
+  atesto_autorizacao?: boolean
+  reenviar?: boolean
 }
 
 export interface Evento {
@@ -245,6 +276,10 @@ export const conselhoApi = {
   atualizarContato: (id: string, data: Partial<ContatoCreate>) =>
     api.patch<Contato>(`/conselho/contatos/${id}`, data).then((r) => r.data),
   deletarContato: (id: string) => api.delete(`/conselho/contatos/${id}`),
+  previewConvitesWhatsapp: (eventoId: string, reenviar = false) =>
+    api.get<ConvitesWhatsappPreview>(`/conselho/eventos/${eventoId}/convites-whatsapp/preview`, { params: { reenviar } }).then((r) => r.data),
+  enviarConvitesWhatsapp: (eventoId: string, data: ConviteWhatsappRequest) =>
+    api.post<{ ok: boolean; modo: string; agendados?: number; custo_total_estimado?: number }>(`/conselho/eventos/${eventoId}/convites-whatsapp`, data).then((r) => r.data),
   addNotaContato: (contatoId: string, texto: string, eventoId?: string) =>
     api.post<Contato>(`/conselho/contatos/${contatoId}/notas`, { texto, evento_id: eventoId }).then((r) => r.data),
   deletarNotaContato: (notaId: string) => api.delete(`/conselho/contatos/notas/${notaId}`),

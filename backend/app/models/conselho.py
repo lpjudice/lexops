@@ -82,6 +82,10 @@ class ConselhoContato(Base):
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     whatsapp: Mapped[str | None] = mapped_column(String(50), nullable=True)
     mensagem_global: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Autorizou receber mensagens por WhatsApp pela API (convite de evento etc.).
+    # Marketing sem opt-in é o que a Meta mais pune — o disparo só vai pra quem tem isto.
+    whatsapp_optin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    whatsapp_optin_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -142,6 +146,12 @@ class ConselhoEventoConvidado(Base):
     pendente_obs: Mapped[str | None] = mapped_column(Text, nullable=True)
     followup_data: Mapped[date | None] = mapped_column(Date, nullable=True)
     mensagem_pessoal: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Convite pela API do WhatsApp (template convite_evento): quando saiu, id da
+    # mensagem na Meta (pra casar o status de entrega) e o último status/erro.
+    convite_whatsapp_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    convite_whatsapp_msg_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    convite_whatsapp_status: Mapped[str | None] = mapped_column(String(20), nullable=True)  # enviado|entregue|lido|falhou
+    convite_whatsapp_erro: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     evento: Mapped["ConselhoEvento"] = relationship("ConselhoEvento", back_populates="convidados")

@@ -1,3 +1,5 @@
+import WhatsappBadge from '../components/WhatsappBadge'
+import ResponsaveisMulti from '../components/ResponsaveisMulti'
 import { useRef, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -217,6 +219,11 @@ export default function ClienteDetailPage() {
     },
   })
 
+  const salvarResponsaveis = useMutation({
+    mutationFn: (ids: string[]) => clientesApi.atualizar(id!, { responsaveis_ids: ids }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['cliente', id] }),
+  })
+
   const atualizarCliente = useMutation({
     mutationFn: (data: { email?: string }) => clientesApi.atualizar(id!, data),
     onSuccess: () => {
@@ -264,7 +271,7 @@ export default function ClienteDetailPage() {
             {cliente.nome_fantasia && <span>🏷️ {cliente.nome_fantasia}</span>}
             {cliente.cpf_cnpj && <span>{cliente.cpf_cnpj}</span>}
             {cliente.email && <span>✉️ {cliente.email}</span>}
-            {cliente.telefone && <span>📞 {cliente.telefone}</span>}
+            {cliente.telefone && <span>📞 {cliente.telefone} <WhatsappBadge cliente={cliente} interativo /></span>}
             {cliente.whatsapp && <span>📱 {cliente.whatsapp}</span>}
             {(cliente.cidade || cliente.uf) && (
               <span>📍 {[cliente.cidade, cliente.uf].filter(Boolean).join('/')}</span>
@@ -274,6 +281,13 @@ export default function ClienteDetailPage() {
                 autocadastro
               </span>
             )}
+          </div>
+          <div style={{ marginTop: 8, maxWidth: 520 }}>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}
+              title="Recebem (por e-mail e, se vinculado, Telegram) os recados que o assistente de WhatsApp repassa quando este cliente precisa do advogado. Quem for escolhido como responsável num contrato ou procuração deste cliente entra aqui automaticamente (e você pode ajustar). Se ficar vazio, só a cópia obrigatória do escritório (pj@) recebe.">
+              Responsáveis pelo cliente
+            </div>
+            <ResponsaveisMulti value={cliente.responsaveis_ids ?? []} onChange={(ids) => salvarResponsaveis.mutate(ids)} />
           </div>
         </div>
       </div>

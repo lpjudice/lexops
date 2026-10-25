@@ -169,6 +169,7 @@ def notificar_responsaveis(db: Session, contrato: Contrato) -> list[dict]:
 
     resultados: list[dict] = []
     algum_ok = False
+    chats_ja_avisados: set[str] = set()  # mesma pessoa com dois cadastros no mesmo chat: uma DM só
     for r in responsaveis:
         res = {"responsavel": r.nome, "email": "sem_email", "telegram": "nao_vinculado"}
         if r.email:
@@ -179,7 +180,10 @@ def notificar_responsaveis(db: Session, contrato: Contrato) -> list[dict]:
             except Exception as exc:
                 logger.warning("Aviso responsáveis: e-mail pra %s falhou: %s", r.email, exc)
                 res["email"] = f"erro: {exc}"
-        if r.telegram_chat_id:
+        if r.telegram_chat_id and r.telegram_chat_id in chats_ja_avisados:
+            res["telegram"] = "mesmo_chat"
+        elif r.telegram_chat_id:
+            chats_ja_avisados.add(r.telegram_chat_id)
             botao = ("📁 Pasta do cliente", link_pasta) if link_pasta else None
             if telegram_api.send_message_html(r.telegram_chat_id, corpo_tg, botao):
                 res["telegram"] = "enviado"

@@ -60,6 +60,8 @@ export interface Processo {
   andamentos_nao_lidos?: number
   // Push diário do bot @jusbr_andamentos_bot
   notificar_telegram?: boolean
+  // Opt-in por processo do template `andamento_novo` (WhatsApp ao cliente)
+  notificar_whatsapp?: boolean
   created_at: string
   updated_at: string
 }
@@ -92,6 +94,7 @@ export interface ProcessoCreate {
   rito?: RitoProcesso
   clientes_litisconsorcio?: ProcessoClienteIn[]
   notificar_telegram?: boolean
+  notificar_whatsapp?: boolean
 }
 
 

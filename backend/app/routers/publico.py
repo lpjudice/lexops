@@ -284,13 +284,26 @@ def informativo_assinar(payload: AssinanteRequest, db: Session = Depends(get_db)
         raise HTTPException(400, "E-mail inválido.")
     nome = (payload.nome or "").strip() or None
 
+    # WhatsApp só é guardado se a pessoa marcou "quero receber" E informou um número válido.
+    import re as _re
+    from datetime import datetime as _dt, timezone as _tz
+    whatsapp = (payload.whatsapp or "").strip()
+    aceita = bool(payload.aceita_whatsapp and len(_re.sub(r"\D", "", whatsapp)) >= 10)
+    agora = _dt.now(_tz.utc)
+
     existente = db.query(InformativoAssinante).filter(InformativoAssinante.email == email).first()
     if existente:
         existente.ativo = True
         if nome:
             existente.nome = nome
+        if aceita:
+            existente.whatsapp, existente.whatsapp_optin, existente.whatsapp_optin_em = whatsapp, True, agora
     else:
-        db.add(InformativoAssinante(email=email, nome=nome))
+        db.add(InformativoAssinante(
+            email=email, nome=nome,
+            whatsapp=whatsapp if aceita else None,
+            whatsapp_optin=aceita, whatsapp_optin_em=agora if aceita else None,
+        ))
     db.commit()
     return {"ok": True}
 

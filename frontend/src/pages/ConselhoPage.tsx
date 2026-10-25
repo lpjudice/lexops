@@ -8,6 +8,7 @@ import type {
 import ComboBox from '../components/ComboBox'
 import type { ComboOption } from '../components/ComboBox'
 import Modal from '../components/Modal'
+import ConvitesWhatsappModal from '../components/ConvitesWhatsappModal'
 import styles from './Page.module.css'
 import cs from './ConselhoPage.module.css'
 
@@ -754,6 +755,7 @@ function EventosSubTab() {
   const [expandidoConvidado, setExpandidoConvidado] = useState<string | null>(null)
   const [masterMsg, setMasterMsg] = useState('')
   const [showAddModal, setShowAddModal] = useState(false)
+  const [showConvitesWa, setShowConvitesWa] = useState(false)
   const [emailTarget, setEmailTarget] = useState<EmailSendTarget | null>(null)
   const [mostrarPassados, setMostrarPassados] = useState(false)
 
@@ -888,7 +890,15 @@ function EventosSubTab() {
               <button className={styles.btnSmall} onClick={() => setShowAddModal(true)}>+ Adicionar convidado</button>
             </div>
             <button className={styles.btnSmall} onClick={exportarPresenca}>Exportar lista de presença (CSV)</button>
+            <button className={styles.btnSmall} onClick={() => setShowConvitesWa(true)}
+              title="Convite pela API oficial do WhatsApp, com botões de resposta (marketing — cobrado pela Meta)">
+              💬 Convidar por WhatsApp (API)
+            </button>
           </div>
+
+          {showConvitesWa && (
+            <ConvitesWhatsappModal eventoId={eventoExpandido.id} eventoNome={eventoExpandido.nome} onClose={() => setShowConvitesWa(false)} />
+          )}
 
           {showAddModal && (
             <AdicionarConvidadoModal
@@ -919,6 +929,12 @@ function EventosSubTab() {
                         {cv.recusou && <span className={`${cs.badge} ${cs.badgeRecusou}`}>✗ Recus.</span>}
                         {cv.participacao_confirmada && <span className={`${cs.badge} ${cs.badgeParticipou}`}>✓ Part.</span>}
                         {cv.pendente && <span className={`${cs.badge} ${cs.badgePendente}`}>⏳ Pend.</span>}
+                        {cv.convite_whatsapp_status && (
+                          <span className={cs.badge} style={{ background: cv.convite_whatsapp_status === 'falhou' ? '#fee2e2' : '#dcfce7', color: cv.convite_whatsapp_status === 'falhou' ? '#b91c1c' : '#15803d' }}
+                            title={cv.convite_whatsapp_erro || `Convite por WhatsApp: ${cv.convite_whatsapp_status}`}>
+                            💬 {cv.convite_whatsapp_status}
+                          </span>
+                        )}
                         {!cv.presenca_confirmada && !cv.recusou && !cv.participacao_confirmada && !cv.pendente && (
                           <span style={{ fontSize: 10, color: '#d1d5db' }}>sem status</span>
                         )}
@@ -1050,6 +1066,7 @@ function ContatoInlineInfo({ contato, onSaved }: { contato: Contato; onSaved: ()
   const [empresa, setEmpresa] = useState(contato.empresa || '')
   const [email, setEmail] = useState(contato.email || '')
   const [whatsapp, setWhatsapp] = useState(contato.whatsapp || '')
+  const [optin, setOptin] = useState(!!contato.whatsapp_optin)
 
   const salvar = useMutation({
     mutationFn: () => conselhoApi.atualizarContato(contato.id, {
@@ -1058,6 +1075,7 @@ function ContatoInlineInfo({ contato, onSaved }: { contato: Contato; onSaved: ()
       empresa: empresa.trim() || undefined,
       email: email.trim() || undefined,
       whatsapp: whatsapp.trim() || undefined,
+      whatsapp_optin: optin,
     }),
     onSuccess: () => { onSaved(); setEditando(false) },
   })
@@ -1073,7 +1091,7 @@ function ContatoInlineInfo({ contato, onSaved }: { contato: Contato; onSaved: ()
       >
         <span>🏢 {contato.empresa || <strong style={{ color: '#f59e0b' }}>--</strong>}</span>
         <span>✉️ {contato.email || <strong style={{ color: '#f59e0b' }}>--</strong>}</span>
-        <span>📱 {contato.whatsapp || <strong style={{ color: '#f59e0b' }}>--</strong>}</span>
+        <span>📱 {contato.whatsapp || <strong style={{ color: '#f59e0b' }}>--</strong>}{contato.whatsapp && contato.whatsapp_optin && <span title="Autorizou receber WhatsApp pela API" style={{ color: '#15803d' }}> ✓ autoriza</span>}</span>
         {!contato.sobrenome && <span>👤 sobrenome <strong style={{ color: '#f59e0b' }}>--</strong></span>}
         {faltando && <span title="Dados incompletos" style={{ color: '#f59e0b' }}>✏️</span>}
       </div>
@@ -1087,6 +1105,10 @@ function ContatoInlineInfo({ contato, onSaved }: { contato: Contato; onSaved: ()
       <input className={styles.input} style={{ width: 130, fontSize: 12 }} value={empresa} onChange={(e) => setEmpresa(e.target.value)} placeholder="Empresa" />
       <input className={styles.input} style={{ width: 150, fontSize: 12 }} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="E-mail" />
       <input className={styles.input} style={{ width: 130, fontSize: 12 }} value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} placeholder="Celular/WhatsApp" />
+      <label style={{ display: 'flex', gap: 4, alignItems: 'center', fontSize: 11, flexBasis: '100%' }}>
+        <input type="checkbox" checked={optin} onChange={(e) => setOptin(e.target.checked)} />
+        Autorizou receber mensagens do escritório por WhatsApp (convites pela API)
+      </label>
       <button className={styles.btnPrimary} style={{ fontSize: 11, padding: '3px 8px' }} disabled={salvar.isPending || !primeiroNome.trim()} onClick={() => salvar.mutate()}>
         Salvar
       </button>

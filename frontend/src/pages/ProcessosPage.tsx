@@ -242,6 +242,32 @@ export default function ProcessosPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['processos'] }),
   })
 
+  const toggleNotificarWhatsapp = useMutation({
+    mutationFn: ({ id, valor }: { id: string; valor: boolean }) =>
+      processosApi.atualizar(id, { notificar_whatsapp: valor } as Partial<ProcessoCreate>),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['processos'] }),
+  })
+
+  // Opt-in do template `andamento_novo`: exige WhatsApp no cliente e confirma antes
+  // de ligar, porque cada mensagem é cobrada e os andamentos recentes saem em seguida.
+  const alternarWhatsappProcesso = (p: { id: string; cliente_id: string; notificar_whatsapp?: boolean }) => {
+    if (p.notificar_whatsapp) {
+      toggleNotificarWhatsapp.mutate({ id: p.id, valor: false })
+      return
+    }
+    const cliente = clientes.find((c) => c.id === p.cliente_id)
+    if (!cliente?.whatsapp) {
+      alert('Este cliente não tem WhatsApp cadastrado. Cadastre o número no cliente antes de ativar o aviso.')
+      return
+    }
+    const ok = confirm(
+      `Avisar ${cliente.nome} por WhatsApp a cada andamento deste processo?\n\n` +
+      '• Cada mensagem enviada é cobrada pela Meta.\n' +
+      '• Os andamentos dos últimos 14 dias que ainda não foram avisados saem no próximo ciclo; os mais antigos são ignorados.'
+    )
+    if (ok) toggleNotificarWhatsapp.mutate({ id: p.id, valor: true })
+  }
+
   const deletar = useMutation({
     mutationFn: (id: string) => processosApi.deletar(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['processos'] }),
@@ -707,6 +733,19 @@ export default function ProcessosPage() {
                     disabled={toggleNotificarTelegram.isPending}
                   >
                     {p.notificar_telegram === false ? '🔕' : '🔔'}
+                  </button>
+                  <button
+                    className={styles.btnTable}
+                    style={p.notificar_whatsapp ? { background: 'var(--teal-light)', borderColor: 'var(--teal)', color: 'var(--teal)' } : undefined}
+                    title={
+                      p.notificar_whatsapp
+                        ? 'Cliente é avisado por WhatsApp a cada andamento (clique para desligar)'
+                        : 'Avisar o cliente por WhatsApp a cada andamento (desligado)'
+                    }
+                    onClick={() => alternarWhatsappProcesso(p)}
+                    disabled={toggleNotificarWhatsapp.isPending}
+                  >
+                    {p.notificar_whatsapp ? '💬 Cliente: ligado' : '💬'}
                   </button>
                   <button className={styles.btnTable}
                     onClick={() => {
