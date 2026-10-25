@@ -537,3 +537,73 @@ class OpcoesDeterminacoesOut(BaseModel):
     destinatarios: list[TemaOut]
     temas: list[TemaOut]
     status: list[TemaOut]
+
+
+# ── Cruzamentos de advogados (valor representado, bancas) ────────────────────
+
+class ValorDaParteOut(BaseModel):
+    valor_centavos: int
+    valor: str
+    tema_rotulo: str
+    n_valores: int
+    n_pecas: int
+    fato_id: uuid.UUID
+    trecho: str | None = None
+    peticao: PeticaoRefOut
+
+
+class ParteComValorOut(BaseModel):
+    chave: str
+    nome: str
+    principal: bool = False
+    valor_centavos: int | None = None
+    valor: str | None = None
+    valor_info: ValorDaParteOut | None = None
+
+
+class AdvogadoValorOut(BaseModel):
+    id: str
+    nome: str | None = None
+    oabs: list[str]
+    n_partes: int
+    n_partes_com_valor: int
+    n_partes_principal: int
+    valor_indicativo_centavos: int
+    valor_indicativo: str | None = None
+    partes: list[ParteComValorOut]
+
+
+class AdvResumoOut(BaseModel):
+    id: str
+    nome: str | None = None
+    n_partes: int | None = None
+
+
+class BancaOut(BaseModel):
+    advogados: list[AdvResumoOut]
+    partes: list[str]
+    n_partes: int
+    valor_indicativo_centavos: int
+    valor_indicativo: str | None = None
+
+
+class ParAdvogadosOut(BaseModel):
+    a: AdvResumoOut
+    b: AdvResumoOut
+    n_comuns: int
+    cobertura: float
+    partes: list[str]
+
+
+class BlocoOut(BaseModel):
+    advogados: list[AdvResumoOut]
+    partes: list[str]
+    n_partes: int
+
+
+class CruzamentosAdvogadosOut(BaseModel):
+    resumo: dict[str, int]
+    advogados: list[AdvogadoValorOut]
+    bancas: list[BancaOut]
+    pares: list[ParAdvogadosOut]
+    blocos: list[BlocoOut]

@@ -245,6 +245,23 @@ export interface AdvogadosPartes {
   sem_advogado: { motivo: MotivoSemAdvogado; parte: string | null; assinante: string | null; peticao: PeticaoRef }[]
 }
 
+export interface ValorDaParte {
+  valor_centavos: number; valor: string; tema_rotulo: string; n_valores: number; n_pecas: number
+  fato_id: string; trecho: string | null; peticao: PeticaoRef
+}
+export interface AdvResumo { id: string; nome: string | null; n_partes?: number | null }
+export interface CruzamentosAdvogados {
+  resumo: Record<string, number>
+  advogados: {
+    id: string; nome: string | null; oabs: string[]; n_partes: number; n_partes_com_valor: number; n_partes_principal: number
+    valor_indicativo_centavos: number; valor_indicativo: string | null
+    partes: { chave: string; nome: string; principal: boolean; valor_centavos: number | null; valor: string | null; valor_info: ValorDaParte | null }[]
+  }[]
+  bancas: { advogados: AdvResumo[]; partes: string[]; n_partes: number; valor_indicativo_centavos: number; valor_indicativo: string | null }[]
+  pares: { a: AdvResumo; b: AdvResumo; n_comuns: number; cobertura: number; partes: string[] }[]
+  blocos: { advogados: AdvResumo[]; partes: string[]; n_partes: number }[]
+}
+
 export interface Determinacao {
   id: string
   ordem: string | null
@@ -541,6 +558,9 @@ export const autosIa = {
 
   ondeMaisApareceValor: (casoId: string, fatoId: string) =>
     api.get<OndeMaisAparece[]>(`/autos-ia/casos/${casoId}/fatos/valores/${fatoId}/anexos`).then((r) => r.data),
+
+  cruzamentosAdvogados: (casoId: string, minPartes = 2) =>
+    api.get<CruzamentosAdvogados>(`/autos-ia/casos/${casoId}/advogados-cruzamentos`, { params: { min_partes: minPartes } }).then((r) => r.data),
 
   opcoesDeterminacoes: () =>
     api.get<OpcoesDeterminacoes>('/autos-ia/fatos/determinacoes/opcoes').then((r) => r.data),

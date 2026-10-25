@@ -17,13 +17,13 @@ from app.dependencies import get_current_user
 from app.models.andamento import AndamentoProcesso
 from app.models.autos_ia import AutosIACaso, AutosIADocumento, AutosIAPeca, AutosIAPerguntaFaq, AutosIAReferencia
 from app.schemas.autos_ia import (
-    AdicionarAdvogadoIn, AdvogadosPartesOut, DeterminacaoOut, DeterminacaoUpdateIn, DeterminacoesListaOut, DeterminacoesStatusOut, IntimacaoIn, MinutaOut, OpcoesDeterminacoesOut, AnexoCorroboracaoOut, FatoValorOut, FatoValorUpdateIn, FatosValoresListaOut, FatosValoresStatusOut, ReconciliacaoOut, RenomearSujeitoIn, TemaOut, AlertaConfigOut, AlertaConfigUpdate, CasoCreate, CasoOut, CasoResumo, CasoUpdate, DocumentoDriveAnexoOut, DocumentoDriveOut, DocumentoOut,
+    AdicionarAdvogadoIn, AdvogadosPartesOut, CruzamentosAdvogadosOut, DeterminacaoOut, DeterminacaoUpdateIn, DeterminacoesListaOut, DeterminacoesStatusOut, IntimacaoIn, MinutaOut, OpcoesDeterminacoesOut, AnexoCorroboracaoOut, FatoValorOut, FatoValorUpdateIn, FatosValoresListaOut, FatosValoresStatusOut, ReconciliacaoOut, RenomearSujeitoIn, TemaOut, AlertaConfigOut, AlertaConfigUpdate, CasoCreate, CasoOut, CasoResumo, CasoUpdate, DocumentoDriveAnexoOut, DocumentoDriveOut, DocumentoOut,
     EstimativaImportacaoOut, ExportMdStatusOut, FaqPerguntaCreate, PastasDriveOut, FaqPerguntaOut, GrafoAresta, GrafoNo, GrafoOut, PecaAnotacaoUpdate,
     PecaDetalheOut, PecaOut, PecaTipoUpdate, PrincipalIn, RenomearAdvogadoIn, VinculoIn,
 )
 from app.services.autos_ia import faq as faq_service
 from app.services.autos_ia.busca import buscar_pecas
-from app.services.autos_ia import advogados_partes, export_md_drive, fatos_determinacoes, fatos_valores
+from app.services.autos_ia import advogados_partes, cruzamentos_advogados, export_md_drive, fatos_determinacoes, fatos_valores
 from app.services.autos_ia.estimativa import estimar_importacao_existentes, estimar_reclassificacao
 from app.services.autos_ia.ingestao import processar_documento, reclassificar_caso, retomar_documento
 from app.services.autos_ia.jusbr_import import (
@@ -535,6 +535,17 @@ def atualizar_determinacao(caso_id: uuid.UUID, fato_id: uuid.UUID, data: Determi
     except fatos_determinacoes.DeterminacaoErro as exc:
         db.rollback()
         raise HTTPException(status_code=404 if "não encontrada" in str(exc) else 422, detail=str(exc))
+
+
+@router.get("/casos/{caso_id}/advogados-cruzamentos", response_model=CruzamentosAdvogadosOut)
+def cruzamentos_dos_advogados(
+    caso_id: uuid.UUID,
+    min_partes: int = Query(2, ge=1, le=50, description="Partes em comum para dois advogados contarem como parceiros"),
+    db: Session = Depends(get_db),
+):
+    """Valor indicativo representado por advogado, bancas (advogados que dividem clientes) e blocos de partes."""
+    _get_caso(db, caso_id)
+    return cruzamentos_advogados.montar(db, caso_id, min_partes=min_partes)
 
 
 @router.get("/casos/{caso_id}/pastas-drive", response_model=PastasDriveOut)

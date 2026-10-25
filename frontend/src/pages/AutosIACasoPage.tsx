@@ -8,13 +8,14 @@ import GrafoRede from '../components/autosIa/GrafoRede'
 import ExportarMdDrive from '../components/autosIa/ExportarMdDrive'
 import AdvogadosPartes from '../components/autosIa/AdvogadosPartes'
 import Cumprimento from '../components/autosIa/Cumprimento'
+import Estrategia from '../components/autosIa/Estrategia'
 import Numeros from '../components/autosIa/Numeros'
 import Modal from '../components/Modal'
 import pageStyles from './Page.module.css'
 import { useColapsaveis } from '../utils/colapsaveis'
 import styles from './AutosIACasoPage.module.css'
 
-type Aba = 'upload' | 'pecas' | 'documentos' | 'timeline' | 'grafo' | 'advogados' | 'numeros' | 'cumprimento' | 'faq'
+type Aba = 'upload' | 'pecas' | 'documentos' | 'timeline' | 'grafo' | 'advogados' | 'numeros' | 'cumprimento' | 'estrategia' | 'faq'
 
 const ABAS: { key: Aba; label: string }[] = [
   { key: 'upload', label: 'Upload & Blocos' },
@@ -25,6 +26,7 @@ const ABAS: { key: Aba; label: string }[] = [
   { key: 'advogados', label: 'Advogados & Partes' },
   { key: 'numeros', label: 'Números' },
   { key: 'cumprimento', label: 'Cumprimento' },
+  { key: 'estrategia', label: 'Estratégia' },
   { key: 'faq', label: 'Perguntas' },
 ]
 
@@ -484,6 +486,7 @@ export default function AutosIACasoPage() {
       {aba === 'advogados' && <AdvogadosPartes casoId={casoId} />}
       {aba === 'numeros' && <Numeros casoId={casoId} />}
       {aba === 'cumprimento' && <Cumprimento casoId={casoId} />}
+      {aba === 'estrategia' && <Estrategia casoId={casoId} />}
       {aba === 'faq' && <AbaFaq casoId={casoId} nosPorId={nosPorId} />}
     </div>
   )
