@@ -1,3 +1,4 @@
+import logging
 import uuid
 from pathlib import Path
 
@@ -1475,6 +1476,7 @@ def _baixar_e_arquivar_assinado_clicksign(
     status, que roda em threadpool) pode pedir mais tentativas com espera entre elas.
     """
     if contrato.arquivo_assinado_path:
+        _enviar_copia_whatsapp(db, contrato)
         return
     pdf_bytes = clicksign.baixar_documento_assinado(doc_key, tentativas=tentativas, espera_s=espera_s)
     if not pdf_bytes:
@@ -1489,6 +1491,17 @@ def _baixar_e_arquivar_assinado_clicksign(
         contrato.drive_link_cliente = link_cliente
     if link_master:
         contrato.drive_link_master = link_master
+    _enviar_copia_whatsapp(db, contrato)
+
+
+def _enviar_copia_whatsapp(db: Session, contrato: Contrato) -> None:
+    """Contrato assinado por todos → cópia em PDF por WhatsApp ao contratante (só contrato novo, só
+    contrato — não procuração). Nunca deixa uma falha daqui atrapalhar a sincronização."""
+    try:
+        from app.services.contrato_whatsapp import enviar_contrato_assinado
+        enviar_contrato_assinado(db, contrato)
+    except Exception:
+        logging.getLogger(__name__).exception("cópia do contrato assinado por WhatsApp falhou (%s)", contrato.id)
 
 
 # ── Download do PDF assinado ──────────────────────────────────────────────────

@@ -72,6 +72,8 @@ class Contrato(Base):
     clicksign_request_signature_key: Mapped[str | None] = mapped_column(String(255))
     # Quando foi enviado ao ClickSign — base dos lembretes automáticos de assinatura.
     assinatura_enviada_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Última vez que o sistema confirmou o status no ClickSign (antes de um lembrete) — evita consultar à toa.
+    ultima_validacao_clicksign_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -116,6 +118,8 @@ class Signatario(Base):
     lembretes_whatsapp: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     ultimo_lembrete_whatsapp_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancelamento_avisado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Cópia do contrato assinado (PDF) já enviada a este signatário por WhatsApp.
+    contrato_assinado_enviado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     avisar_whatsapp: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
     # Opcional: o próprio ClickSign convida e autentica por WhatsApp (communicate_by
     # + auths=whatsapp). Exige o recurso habilitado na conta/plano e cobra por

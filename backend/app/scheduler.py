@@ -166,12 +166,15 @@ def _push_andamentos_whatsapp() -> None:
 
 
 def _sincronizar_assinaturas_clicksign() -> None:
-    """A cada 30 min — sincroniza com o ClickSign os contratos que esperam assinatura (antes só
-    atualizava ao abrir o card, porque o webhook não chega). Alimenta status, PDF assinado e os
-    lembretes por WhatsApp, que só saem depois de confirmar no ClickSign."""
+    """1x por dia (7h30 BRT) — sincroniza com o ClickSign os contratos que esperam assinatura (o
+    webhook não chega; o status também atualiza ao abrir o card) e tenta de novo as cópias de contrato
+    assinado que ainda não saíram. Os lembretes por WhatsApp NÃO dependem deste job: cada um confirma
+    o ClickSign por conta própria, 30 min antes e na hora de enviar."""
     try:
         from app.services.clicksign_estado import sincronizar_todos
         sincronizar_todos()
+        from app.services.contrato_whatsapp import reenviar_contratos_assinados_pendentes
+        reenviar_contratos_assinados_pendentes()
     except Exception as exc:
         logger.warning("Scheduler: sincronizar_assinaturas_clicksign falhou: %s", exc)
 
@@ -187,7 +190,8 @@ def _lembretes_evento_whatsapp() -> None:
 
 
 def _lembretes_assinatura_whatsapp() -> None:
-    """10h BRT — lembra por WhatsApp quem ainda não assinou (3, 7, 14 e 27 dias após o envio)."""
+    """A cada 15 min — só olha o banco. Cada lembrete (3, 7, 14 e 27 dias após o envio) vence no horário do
+    próprio contrato: 30 min antes confirma no ClickSign e, na hora, confirma de novo e só então envia."""
     try:
         from app.services.contrato_whatsapp import enviar_lembretes_assinatura
         enviar_lembretes_assinatura()
@@ -919,7 +923,7 @@ def start_scheduler() -> None:
     )
     scheduler.add_job(
         _sincronizar_assinaturas_clicksign,
-        trigger=CronTrigger(minute="*/30", timezone="America/Sao_Paulo"),
+        trigger=CronTrigger(hour=7, minute=30, timezone="America/Sao_Paulo"),
         id="sincronizar_assinaturas_clicksign",
         replace_existing=True,
     )
@@ -931,7 +935,7 @@ def start_scheduler() -> None:
     )
     scheduler.add_job(
         _lembretes_assinatura_whatsapp,
-        trigger=CronTrigger(hour=10, minute=0, timezone="America/Sao_Paulo"),
+        trigger=CronTrigger(minute="*/15", timezone="America/Sao_Paulo"),
         id="lembretes_assinatura_whatsapp",
         replace_existing=True,
     )

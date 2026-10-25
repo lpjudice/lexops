@@ -1297,6 +1297,8 @@ def _run_migrations() -> None:
             "ALTER TABLE signatarios ADD COLUMN IF NOT EXISTS lembretes_whatsapp INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE signatarios ADD COLUMN IF NOT EXISTS ultimo_lembrete_whatsapp_em TIMESTAMPTZ",
             "ALTER TABLE signatarios ADD COLUMN IF NOT EXISTS cancelamento_avisado_em TIMESTAMPTZ",
+            "ALTER TABLE signatarios ADD COLUMN IF NOT EXISTS contrato_assinado_enviado_em TIMESTAMPTZ",
+            "ALTER TABLE contratos ADD COLUMN IF NOT EXISTS ultima_validacao_clicksign_em TIMESTAMPTZ",
         ):
             conn.execute(text(_ddl))
 
