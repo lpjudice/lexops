@@ -17,13 +17,13 @@ from app.dependencies import get_current_user
 from app.models.andamento import AndamentoProcesso
 from app.models.autos_ia import AutosIACaso, AutosIADocumento, AutosIAPeca, AutosIAPerguntaFaq, AutosIAReferencia
 from app.schemas.autos_ia import (
-    AdicionarAdvogadoIn, AdvogadosPartesOut, CruzamentosAdvogadosOut, DeterminacaoOut, DeterminacaoUpdateIn, DeterminacoesListaOut, DeterminacoesStatusOut, IntimacaoIn, MinutaOut, OpcoesDeterminacoesOut, AnexoCorroboracaoOut, FatoValorOut, FatoValorUpdateIn, FatosValoresListaOut, FatosValoresStatusOut, ReconciliacaoOut, RenomearSujeitoIn, TemaOut, AlertaConfigOut, AlertaConfigUpdate, CasoCreate, CasoOut, CasoResumo, CasoUpdate, DocumentoDriveAnexoOut, DocumentoDriveOut, DocumentoOut,
+    AdicionarAdvogadoIn, AdvogadosPartesOut, ConflitosAdvogadosOut, ContradicoesOut, CruzamentosAdvogadosOut, MatrizPosicoesOut, OpcoesPosicoesOut, PosicaoOut, PosicaoUpdateIn, PosicoesListaOut, PosicoesStatusOut, DeterminacaoOut, DeterminacaoUpdateIn, DeterminacoesListaOut, DeterminacoesStatusOut, IntimacaoIn, MinutaOut, OpcoesDeterminacoesOut, AnexoCorroboracaoOut, FatoValorOut, FatoValorUpdateIn, FatosValoresListaOut, FatosValoresStatusOut, ReconciliacaoOut, RenomearSujeitoIn, TemaOut, AlertaConfigOut, AlertaConfigUpdate, CasoCreate, CasoOut, CasoResumo, CasoUpdate, DocumentoDriveAnexoOut, DocumentoDriveOut, DocumentoOut,
     EstimativaImportacaoOut, ExportMdStatusOut, FaqPerguntaCreate, PastasDriveOut, FaqPerguntaOut, GrafoAresta, GrafoNo, GrafoOut, PecaAnotacaoUpdate,
     PecaDetalheOut, PecaOut, PecaTipoUpdate, PrincipalIn, RenomearAdvogadoIn, VinculoIn,
 )
 from app.services.autos_ia import faq as faq_service
 from app.services.autos_ia.busca import buscar_pecas
-from app.services.autos_ia import advogados_partes, cruzamentos_advogados, export_md_drive, fatos_determinacoes, fatos_valores
+from app.services.autos_ia import advogados_partes, cruzamentos_advogados, export_md_drive, fatos_determinacoes, fatos_posicoes, fatos_valores
 from app.services.autos_ia.estimativa import estimar_importacao_existentes, estimar_reclassificacao
 from app.services.autos_ia.ingestao import processar_documento, reclassificar_caso, retomar_documento
 from app.services.autos_ia.jusbr_import import (
@@ -546,6 +546,81 @@ def cruzamentos_dos_advogados(
     """Valor indicativo representado por advogado, bancas (advogados que dividem clientes) e blocos de partes."""
     _get_caso(db, caso_id)
     return cruzamentos_advogados.montar(db, caso_id, min_partes=min_partes)
+
+
+# ── Posições (matriz, contradições, conflitos de advogados) ──────────────────
+
+@router.get("/fatos/posicoes/opcoes", response_model=OpcoesPosicoesOut)
+def opcoes_posicoes():
+    return {
+        "temas": [{"chave": k, "rotulo": v} for k, v in fatos_posicoes.TEMA_POS_ROTULO.items()],
+        "posicoes": [{"chave": k, "rotulo": v} for k, v in fatos_posicoes.POSICAO_ROTULO.items()],
+    }
+
+
+@router.get("/casos/{caso_id}/fatos/posicoes/status", response_model=PosicoesStatusOut)
+def status_posicoes(caso_id: uuid.UUID, db: Session = Depends(get_db)):
+    _get_caso(db, caso_id)
+    return fatos_posicoes.status_extracao(db, caso_id)
+
+
+@router.post("/casos/{caso_id}/fatos/posicoes/extrair", response_model=PosicoesStatusOut, status_code=status.HTTP_202_ACCEPTED)
+def extrair_posicoes(
+    caso_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
+    forcar: bool = Query(False, description="Relê também as peças já lidas"),
+    limite_pecas: int | None = Query(None, ge=1),
+    db: Session = Depends(get_db),
+):
+    """Lê, com IA, as posições que cada autor assume nas peças narrativas ainda não lidas."""
+    _get_caso(db, caso_id)
+    atual = fatos_posicoes.status_extracao(db, caso_id)
+    if atual["estado"] == "rodando":
+        return atual
+    background_tasks.add_task(fatos_posicoes.extrair_caso, caso_id, forcar, limite_pecas)
+    atual["estado"] = "rodando"
+    atual["mensagem"] = "Iniciando…"
+    return atual
+
+
+@router.get("/casos/{caso_id}/fatos/posicoes/matriz", response_model=MatrizPosicoesOut)
+def matriz_posicoes(caso_id: uuid.UUID, db: Session = Depends(get_db)):
+    _get_caso(db, caso_id)
+    return fatos_posicoes.matriz(db, caso_id)
+
+
+@router.get("/casos/{caso_id}/fatos/posicoes/contradicoes", response_model=ContradicoesOut)
+def contradicoes_posicoes(caso_id: uuid.UUID, db: Session = Depends(get_db)):
+    _get_caso(db, caso_id)
+    return fatos_posicoes.contradicoes(db, caso_id)
+
+
+@router.get("/casos/{caso_id}/fatos/posicoes/conflitos-advogados", response_model=ConflitosAdvogadosOut)
+def conflitos_de_advogados(caso_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Advogados que representam partes com posições opostas no mesmo tema."""
+    _get_caso(db, caso_id)
+    return fatos_posicoes.conflitos_advogados(db, caso_id)
+
+
+@router.get("/casos/{caso_id}/fatos/posicoes", response_model=PosicoesListaOut)
+def listar_posicoes(
+    caso_id: uuid.UUID, tema: str | None = None, posicao: str | None = None, participante: str | None = None,
+    status_posicao: str | None = Query(None, alias="status"), q: str | None = None, db: Session = Depends(get_db),
+):
+    _get_caso(db, caso_id)
+    return fatos_posicoes.listar(db, caso_id, {"tema": tema, "posicao": posicao, "participante": participante, "status": status_posicao, "q": q})
+
+
+@router.patch("/casos/{caso_id}/fatos/posicoes/{fato_id}", response_model=PosicaoOut)
+def atualizar_posicao(caso_id: uuid.UUID, fato_id: uuid.UUID, data: PosicaoUpdateIn, db: Session = Depends(get_db)):
+    """Valida, corrige (posição/tema/nota) ou rejeita uma posição extraída."""
+    _get_caso(db, caso_id)
+    try:
+        return fatos_posicoes.atualizar(db, caso_id, fato_id, posicao=data.posicao, tema=data.tema, status=data.status,
+                                        nota=data.nota, nota_definida="nota" in data.model_fields_set)
+    except fatos_posicoes.PosicaoErro as exc:
+        db.rollback()
+        raise HTTPException(status_code=404 if "não encontrada" in str(exc) else 422, detail=str(exc))
 
 
 @router.get("/casos/{caso_id}/pastas-drive", response_model=PastasDriveOut)

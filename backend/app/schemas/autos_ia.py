@@ -607,3 +607,122 @@ class CruzamentosAdvogadosOut(BaseModel):
     bancas: list[BancaOut]
     pares: list[ParAdvogadosOut]
     blocos: list[BlocoOut]
+
+
+# ── Banco de fatos: posições (matriz, contradições, conflitos de advogados) ──
+
+class HolderOut(BaseModel):
+    chave: str
+    nome: str
+    tipo: str
+
+
+class PosicaoOut(BaseModel):
+    id: uuid.UUID
+    tema: str | None = None
+    tema_rotulo: str
+    posicao: str | None = None
+    posicao_rotulo: str | None = None
+    resumo: str | None = None
+    pede: str | None = None
+    trecho: str | None = None
+    data: str | None = None
+    confianca: float | None = None
+    status: str
+    nota: str | None = None
+    validado: bool = False
+    holders: list[HolderOut]
+    peticao: PeticaoRefOut
+
+
+class PosicoesListaOut(BaseModel):
+    total: int
+    itens: list[PosicaoOut]
+
+
+class PosicoesStatusOut(BaseModel):
+    estado: Literal["ocioso", "rodando", "concluido", "erro"]
+    total_posicoes: int
+    pecas_com_posicoes: int
+    validadas: int
+    pecas_pendentes: int
+    total: int = 0
+    feitos: int = 0
+    novas: int = 0
+    erros: int = 0
+    custo_usd: float = 0.0
+    mensagem: str | None = None
+
+
+class PosicaoUpdateIn(BaseModel):
+    posicao: str | None = None
+    tema: str | None = None
+    status: Literal["extraido", "validado", "rejeitado"] | None = None
+    nota: str | None = None
+
+
+class CelulaMatrizOut(BaseModel):
+    atual: str
+    atual_rotulo: str
+    n: int
+    mudou: bool
+    inversao: bool
+    itens: list[PosicaoOut]
+
+
+class LinhaMatrizOut(BaseModel):
+    chave: str
+    nome: str
+    tipo: str
+    n_pecas: int
+    celulas: dict[str, CelulaMatrizOut]
+
+
+class MatrizPosicoesOut(BaseModel):
+    resumo: dict[str, int]
+    temas: list[TemaOut]
+    linhas: list[LinhaMatrizOut]
+
+
+class ContradicaoOut(BaseModel):
+    chave: str
+    nome: str
+    tipo: str
+    tema: str
+    tema_rotulo: str
+    inversao: bool
+    gravidade: Literal["inversao", "mudanca"]
+    itens: list[PosicaoOut]
+
+
+class ContradicoesOut(BaseModel):
+    total: int
+    inversoes: int
+    itens: list[ContradicaoOut]
+
+
+class ParteDoConflitoOut(BaseModel):
+    chave: str
+    nome: str
+    principal: bool = False
+    posicao_item: PosicaoOut
+
+
+class ConflitoAdvogadoOut(BaseModel):
+    advogado: AdvPessoaOut
+    tema: str
+    tema_rotulo: str
+    favoraveis: list[ParteDoConflitoOut]
+    contrarias: list[ParteDoConflitoOut]
+    n_partes: int
+
+
+class ConflitosAdvogadosOut(BaseModel):
+    total: int
+    advogados: int
+    itens: list[ConflitoAdvogadoOut]
+
+
+class OpcoesPosicoesOut(BaseModel):
+    temas: list[TemaOut]
+    posicoes: list[TemaOut]

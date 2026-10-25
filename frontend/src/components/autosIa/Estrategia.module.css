@@ -34,3 +34,34 @@
 .id:hover { background: #e0f2f1; }
 .idSem { color: var(--gray-mid); }
 .idMd { font-size: 10.5px; font-weight: 700; padding: 2px 6px; text-decoration: none; color: var(--gray-mid); border-left: 1px solid var(--gray-border); background: var(--light); }
+.btn { padding: 7px 16px; border-radius: 999px; border: 1px solid var(--teal); background: var(--teal); color: #fff; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.btn:disabled { opacity: .5; cursor: default; }
+.aviso { color: #92400e; background: #fef3c7; padding: 1px 8px; border-radius: 6px; }
+.erro { font-size: 12px; color: #991b1b; }
+.miniLink { background: none; border: none; padding: 0; font: inherit; font-size: 12px; color: var(--gray-mid); cursor: pointer; text-decoration: underline; }
+.mini { padding: 5px 12px; border-radius: 999px; border: 1px solid var(--teal); background: var(--teal); color: #fff; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.pBadge { font: inherit; font-size: 11.5px; font-weight: 700; padding: 3px 10px; border-radius: 999px; border: 1px solid transparent; white-space: nowrap; cursor: default; }
+button.pBadge { cursor: pointer; }
+.pSel { outline: 2px solid var(--teal); outline-offset: 1px; }
+.pFav { background: #dcfce7; color: #166534; }
+.pCon { background: #fee2e2; color: #991b1b; }
+.pCond { background: #fef3c7; color: #92400e; }
+.pNeu { background: #f3f4f6; color: #4b5563; }
+.tabelaWrap { overflow-x: auto; border: 1px solid var(--gray-border); border-radius: 12px; background: var(--white); }
+.tabela { border-collapse: collapse; width: 100%; font-size: 13px; }
+.tabela th, .tabela td { padding: 8px 10px; border-bottom: 1px solid var(--gray-border); text-align: left; vertical-align: top; }
+.tabela thead th { font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--gray-mid); background: var(--light); white-space: nowrap; }
+.tabela tbody th { font-weight: 600; min-width: 220px; }
+.detalheCel { background: var(--light); }
+.pItem { border-left: 3px solid var(--gray-border); padding: 6px 0 6px 10px; margin: 6px 0; background: var(--white); border-radius: 0 8px 8px 0; }
+.pOk { border-left-color: var(--teal); }
+.pResumo { font-size: 13px; line-height: 1.5; flex-basis: 100%; }
+.notaTxt { font-size: 12px; color: #92400e; margin-top: 2px; }
+.acoes { margin-left: auto; display: inline-flex; gap: 2px; }
+.ico { background: none; border: none; cursor: pointer; font-size: 14px; padding: 2px 6px; color: var(--gray-mid); border-radius: 6px; }
+.ico:hover { background: var(--light); color: var(--dark); }
+.icoOn, .icoOn:hover { color: #fff; background: var(--teal); }
+.editor { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 8px; padding: 10px; background: var(--light); border-radius: 8px; }
+.editor label { display: flex; flex-direction: column; gap: 3px; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--gray-mid); }
+.editor select, .editor input { padding: 6px 10px; border: 1px solid var(--gray-border); border-radius: 8px; font: inherit; font-size: 13px; background: var(--white); text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--dark); min-width: 160px; }
+.notaCampo input { min-width: 260px; }

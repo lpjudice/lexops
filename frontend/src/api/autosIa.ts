@@ -262,6 +262,34 @@ export interface CruzamentosAdvogados {
   blocos: { advogados: AdvResumo[]; partes: string[]; n_partes: number }[]
 }
 
+export interface PosicaoHolder { chave: string; nome: string; tipo: string }
+export interface Posicao {
+  id: string; tema: string | null; tema_rotulo: string; posicao: string | null; posicao_rotulo: string | null
+  resumo: string | null; pede: string | null; trecho: string | null; data: string | null; confianca: number | null
+  status: 'extraido' | 'validado' | 'rejeitado'; nota: string | null; validado: boolean; holders: PosicaoHolder[]; peticao: PeticaoRef
+}
+export interface PosicoesStatus {
+  estado: 'ocioso' | 'rodando' | 'concluido' | 'erro'; total_posicoes: number; pecas_com_posicoes: number; validadas: number
+  pecas_pendentes: number; total: number; feitos: number; novas: number; erros: number; custo_usd: number; mensagem: string | null
+}
+export interface MatrizPosicoes {
+  resumo: Record<string, number>
+  temas: { chave: string; rotulo: string }[]
+  linhas: { chave: string; nome: string; tipo: string; n_pecas: number
+    celulas: Record<string, { atual: string; atual_rotulo: string; n: number; mudou: boolean; inversao: boolean; itens: Posicao[] }> }[]
+}
+export interface ContradicoesPosicoes {
+  total: number; inversoes: number
+  itens: { chave: string; nome: string; tipo: string; tema: string; tema_rotulo: string; inversao: boolean; gravidade: 'inversao' | 'mudanca'; itens: Posicao[] }[]
+}
+export interface ConflitosAdvogados {
+  total: number; advogados: number
+  itens: { advogado: { id: string; nome: string | null; oabs: string[] }; tema: string; tema_rotulo: string; n_partes: number
+    favoraveis: { chave: string; nome: string; principal: boolean; posicao_item: Posicao }[]
+    contrarias: { chave: string; nome: string; principal: boolean; posicao_item: Posicao }[] }[]
+}
+export interface OpcoesPosicoes { temas: { chave: string; rotulo: string }[]; posicoes: { chave: string; rotulo: string }[] }
+
 export interface Determinacao {
   id: string
   ordem: string | null
@@ -561,6 +589,27 @@ export const autosIa = {
 
   cruzamentosAdvogados: (casoId: string, minPartes = 2) =>
     api.get<CruzamentosAdvogados>(`/autos-ia/casos/${casoId}/advogados-cruzamentos`, { params: { min_partes: minPartes } }).then((r) => r.data),
+
+  opcoesPosicoes: () =>
+    api.get<OpcoesPosicoes>('/autos-ia/fatos/posicoes/opcoes').then((r) => r.data),
+
+  statusPosicoes: (casoId: string) =>
+    api.get<PosicoesStatus>(`/autos-ia/casos/${casoId}/fatos/posicoes/status`).then((r) => r.data),
+
+  extrairPosicoes: (casoId: string, forcar = false) =>
+    api.post<PosicoesStatus>(`/autos-ia/casos/${casoId}/fatos/posicoes/extrair`, null, { params: forcar ? { forcar: true } : {} }).then((r) => r.data),
+
+  matrizPosicoes: (casoId: string) =>
+    api.get<MatrizPosicoes>(`/autos-ia/casos/${casoId}/fatos/posicoes/matriz`).then((r) => r.data),
+
+  contradicoesPosicoes: (casoId: string) =>
+    api.get<ContradicoesPosicoes>(`/autos-ia/casos/${casoId}/fatos/posicoes/contradicoes`).then((r) => r.data),
+
+  conflitosAdvogados: (casoId: string) =>
+    api.get<ConflitosAdvogados>(`/autos-ia/casos/${casoId}/fatos/posicoes/conflitos-advogados`).then((r) => r.data),
+
+  atualizarPosicao: (casoId: string, fatoId: string, body: { posicao?: string; tema?: string; status?: string; nota?: string | null }) =>
+    api.patch<Posicao>(`/autos-ia/casos/${casoId}/fatos/posicoes/${fatoId}`, body).then((r) => r.data),
 
   opcoesDeterminacoes: () =>
     api.get<OpcoesDeterminacoes>('/autos-ia/fatos/determinacoes/opcoes').then((r) => r.data),
