@@ -147,9 +147,23 @@ def enviar_lembretes_assinatura(hoje=None) -> dict:
                     Contrato.assinatura_enviada_em.isnot(None))
             .all()
         )
+        from app.services import clicksign_estado as ce
+
         for c in contratos:
             dias = (hoje - c.assinatura_enviada_em.date()).days
+            # CONFIRMA no ClickSign antes de qualquer envio: o status do nosso lado pode estar velho
+            # (só atualizava ao abrir o card). Sem resposta do ClickSign, ninguém é lembrado.
+            estado = ce.consultar_estado(c)
+            if estado is None:
+                logger.warning("lembrete assinatura: sem confirmação do ClickSign (contrato %s) — pulado", c.id)
+                continue
+            ce.sincronizar(c.id)          # persiste quem já assinou / documento fechado ou cancelado
+            db.expire_all()
+            if estado["doc_status"] != "running":
+                continue                  # fechado, cancelado ou vencido: não há mais o que lembrar
             for sig in c.signatarios:
+                if ce.assinou(estado, sig):
+                    continue
                 if (sig.status_assinatura != "pendente" or not sig.whatsapp or not sig.avisar_whatsapp
                         or sig.assinar_via_whatsapp or not sig.clicksign_request_key or sig.clicksign_erro):
                     continue

@@ -1086,6 +1086,14 @@ def lembrar_signatario(contrato_id: uuid.UUID, sig_id: uuid.UUID, db: Session = 
         raise HTTPException(status_code=400, detail="Este signatário já assinou.")
     if not sig.clicksign_request_key:
         raise HTTPException(status_code=400, detail="Este signatário ainda não foi enviado para assinatura.")
+    # Confirma no ClickSign (o status daqui pode estar velho): não manda lembrete a quem já assinou.
+    from app.services import clicksign_estado as ce
+    estado = ce.consultar_estado(sig.contrato)
+    if estado is not None and (ce.assinou(estado, sig) or estado["doc_status"] != "running"):
+        ce.sincronizar(contrato_id)
+        raise HTTPException(status_code=400, detail=(
+            "O ClickSign informa que este signatário já assinou ou que o documento já foi encerrado. "
+            "O status foi atualizado — nenhum lembrete foi enviado."))
     if not clicksign.notificar_signatario(sig.clicksign_request_key):
         raise HTTPException(status_code=502, detail="Falha ao enviar lembrete pelo ClickSign.")
     # Assina via WhatsApp do ClickSign: o lembrete acima JÁ foi por WhatsApp (e cobrado por eles).

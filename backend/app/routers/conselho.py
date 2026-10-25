@@ -26,6 +26,7 @@ from app.models.usuario import Usuario
 from app.schemas.conselho import (
     AnexoLibOut,
     ConviteWhatsappRequest,
+    LembretesWhatsappRequest,
     ContatoCreate,
     ContatoNotaCreate,
     ContatoNotaOut,
@@ -474,6 +475,24 @@ def _nome_convidado(cv: ConselhoEventoConvidado) -> dict:
     c = cv.contato
     return {"id": str(cv.id), "nome": f"{c.primeiro_nome} {c.sobrenome or ''}".strip(),
             "whatsapp": c.whatsapp, "contato_id": str(c.id)}
+
+
+@router.post("/eventos/{evento_id}/lembretes-whatsapp")
+def definir_lembretes_whatsapp(
+    evento_id: uuid.UUID,
+    data: LembretesWhatsappRequest,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    """Liga ou desliga o lembrete por WhatsApp de vários convidados (ou de todos) de uma vez."""
+    evento = _evento_com_convidados(db, evento_id)
+    n = 0
+    for cv in evento.convidados:
+        if data.convidado_ids is None or cv.id in data.convidado_ids:
+            cv.lembrete_whatsapp_ativo = data.ativo
+            n += 1
+    db.commit()
+    return {"atualizados": n, "ativo": data.ativo}
 
 
 @router.get("/eventos/{evento_id}/convites-whatsapp/preview")

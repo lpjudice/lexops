@@ -124,6 +124,9 @@ class ConselhoEvento(Base):
     mensagem_master: Mapped[str | None] = mapped_column(Text, nullable=True)
     dias_lembrete: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
     # Detalhes que vão na mensagem de confirmação e no lembrete por WhatsApp.
+    # Lembrete por WhatsApp aos confirmados: padrão LIGADO; desliga o evento inteiro aqui ou cada
+    # convidado em ConselhoEventoConvidado.lembrete_whatsapp_ativo (cada mensagem enviada é cobrada).
+    lembrete_whatsapp_ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     horario: Mapped[str | None] = mapped_column(String(40), nullable=True)   # texto livre: "19h", "19h às 21h"
     local_evento: Mapped[str | None] = mapped_column(String(300), nullable=True)    # nome do local
     endereco: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -160,6 +163,8 @@ class ConselhoEventoConvidado(Base):
     # De onde veio a resposta de presença: 'whatsapp_botao' ou 'manual (Nome)'; e quando.
     confirmacao_origem: Mapped[str | None] = mapped_column(String(80), nullable=True)
     confirmacao_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Padrão ligado; desligar evita o lembrete (e o custo) só pra este convidado.
+    lembrete_whatsapp_ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     # Lembrete (template lembrete_evento) já enviado a este convidado.
     lembrete_whatsapp_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
