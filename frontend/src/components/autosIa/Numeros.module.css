@@ -1,0 +1,67 @@
+.wrap { display: flex; flex-direction: column; gap: 12px; }
+.topo { display: flex; flex-direction: column; gap: 8px; }
+.cobertura { font-size: 12.5px; color: var(--gray-mid); line-height: 1.55; }
+.cobertura strong { color: var(--dark); }
+.aviso { color: #92400e; background: #fef3c7; padding: 1px 8px; border-radius: 6px; }
+.botoes { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.btn { padding: 7px 16px; border-radius: 999px; border: 1px solid var(--teal); background: var(--teal); color: #fff; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.btn:disabled { opacity: .5; cursor: default; }
+.dica { font-size: 12px; color: var(--gray-mid); }
+.erro { font-size: 12px; color: #991b1b; }
+.barra { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.seg { display: inline-flex; border: 1px solid var(--gray-border); border-radius: 999px; overflow: hidden; background: var(--white); flex-wrap: wrap; }
+.seg button { border: none; background: none; padding: 7px 14px; font: inherit; font-size: 13px; font-weight: 600; color: var(--gray-mid); cursor: pointer; }
+.seg button.segOn { background: var(--teal); color: #fff; }
+.n { font-weight: 500; opacity: .8; margin-left: 4px; }
+.explica { font-size: 12.5px; color: var(--gray-mid); line-height: 1.5; margin: 0; }
+.vazio { font-size: 13px; color: var(--gray-mid); padding: 14px 0; }
+.card { background: var(--white); border: 1px solid var(--gray-border); border-radius: 12px; overflow: hidden; }
+.cardHead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; width: 100%; padding: 11px 14px; background: none; border: none; font: inherit; text-align: left; cursor: pointer; color: var(--dark); }
+.cardHead:hover { background: var(--light); }
+.chevron { color: var(--gray-mid); font-size: 12px; width: 12px; }
+.titulo { font-size: 14px; font-weight: 700; }
+.conta { margin-left: auto; font-size: 12px; color: var(--gray-mid); white-space: nowrap; }
+.corpo { border-top: 1px solid var(--gray-border); padding: 6px 14px 12px; display: flex; flex-direction: column; gap: 10px; }
+.grupoValor { padding-top: 8px; }
+.grupoTopo { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+.valorG { font-size: 15px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.afirmantes { font-size: 12px; color: var(--gray-mid); }
+.fato { border-left: 3px solid var(--gray-border); padding: 6px 0 6px 10px; margin: 2px 0; }
+.fatoOk { border-left-color: var(--teal); background: rgba(0, 168, 140, .04); }
+.fatoTopo { display: flex; align-items: baseline; gap: 6px 10px; flex-wrap: wrap; }
+.valor { font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums; min-width: 150px; }
+.chipTema { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: #e0f2f1; color: #0f5e57; white-space: nowrap; }
+.chipNat { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: #f3f4f6; color: #4b5563; white-space: nowrap; }
+.sujeito { font-size: 13px; font-weight: 600; }
+.afirmante { font-size: 12px; color: #5b21b6; background: #ede9fe; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+.dataRef { font-size: 11.5px; color: var(--gray-mid); }
+.acoes { margin-left: auto; display: inline-flex; gap: 2px; }
+.ico { background: none; border: none; cursor: pointer; font-size: 14px; padding: 2px 6px; color: var(--gray-mid); border-radius: 6px; }
+.ico:hover { background: var(--light); color: var(--dark); }
+.icoOn { color: #fff; background: var(--teal); }
+.icoOn:hover { color: #fff; background: var(--teal); }
+.fonte { font-size: 12px; color: var(--gray-mid); margin-top: 2px; }
+.nota { font-size: 12px; color: #92400e; margin-top: 2px; }
+.links { display: flex; align-items: center; gap: 12px; margin-top: 2px; }
+.link { background: none; border: none; padding: 0; font: inherit; font-size: 12px; font-weight: 600; color: var(--teal); cursor: pointer; }
+.trecho { margin: 6px 0 2px; padding: 8px 12px; background: var(--light); border-radius: 8px; font-size: 12.5px; line-height: 1.55; color: var(--dark); }
+.marca { background: #fde68a; padding: 0 3px; border-radius: 3px; font-weight: 700; }
+.onde { margin: 6px 0 2px; display: flex; flex-direction: column; gap: 6px; }
+.ondeLinha { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+.ondeTrecho { color: var(--gray-mid); flex-basis: 100%; }
+.idWrap { display: inline-flex; align-items: center; border: 1px solid var(--gray-border); border-radius: 6px; overflow: hidden; background: var(--white); }
+.id, .idSem { font-size: 11.5px; font-weight: 700; padding: 2px 8px; font-variant-numeric: tabular-nums; text-decoration: none; }
+.id { color: var(--teal); }
+.id:hover { background: #e0f2f1; }
+.idSem { color: var(--gray-mid); }
+.idMd { font-size: 10.5px; font-weight: 700; padding: 2px 6px; text-decoration: none; color: var(--gray-mid); border-left: 1px solid var(--gray-border); background: var(--light); }
+.idMd:hover { color: var(--teal); }
+.editor { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 8px; padding: 10px; background: var(--light); border-radius: 8px; }
+.editor label { display: flex; flex-direction: column; gap: 3px; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--gray-mid); }
+.editor select, .editor input { padding: 6px 10px; border: 1px solid var(--gray-border); border-radius: 8px; font: inherit; font-size: 13px; background: var(--white); text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--dark); min-width: 180px; }
+.nota2 input { min-width: 260px; }
+.mini { padding: 6px 14px; border-radius: 999px; border: 1px solid var(--teal); background: var(--teal); color: #fff; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.miniLink { background: none; border: none; padding: 0; font: inherit; font-size: 12px; color: var(--gray-mid); cursor: pointer; text-decoration: underline; }
+.filtros { display: flex; gap: 8px; flex-wrap: wrap; }
+.filtros select, .filtros input { padding: 7px 10px; border: 1px solid var(--gray-border); border-radius: 8px; font: inherit; font-size: 13px; background: var(--white); }
+.filtros input { min-width: 240px; flex: 1; }

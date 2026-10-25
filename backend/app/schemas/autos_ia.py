@@ -357,3 +357,108 @@ class AlertaConfigOut(BaseModel):
 class AlertaConfigUpdate(BaseModel):
     ativo: bool | None = None
     emails_extras: list[str] | None = None
+
+
+# ── Banco de fatos: valores (R$) e reconciliador ─────────────────────────────
+
+class FatoValorOut(BaseModel):
+    id: uuid.UUID
+    valor_centavos: int
+    valor: str
+    rotulo_original: str | None = None
+    tema: str | None = None
+    tema_rotulo: str
+    sujeito: str | None = None
+    sujeito_canonico: str | None = None
+    natureza: str | None = None
+    fonte_citada: str | None = None
+    data_ref: str | None = None
+    trecho: str | None = None
+    confianca: float | None = None
+    status: str
+    nota: str | None = None
+    ocorrencias: int = 1
+    afirmante: str
+    afirmante_chave: str
+    peticao: PeticaoRefOut
+
+
+class FatosValoresListaOut(BaseModel):
+    total: int
+    itens: list[FatoValorOut]
+
+
+class FatosValoresStatusOut(BaseModel):
+    estado: Literal["ocioso", "rodando", "concluido", "erro"]
+    total_fatos: int
+    validados: int
+    pecas_com_fatos: int
+    pecas_pendentes: int
+    total: int = 0
+    feitos: int = 0
+    fatos_novos: int = 0
+    erros: int = 0
+    custo_usd: float = 0.0
+    mensagem: str | None = None
+
+
+class ReconValorOut(BaseModel):
+    valor_centavos: int
+    valor: str
+    afirmantes: list[str]
+    fatos: list[FatoValorOut]
+
+
+class DivergenciaOut(BaseModel):
+    tema: str
+    tema_rotulo: str
+    sujeito: str | None = None
+    valores: list[ReconValorOut]
+    afirmantes: list[str]
+    razao: float | None = None
+    n_fatos: int
+
+
+class CorroboracaoValorOut(BaseModel):
+    valor_centavos: int
+    valor: str
+    n_pecas: int
+    afirmantes: list[str]
+    temas: list[str]
+    sujeitos: list[str]
+    fatos: list[FatoValorOut]
+
+
+class ReconciliacaoOut(BaseModel):
+    resumo: dict
+    divergencias: list[DivergenciaOut]
+    corroboracoes: list[CorroboracaoValorOut]
+
+
+class FatoValorUpdateIn(BaseModel):
+    tema: str | None = None
+    sujeito_canonico: str | None = None
+    status: Literal["extraido", "validado", "rejeitado"] | None = None
+    nota: str | None = None
+
+
+class RenomearSujeitoIn(BaseModel):
+    de: str
+    para: str
+
+
+class AnexoCorroboracaoOut(BaseModel):
+    peca_id: uuid.UUID
+    id_processual: str | None = None
+    titulo: str | None = None
+    tipo_pje: str | None = None
+    data: date | None = None
+    link_pdf: str | None = None
+    link_md: str | None = None
+    ocorrencias: int
+    trecho: str
+
+
+class TemaOut(BaseModel):
+    chave: str
+    rotulo: str

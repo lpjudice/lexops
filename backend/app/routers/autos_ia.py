@@ -17,13 +17,13 @@ from app.dependencies import get_current_user
 from app.models.andamento import AndamentoProcesso
 from app.models.autos_ia import AutosIACaso, AutosIADocumento, AutosIAPeca, AutosIAPerguntaFaq, AutosIAReferencia
 from app.schemas.autos_ia import (
-    AdicionarAdvogadoIn, AdvogadosPartesOut, AlertaConfigOut, AlertaConfigUpdate, CasoCreate, CasoOut, CasoResumo, CasoUpdate, DocumentoDriveAnexoOut, DocumentoDriveOut, DocumentoOut,
+    AdicionarAdvogadoIn, AdvogadosPartesOut, AnexoCorroboracaoOut, FatoValorOut, FatoValorUpdateIn, FatosValoresListaOut, FatosValoresStatusOut, ReconciliacaoOut, RenomearSujeitoIn, TemaOut, AlertaConfigOut, AlertaConfigUpdate, CasoCreate, CasoOut, CasoResumo, CasoUpdate, DocumentoDriveAnexoOut, DocumentoDriveOut, DocumentoOut,
     EstimativaImportacaoOut, ExportMdStatusOut, FaqPerguntaCreate, PastasDriveOut, FaqPerguntaOut, GrafoAresta, GrafoNo, GrafoOut, PecaAnotacaoUpdate,
     PecaDetalheOut, PecaOut, PecaTipoUpdate, PrincipalIn, RenomearAdvogadoIn, VinculoIn,
 )
 from app.services.autos_ia import faq as faq_service
 from app.services.autos_ia.busca import buscar_pecas
-from app.services.autos_ia import advogados_partes, export_md_drive
+from app.services.autos_ia import advogados_partes, export_md_drive, fatos_valores
 from app.services.autos_ia.estimativa import estimar_importacao_existentes, estimar_reclassificacao
 from app.services.autos_ia.ingestao import processar_documento, reclassificar_caso, retomar_documento
 from app.services.autos_ia.jusbr_import import (
@@ -359,6 +359,94 @@ def remover_advogado(caso_id: uuid.UUID, data: VinculoIn, db: Session = Depends(
 @router.post("/casos/{caso_id}/advogados-partes/restaurar", response_model=AdvogadosPartesOut)
 def restaurar_advogado(caso_id: uuid.UUID, data: VinculoIn, db: Session = Depends(get_db)):
     return _editar_relacao(db, caso_id, advogados_partes.restaurar_advogado, data.parte_chave, data.adv_id)
+
+
+# ── Banco de fatos: valores (R$) e reconciliador de números ──────────────────
+
+@router.get("/fatos/temas", response_model=list[TemaOut])
+def temas_fatos():
+    return [{"chave": k, "rotulo": fatos_valores.TEMA_ROTULO[k]} for k in fatos_valores.TEMAS]
+
+
+@router.get("/casos/{caso_id}/fatos/valores/status", response_model=FatosValoresStatusOut)
+def status_fatos_valores(caso_id: uuid.UUID, db: Session = Depends(get_db)):
+    _get_caso(db, caso_id)
+    return fatos_valores.status_extracao(db, caso_id)
+
+
+@router.post("/casos/{caso_id}/fatos/valores/extrair", response_model=FatosValoresStatusOut, status_code=status.HTTP_202_ACCEPTED)
+def extrair_fatos_valores(
+    caso_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
+    forcar: bool = Query(False, description="Reextrai mesmo as peças já processadas"),
+    limite_pecas: int | None = Query(None, ge=1, le=2000, description="Máximo de peças (amostra)"),
+    db: Session = Depends(get_db),
+):
+    """Extrai e rotula os valores em R$ das peças narrativas (usa IA; custo aparece no status)."""
+    _get_caso(db, caso_id)
+    atual = fatos_valores.status_extracao(db, caso_id)
+    if atual["estado"] == "rodando":
+        return atual
+    background_tasks.add_task(fatos_valores.extrair_caso, caso_id, forcar, limite_pecas)
+    atual["estado"] = "rodando"
+    atual["mensagem"] = "Iniciando…"
+    return atual
+
+
+@router.get("/casos/{caso_id}/fatos/valores/reconciliacao", response_model=ReconciliacaoOut)
+def reconciliacao_valores(caso_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Divergências (mesmo tema e sujeito, números diferentes) e corroborações (mesmo número em várias peças)."""
+    _get_caso(db, caso_id)
+    return fatos_valores.reconciliar(db, caso_id)
+
+
+@router.post("/casos/{caso_id}/fatos/valores/renomear-sujeito")
+def renomear_sujeito_valores(caso_id: uuid.UUID, data: RenomearSujeitoIn, db: Session = Depends(get_db)):
+    """Unifica à mão um nome de sujeito em todos os valores do caso."""
+    _get_caso(db, caso_id)
+    try:
+        return {"atualizados": fatos_valores.renomear_sujeito(db, caso_id, data.de, data.para)}
+    except fatos_valores.FatoErro as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.get("/casos/{caso_id}/fatos/valores", response_model=FatosValoresListaOut)
+def listar_valores(
+    caso_id: uuid.UUID,
+    tema: str | None = None, afirmante: str | None = None, natureza: str | None = None,
+    q: str | None = None, status_fato: str | None = Query(None, alias="status"),
+    minimo_reais: float | None = Query(None, ge=0), maximo_reais: float | None = Query(None, ge=0),
+    limite: int = Query(200, ge=1, le=1000), offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    _get_caso(db, caso_id)
+    filtros = {
+        "tema": tema, "afirmante": afirmante, "natureza": natureza, "q": q, "status": status_fato,
+        "minimo": int(minimo_reais * 100) if minimo_reais is not None else None,
+        "maximo": int(maximo_reais * 100) if maximo_reais is not None else None,
+    }
+    return fatos_valores.listar_fatos(db, caso_id, filtros, limite, offset)
+
+
+@router.get("/casos/{caso_id}/fatos/valores/{fato_id}/anexos", response_model=list[AnexoCorroboracaoOut])
+def anexos_do_valor(caso_id: uuid.UUID, fato_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Outras peças — sobretudo anexos (extratos, contratos, planilhas) — em que o mesmo valor aparece escrito igual."""
+    _get_caso(db, caso_id)
+    return fatos_valores.anexos_com_valor(db, caso_id, fato_id)
+
+
+@router.patch("/casos/{caso_id}/fatos/valores/{fato_id}", response_model=FatoValorOut)
+def atualizar_valor(caso_id: uuid.UUID, fato_id: uuid.UUID, data: FatoValorUpdateIn, db: Session = Depends(get_db)):
+    """Valida, rejeita ou edita (tema, sujeito, nota) um valor — decisão humana nunca é sobrescrita."""
+    _get_caso(db, caso_id)
+    try:
+        return fatos_valores.atualizar_fato(
+            db, caso_id, fato_id, tema=data.tema, sujeito_canonico=data.sujeito_canonico, status=data.status,
+            nota=data.nota, nota_definida="nota" in data.model_fields_set,
+        )
+    except fatos_valores.FatoErro as exc:
+        db.rollback()
+        raise HTTPException(status_code=422 if "não encontrado" not in str(exc) else 404, detail=str(exc))
 
 
 @router.get("/casos/{caso_id}/pastas-drive", response_model=PastasDriveOut)

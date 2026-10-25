@@ -245,6 +245,62 @@ export interface AdvogadosPartes {
   sem_advogado: { motivo: MotivoSemAdvogado; parte: string | null; assinante: string | null; peticao: PeticaoRef }[]
 }
 
+export interface FatoValor {
+  id: string
+  valor_centavos: number
+  valor: string
+  rotulo_original: string | null
+  tema: string | null
+  tema_rotulo: string
+  sujeito: string | null
+  sujeito_canonico: string | null
+  natureza: string | null
+  fonte_citada: string | null
+  data_ref: string | null
+  trecho: string | null
+  confianca: number | null
+  status: 'extraido' | 'validado' | 'rejeitado'
+  nota: string | null
+  ocorrencias: number
+  afirmante: string
+  afirmante_chave: string
+  peticao: PeticaoRef
+}
+
+export interface FatosValoresStatus {
+  estado: 'ocioso' | 'rodando' | 'concluido' | 'erro'
+  total_fatos: number
+  validados: number
+  pecas_com_fatos: number
+  pecas_pendentes: number
+  total: number
+  feitos: number
+  fatos_novos: number
+  erros: number
+  custo_usd: number
+  mensagem: string | null
+}
+
+export interface Reconciliacao {
+  resumo: { fatos: number; divergencias: number; corroboracoes: number; validados: number }
+  divergencias: {
+    tema: string; tema_rotulo: string; sujeito: string | null; afirmantes: string[]; razao: number | null; n_fatos: number
+    valores: { valor_centavos: number; valor: string; afirmantes: string[]; fatos: FatoValor[] }[]
+  }[]
+  corroboracoes: {
+    valor_centavos: number; valor: string; n_pecas: number; afirmantes: string[]; temas: string[]; sujeitos: string[]; fatos: FatoValor[]
+  }[]
+}
+
+export interface FiltrosValores {
+  tema?: string; afirmante?: string; natureza?: string; q?: string; status?: string
+}
+
+export interface OndeMaisAparece {
+  peca_id: string; id_processual: string | null; titulo: string | null; tipo_pje: string | null; data: string | null
+  link_pdf: string | null; link_md: string | null; ocorrencias: number; trecho: string
+}
+
 export interface PastasDrive {
   processo: string | null
   pdfs: string | null
@@ -403,6 +459,31 @@ export const autosIa = {
 
   restaurarAdvogadoDaParte: (casoId: string, parteChave: string, advId: string) =>
     api.post<AdvogadosPartes>(`/autos-ia/casos/${casoId}/advogados-partes/restaurar`, { parte_chave: parteChave, adv_id: advId }).then((r) => r.data),
+
+  temasFatos: () =>
+    api.get<{ chave: string; rotulo: string }[]>('/autos-ia/fatos/temas').then((r) => r.data),
+
+  statusFatosValores: (casoId: string) =>
+    api.get<FatosValoresStatus>(`/autos-ia/casos/${casoId}/fatos/valores/status`).then((r) => r.data),
+
+  extrairFatosValores: (casoId: string, opts: { forcar?: boolean; limitePecas?: number } = {}) =>
+    api.post<FatosValoresStatus>(`/autos-ia/casos/${casoId}/fatos/valores/extrair`, null, {
+      params: { ...(opts.forcar ? { forcar: true } : {}), ...(opts.limitePecas ? { limite_pecas: opts.limitePecas } : {}) },
+    }).then((r) => r.data),
+
+  reconciliacaoValores: (casoId: string) =>
+    api.get<Reconciliacao>(`/autos-ia/casos/${casoId}/fatos/valores/reconciliacao`).then((r) => r.data),
+
+  listarFatosValores: (casoId: string, f: FiltrosValores = {}) =>
+    api.get<{ total: number; itens: FatoValor[] }>(`/autos-ia/casos/${casoId}/fatos/valores`, {
+      params: Object.fromEntries(Object.entries(f).filter(([, v]) => v)),
+    }).then((r) => r.data),
+
+  atualizarFatoValor: (casoId: string, fatoId: string, body: { tema?: string; sujeito_canonico?: string; status?: string; nota?: string | null }) =>
+    api.patch<FatoValor>(`/autos-ia/casos/${casoId}/fatos/valores/${fatoId}`, body).then((r) => r.data),
+
+  ondeMaisApareceValor: (casoId: string, fatoId: string) =>
+    api.get<OndeMaisAparece[]>(`/autos-ia/casos/${casoId}/fatos/valores/${fatoId}/anexos`).then((r) => r.data),
 
   pastasDrive: (casoId: string) =>
     api.get<PastasDrive>(`/autos-ia/casos/${casoId}/pastas-drive`).then((r) => r.data),

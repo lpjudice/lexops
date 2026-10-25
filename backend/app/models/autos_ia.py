@@ -19,7 +19,7 @@ principal por padrão.
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import ARRAY, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import ARRAY, BigInteger, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -217,6 +217,11 @@ class AutosIAPeca(Base):
     md_hash: Mapped[str | None] = mapped_column(String(64))
     md_exportado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Extração de valores (R$) desta peça para o banco de fatos (services/autos_ia/fatos_valores.py):
+    # hash do texto lido — só reextrai se o texto mudar (ex.: depois de reler).
+    fatos_valores_hash: Mapped[str | None] = mapped_column(String(64))
+    fatos_valores_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     atualizado_em: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -337,6 +342,42 @@ class AutosIAParteAdvogado(Base):
     manual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     principal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     oculto: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    atualizado_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class AutosIAFato(Base):
+    """Fato extraído dos autos, sempre com a peça de origem e o trecho (evidência). Hoje: `tipo`
+    "valor" (cifras em R$); o mesmo banco recebe depois determinações do Juízo, posições das
+    partes e saldos de entidades. `dados` guarda o que é específico de cada tipo."""
+    __tablename__ = "autos_ia_fatos"
+    __table_args__ = (UniqueConstraint("peca_id", "tipo", "pos", name="uq_autos_ia_fato_peca_pos"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    caso_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("autos_ia_casos.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    peca_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("autos_ia_pecas.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    tipo: Mapped[str] = mapped_column(String(30), nullable=False)
+    tema: Mapped[str | None] = mapped_column(String(60))
+    sujeito: Mapped[str | None] = mapped_column(String(255))            # como a peça escreve
+    sujeito_canonico: Mapped[str | None] = mapped_column(String(255))   # nome unificado (editável)
+    natureza: Mapped[str | None] = mapped_column(String(40))
+    fonte_citada: Mapped[str | None] = mapped_column(String(255))
+    valor_centavos: Mapped[int | None] = mapped_column(BigInteger)
+    data_ref: Mapped[str | None] = mapped_column(String(10))            # AAAA, AAAA-MM ou AAAA-MM-DD
+    rotulo_original: Mapped[str | None] = mapped_column(String(120))    # "R$ 8,1 bilhões" como escrito
+    trecho: Mapped[str | None] = mapped_column(Text)
+    pos: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    confianca: Mapped[float | None] = mapped_column(Float)
+    origem: Mapped[str] = mapped_column(String(20), nullable=False, default="ia")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="extraido")
+    nota: Mapped[str | None] = mapped_column(Text)
+    dados: Mapped[dict | None] = mapped_column(JSONB)
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     atualizado_em: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
