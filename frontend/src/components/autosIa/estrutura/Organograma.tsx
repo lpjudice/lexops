@@ -71,6 +71,7 @@ export default function Organograma({ casoId, onVerDividas }: { casoId: string; 
     return { itens, pos, larg: maxX + LARG + 80, alt: MARGEM * 2 + linha * (ALT + 8) }
   }, [grafo, expandidos])
 
+  const somaPct = (c: string) => { const n = grafo?.nos.get(c); if (!n || !n.paiPrimario) return null; const ps = [n.paiPrimario, ...n.outrosPais]; return ps.some((p) => p.pct == null) ? null : ps.reduce((t, p) => t + (p.pct ?? 0), 0) }
   const maxDeve = Math.max(1, ...(d?.empresas.map((e) => e.deve_centavos) ?? [1]))
   const alternar = (c: string) => setExpandidos((s) => { const n = new Set(s); n.has(c) ? n.delete(c) : n.add(c); return n })
   const expandirTudo = () => grafo && setExpandidos(new Set([...grafo.nos.values()].filter((n) => n.filhos.length).map((n) => n.e.cnpj)))
@@ -152,6 +153,7 @@ export default function Organograma({ casoId, onVerDividas }: { casoId: string; 
                       <text x={8} y={16} fontSize={11} fontWeight={700} fill={texto}>{e.nome.length > 38 ? `${e.nome.slice(0, 37)}…` : e.nome}<title>{e.nome}</title></text>
                       <text x={8} y={31} fontSize={9.5} fill={texto} opacity={0.85}>{e.cnpj_fmt}</text>
                       {e.deve_centavos > 0 && <text x={LARG - (n.filhos.length > 0 ? 22 : 8)} y={31} fontSize={9.5} textAnchor="end" fontWeight={700} fill={cor === 'divida' || e.nivel === 'Holding' ? (cor === 'divida' ? '#991b1b' : '#fca5a5') : '#b91c1c'}>deve {brlCurto(e.deve_centavos)}</text>}
+                      {(() => { const sp = somaPct(c); return sp !== null && sp < 99.9 ? <g><circle cx={LARG - 10} cy={9} r={5} fill="#f59e0b" stroke="#fff" /><title>{`Só ${pctTxt(sp)} do capital tem titular no desenho (faltam ${pctTxt(100 - sp)})`}</title></g> : null })()}
                       {n.filhos.length > 0 && (
                         <g transform={`translate(${LARG - 2},${ALT / 2})`} onClick={(ev) => { ev.stopPropagation(); alternar(c) }} aria-label={expandidos.has(c) ? 'Recolher filhos' : `Expandir ${n.filhos.length} filhos`} role="button">
                           <circle r={10} fill="#fff" stroke="#64748b" /><text textAnchor="middle" y={4} fontSize={10} fill="#334155" fontWeight={700}>{expandidos.has(c) ? '−' : n.filhos.length}</text>
@@ -187,6 +189,7 @@ export default function Organograma({ casoId, onVerDividas }: { casoId: string; 
                       }}>editar</button> <button className={styles.miniLink} onClick={() => window.confirm('Remover este vínculo do organograma?') && atualizar.mutate({ tipo: 'status', id: p!.id, status: 'rejeitado' })}>remover</button></span>
                     </div>
                   ))}
+                  {(() => { const sp = somaPct(selNo.e.cnpj); return sp !== null && sp < 99.9 ? <div className={styles.avisos}>Os titulares desenhados somam {pctTxt(sp)}: <strong>{pctTxt(100 - sp)}</strong> do capital não tem titular no organograma (sócios não identificados no desenho). Confira nos atos societários.</div> : null })()}
                   <label className={styles.campo}>Adicionar controladora
                     <select aria-label="Adicionar controladora" value="" onChange={(ev) => {
                       if (!ev.target.value) return
