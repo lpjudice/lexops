@@ -283,8 +283,17 @@ def obter_pasta_mestra_financeiro():
 
 # ── Parcelas ──────────────────────────────────────────────────────────────────
 
+def _sync_vencimento(h: Honorario) -> None:
+    """Com cronograma, o vencimento do recebível é o da próxima parcela em aberto (ou o da
+    última, se tudo foi pago) — senão ele fica congelado na 1ª parcela e aparece como vencido."""
+    if h.parcelas:
+        abertas = [p.data_vencimento for p in h.parcelas if p.status == "pendente"]
+        h.data_vencimento = min(abertas) if abertas else max(p.data_vencimento for p in h.parcelas)
+
+
 def _recalc_status_honorario(h: Honorario) -> None:
     """Deriva o status do recebível dos recebimentos (pagar parcela cria recebimento)."""
+    _sync_vencimento(h)
     total_rec = sum(float(r.valor) for r in h.recebimentos)
     if total_rec <= 0:
         h.status = "pendente"
@@ -298,6 +307,7 @@ def _sync_valor_total(h: Honorario) -> None:
     """Quando há cronograma, o valor_total do recebível acompanha a soma das parcelas."""
     if h.parcelas:
         h.valor_total = round(sum(float(p.valor) for p in h.parcelas), 2)
+    _sync_vencimento(h)
 
 
 @router.post("/honorarios/{honorario_id}/parcelas/", response_model=ParcelaOut,
@@ -443,6 +453,44 @@ def enviar_cobranca_manual(honorario_id: uuid.UUID, db: Session = Depends(get_db
     if resultado["enviados"] == 0:
         raise HTTPException(status_code=400, detail="Nenhuma parcela pendente para cobrar (todas pagas?).")
     return resultado
+
+
+# ── Quadro de recebimentos (cliente × mês) + extrato em PDF ──────────────────
+
+def _validar_quadro(sentido: str, meses: int) -> None:
+    if sentido not in ("futuro", "passado"):
+        raise HTTPException(status_code=422, detail="sentido deve ser 'futuro' ou 'passado'")
+    if meses not in (3, 6, 9, 12):
+        raise HTTPException(status_code=422, detail="meses deve ser 3, 6, 9 ou 12")
+
+
+@router.get("/quadro/")
+def quadro_recebimentos(sentido: str = "futuro", meses: int = 6, db: Session = Depends(get_db)):
+    """Recebimentos por cliente × mês: `futuro` = programados (parcelas em aberto) nos
+    próximos N meses; `passado` = recebidos nos últimos N meses. Vem com o consolidado."""
+    from app.services.quadro_recebimentos import montar_quadro
+    _validar_quadro(sentido, meses)
+    return montar_quadro(db, sentido, meses)
+
+
+@router.get("/quadro/pdf/")
+def quadro_recebimentos_pdf(
+    sentido: str = "futuro", meses: int = 6, cliente_id: uuid.UUID | None = None,
+    db: Session = Depends(get_db),
+):
+    """Extrato em PDF (paisagem) do mesmo quadro; `cliente_id` restringe a um cliente."""
+    from fastapi.responses import Response
+    from app.services.quadro_recebimentos import gerar_pdf_quadro, montar_quadro
+    _validar_quadro(sentido, meses)
+    quadro = montar_quadro(db, sentido, meses, cliente_id=cliente_id)
+    nome = None
+    if cliente_id:
+        cli = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+        nome = cli.nome if cli else None
+    pdf = gerar_pdf_quadro(quadro, cliente_filtro=nome)
+    arquivo = f"extrato_{'proximos' if sentido == 'futuro' else 'ultimos'}_{meses}_meses.pdf"
+    return Response(pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="{arquivo}"'})
 
 
 # ── Resumo financeiro ─────────────────────────────────────────────────────────

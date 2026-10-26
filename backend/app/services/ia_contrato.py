@@ -63,6 +63,7 @@ Responda SOMENTE com JSON válido (sem markdown), neste formato exato:
     "data_vencimento": "data de vencimento/pagamento (ou do 1º vencimento, se parcelado) no formato AAAA-MM-DD, ou \\"\\"",
     "condicao_pagamento": "condição de pagamento em texto (ex.: parcela única, 3x), ou \\"\\"",
     "num_parcelas": <número de parcelas do pagamento (1 se à vista), ou null>,
+    "parcelas": [{"valor": <número>, "data_vencimento": "AAAA-MM-DD"}],
     "data_contrato": "data de assinatura/celebração do contrato em AAAA-MM-DD, ou \\"\\""
   }
 }
@@ -73,6 +74,9 @@ dados de quem assina por ela vão em "representante" (nunca crie um novo item na
 representante).
 - "tipo": use "PJ" quando houver CNPJ/razão social; senão "PF".
 - Não inclua o contratado/escritório na lista.
+- "parcelas": liste uma entrada por parcela SOMENTE quando o contrato informar o valor de cada \
+parcela (inclusive quando forem diferentes entre si, ex.: entrada de 2.500 e depois 5.000 e 2.500); \
+se as parcelas forem iguais/sem valores individuais, use [].
 - Financeiro: extraia só o que está no documento; se não houver, use null/false/"". \
 "valor_honorarios" é o valor FIXO; se o contrato for só de êxito, use null e tem_exito=true."""
 
@@ -229,5 +233,10 @@ def _normalizar_financeiro(fin) -> dict:
         "data_vencimento": str(fin.get("data_vencimento") or "").strip(),
         "condicao_pagamento": str(fin.get("condicao_pagamento") or "").strip(),
         "num_parcelas": int(_num(fin.get("num_parcelas")) or 0) or None,
+        "parcelas": [
+            {"valor": v, "data_vencimento": str(it.get("data_vencimento") or "").strip()}
+            for it in (fin.get("parcelas") if isinstance(fin.get("parcelas"), list) else [])
+            if isinstance(it, dict) and (v := _num(it.get("valor")))
+        ],
         "data_contrato": str(fin.get("data_contrato") or "").strip(),
     }

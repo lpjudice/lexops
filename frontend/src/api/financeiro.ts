@@ -119,7 +119,33 @@ export interface ResumoFinanceiro {
   }[]
 }
 
+export type SentidoQuadro = 'futuro' | 'passado'
+
+export interface QuadroRecebimentos {
+  sentido: SentidoQuadro
+  meses: number
+  colunas: { ano: number; mes: number }[]
+  consolidado: { atrasado: number; valores: number[]; total: number }
+  alem_do_periodo: number
+  clientes: {
+    cliente_id: string
+    cliente_nome: string
+    atrasado: number
+    valores: number[]
+    total: number
+    itens: { data: string; descricao: string; detalhe: string; valor: number; atrasado: boolean }[]
+  }[]
+}
+
 export const financeiroApi = {
+  quadro: (sentido: SentidoQuadro, meses: number) =>
+    api.get<QuadroRecebimentos>('/financeiro/quadro/', { params: { sentido, meses } }).then((r) => r.data),
+
+  quadroPdf: (sentido: SentidoQuadro, meses: number, clienteId?: string) =>
+    api.get<Blob>('/financeiro/quadro/pdf/', {
+      params: { sentido, meses, cliente_id: clienteId }, responseType: 'blob',
+    }).then((r) => r.data),
+
   listarHonorarios: (params?: { cliente_id?: string; status?: string; pendente_assinatura?: boolean }) =>
     api.get<Honorario[]>('/financeiro/honorarios/', { params }).then((r) => r.data),
 

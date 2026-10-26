@@ -11,6 +11,7 @@ import CurrencyInput from '../components/CurrencyInput'
 import ComboBox from '../components/ComboBox'
 import type { ComboOption } from '../components/ComboBox'
 import PagarParcelaModal from '../components/PagarParcelaModal'
+import QuadroRecebimentos from '../components/QuadroRecebimentos'
 import styles from './Page.module.css'
 import cs from './FinanceiroPage.module.css'
 
@@ -445,6 +446,7 @@ export default function FinanceiroPage() {
           <div className={cs.mesesGrid}>
             {resumo.por_mes.map((m) => (
               <div key={`${m.ano}-${m.mes}`} className={cs.mesBar}>
+                <div className={cs.mesBarValor}>{m.total_recebido > 0 ? fmtVal(m.total_recebido) : ''}</div>
                 <div
                   className={cs.mesBarFill}
                   style={{ height: `${Math.max(4, (m.total_recebido / maxMes) * 64)}px` }}
@@ -456,6 +458,9 @@ export default function FinanceiroPage() {
           </div>
         </div>
       )}
+
+      {/* Programados (próximos) / realizados (últimos) por cliente × mês + PDF */}
+      {aba === 'recebiveis' && <QuadroRecebimentos />}
 
       {/* Resumo por cliente */}
       {aba === 'recebiveis' && resumo && resumo.por_cliente.length > 0 && (

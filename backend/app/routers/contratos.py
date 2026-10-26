@@ -627,19 +627,38 @@ def _upsert_honorario_do_contrato(db: Session, contrato: Contrato, fin) -> None:
         return
     valor = fin.valor_honorarios
     tem_exito = bool(fin.tem_exito)
-    if not valor and not tem_exito:
-        return  # nada financeiro a lançar
 
     venc = _parse_date(fin.data_vencimento)
     dcont = _parse_date(fin.data_contrato)
     pct = fin.percentual_exito
+
+    # Cronograma explícito (valores diferentes por mês, sem pro rata): vale no lugar da
+    # divisão igual. Precisa de 2+ parcelas com valor e data válidos.
+    cronograma = []
+    for it in (getattr(fin, "parcelas", None) or []):
+        d = _parse_date(it.data_vencimento)
+        if it.valor and d:
+            cronograma.append((round(float(it.valor), 2), d))
+    cronograma.sort(key=lambda t: t[1])
+    if len(cronograma) < 2:
+        cronograma = []
+    elif not valor:
+        valor = round(sum(v for v, _ in cronograma), 2)
+    if cronograma:
+        venc = cronograma[0][1]
+    if not valor and not tem_exito:
+        return  # nada financeiro a lançar
 
     existente = db.query(Honorario).filter(Honorario.contrato_id == contrato.id).first()
     if existente:
         # Se já há cronograma (parcelas), o valor_total é derivado dele — pode ter sido
         # customizado manualmente (split não-prorata). Não deixa a releitura da IA
         # sobrescrever com o total "cru" do contrato.
-        if valor and not existente.parcelas:
+        if cronograma and not existente.parcelas:
+            for numero, (pv, pd) in enumerate(cronograma, start=1):
+                db.add(Parcela(honorario_id=existente.id, numero=numero, valor=pv, data_vencimento=pd))
+            existente.valor_total = round(sum(v for v, _ in cronograma), 2)
+        elif valor and not existente.parcelas:
             existente.valor_total = valor
         if fin.valor_causa is not None:
             existente.valor_causa = fin.valor_causa
@@ -660,7 +679,7 @@ def _upsert_honorario_do_contrato(db: Session, contrato: Contrato, fin) -> None:
             contrato_id=contrato.id,
             descricao="Honorários — contrato (lido por IA)",
             tipo="exito" if tem_exito else "fixo",
-            valor_total=valor or 0,
+            valor_total=round(sum(v for v, _ in cronograma), 2) if cronograma else (valor or 0),
             valor_causa=fin.valor_causa,
             percentual_exito=pct,
             data_contrato=dcont or _date.today(),
@@ -673,7 +692,10 @@ def _upsert_honorario_do_contrato(db: Session, contrato: Contrato, fin) -> None:
         # Se o contrato indicar parcelamento (>1) e houver valor fixo e 1º vencimento,
         # gera o cronograma de parcelas (ajustável depois na tela do Financeiro).
         n = int(getattr(fin, "num_parcelas", None) or 0)
-        if valor and n >= 2 and venc:
+        if cronograma:
+            for numero, (pv, pd) in enumerate(cronograma, start=1):
+                db.add(Parcela(honorario_id=h.id, numero=numero, valor=pv, data_vencimento=pd))
+        elif valor and n >= 2 and venc:
             for numero, (pv, pd) in enumerate(_dividir_parcelas(float(valor), n, venc), start=1):
                 db.add(Parcela(honorario_id=h.id, numero=numero, valor=pv, data_vencimento=pd))
 

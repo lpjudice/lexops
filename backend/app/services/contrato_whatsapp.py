@@ -29,13 +29,28 @@ logger = logging.getLogger(__name__)
 TEMPLATE_ASSINATURA_PENDENTE = "assinatura_pendente"
 # v2 = mesmo aviso + botão de resposta "Já assinei" (link no botão 0, "Já assinei" no botão 1).
 TEMPLATE_ASSINATURA_PENDENTE_V2 = "assinatura_pendente_v2"
+# v3 = texto novo (título do documento em negrito, orientação do código de verificação do ClickSign).
+TEMPLATE_ASSINATURA_AVISO_V3 = "assinatura_aviso_v3"
+# Lembrete (dias 3, 7, 14 e 28): texto de "lembrete". A Meta recusou todo texto com prazo/expiração.
+TEMPLATE_ASSINATURA_LEMBRETE = "assinatura_lembrete"
+
+# Do mais novo ao mais antigo: o primeiro APROVADO é usado; nenhum aprovado → o último (legado).
+_AVISO_ORDEM = (TEMPLATE_ASSINATURA_AVISO_V3, TEMPLATE_ASSINATURA_PENDENTE_V2, TEMPLATE_ASSINATURA_PENDENTE)
+_LEMBRETE_ORDEM = (TEMPLATE_ASSINATURA_LEMBRETE,) + _AVISO_ORDEM
 
 
-def template_aviso_assinatura() -> tuple[str, str | None]:
-    """(nome do template, status): usa a v2 (com "Já assinei") assim que a Meta aprovar; até lá, a v1."""
-    if whatsapp_api.status_template(TEMPLATE_ASSINATURA_PENDENTE_V2) == "APPROVED":
-        return TEMPLATE_ASSINATURA_PENDENTE_V2, "APPROVED"
-    return TEMPLATE_ASSINATURA_PENDENTE, whatsapp_api.status_template(TEMPLATE_ASSINATURA_PENDENTE)
+def template_aviso_assinatura(lembrete: bool = False) -> tuple[str, str | None]:
+    """(nome do template, status): o mais novo aprovado do aviso (ou do lembrete); até aprovar, o legado."""
+    return whatsapp_api.escolher_template(*(_LEMBRETE_ORDEM if lembrete else _AVISO_ORDEM))
+
+
+def titulo_para_template(titulo: str | None, tipo_documento: str | None = None) -> str:
+    """Título do documento como parâmetro de template: sem '|' (vira '-'), sem marcas de formatação do
+    WhatsApp (* _ ~) nem quebras de linha, espaços colapsados e tamanho contido. Vazio → "Procuração"/"Contrato"."""
+    t = (titulo or "").replace("|", "-")
+    t = re.sub(r"[*~`]", "", t.replace("_", " "))
+    t = re.sub(r"\s+", " ", t).strip()[:120].strip()
+    return t or _rotulo_documento(tipo_documento)
 
 # ── Só contratos/procurações NOVOS ───────────────────────────────────────────
 # Regra do Lucas (25/10/2026): mensagens AUTOMÁTICAS de WhatsApp (lembretes, aviso de cancelamento,
@@ -65,7 +80,9 @@ def _rotulo_documento(tipo_documento: str | None) -> str:
     return "Procuração" if tipo_documento == "procuracao" else "Contrato"
 
 
-def avisar_assinatura_pendente_detalhe(sig: Signatario, contrato: Contrato) -> tuple[bool, str | None]:
+def avisar_assinatura_pendente_detalhe(
+    sig: Signatario, contrato: Contrato, lembrete: bool = False,
+) -> tuple[bool, str | None]:
     """(enviou, motivo). `motivo` explica por que NÃO enviou, quando faz sentido
     mostrar ao usuário (template em análise, Meta recusou); None se simplesmente
     não se aplica (sem número, aviso desmarcado, assina via ClickSign)."""
@@ -75,23 +92,24 @@ def avisar_assinatura_pendente_detalhe(sig: Signatario, contrato: Contrato) -> t
     # (mandar o nosso também duplicaria a mensagem).
     if not sig.avisar_whatsapp or sig.assinar_via_whatsapp:
         return False, None
-    nome_template, status = template_aviso_assinatura()
+    nome_template, status = template_aviso_assinatura(lembrete)
     if status not in (None, "APPROVED"):
         logger.warning("assinatura_pendente: %s NÃO avisado — template %s com status %s", sig.nome, nome_template, status)
         return False, f"o template de aviso ainda não foi aprovado pela Meta (status: {status})"
     extras: dict = {}
-    if nome_template == TEMPLATE_ASSINATURA_PENDENTE_V2 and getattr(sig, "id", None):
+    if nome_template != TEMPLATE_ASSINATURA_PENDENTE and getattr(sig, "id", None):   # todas as versões novas têm "Já assinei"
         from app.services.whatsapp_assinatura import payload_ja_assinei
 
         extras = {"botoes_resposta_payload": [payload_ja_assinei(sig.id)], "botoes_resposta_indice_inicial": 1}
+    if nome_template in (TEMPLATE_ASSINATURA_PENDENTE, TEMPLATE_ASSINATURA_PENDENTE_V2):
+        parametros = {"nome": sig.nome, "documento": _rotulo_documento(contrato.tipo_documento)}
+    else:
+        parametros = {"nome": sig.nome, "titulo": titulo_para_template(contrato.titulo, contrato.tipo_documento)}
     try:
         resultado = whatsapp_api.send_template_message(
             to=sig.whatsapp,
             template_name=nome_template,
-            parametros={
-                "nome": sig.nome,
-                "documento": _rotulo_documento(contrato.tipo_documento),
-            },
+            parametros=parametros,
             botao_url_param=sig.clicksign_request_key,
             **extras,
         )
@@ -112,6 +130,7 @@ def avisar_assinatura_pendente(sig: Signatario, contrato: Contrato) -> bool:
 # ── Cancelamento ─────────────────────────────────────────────────────────────
 
 TEMPLATE_ASSINATURA_CANCELADA = "assinatura_cancelada"
+TEMPLATE_ASSINATURA_CANCELADA_V2 = "assinatura_cancelada_v2"   # texto novo, com o título do documento
 
 
 def avisar_cancelamento(db, contrato: Contrato) -> int:
@@ -131,17 +150,22 @@ def avisar_cancelamento(db, contrato: Contrato) -> int:
     ]
     if not candidatos:
         return 0
-    status = whatsapp_api.status_template(TEMPLATE_ASSINATURA_CANCELADA)
+    nome_template, status = whatsapp_api.escolher_template(TEMPLATE_ASSINATURA_CANCELADA_V2, TEMPLATE_ASSINATURA_CANCELADA)
     if status not in (None, "APPROVED"):
         logger.warning("assinatura_cancelada: template não aprovado (%s) — avisos não enviados", status)
         return 0
+    if nome_template == TEMPLATE_ASSINATURA_CANCELADA_V2:
+        titulo = titulo_para_template(contrato.titulo, contrato.tipo_documento)
+        params_extra = {"titulo": titulo}
+    else:
+        params_extra = {"documento": _rotulo_documento(contrato.tipo_documento)}
     enviados = 0
     for sig in candidatos:
         try:
             resp = whatsapp_api.send_template_message(
                 to=sig.whatsapp,
-                template_name=TEMPLATE_ASSINATURA_CANCELADA,
-                parametros={"nome": sig.nome, "documento": _rotulo_documento(contrato.tipo_documento)},
+                template_name=nome_template,
+                parametros={"nome": sig.nome, **params_extra},
             )
         except Exception:
             logger.exception("assinatura_cancelada: erro avisando %s", sig.nome)
@@ -158,8 +182,8 @@ def avisar_cancelamento(db, contrato: Contrato) -> int:
 
 # Dias depois do envio em que o signatário que ainda não assinou recebe lembrete por WhatsApp — cada
 # lembrete tem o SEU horário: envio + N dias (mesma hora do dia do envio). O ClickSign dá 30 dias
-# (prazo padrão do documento): o último cai 3 dias antes de vencer.
-ESTAGIOS_LEMBRETE_DIAS = (3, 7, 14, 27)
+# (prazo padrão do documento): o último cai 2 dias antes de vencer.
+ESTAGIOS_LEMBRETE_DIAS = (3, 7, 14, 28)
 PRAZO_ASSINATURA_DIAS = 30
 FUSO = ZoneInfo("America/Sao_Paulo")
 JANELA_ENVIO_HORAS = (8, 20)                      # lembrete só sai entre 8h e 20h (Brasília)
@@ -244,7 +268,7 @@ def enviar_lembretes_assinatura(agora: datetime | None = None) -> dict:
             if not devidos or not pode_enviar:
                 continue
             if status_tpl is None:
-                status_tpl = template_aviso_assinatura()[1] or "?"
+                status_tpl = template_aviso_assinatura(lembrete=True)[1] or "?"
             if status_tpl not in ("?", "APPROVED"):
                 logger.warning("lembrete assinatura: template não aprovado (%s) — nada enviado", status_tpl)
                 return {"enviados": enviados, "validados": validados, "motivo": f"template {status_tpl}"}
@@ -258,7 +282,7 @@ def enviar_lembretes_assinatura(agora: datetime | None = None) -> dict:
             for sig, estagio in devidos:
                 if ce.assinou(estado, sig):
                     continue
-                ok, motivo = avisar_assinatura_pendente_detalhe(sig, c)
+                ok, motivo = avisar_assinatura_pendente_detalhe(sig, c, lembrete=True)
                 if ok:
                     sig.lembretes_whatsapp = estagio
                     sig.ultimo_lembrete_whatsapp_em = agora
@@ -279,6 +303,7 @@ def enviar_lembretes_assinatura(agora: datetime | None = None) -> dict:
 # ── Cópia do contrato assinado ───────────────────────────────────────────────
 
 TEMPLATE_CONTRATO_ASSINADO = "contrato_assinado"
+TEMPLATE_CONTRATO_ASSINADO_V2 = "contrato_assinado_v2"   # texto novo, com o título do contrato
 _LIMITE_PDF_BYTES = 90 * 1024 * 1024  # a Meta aceita até 100 MB por documento
 
 
@@ -306,10 +331,11 @@ def enviar_contrato_assinado(db, contrato: Contrato) -> int:
     if not caminho or not caminho.is_file():
         logger.warning("contrato_assinado: PDF assinado indisponível no disco (contrato %s)", contrato.id)
         return 0
-    status = whatsapp_api.status_template(TEMPLATE_CONTRATO_ASSINADO)
+    nome_template, status = whatsapp_api.escolher_template(TEMPLATE_CONTRATO_ASSINADO_V2, TEMPLATE_CONTRATO_ASSINADO)
     if status not in (None, "APPROVED"):
         logger.warning("contrato_assinado: template não aprovado (%s) — será tentado de novo", status)
         return 0
+    titulo = titulo_para_template(contrato.titulo, contrato.tipo_documento)
     conteudo = caminho.read_bytes()
     if len(conteudo) > _LIMITE_PDF_BYTES:
         logger.warning("contrato_assinado: PDF grande demais (%d bytes) — não enviado", len(conteudo))
@@ -323,8 +349,9 @@ def enviar_contrato_assinado(db, contrato: Contrato) -> int:
     for sig in candidatos:
         try:
             resp = whatsapp_api.send_template_message(
-                to=sig.whatsapp, template_name=TEMPLATE_CONTRATO_ASSINADO,
-                parametros={"nome": sig.nome}, header_documento=(media_id, nome_arquivo),
+                to=sig.whatsapp, template_name=nome_template,
+                parametros={"nome": sig.nome, "titulo": titulo} if nome_template == TEMPLATE_CONTRATO_ASSINADO_V2 else {"nome": sig.nome},
+                header_documento=(media_id, nome_arquivo),
             )
         except Exception:
             logger.exception("contrato_assinado: erro enviando a %s", sig.nome)

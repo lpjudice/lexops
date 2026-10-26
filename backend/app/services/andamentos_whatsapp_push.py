@@ -28,6 +28,7 @@ from app.services import whatsapp_api
 logger = logging.getLogger(__name__)
 
 TEMPLATE_ANDAMENTO_NOVO = "andamento_novo"
+TEMPLATE_ANDAMENTO_NOVO_V2 = "andamento_novo_v2"   # texto novo (mesmos parâmetros)
 # Andamento com data mais antiga que isso é considerado histórico retroativo —
 # marca como notificado sem enviar (mesma lógica do push do Telegram).
 _JANELA_DIAS = 14
@@ -42,6 +43,7 @@ def push_andamentos_whatsapp() -> dict:
         return {"enviados": 0, "sem_whatsapp": 0, "erros": 0, "motivo": "não configurado"}
 
     cutoff_data = date.today() - timedelta(days=_JANELA_DIAS)
+    nome_template = whatsapp_api.escolher_template(TEMPLATE_ANDAMENTO_NOVO_V2, TEMPLATE_ANDAMENTO_NOVO)[0]
     enviados = 0
     sem_whatsapp = 0
     erros = 0
@@ -96,7 +98,7 @@ def push_andamentos_whatsapp() -> dict:
 
             resultado = whatsapp_api.send_template_message(
                 to=cliente.whatsapp,
-                template_name=TEMPLATE_ANDAMENTO_NOVO,
+                template_name=nome_template,
                 parametros={
                     "cliente_nome": cliente.nome,
                     "numero_processo": p.numero_cnj,

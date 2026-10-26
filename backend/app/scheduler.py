@@ -190,7 +190,7 @@ def _lembretes_evento_whatsapp() -> None:
 
 
 def _lembretes_assinatura_whatsapp() -> None:
-    """A cada 15 min — só olha o banco. Cada lembrete (3, 7, 14 e 27 dias após o envio) vence no horário do
+    """A cada 15 min — só olha o banco. Cada lembrete (3, 7, 14 e 28 dias após o envio) vence no horário do
     próprio contrato: 30 min antes confirma no ClickSign e, na hora, confirma de novo e só então envia."""
     try:
         from app.services.contrato_whatsapp import enviar_lembretes_assinatura

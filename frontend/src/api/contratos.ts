@@ -340,6 +340,8 @@ export interface ContratoFinanceiroIA {
   data_vencimento?: string
   condicao_pagamento?: string
   num_parcelas?: number | null
+  /** Cronograma explícito (valores/datas livres). Com 2+ itens vale no lugar da divisão igual. */
+  parcelas?: { valor: number; data_vencimento: string }[]
   data_contrato?: string
 }
 
