@@ -15,6 +15,7 @@ interface FormState {
   cpf_cnpj: string
   rg: string
   data_nascimento: string
+  nacionalidade: string
   estado_civil: string
   profissao: string
   email: string
@@ -37,7 +38,7 @@ interface FormState {
 
 const EMPTY: FormState = {
   tipo: 'PF', nome: '', nome_fantasia: '', cpf_cnpj: '', rg: '', data_nascimento: '',
-  estado_civil: '', profissao: '', email: '', telefone: '', whatsapp: '', cep: '',
+  nacionalidade: '', estado_civil: '', profissao: '', email: '', telefone: '', whatsapp: '', cep: '',
   logradouro: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '',
   empresas_vinculadas: '', responsavel_nome: '', responsavel_cpf: '',
   responsavel_email: '', responsavel_telefone: '', observacoes: '',
@@ -228,6 +229,12 @@ export default function CadastroPublicoPage() {
                 <input className={cs.input} inputMode="numeric" placeholder="DD/MM/AAAA" maxLength={10}
                   value={form.data_nascimento}
                   onChange={(e) => set({ data_nascimento: maskDataBr(e.target.value) })} />
+              </label>
+            </div>
+            <div className={cs.row2}>
+              <label className={cs.label}>Nacionalidade
+                <input className={cs.input} placeholder="ex.: brasileiro(a)" value={form.nacionalidade}
+                  onChange={(e) => set({ nacionalidade: e.target.value })} />
               </label>
             </div>
             <div className={cs.row2}>

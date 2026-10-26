@@ -12,7 +12,8 @@ import ContratoResponsaveisEscopo from '../components/ContratoResponsaveisEscopo
 import EscopoEditor from '../components/EscopoEditor'
 import ResponsaveisMulti from '../components/ResponsaveisMulti'
 import CurrencyInput, { formatBRL } from '../components/CurrencyInput'
-import { maskTelefone } from '../utils/masks'
+import { maskTelefone, ESTADO_CIVIL_OPCOES } from '../utils/masks'
+import { enderecoCompleto } from '../utils/endereco'
 import styles from './Page.module.css'
 import cs from './ContratosPage.module.css'
 
@@ -175,6 +176,9 @@ export default function ContratosPage() {
   const [poderesTemplateId, setPoderesTemplateId] = useState('')
   const [gerarForm, setGerarForm] = useState<GerarPdfRequest>({
     contratante_nome: '',
+    contratante_nacionalidade: '',
+    contratante_estado_civil: '',
+    contratante_profissao: '',
     contratante_qualificacao: '',
     contratante_cpf_cnpj: '',
     contratante_endereco: '',
@@ -421,9 +425,13 @@ export default function ContratosPage() {
     const cliente = clientePorId(clienteId)
     setGerarForm({
       contratante_nome: cliente?.nome || '',
+      // PF: puxa a qualificação do cadastro (nacionalidade padrão "brasileiro(a)"); PJ não tem.
+      contratante_nacionalidade: cliente?.tipo === 'PJ' ? '' : (cliente?.nacionalidade || 'brasileiro(a)'),
+      contratante_estado_civil: cliente?.estado_civil || '',
+      contratante_profissao: cliente?.profissao || '',
       contratante_qualificacao: '',
       contratante_cpf_cnpj: cliente?.cpf_cnpj || '',
-      contratante_endereco: '',
+      contratante_endereco: enderecoCompleto(cliente),
       contratante_email: cliente?.email || '',
       contratante_whatsapp: cliente?.whatsapp || '',
       objeto_tipo: 'PPS',
@@ -455,7 +463,8 @@ export default function ContratosPage() {
           cpf_cnpj: cliente?.cpf_cnpj || '',
           email: cliente?.email || '',
           whatsapp: cliente?.whatsapp || '',
-          endereco: cliente?.endereco || '',
+          endereco: enderecoCompleto(cliente),
+          nacionalidade: cliente?.nacionalidade || EMPTY_OUTORGANTE.nacionalidade,
           estado_civil: cliente?.estado_civil || '',
           profissao: cliente?.profissao || '',
         }],
@@ -819,10 +828,27 @@ export default function ContratosPage() {
                               onChange={(e) => setGerarForm({ ...gerarForm, contratante_nome: e.target.value })} />
                           </div>
                           <div className={styles.formRow}>
-                            <label className={styles.formLabel}>Qualificação</label>
-                            <input className={styles.input} placeholder="ex: brasileira, empresária, divorciada"
-                              value={gerarForm.contratante_qualificacao}
-                              onChange={(e) => setGerarForm({ ...gerarForm, contratante_qualificacao: e.target.value })} />
+                            <label className={styles.formLabel}>Nacionalidade</label>
+                            <input className={styles.input} placeholder="ex: brasileiro(a)"
+                              value={gerarForm.contratante_nacionalidade ?? ''}
+                              onChange={(e) => setGerarForm({ ...gerarForm, contratante_nacionalidade: e.target.value })} />
+                          </div>
+                        </div>
+                        <div className={cs.twoCol}>
+                          <div className={styles.formRow}>
+                            <label className={styles.formLabel}>Estado civil</label>
+                            <input className={styles.input} list="estado-civil-opcoes" placeholder="ex: casado(a)"
+                              value={gerarForm.contratante_estado_civil ?? ''}
+                              onChange={(e) => setGerarForm({ ...gerarForm, contratante_estado_civil: e.target.value })} />
+                            <datalist id="estado-civil-opcoes">
+                              {ESTADO_CIVIL_OPCOES.map((o) => <option key={o} value={o} />)}
+                            </datalist>
+                          </div>
+                          <div className={styles.formRow}>
+                            <label className={styles.formLabel}>Profissão</label>
+                            <input className={styles.input} placeholder="ex: empresária"
+                              value={gerarForm.contratante_profissao ?? ''}
+                              onChange={(e) => setGerarForm({ ...gerarForm, contratante_profissao: e.target.value })} />
                           </div>
                         </div>
                         <div className={cs.twoCol}>

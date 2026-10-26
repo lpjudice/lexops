@@ -13,6 +13,7 @@ const LABELS: Record<string, string> = {
   cpf_cnpj: 'CPF / CNPJ',
   rg: 'RG',
   data_nascimento: 'Data de nascimento',
+  nacionalidade: 'Nacionalidade',
   estado_civil: 'Estado civil',
   profissao: 'Profissão',
   email: 'E-mail',
@@ -98,7 +99,7 @@ type Tipo = 'PF' | 'PJ'
 
 // Ordem de exibição dos campos editáveis por tipo.
 const CAMPOS_TIPO: Record<Tipo, string[]> = {
-  PF: ['nome', 'cpf_cnpj', 'rg', 'data_nascimento', 'estado_civil', 'profissao',
+  PF: ['nome', 'cpf_cnpj', 'rg', 'data_nascimento', 'nacionalidade', 'estado_civil', 'profissao',
     'email', 'telefone', 'whatsapp',
     'cep', 'logradouro', 'numero', 'complemento', 'bairro', 'cidade', 'uf',
     'empresas_vinculadas', 'observacoes'],

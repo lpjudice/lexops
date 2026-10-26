@@ -15,7 +15,7 @@ def _blank_to_none(v: str | None) -> str | None:
 _CADASTRO_STR_FIELDS = (
     "cpf_cnpj", "email", "telefone", "whatsapp", "endereco", "observacoes",
     "cep", "logradouro", "numero", "complemento", "bairro", "cidade", "uf",
-    "rg", "estado_civil", "profissao", "empresas_vinculadas",
+    "rg", "nacionalidade", "estado_civil", "profissao", "empresas_vinculadas",
     "nome_fantasia", "responsavel_nome", "responsavel_cpf",
     "responsavel_email", "responsavel_telefone",
 )
@@ -38,6 +38,7 @@ class _CadastroFields(BaseModel):
     # Pessoa Física
     data_nascimento: date | None = None
     rg: str | None = None
+    nacionalidade: str | None = None
     estado_civil: str | None = None
     profissao: str | None = None
     empresas_vinculadas: str | None = None

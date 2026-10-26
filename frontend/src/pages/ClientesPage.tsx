@@ -226,7 +226,7 @@ export default function ClientesPage() {
                         telefone: c.telefone, whatsapp: c.whatsapp, observacoes: c.observacoes,
                         cep: c.cep, logradouro: c.logradouro, numero: c.numero, complemento: c.complemento,
                         bairro: c.bairro, cidade: c.cidade, uf: c.uf,
-                        data_nascimento: isoParaBr(c.data_nascimento), rg: c.rg, estado_civil: c.estado_civil,
+                        data_nascimento: isoParaBr(c.data_nascimento), rg: c.rg, nacionalidade: c.nacionalidade, estado_civil: c.estado_civil,
                         profissao: c.profissao, empresas_vinculadas: c.empresas_vinculadas,
                         nome_fantasia: c.nome_fantasia, responsavel_nome: c.responsavel_nome,
                         responsavel_cpf: c.responsavel_cpf, responsavel_email: c.responsavel_email,
@@ -369,6 +369,11 @@ function ClienteFormFields({ form, onChange }: { form: ClienteCreate; onChange: 
             <input className={styles.input} inputMode="numeric" placeholder="DD/MM/AAAA" maxLength={10}
               value={form.data_nascimento ?? ''}
               onChange={(e) => onChange({ ...form, data_nascimento: maskDataBr(e.target.value) })} />
+          </div>
+          <div className={styles.formRow}>
+            <label className={styles.formLabel}>Nacionalidade</label>
+            <input className={styles.input} placeholder="ex.: brasileiro(a)" value={form.nacionalidade ?? ''}
+              onChange={(e) => onChange({ ...form, nacionalidade: e.target.value })} />
           </div>
           <div className={styles.formRow}>
             <label className={styles.formLabel}>Estado civil</label>

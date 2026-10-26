@@ -169,6 +169,18 @@ def _estilos():
     }
 
 
+def compor_qualificacao(nacionalidade: str = "", estado_civil: str = "", profissao: str = "", extra: str = "") -> str:
+    """"brasileiro(a), casado, advogado" — estado civil/profissão em minúscula mesmo se
+    o cadastro tiver CAIXA ALTA; `extra` é o texto livre antigo, anexado ao final."""
+    partes = [
+        (nacionalidade or "").strip(),
+        (estado_civil or "").strip().lower(),
+        (profissao or "").strip().lower(),
+        (extra or "").strip(),
+    ]
+    return ", ".join(p for p in partes if p)
+
+
 def gerar_contrato(
     contratante_nome: str,
     contratante_qualificacao: str,
@@ -226,7 +238,7 @@ def gerar_contrato(
     # ── PARTES ────────────────────────────────────────────────────────────────
     story.append(Paragraph("<b>CONTRATANTE:</b>", st["parte_label"]))
     story.append(Paragraph(
-        f"{contratante_nome}, {contratante_qualificacao}, "
+        f"{contratante_nome}, {contratante_qualificacao + ', ' if contratante_qualificacao else ''}"
         f"com {contratante_cpf_cnpj}, "
         f"residente/domiciliado em {contratante_endereco}"
         f"{', e-mail ' + contratante_email if contratante_email else ''}, "

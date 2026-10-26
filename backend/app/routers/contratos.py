@@ -20,6 +20,42 @@ from app.services.contrato_whatsapp import avisar_assinatura_pendente, avisar_as
 UPLOADS_DIR = Path("/app/uploads/contratos")
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
+
+def _baixar_do_drive(drive_link: str | None, destino: Path) -> Path | None:
+    """Recupera do Drive um arquivo que sumiu do disco local (deploys antigos apagavam
+    /app/uploads) e o regrava em `destino`. None se não houver link ou o download falhar."""
+    if not drive_link:
+        return None
+    try:
+        from app.services.google_drive import baixar_arquivo_por_id, extrair_file_id
+        file_id = extrair_file_id(drive_link)
+        dados = baixar_arquivo_por_id(file_id) if file_id else None
+        if not dados:
+            return None
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        destino.write_bytes(dados)
+        return destino
+    except Exception:
+        logging.getLogger(__name__).warning("Recuperar arquivo do Drive falhou (%s)", drive_link, exc_info=True)
+        return None
+
+
+def _arquivo_local(arq: dict) -> Path | None:
+    """Caminho local de uma entrada de `Contrato.arquivos`; se o arquivo não está mais no
+    disco mas tem cópia no Drive, baixa de volta (no mesmo caminho — sem mexer no banco)."""
+    caminho = arq.get("path") or ""
+    if not caminho:
+        return None
+    p = Path(caminho)
+    if p.is_file():
+        return p
+    return _baixar_do_drive(arq.get("drive_link"), p)
+
+
+def _reidratar_arquivos(lista: list[dict]) -> None:
+    for arq in lista:
+        _arquivo_local(arq)
+
 router = APIRouter(prefix="/contratos", tags=["contratos"],
                    dependencies=[Depends(get_current_user)])
 
@@ -420,8 +456,8 @@ def ver_arquivo(contrato_id: uuid.UUID, filename: str, db: Session = Depends(get
         raise HTTPException(status_code=404, detail="Contrato não encontrado")
     for arq in (c.arquivos or []):
         if arq.get("filename") == filename:
-            path = Path(arq["path"])
-            if path.exists():
+            path = _arquivo_local(arq)
+            if path:
                 return FileResponse(str(path), media_type="application/pdf", filename=filename)
     raise HTTPException(status_code=404, detail="Arquivo não encontrado")
 
@@ -435,14 +471,17 @@ def _so_digitos(v: str | None) -> str:
 def _primeiro_pdf_path(c: Contrato) -> Path | None:
     """Caminho local do PDF principal do contrato (para enviar à IA)."""
     for arq in (c.arquivos or []):
-        p = Path(arq.get("path", ""))
-        if p.exists() and p.suffix.lower() == ".pdf":
+        if Path(arq.get("path", "")).suffix.lower() != ".pdf":
+            continue
+        p = _arquivo_local(arq)
+        if p:
             return p
-    if c.arquivo_path:
-        p = Path(c.arquivo_path)
-        if p.exists():
-            return p
-    return None
+    if c.arquivo_path and Path(c.arquivo_path).exists():
+        return Path(c.arquivo_path)
+    if c.arquivo_assinado_path and Path(c.arquivo_assinado_path).exists():
+        return Path(c.arquivo_assinado_path)
+    # Último recurso (ex.: assinado manualmente, arquivo local perdido): cópia final no Drive.
+    return _baixar_do_drive(c.drive_link_cliente or c.drive_link_master, UPLOADS_DIR / f"{c.id}_drive.pdf")
 
 
 @router.post("/{contrato_id}/ler-contratantes")
@@ -738,7 +777,7 @@ async def gerar_pdf_contrato(
 ):
     """Gera o PDF do contrato de honorários e o adiciona à lista de arquivos."""
     from datetime import date as date_type
-    from app.services.contrato_pdf import gerar_contrato
+    from app.services.contrato_pdf import compor_qualificacao, gerar_contrato
 
     c = db.query(Contrato).filter(Contrato.id == contrato_id).first()
     if not c:
@@ -753,7 +792,10 @@ async def gerar_pdf_contrato(
 
     pdf_bytes = gerar_contrato(
         contratante_nome=body.contratante_nome,
-        contratante_qualificacao=body.contratante_qualificacao,
+        contratante_qualificacao=compor_qualificacao(
+            body.contratante_nacionalidade, body.contratante_estado_civil,
+            body.contratante_profissao, body.contratante_qualificacao,
+        ),
         contratante_cpf_cnpj=body.contratante_cpf_cnpj,
         contratante_endereco=body.contratante_endereco,
         contratante_email=body.contratante_email,
@@ -810,6 +852,17 @@ async def gerar_pdf_contrato(
             if not cli.endereco and novo_end:
                 cli.endereco = novo_end
                 mudou = True
+            # Qualificação (só PF, só campos vazios) — a próxima procuração/contrato já vem preenchida.
+            if cli.tipo == "PF":
+                for campo, valor in (
+                    ("nacionalidade", body.contratante_nacionalidade),
+                    ("estado_civil", body.contratante_estado_civil),
+                    ("profissao", body.contratante_profissao),
+                ):
+                    valor = (valor or "").strip()
+                    if valor and not (getattr(cli, campo, None) or "").strip():
+                        setattr(cli, campo, _cap(campo, valor))
+                        mudou = True
             if mudou:
                 db.commit()
     except Exception:
@@ -1007,6 +1060,10 @@ async def gerar_pdf_procuracao(
                 cli.endereco = novo_end
                 mudou = True
             if primeiro.tipo == "PF":
+                nova_nac = (primeiro.nacionalidade or "").strip()
+                if not (cli.nacionalidade or "").strip() and nova_nac:
+                    cli.nacionalidade = _cap("nacionalidade", nova_nac)
+                    mudou = True
                 novo_ec = (primeiro.estado_civil or "").strip()
                 if not cli.estado_civil and novo_ec:
                     cli.estado_civil = novo_ec
@@ -1125,6 +1182,7 @@ def enviar_para_assinatura(contrato_id: uuid.UUID, db: Session = Depends(get_db)
         arquivos_para_enviar = [{"filename": Path(c.arquivo_path).name, "path": c.arquivo_path, "clicksign_key": None}]
 
     erros: list[str] = []
+    _reidratar_arquivos(arquivos_para_enviar)
 
     # 1. Se houver mais de um PDF, mescla em um único arquivo antes do upload.
     #    O ClickSign API v1 não tem envelope multi-doc — um único PDF contém tudo.
@@ -1258,6 +1316,7 @@ def finalizar_assinado_manual(contrato_id: uuid.UUID, db: Session = Depends(get_
         arquivos_atuais = [{"filename": Path(c.arquivo_path).name, "path": c.arquivo_path}]
     if not arquivos_atuais:
         raise HTTPException(status_code=400, detail="Anexe o PDF já assinado antes de finalizar")
+    _reidratar_arquivos(arquivos_atuais)
 
     # Mescla múltiplos PDFs em um único arquivo final, como no envio ao ClickSign
     if len(arquivos_atuais) > 1:
@@ -1513,4 +1572,7 @@ def download_assinado(contrato_id: uuid.UUID, db: Session = Depends(get_db)):
     if not c or not c.arquivo_assinado_path:
         raise HTTPException(status_code=404, detail="PDF assinado não disponível")
     prefixo = "procuracao" if c.tipo_documento == "procuracao" else "contrato"
+    if not Path(c.arquivo_assinado_path).is_file():
+        if not _baixar_do_drive(c.drive_link_cliente or c.drive_link_master, Path(c.arquivo_assinado_path)):
+            raise HTTPException(status_code=404, detail="PDF assinado não está mais no servidor nem no Drive")
     return FileResponse(c.arquivo_assinado_path, media_type="application/pdf", filename=f"{prefixo}_{contrato_id}_assinado.pdf")

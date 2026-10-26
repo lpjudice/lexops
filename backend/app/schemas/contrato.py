@@ -63,6 +63,11 @@ class ContratoArquivoItem(BaseModel):
 
 class GerarPdfRequest(BaseModel):
     contratante_nome: str
+    # Qualificação separada (como na procuração): vira "brasileiro(a), casado, advogado".
+    # `contratante_qualificacao` segue aceito como texto livre ADICIONAL (clientes antigos / PJ).
+    contratante_nacionalidade: str = ""
+    contratante_estado_civil: str = ""
+    contratante_profissao: str = ""
     contratante_qualificacao: str = ""
     contratante_cpf_cnpj: str = ""
     contratante_endereco: str = ""

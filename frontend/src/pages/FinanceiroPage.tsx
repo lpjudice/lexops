@@ -66,6 +66,8 @@ export default function FinanceiroPage() {
   const [parcelasEdit, setParcelasEdit] = useState<ParcelaInput[]>([])
   // Edição inline de parcelas no card (id → {valor, data})
   const [parcEdits, setParcEdits] = useState<Record<string, { valor: number; data_vencimento: string }>>({})
+  // Correção do valor de uma parcela JÁ paga (ajusta também o recebimento que a quitou)
+  const [pagaEdit, setPagaEdit] = useState<{ id: string; valor: number } | null>(null)
   const [pagarModal, setPagarModal] = useState<{ id: string; numero: number; valor: number } | null>(null)
 
   const { data: honorarios = [], isLoading } = useQuery({
@@ -175,6 +177,7 @@ export default function FinanceiroPage() {
     mutationFn: ({ id, data }: { id: string; data: { valor?: number; data_vencimento?: string } }) =>
       financeiroApi.editarParcela(id, data),
     onSuccess: invalidarFin,
+    onError: (e: any) => alert(`Erro ao salvar a parcela:\n${e?.response?.data?.detail || e?.message || 'Erro desconhecido'}`),
   })
   const removerParcela = useMutation({
     mutationFn: (id: string) => financeiroApi.removerParcela(id),
@@ -858,6 +861,13 @@ export default function FinanceiroPage() {
             const parcelasVencidas = (h.parcelas || []).filter(
               (p) => p.status === 'pendente' && new Date(p.data_vencimento + 'T12:00:00') < new Date()
             )
+            // Com cronograma, o vencimento que importa é o da próxima parcela em aberto —
+            // não o do recebível (que fica na 1ª parcela e já passou quando ela foi paga).
+            const proximaParcela = [...(h.parcelas || [])]
+              .filter((p) => p.status === 'pendente')
+              .sort((a, b) => a.data_vencimento.localeCompare(b.data_vencimento))[0]
+            const proximaAtrasada = !!proximaParcela &&
+              new Date(proximaParcela.data_vencimento + 'T12:00:00') < new Date()
 
             return (
               <div key={h.id} className={`${cs.card} ${h.contrato_orfao ? cs.cardOrfao : ''}`}>
@@ -884,7 +894,15 @@ export default function FinanceiroPage() {
                     </div>
                     <div className={cs.cardMeta}>
                       {clienteNome(h.cliente_id)} · {TIPO_LABEL[h.tipo]}
-                      {h.data_vencimento && (
+                      {(h.parcelas?.length ?? 0) > 0 ? (
+                        proximaParcela && (
+                          <span style={{ color: proximaAtrasada ? '#b91c1c' : undefined }}>
+                            {' '}· {proximaAtrasada ? 'Vencida em' : 'Próx. vencimento'} {fmtData(proximaParcela.data_vencimento)}
+                            {' '}(parcela {proximaParcela.numero}/{h.parcelas.length})
+                            {proximaAtrasada && ' ⚠'}
+                          </span>
+                        )
+                      ) : h.data_vencimento && (
                         <span style={{ color: vencido ? '#b91c1c' : undefined }}>
                           {' '}· Vence {fmtData(h.data_vencimento)}
                           {vencido && ' ⚠'}
@@ -1119,7 +1137,25 @@ export default function FinanceiroPage() {
                                           <CurrencyInput className={styles.input} style={{ padding: '3px 6px', width: 130 }}
                                             value={ed?.valor ?? p.valor}
                                             onChange={(v) => setParcEdits({ ...parcEdits, [p.id]: { data_vencimento: ed?.data_vencimento ?? p.data_vencimento, valor: v } })} />
-                                        ) : fmtVal(p.valor)}
+                                        ) : p.status === 'pago' && pagaEdit?.id === p.id ? (
+                                          <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                                            <CurrencyInput className={styles.input} style={{ padding: '3px 6px', width: 120 }}
+                                              value={pagaEdit.valor}
+                                              onChange={(v) => setPagaEdit({ id: p.id, valor: v })} />
+                                            <button className={styles.btnTable} title="Salvar valor (corrige também o recebimento)"
+                                              onClick={() => { editarParcela.mutate({ id: p.id, data: { valor: pagaEdit.valor } }); setPagaEdit(null) }}>💾</button>
+                                            <button className={styles.btnTable} title="Cancelar" onClick={() => setPagaEdit(null)}>✕</button>
+                                          </span>
+                                        ) : (
+                                          <>
+                                            {fmtVal(p.valor)}
+                                            {p.status === 'pago' && (
+                                              <button className={styles.btnTable} style={{ marginLeft: 6 }}
+                                                title="Corrigir o valor desta parcela paga (ajusta também o recebimento)"
+                                                onClick={() => setPagaEdit({ id: p.id, valor: p.valor })}>✎</button>
+                                            )}
+                                          </>
+                                        )}
                                       </td>
                                       <td>
                                         <span style={{ fontSize: 11, fontWeight: 700, color: p.status === 'pago' ? '#2f6f5e' : atrasada ? '#a2585e' : '#6b7280' }}>

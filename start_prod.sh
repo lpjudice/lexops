@@ -3,6 +3,20 @@ set -e
 
 echo "[START] Starting Gestor Juridico..."
 
+# Persistência de uploads: o volume `lexops_uploads` está montado em /app/backend/uploads
+# (fly.toml), mas boa parte do código grava em /app/uploads (contratos, financeiro,
+# clientes...) — pasta efêmera que um deploy apaga junto com a imagem. Aponta /app/uploads
+# pro volume para tudo persistir; se já houver arquivos na pasta real, copia antes.
+mkdir -p /app/backend/uploads
+if [ ! -L /app/uploads ]; then
+  if [ -d /app/uploads ]; then
+    cp -an /app/uploads/. /app/backend/uploads/ 2>/dev/null || true
+    rm -rf /app/uploads
+  fi
+  ln -s /app/backend/uploads /app/uploads
+fi
+echo "[START] uploads -> $(readlink /app/uploads)"
+
 cd /app/backend
 echo "[START] Applying database migrations..."
 alembic upgrade head

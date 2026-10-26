@@ -61,6 +61,10 @@ export interface Contrato {
 
 export interface GerarPdfRequest {
   contratante_nome: string
+  contratante_nacionalidade?: string
+  contratante_estado_civil?: string
+  contratante_profissao?: string
+  /** Texto livre adicional (legado) — o normal é usar os três campos acima. */
   contratante_qualificacao?: string
   contratante_cpf_cnpj?: string
   contratante_endereco?: string

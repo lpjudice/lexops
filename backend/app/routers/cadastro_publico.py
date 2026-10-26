@@ -43,7 +43,7 @@ CAMPOS_COMUNS = {"nome", "cpf_cnpj", "email", "telefone", "whatsapp", "observaco
                  "cep", "logradouro", "numero", "complemento", "bairro", "cidade", "uf",
                  # "Outras pessoas vinculadas" (texto livre que o cliente digita no público).
                  "empresas_vinculadas"}
-CAMPOS_PF = {"data_nascimento", "rg", "estado_civil", "profissao"}
+CAMPOS_PF = {"data_nascimento", "rg", "nacionalidade", "estado_civil", "profissao"}
 CAMPOS_PJ = {"nome_fantasia", "responsavel_nome", "responsavel_cpf",
              "responsavel_email", "responsavel_telefone"}
 MAX_ANEXOS = 5

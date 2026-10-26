@@ -322,13 +322,28 @@ def editar_parcela(parcela_id: uuid.UUID, data: ParcelaUpdate, db: Session = Dep
     p = db.query(Parcela).filter(Parcela.id == parcela_id).first()
     if not p:
         raise HTTPException(status_code=404, detail="Parcela não encontrada")
-    for field, value in data.model_dump(exclude_unset=True).items():
+    campos = data.model_dump(exclude_unset=True)
+    # Parcela já paga: corrigir o valor também corrige o recebimento que a quitou —
+    # senão o "recebido" fica com o valor antigo e o recebível não fecha com o cronograma.
+    if p.status == "pago" and "valor" in campos and campos["valor"] is not None \
+            and round(float(campos["valor"]), 2) != round(float(p.valor), 2):
+        recs = db.query(Recebimento).filter(Recebimento.parcela_id == p.id).all()
+        if len(recs) > 1:
+            raise HTTPException(
+                status_code=400,
+                detail="Esta parcela tem mais de um pagamento lançado; ajuste o valor direto nos recebimentos.",
+            )
+        for rec in recs:
+            rec.valor = campos["valor"]
+    for field, value in campos.items():
         setattr(p, field, value)
     db.flush()
     h = db.query(Honorario).filter(Honorario.id == p.honorario_id).first()
     if h:
         db.refresh(h)
         _sync_valor_total(h)
+        if p.status == "pago":
+            _recalc_status_honorario(h)
     db.commit()
     db.refresh(p)
     return p
@@ -448,36 +463,23 @@ def resumo_financeiro(db: Session = Depends(get_db)):
     total_contratado = sum(float(h.valor_total) for h in honorarios if not h.pendente_assinatura)
     total_recebido = sum(h.total_recebido for h in honorarios if not h.pendente_assinatura)
     total_pendente = sum(h.saldo_pendente for h in honorarios if h.status != "pago" and not h.pendente_assinatura)
-    total_vencido = sum(
-        h.saldo_pendente
-        for h in honorarios
-        if h.status in ("pendente", "parcial")
-        and h.data_vencimento
-        and h.data_vencimento < hoje
-    )
+    # Vencido / a vencer: com cronograma vale a data de cada parcela EM ABERTO (o
+    # vencimento do recebível fica na 1ª parcela e já passou quando ela foi paga);
+    # sem cronograma, o vencimento do próprio recebível sobre o saldo pendente.
+    def _itens_a_receber(h) -> list[tuple[date, float]]:
+        if h.status not in ("pendente", "parcial"):
+            return []
+        if h.parcelas:
+            return [(p.data_vencimento, float(p.valor)) for p in h.parcelas if p.status == "pendente"]
+        return [(h.data_vencimento, h.saldo_pendente)] if h.data_vencimento else []
+
+    itens = [it for h in honorarios for it in _itens_a_receber(h)]
+    total_vencido = sum(v for d, v in itens if d < hoje)
 
     # A vencer por faixa (vencimento futuro)
-    a_vencer_30 = sum(
-        h.saldo_pendente
-        for h in honorarios
-        if h.status in ("pendente", "parcial")
-        and h.data_vencimento
-        and hoje <= h.data_vencimento <= d30
-    )
-    a_vencer_60 = sum(
-        h.saldo_pendente
-        for h in honorarios
-        if h.status in ("pendente", "parcial")
-        and h.data_vencimento
-        and d30 < h.data_vencimento <= d60
-    )
-    a_vencer_90 = sum(
-        h.saldo_pendente
-        for h in honorarios
-        if h.status in ("pendente", "parcial")
-        and h.data_vencimento
-        and d60 < h.data_vencimento <= d90
-    )
+    a_vencer_30 = sum(v for d, v in itens if hoje <= d <= d30)
+    a_vencer_60 = sum(v for d, v in itens if d30 < d <= d60)
+    a_vencer_90 = sum(v for d, v in itens if d60 < d <= d90)
 
     # Por cliente
     por_cliente_map: dict[uuid.UUID, dict] = defaultdict(lambda: {

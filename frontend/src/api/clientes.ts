@@ -19,6 +19,7 @@ export interface ClienteCadastroFields {
   // Pessoa Física
   data_nascimento?: string | null
   rg?: string
+  nacionalidade?: string
   estado_civil?: string
   profissao?: string
   empresas_vinculadas?: string
