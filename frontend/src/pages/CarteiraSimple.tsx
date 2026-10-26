@@ -503,6 +503,87 @@ function EtapasBuilder({
   )
 }
 
+const STATUS_CONTRATO_LABEL: Record<string, string> = {
+  rascunho: 'Rascunho',
+  aguardando_assinatura: 'Aguard. assinatura',
+  parcialmente_assinado: 'Parc. assinado',
+  assinado: 'Assinado',
+  cancelado: 'Cancelado',
+}
+
+// ── Vínculo com um contrato já cadastrado em Contratos & Procurações —
+// single-select (1 contrato principal por cliente, não é chip múltiplo como
+// estratégia/cronologia). Sem vínculo mostra alerta — não dá pra saber se o
+// cliente tem contrato sem abrir a aba de Contratos cliente por cliente. ──
+function ContratoLink({
+  clienteUuid, contratoId, contratos, onUpdate,
+}: {
+  clienteUuid: string | null | undefined
+  contratoId: string | null | undefined
+  contratos: any[]
+  onUpdate: (id: string | null) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [dropStyle, setDropStyle] = useState<React.CSSProperties>({})
+  const btnRef = useRef<HTMLButtonElement>(null)
+
+  const linked = contratoId ? contratos.find((c: any) => c.id === contratoId) : null
+  const disponiveis = clienteUuid ? contratos.filter((c: any) => c.cliente_id === clienteUuid) : []
+
+  const abrir = () => {
+    if (!btnRef.current) return
+    const rect = btnRef.current.getBoundingClientRect()
+    setDropStyle({ position: 'fixed', top: rect.bottom + 2, left: rect.left, minWidth: 220, maxWidth: 320, zIndex: 9999, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 6, maxHeight: 260, overflowY: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,0.12)' })
+    setOpen(o => !o)
+  }
+
+  return (
+    <>
+      {linked ? (
+        <button ref={btnRef}
+          title={`${linked.titulo} — ${STATUS_CONTRATO_LABEL[linked.status] ?? linked.status}`}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#f0fdfa', border: '1px solid #0d9488', borderRadius: 10, padding: '2px 8px', fontSize: 11, cursor: 'pointer', color: '#0d6b63', maxWidth: 160, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+          onClick={abrir}>
+          {linked.titulo}
+        </button>
+      ) : (
+        <button ref={btnRef}
+          title="Sem contrato vinculado — clique para linkar"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 10, padding: '2px 8px', fontSize: 11, cursor: 'pointer', color: '#b91c1c', whiteSpace: 'nowrap' }}
+          onClick={abrir}>
+          ⚠ Sem contrato
+        </button>
+      )}
+      {open && createPortal(
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 9998 }} onClick={() => setOpen(false)} />
+          <div style={dropStyle}>
+            {!clienteUuid ? (
+              <div style={{ padding: '10px 14px', color: '#9ca3af', fontSize: 12 }}>Cliente não vinculado ao cadastro principal — vincule-o primeiro (campo "Pré-preencher de cliente existente" na edição do cliente) para poder linkar um contrato.</div>
+            ) : disponiveis.length === 0 ? (
+              <div style={{ padding: '10px 14px', color: '#9ca3af', fontSize: 12 }}>Nenhum contrato cadastrado para este cliente em Contratos &amp; Procurações.</div>
+            ) : (
+              disponiveis.map((c: any) => (
+                <div key={c.id}
+                  style={{ padding: '8px 14px', cursor: 'pointer', fontSize: 12, borderBottom: '1px solid #f3f4f6', background: c.id === contratoId ? '#f0fdfa' : undefined }}
+                  onMouseDown={() => { onUpdate(c.id); setOpen(false) }}>
+                  <strong>{c.titulo}</strong>
+                  <span style={{ marginLeft: 6, fontSize: 10, color: '#6b7280' }}>{STATUS_CONTRATO_LABEL[c.status] ?? c.status}</span>
+                </div>
+              ))
+            )}
+            {linked && (
+              <div style={{ padding: '8px 14px', cursor: 'pointer', fontSize: 12, color: '#dc2626' }}
+                onMouseDown={() => { onUpdate(null); setOpen(false) }}>✕ Remover vínculo</div>
+            )}
+          </div>
+        </>,
+        document.body
+      )}
+    </>
+  )
+}
+
 // ────────────────────────────────────────────────────────────────────
 export default function CarteiraPage() {
   const [tab, setTab] = useState<Tab>('posicao-cliente')
@@ -629,6 +710,7 @@ export default function CarteiraPage() {
   const { data: estrategiasRes } = useQuery({ queryKey: ['carteira-estrategias'], queryFn: () => api.get('/carteira/estrategias').then(r => r.data) })
   const { data: cronologiasRes = [] } = useQuery({ queryKey: ['carteira-cronologias'], queryFn: () => api.get('/carteira/cronologias').then(r => r.data) })
   const { data: atosRes } = useQuery({ queryKey: ['carteira-atos'], queryFn: () => api.get('/carteira/atos', { params: { limit: 1000 } }).then(r => r.data) })
+  const { data: contratosRes = [] } = useQuery({ queryKey: ['contratos-todos'], queryFn: () => api.get('/contratos/').then(r => r.data) })
 
   const clientes: any[] = clientesRes?.data ?? []
   const debentures: any[] = debenturesRes?.data ?? []
@@ -640,6 +722,7 @@ export default function CarteiraPage() {
   const estrategias: any[] = estrategiasRes?.data ?? []
   const cronologias: any[] = Array.isArray(cronologiasRes) ? cronologiasRes : []
   const atos: any[] = atosRes?.data ?? []
+  const contratos: any[] = Array.isArray(contratosRes) ? contratosRes : []
 
   // ── Lookups ───────────────────────────────────────────────────────
   const clienteNome = (id: number) => {
@@ -1073,6 +1156,11 @@ export default function CarteiraPage() {
   const patchCronologiaCliente = useMutation({
     mutationFn: ({ id, ids }: { id: number; ids: number[] }) =>
       api.put(`/carteira/clientes/${id}`, { cronologia_ids: ids }).then(r => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['carteira-clientes'] }),
+  })
+  const patchContratoCliente = useMutation({
+    mutationFn: ({ id, contratoId }: { id: number; contratoId: string | null }) =>
+      api.put(`/carteira/clientes/${id}`, { contrato_vinculado_id: contratoId }).then(r => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['carteira-clientes'] }),
   })
   const patchCronologiaDeb = useMutation({
@@ -2204,11 +2292,11 @@ export default function CarteiraPage() {
           </div>
           <div className={styles.tableCard}>
             <table className={styles.table}>
-              <colgroup><col /><col style={{ width: 60 }} /><col style={{ width: 140 }} /><col style={{ width: 160 }} /><col style={{ width: 150 }} /><col style={{ width: 150 }} /><col style={{ width: 80 }} /><col style={{ width: 36 }} /><col style={{ width: 36 }} /><col style={{ width: 60 }} /></colgroup>
-              <thead><tr><th>Nome</th><th>Tipo</th><th>CPF/CNPJ</th><th>{isSuperAdmin ? 'Fee entrada' : '🔒 Fee'}</th>{thR(isSuperAdmin ? 'Fee (R$ esp.)' : '🔒')}{thR(isSuperAdmin ? 'Êxito (R$ esp.)' : '🔒')}<th>Status</th><th /><th title="Drive" /></tr></thead>
+              <colgroup><col /><col style={{ width: 60 }} /><col style={{ width: 140 }} /><col style={{ width: 160 }} /><col style={{ width: 150 }} /><col style={{ width: 150 }} /><col style={{ width: 80 }} /><col style={{ width: 150 }} /><col style={{ width: 36 }} /><col style={{ width: 36 }} /><col style={{ width: 60 }} /></colgroup>
+              <thead><tr><th>Nome</th><th>Tipo</th><th>CPF/CNPJ</th><th>{isSuperAdmin ? 'Fee entrada' : '🔒 Fee'}</th>{thR(isSuperAdmin ? 'Fee (R$ esp.)' : '🔒')}{thR(isSuperAdmin ? 'Êxito (R$ esp.)' : '🔒')}<th>Status</th><th>Contrato</th><th /><th title="Drive" /></tr></thead>
               <tbody>
                 {clientesFiltradosRef.length === 0
-                  ? <tr><td colSpan={10} style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Nenhum registro</td></tr>
+                  ? <tr><td colSpan={11} style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Nenhum registro</td></tr>
                   : clientesFiltradosRef.map((c: any) => {
                     const { feeEntrada, exito } = calcularHonorarios(c)
                     const feeLbl = c.pro_labore_tipo === 'fixo' ? brl(c.pro_labore_valor)
@@ -2224,6 +2312,14 @@ export default function CarteiraPage() {
                         <td style={{ textAlign: 'right' }}>{isSuperAdmin ? (feeEntrada > 0 ? brl(feeEntrada) : '—') : '🔒'}</td>
                         <td style={{ textAlign: 'right' }}>{isSuperAdmin ? (exito > 0 ? brl(exito) : '—') : '🔒'}</td>
                         <td>{statusBadge(c.ativo)}</td>
+                        <td>
+                          <ContratoLink
+                            clienteUuid={c.cliente_uuid || null}
+                            contratoId={c.contrato_vinculado_id || null}
+                            contratos={contratos}
+                            onUpdate={contratoId => patchContratoCliente.mutate({ id: c.id, contratoId })}
+                          />
+                        </td>
                         <td>
                           <button title="Copiar qualificação" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: '#374151', padding: '0 4px' }}
                             onClick={() => navigator.clipboard.writeText(qualificacaoTexto(c)).then(() => alert('Qualificação copiada!')).catch(() => alert('Erro ao copiar'))}>⎘</button>
