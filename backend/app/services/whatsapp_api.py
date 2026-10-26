@@ -53,6 +53,16 @@ def status_template(nome: str, idioma: str = "pt_BR") -> str | None:
     return status
 
 
+def escolher_template(*nomes: str) -> tuple[str, str | None]:
+    """(nome, status) do template a usar, dados do mais novo ao mais antigo: o primeiro APROVADO vence.
+    Nenhum aprovado → devolve o ÚLTIMO (o legado) com o status dele, que é como o sistema já decidia
+    enviar ou esperar. Assim cada versão nova entra sozinha assim que a Meta aprova, e nunca antes."""
+    for nome in nomes[:-1]:
+        if status_template(nome) == "APPROVED":
+            return nome, "APPROVED"
+    return nomes[-1], status_template(nomes[-1])
+
+
 def _messages_url() -> str:
     return f"{GRAPH_BASE}/{settings.whatsapp_api_version}/{settings.whatsapp_phone_number_id}/messages"
 

@@ -31,7 +31,18 @@ from app.services import whatsapp_api
 logger = logging.getLogger(__name__)
 
 TEMPLATE_CONVITE_EVENTO = "convite_evento"
+TEMPLATE_CONVITE_EVENTO_V2 = "convite_evento_v2"      # texto novo: com horário e local
 TEMPLATE_LEMBRETE_EVENTO = "lembrete_evento"
+TEMPLATE_LEMBRETE_EVENTO_V2 = "lembrete_evento_v2"    # texto novo (mesmos parâmetros do anterior)
+
+
+def template_convite() -> tuple[str, str | None]:
+    """(nome, status): o convite novo assim que a Meta aprovar; até lá, o anterior."""
+    return whatsapp_api.escolher_template(TEMPLATE_CONVITE_EVENTO_V2, TEMPLATE_CONVITE_EVENTO)
+
+
+def template_lembrete() -> tuple[str, str | None]:
+    return whatsapp_api.escolher_template(TEMPLATE_LEMBRETE_EVENTO_V2, TEMPLATE_LEMBRETE_EVENTO)
 # Estimativa pra mostrar na tela (Meta, marketing Brasil, tabela de out/2026) — não é cobrança exata.
 CUSTO_MARKETING_ESTIMADO_BRL = 0.3217
 
@@ -102,17 +113,34 @@ def _data_para_texto(evento: ConselhoEvento) -> str:
     return evento.data.strftime("%d/%m/%Y") if evento.data else "data a confirmar"
 
 
-def _parametros_convite(primeiro_nome: str, evento_nome: str, data_txt: str) -> dict[str, str]:
-    return {"primeiro_nome": primeiro_nome.strip() or "convidado", "evento": evento_nome.strip(), "data": data_txt}
+def _horario_para_texto(evento: ConselhoEvento) -> str:
+    return (evento.horario or "").strip() or "horário a confirmar"
+
+
+def _local_para_texto(evento: ConselhoEvento) -> str:
+    return ", ".join(x.strip() for x in (evento.local_evento, evento.endereco) if x and x.strip()) or "local a confirmar"
+
+
+def _parametros_convite(
+    primeiro_nome: str, evento_nome: str, data_txt: str, evento: ConselhoEvento | None = None, nome_template: str = "",
+) -> dict[str, str]:
+    """Parâmetros do convite. O texto novo (v2) também leva horário e local; o anterior só nome/evento/data
+    (mandar parâmetro a mais num template faz a Meta recusar)."""
+    params = {"primeiro_nome": primeiro_nome.strip() or "convidado", "evento": evento_nome.strip(), "data": data_txt}
+    if nome_template == TEMPLATE_CONVITE_EVENTO_V2 and evento is not None:
+        params["horario"] = _horario_para_texto(evento)
+        params["local"] = _local_para_texto(evento)
+    return params
 
 
 def enviar_teste(telefone: str, evento: ConselhoEvento) -> dict | None:
     """Manda UM convite de teste (sem registrar nada no convidado) — pra conferir
     texto e botões no próprio celular antes do disparo real."""
+    nome_template = template_convite()[0]
     return whatsapp_api.send_template_message(
         to=telefone,
-        template_name=TEMPLATE_CONVITE_EVENTO,
-        parametros=_parametros_convite("Teste", evento.nome, _data_para_texto(evento)),
+        template_name=nome_template,
+        parametros=_parametros_convite("Teste", evento.nome, _data_para_texto(evento), evento, nome_template),
         botoes_resposta_payload=[f"{_PAYLOAD_PREFIXO}:t-{getattr(evento, 'id', '') or 'x'}:{a}" for a in _ACOES],
     )
 
@@ -130,6 +158,7 @@ def enviar_convites_em_lote(evento_id: uuid.UUID, convidado_ids: list[uuid.UUID]
         if not evento:
             return {"enviados": 0, "falhas": 0, "erro": "evento não encontrado"}
         data_txt = _data_para_texto(evento)
+        nome_template = template_convite()[0]
         for cv in db.query(ConselhoEventoConvidado).filter(ConselhoEventoConvidado.id.in_(convidado_ids)).all():
             c = cv.contato
             # Rechecagem na hora do envio: opt-out pode ter chegado desde o clique.
@@ -138,8 +167,8 @@ def enviar_convites_em_lote(evento_id: uuid.UUID, convidado_ids: list[uuid.UUID]
             try:
                 resp = whatsapp_api.send_template_message(
                     to=c.whatsapp,
-                    template_name=TEMPLATE_CONVITE_EVENTO,
-                    parametros=_parametros_convite(c.primeiro_nome, evento.nome, data_txt),
+                    template_name=nome_template,
+                    parametros=_parametros_convite(c.primeiro_nome, evento.nome, data_txt, evento, nome_template),
                     botoes_resposta_payload=[f"{_PAYLOAD_PREFIXO}:{cv.id}:{a}" for a in _ACOES],
                 )
             except Exception as e:  # nunca derruba o lote por causa de uma pessoa
@@ -248,7 +277,7 @@ def enviar_lembretes_evento(hoje: date | None = None) -> dict:
     from app.database import SessionLocal
 
     hoje = hoje or date.today()
-    status = whatsapp_api.status_template(TEMPLATE_LEMBRETE_EVENTO)
+    nome_lembrete, status = template_lembrete()
     if status not in (None, "APPROVED"):
         logger.warning("lembrete_evento: template não aprovado (%s) — nada enviado", status)
         return {"enviados": 0, "motivo": f"template {status}"}
@@ -260,7 +289,7 @@ def enviar_lembretes_evento(hoje: date | None = None) -> dict:
             restam = (ev.data - hoje).days
             if restam > (ev.dias_lembrete or 0) or ev.lembrete_whatsapp_ativo is False:
                 continue
-            local = ", ".join(x.strip() for x in (ev.local_evento, ev.endereco) if x and x.strip()) or "local a confirmar"
+            local = _local_para_texto(ev)
             for cv in ev.convidados:
                 c = cv.contato
                 if not cv.presenca_confirmada or cv.recusou or cv.lembrete_whatsapp_em or cv.lembrete_whatsapp_ativo is False:
@@ -270,12 +299,12 @@ def enviar_lembretes_evento(hoje: date | None = None) -> dict:
                 if not (c.whatsapp_optin or cv.confirmacao_origem == "whatsapp_botao"):
                     continue
                 resp = whatsapp_api.send_template_message(
-                    to=c.whatsapp, template_name=TEMPLATE_LEMBRETE_EVENTO,
+                    to=c.whatsapp, template_name=nome_lembrete,
                     parametros={
                         "primeiro_nome": c.primeiro_nome.strip() or "convidado",
                         "evento": ev.nome.strip(),
                         "data": ev.data.strftime("%d/%m/%Y"),
-                        "horario": (ev.horario or "").strip() or "horário a confirmar",
+                        "horario": _horario_para_texto(ev),
                         "local": local,
                     },
                 )
