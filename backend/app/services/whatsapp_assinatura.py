@@ -69,13 +69,22 @@ def _estado_do_signatario(sig_id: uuid.UUID) -> str:
         db.close()
 
 
-def verificar_com_retentativas(sig_id: uuid.UUID, tentativas: int = TENTATIVAS, espera_s: float = ESPERA_S) -> str:
-    """Repete a consulta enquanto o resultado for 'pendente' (o ClickSign leva alguns segundos pra refletir)."""
+def verificar_com_retentativas(
+    sig_id: uuid.UUID, tentativas: int = TENTATIVAS, espera_s: float = ESPERA_S, ao_ficar_pendente=None,
+) -> str:
+    """Repete a consulta enquanto o resultado for 'pendente' (o ClickSign leva alguns segundos pra refletir).
+    `ao_ficar_pendente`: chamado UMA vez, quando a 1ª consulta ainda não achou a assinatura (ex.: avisar
+    "conferindo…", pra pessoa não ficar ~40 s sem resposta)."""
     resultado = "pendente"
     for i in range(tentativas):
         resultado = _estado_do_signatario(sig_id)
         if resultado != "pendente":
             return resultado
+        if i == 0 and ao_ficar_pendente:
+            try:
+                ao_ficar_pendente()
+            except Exception:
+                logger.exception("já assinei: erro no aviso de 'conferindo'")
         if i < tentativas - 1:
             time.sleep(espera_s)
     return resultado
@@ -165,7 +174,12 @@ def tratar_ja_assinei(telefone: str, payload: str, verificar_telefone: bool = Tr
             return "Já estou conferindo a sua assinatura. Aguarde só um instante."
         _em_andamento.add(chave)
     try:
-        resultado = verificar_com_retentativas(sig_id)
+        conferindo = None
+        if verificar_telefone:   # uso real (toque no botão): avisa já, a conferência pode levar ~40 s
+            conferindo = lambda: whatsapp_api.send_text_message(
+                telefone, "Conferindo a sua assinatura no ClickSign… isso leva alguns segundos."
+            )
+        resultado = verificar_com_retentativas(sig_id, ao_ficar_pendente=conferindo)
         if resultado == "assinou":
             _ja_confirmados.add(chave)
             return _texto_confirmacao(sig_id)
