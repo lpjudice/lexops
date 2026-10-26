@@ -30,6 +30,26 @@ interface DecisaoState {
   diferenciador: string
 }
 
+/** Soma `n` meses a uma data AAAA-MM-DD (ajusta o dia ao fim do mês quando preciso). */
+function somarMeses(iso: string, n: number): string {
+  const [a, m, d] = iso.split('-').map(Number)
+  const alvo = new Date(a, m - 1 + n, 1)
+  const ultimo = new Date(alvo.getFullYear(), alvo.getMonth() + 1, 0).getDate()
+  const dia = Math.min(d, ultimo)
+  return `${alvo.getFullYear()}-${String(alvo.getMonth() + 1).padStart(2, '0')}-${String(dia).padStart(2, '0')}`
+}
+
+/** Divisão igual (a última parcela absorve o arredondamento) — só ponto de partida, é editável. */
+function dividirIgual(total: number, n: number, primeiro: string) {
+  const base = Math.round((total / n) * 100) / 100
+  let acum = 0
+  return Array.from({ length: n }, (_, i) => {
+    const valor = i === n - 1 ? Math.round((total - acum) * 100) / 100 : base
+    acum = Math.round((acum + base) * 100) / 100
+    return { valor, data_vencimento: somarMeses(primeiro, i) }
+  })
+}
+
 function estadoInicial(lido: ContratanteLido): DecisaoState {
   const e = lido.extraido
   const rep = e.representante
@@ -78,7 +98,13 @@ export default function ContratantesIAModal({ contratoId, onClose, onApplied }: 
         setDecisoes(r.contratantes.map(estadoInicial))
         setPrincipalIdx(0)
         const f = r.financeiro || {}
-        setFin(f)
+        // Contrato diz "Nx" mas não lista valores: já abre o cronograma (divisão igual, editável).
+        const n = f.num_parcelas ?? 0
+        if (n >= 2 && !(f.parcelas?.length) && f.valor_honorarios && /^\d{4}-\d{2}-\d{2}$/.test(f.data_vencimento ?? '')) {
+          setFin({ ...f, parcelas: dividirIgual(f.valor_honorarios, n, f.data_vencimento as string) })
+        } else {
+          setFin(f)
+        }
         // Pré-marca o lançamento se a IA achou valor fixo ou êxito.
         setLancarFin(!!(f.valor_honorarios || f.tem_exito))
       })
@@ -252,8 +278,47 @@ export default function ContratantesIAModal({ contratoId, onClose, onApplied }: 
                   </div>
                   <input style={{ ...inp, width: '100%', marginTop: 6 }} type="number" min={1}
                     value={fin.num_parcelas ?? ''}
-                    onChange={(e) => setFin({ ...fin, num_parcelas: e.target.value === '' ? null : Number(e.target.value) })}
-                    placeholder="Nº de parcelas (1 = à vista; 2+ gera cronograma mensal)" />
+                    onChange={(e) => {
+                      const n = e.target.value === '' ? null : Number(e.target.value)
+                      const pode = n && n >= 2 && fin.valor_honorarios && /^\d{4}-\d{2}-\d{2}$/.test(fin.data_vencimento ?? '')
+                      setFin({
+                        ...fin, num_parcelas: n,
+                        // mudou o nº de parcelas: recomeça da divisão igual (editável depois)
+                        parcelas: pode ? dividirIgual(fin.valor_honorarios as number, n as number, fin.data_vencimento as string) : [],
+                      })
+                    }}
+                    placeholder="Nº de parcelas (1 = à vista; 2+ abre o cronograma, com valores livres)" />
+                  {(fin.parcelas?.length ?? 0) >= 2 && (
+                    <div style={{ marginTop: 6 }}>
+                      {fin.parcelas!.map((p, i) => (
+                        <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
+                          <span style={{ width: 22, fontSize: 12, color: '#6b7280' }}>{i + 1}.</span>
+                          <input style={{ ...inp, width: 140 }} type="number" step="0.01" value={p.valor}
+                            onChange={(e) => setFin({ ...fin, parcelas: fin.parcelas!.map((x, j) => j === i ? { ...x, valor: Number(e.target.value) } : x) })} />
+                          <input style={{ ...inp, width: 150 }} type="date" value={p.data_vencimento}
+                            onChange={(e) => setFin({ ...fin, parcelas: fin.parcelas!.map((x, j) => j === i ? { ...x, data_vencimento: e.target.value } : x) })} />
+                        </div>
+                      ))}
+                      <div style={{ fontSize: 12, color: '#6b7280', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                        {(() => {
+                          const soma = Math.round(fin.parcelas!.reduce((s, p) => s + (p.valor || 0), 0) * 100) / 100
+                          const dif = fin.valor_honorarios != null && Math.abs(soma - fin.valor_honorarios) > 0.01
+                          return (
+                            <span style={{ color: dif ? '#b45309' : undefined }}>
+                              Soma das parcelas: <b>{soma.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</b>
+                              {dif && ' — diferente do valor dos honorários (o total lançado será a soma das parcelas)'}
+                            </span>
+                          )
+                        })()}
+                        {fin.valor_honorarios && /^\d{4}-\d{2}-\d{2}$/.test(fin.data_vencimento ?? '') && (
+                          <button type="button" style={btnGhost}
+                            onClick={() => setFin({ ...fin, parcelas: dividirIgual(fin.valor_honorarios as number, fin.parcelas!.length, fin.data_vencimento as string) })}>
+                            ↻ Dividir igualmente
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   <label style={{ ...decOpt, marginTop: 6 }}>
                     <input type="checkbox" checked={!!fin.tem_exito}
                       onChange={(e) => setFin({ ...fin, tem_exito: e.target.checked })} />

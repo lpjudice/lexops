@@ -283,8 +283,17 @@ def obter_pasta_mestra_financeiro():
 
 # ── Parcelas ──────────────────────────────────────────────────────────────────
 
+def _sync_vencimento(h: Honorario) -> None:
+    """Com cronograma, o vencimento do recebível é o da próxima parcela em aberto (ou o da
+    última, se tudo foi pago) — senão ele fica congelado na 1ª parcela e aparece como vencido."""
+    if h.parcelas:
+        abertas = [p.data_vencimento for p in h.parcelas if p.status == "pendente"]
+        h.data_vencimento = min(abertas) if abertas else max(p.data_vencimento for p in h.parcelas)
+
+
 def _recalc_status_honorario(h: Honorario) -> None:
     """Deriva o status do recebível dos recebimentos (pagar parcela cria recebimento)."""
+    _sync_vencimento(h)
     total_rec = sum(float(r.valor) for r in h.recebimentos)
     if total_rec <= 0:
         h.status = "pendente"
@@ -298,6 +307,7 @@ def _sync_valor_total(h: Honorario) -> None:
     """Quando há cronograma, o valor_total do recebível acompanha a soma das parcelas."""
     if h.parcelas:
         h.valor_total = round(sum(float(p.valor) for p in h.parcelas), 2)
+    _sync_vencimento(h)
 
 
 @router.post("/honorarios/{honorario_id}/parcelas/", response_model=ParcelaOut,

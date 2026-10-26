@@ -197,6 +197,12 @@ class ContratanteDecisao(BaseModel):
     ignorar_similares: bool = False
 
 
+class ContratoParcelaIA(BaseModel):
+    """Uma parcela do cronograma lido/ajustado — os valores podem ser diferentes entre si."""
+    valor: float
+    data_vencimento: str
+
+
 class ContratoFinanceiro(BaseModel):
     """Dados financeiros lidos do contrato (para lançar/atualizar o Honorário)."""
     valor_honorarios: float | None = None
@@ -206,6 +212,9 @@ class ContratoFinanceiro(BaseModel):
     data_vencimento: str | None = None
     condicao_pagamento: str | None = None
     num_parcelas: int | None = None
+    # Cronograma explícito (valores/datas livres). Se vier com 2+ itens, vale no lugar da
+    # divisão igual de `valor_honorarios` por `num_parcelas`.
+    parcelas: list[ContratoParcelaIA] | None = None
     data_contrato: str | None = None
 
 
