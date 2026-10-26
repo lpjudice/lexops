@@ -89,6 +89,8 @@ def send_template_message(
     botao_url_param: str | None = None,
     botoes_resposta_payload: list[str] | None = None,
     header_documento: tuple[str, str] | None = None,
+    botao_url_indice: int = 0,
+    botoes_resposta_indice_inicial: int = 0,
 ) -> dict | None:
     """Envia mensagem de template aprovado (categoria Utility/Marketing/Auth).
     `parametros` preenche as variáveis nomeadas do corpo (ex.: {{cliente_nome}}) —
@@ -121,14 +123,14 @@ def send_template_message(
         components.append({
             "type": "button",
             "sub_type": "url",
-            "index": "0",
+            "index": str(botao_url_indice),
             "parameters": [{"type": "text", "text": botao_url_param}],
         })
     for i, payload_botao in enumerate(botoes_resposta_payload or []):
         components.append({
             "type": "button",
             "sub_type": "quick_reply",
-            "index": str(i),
+            "index": str(botoes_resposta_indice_inicial + i),
             "parameters": [{"type": "payload", "payload": payload_botao}],
         })
     payload: dict[str, Any] = {

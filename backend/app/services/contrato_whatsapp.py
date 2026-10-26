@@ -27,6 +27,15 @@ from app.services import whatsapp_api
 logger = logging.getLogger(__name__)
 
 TEMPLATE_ASSINATURA_PENDENTE = "assinatura_pendente"
+# v2 = mesmo aviso + botão de resposta "Já assinei" (link no botão 0, "Já assinei" no botão 1).
+TEMPLATE_ASSINATURA_PENDENTE_V2 = "assinatura_pendente_v2"
+
+
+def template_aviso_assinatura() -> tuple[str, str | None]:
+    """(nome do template, status): usa a v2 (com "Já assinei") assim que a Meta aprovar; até lá, a v1."""
+    if whatsapp_api.status_template(TEMPLATE_ASSINATURA_PENDENTE_V2) == "APPROVED":
+        return TEMPLATE_ASSINATURA_PENDENTE_V2, "APPROVED"
+    return TEMPLATE_ASSINATURA_PENDENTE, whatsapp_api.status_template(TEMPLATE_ASSINATURA_PENDENTE)
 
 # ── Só contratos/procurações NOVOS ───────────────────────────────────────────
 # Regra do Lucas (25/10/2026): mensagens AUTOMÁTICAS de WhatsApp (lembretes, aviso de cancelamento,
@@ -66,18 +75,24 @@ def avisar_assinatura_pendente_detalhe(sig: Signatario, contrato: Contrato) -> t
     # (mandar o nosso também duplicaria a mensagem).
     if not sig.avisar_whatsapp or sig.assinar_via_whatsapp:
         return False, None
-    status = whatsapp_api.status_template(TEMPLATE_ASSINATURA_PENDENTE)
+    nome_template, status = template_aviso_assinatura()
     if status not in (None, "APPROVED"):
         return False, f"o template de aviso ainda não foi aprovado pela Meta (status: {status})"
+    extras: dict = {}
+    if nome_template == TEMPLATE_ASSINATURA_PENDENTE_V2 and getattr(sig, "id", None):
+        from app.services.whatsapp_assinatura import payload_ja_assinei
+
+        extras = {"botoes_resposta_payload": [payload_ja_assinei(sig.id)], "botoes_resposta_indice_inicial": 1}
     try:
         resultado = whatsapp_api.send_template_message(
             to=sig.whatsapp,
-            template_name=TEMPLATE_ASSINATURA_PENDENTE,
+            template_name=nome_template,
             parametros={
                 "nome": sig.nome,
                 "documento": _rotulo_documento(contrato.tipo_documento),
             },
             botao_url_param=sig.clicksign_request_key,
+            **extras,
         )
     except Exception:
         logger.exception("assinatura_pendente: erro inesperado ao avisar %s", sig.nome)
@@ -228,7 +243,7 @@ def enviar_lembretes_assinatura(agora: datetime | None = None) -> dict:
             if not devidos or not pode_enviar:
                 continue
             if status_tpl is None:
-                status_tpl = whatsapp_api.status_template(TEMPLATE_ASSINATURA_PENDENTE) or "?"
+                status_tpl = template_aviso_assinatura()[1] or "?"
             if status_tpl not in ("?", "APPROVED"):
                 logger.warning("lembrete assinatura: template não aprovado (%s) — nada enviado", status_tpl)
                 return {"enviados": enviados, "validados": validados, "motivo": f"template {status_tpl}"}

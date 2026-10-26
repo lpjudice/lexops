@@ -61,7 +61,20 @@ def _processar_mensagem(telefone: str, texto: str, message_id: str | None) -> No
 
 
 def _processar_botao(telefone: str, payload: str, message_id: str | None) -> None:
-    """Clique em botão de resposta rápida de um template (ex.: convite de evento)."""
+    """Clique em botão de resposta rápida de um template (convite de evento, "Já assinei")."""
+    from app.services import whatsapp_assinatura
+
+    if whatsapp_assinatura.eh_payload(payload):
+        # Pode demorar até ~40 s (o ClickSign leva alguns segundos pra refletir a assinatura): roda aqui,
+        # em segundo plano, e responde sozinho no fim.
+        try:
+            resposta = whatsapp_assinatura.tratar_ja_assinei(telefone, payload)
+        except Exception:
+            logger.exception("whatsapp webhook: erro no \"Já assinei\" de %s", telefone)
+            resposta = "Não consegui conferir agora. Tente de novo em instantes ou fale com o escritório: (27) 3345-5501."
+        if resposta:
+            whatsapp_api.send_text_message(telefone, resposta)
+        return
     db = SessionLocal()
     try:
         resposta = whatsapp_marketing.tratar_resposta_botao(db, telefone, payload)
