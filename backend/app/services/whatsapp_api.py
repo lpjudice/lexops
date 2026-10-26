@@ -39,8 +39,14 @@ def status_template(nome: str, idioma: str = "pt_BR") -> str | None:
             headers={"Authorization": f"Bearer {settings.whatsapp_access_token}"},
             timeout=15.0,
         )
-        itens = [t for t in r.json().get("data", []) if t.get("language") == idioma]
-        status = itens[0].get("status") if itens else "INEXISTENTE"
+        corpo = r.json()
+        if r.status_code >= 400 or "data" not in corpo:
+            status = None   # erro na consulta (token, rede): desconhecido — quem chama segue e a Meta responde no envio
+        else:
+            # A Meta filtra `name` por trecho: "assinatura_pendente" também devolve "assinatura_pendente_v2".
+            # Só vale o template de nome EXATO — senão a v2 (em análise) fazia a v1 aprovada parecer pendente.
+            itens = [t for t in corpo["data"] if t.get("name") == nome and t.get("language") == idioma]
+            status = itens[0].get("status") if itens else "INEXISTENTE"
     except Exception:
         status = None
     _cache_status_template[chave] = (agora, status)

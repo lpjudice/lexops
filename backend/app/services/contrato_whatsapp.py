@@ -77,6 +77,7 @@ def avisar_assinatura_pendente_detalhe(sig: Signatario, contrato: Contrato) -> t
         return False, None
     nome_template, status = template_aviso_assinatura()
     if status not in (None, "APPROVED"):
+        logger.warning("assinatura_pendente: %s NÃO avisado — template %s com status %s", sig.nome, nome_template, status)
         return False, f"o template de aviso ainda não foi aprovado pela Meta (status: {status})"
     extras: dict = {}
     if nome_template == TEMPLATE_ASSINATURA_PENDENTE_V2 and getattr(sig, "id", None):
