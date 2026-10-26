@@ -51,6 +51,7 @@ from app.routers import backoffice, precedentcheck, conselho, tarefa_projetos, t
 from app.routers import cadastro_links, cadastro_publico, cadastro_submissoes
 from app.routers import informativos
 from app.routers import autos_ia
+from app.routers import autos_ia_estrutura
 from app.routers import carteira
 from app.routers import informativo_stj
 from app.routers import informativo_stf
@@ -2193,6 +2194,7 @@ app.include_router(patrimonio.router)
 app.include_router(instagram.router)
 app.include_router(informativos.router)
 app.include_router(autos_ia.router)
+app.include_router(autos_ia_estrutura.router)
 app.include_router(carteira.router)
 app.include_router(informativo_stj.router)
 app.include_router(informativo_stf.router)

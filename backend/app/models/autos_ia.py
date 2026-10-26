@@ -19,7 +19,7 @@ principal por padrão.
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import ARRAY, BigInteger, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import ARRAY, BigInteger, Boolean, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -400,3 +400,76 @@ class AutosIACenario(Base):
     atualizado_em: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class AutosIAEntidade(Base):
+    """Empresa do grupo (do organograma societário), identificada pelo CNPJ (14 dígitos)."""
+    __tablename__ = "autos_ia_entidades"
+    __table_args__ = (UniqueConstraint("caso_id", "cnpj", name="uq_autos_ia_entidade_caso_cnpj"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    caso_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("autos_ia_casos.id", ondelete="CASCADE"), nullable=False, index=True)
+    cnpj: Mapped[str] = mapped_column(String(14), nullable=False)
+    nome: Mapped[str] = mapped_column(String(255), nullable=False)
+    nivel: Mapped[str | None] = mapped_column(String(40))
+    descricao: Mapped[str | None] = mapped_column(Text)
+    origem: Mapped[str] = mapped_column(String(20), nullable=False, default="organograma")
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class AutosIAParticipacao(Base):
+    """Participação societária: `pai` detém `pct`% de `filho` (tracejado = vínculo secundário no desenho)."""
+    __tablename__ = "autos_ia_participacoes"
+    __table_args__ = (UniqueConstraint("caso_id", "pai_cnpj", "filho_cnpj", name="uq_autos_ia_participacao"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    caso_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("autos_ia_casos.id", ondelete="CASCADE"), nullable=False, index=True)
+    pai_cnpj: Mapped[str] = mapped_column(String(14), nullable=False)
+    filho_cnpj: Mapped[str] = mapped_column(String(14), nullable=False)
+    pct: Mapped[float | None] = mapped_column(Numeric(7, 4))
+    tracejado: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    origem: Mapped[str] = mapped_column(String(20), nullable=False, default="organograma")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="extraido")
+    nota: Mapped[str | None] = mapped_column(Text)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class AutosIACreditoLote(Base):
+    """Uma importação da planilha de credores (as anteriores ficam para comparação)."""
+    __tablename__ = "autos_ia_credito_lotes"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    caso_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("autos_ia_casos.id", ondelete="CASCADE"), nullable=False, index=True)
+    nome_arquivo: Mapped[str | None] = mapped_column(String(255))
+    total_linhas: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_centavos: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    notas: Mapped[str | None] = mapped_column(Text)
+    importado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AutosIACredito(Base):
+    """Uma linha da relação de credores: a empresa devedora (CNPJ), o credor, a natureza e o valor."""
+    __tablename__ = "autos_ia_creditos"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    lote_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("autos_ia_credito_lotes.id", ondelete="CASCADE"), nullable=False, index=True)
+    caso_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("autos_ia_casos.id", ondelete="CASCADE"), nullable=False)
+    linha: Mapped[int | None] = mapped_column(Integer)
+    devedor_cnpj: Mapped[str | None] = mapped_column(String(14))
+    devedor_nome: Mapped[str | None] = mapped_column(String(255))
+    credor_cnpj: Mapped[str | None] = mapped_column(String(14))
+    credor_nome: Mapped[str | None] = mapped_column(String(255))
+    credor_endereco: Mapped[str | None] = mapped_column(Text)
+    credor_email: Mapped[str | None] = mapped_column(String(255))
+    natureza: Mapped[str | None] = mapped_column(String(400))
+    classe: Mapped[str | None] = mapped_column(String(60))
+    valor_centavos: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    data_base: Mapped[date | None] = mapped_column(Date)
+    vencimento: Mapped[date | None] = mapped_column(Date)
+    coobrigados: Mapped[str | None] = mapped_column(Text)
+    pagina_pdf: Mapped[int | None] = mapped_column(Integer)
+    categoria: Mapped[str | None] = mapped_column(String(80))
+    subcategoria: Mapped[str | None] = mapped_column(String(160))
