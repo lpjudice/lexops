@@ -2500,6 +2500,17 @@ export default function CarteiraPage() {
               </div>
             )}
           </div>
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ fontSize: 12, color: 'var(--gray-mid)', display: 'block', marginBottom: 4 }}>Contrato vinculado</label>
+            {!form.cliente_uuid ? (
+              <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>Vincule este cliente ao cadastro principal (campo acima) antes de linkar um contrato.</p>
+            ) : (() => {
+              const doCliente = contratos.filter((ct: any) => ct.cliente_id === form.cliente_uuid)
+              return doCliente.length === 0
+                ? <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>Nenhum contrato cadastrado para este cliente em Contratos &amp; Procurações.</p>
+                : fs('contrato_vinculado_id', doCliente.map((ct: any) => ({ value: ct.id, label: `${ct.titulo} — ${STATUS_CONTRATO_LABEL[ct.status] ?? ct.status}` })))
+            })()}
+          </div>
           <div style={{ marginBottom: 12 }}>
             <label style={{ fontSize: 12, color: 'var(--gray-mid)', display: 'block', marginBottom: 4 }}>Preencher via documento (IA) — contrato de honorários, procuração, doc pessoal:</label>
             <input type="file" accept=".pdf,.jpg,.png,.jpeg" style={{ fontSize: 12 }}
