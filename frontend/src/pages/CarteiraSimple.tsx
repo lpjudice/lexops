@@ -2491,7 +2491,12 @@ export default function CarteiraPage() {
           <div style={{ background: 'var(--gray-light, #f8f9fa)', borderRadius: 6, padding: '10px 14px', marginBottom: 14 }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Pré-preencher de cliente existente</div>
             <UnifiedClientCombo
-              localClientes={localClientesCombos}
+              // Exclui o próprio registro em edição da lista "já tem na carteira" —
+              // senão, se ele já tiver o CPF preenchido igual ao do cadastro
+              // principal (o caso normal de quem já tem CPF cadastrado), o
+              // resultado do Sistema que seria o match certo fica escondido
+              // (a busca "não acha" o próprio cliente que você está editando).
+              localClientes={editandoClienteId ? localClientesCombos.filter((c: any) => c.id !== editandoClienteId) : localClientesCombos}
               onSelect={c => setForm(f => ({ ...f, nome: c.nome ?? f.nome, cpf: c.cpf ?? f.cpf, email: c.email ?? f.email, telefone: c.telefone ?? f.telefone, tipo_pessoa: c.tipo_pessoa ?? f.tipo_pessoa, cliente_uuid: c.cliente_uuid ?? f.cliente_uuid }))}
             />
             {form.cliente_uuid && (
