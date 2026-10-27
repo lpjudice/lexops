@@ -416,3 +416,14 @@
     align-items: stretch;
   }
 }
+
+/* Filtro de cliente com busca (ComboBox) — mesmo porte dos outros filtros */
+.filtroCombo {
+  width: 240px;
+}
+.filtroCombo input {
+  font-size: 12px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  color: #374151;
+}

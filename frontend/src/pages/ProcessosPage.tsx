@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { processosApi } from '../api/processos'
 import { clientesApi } from '../api/clientes'
@@ -6,6 +6,8 @@ import { andamentosApi } from '../api/andamentos'
 import type { ProcessoCreate, EstadoProcesso, FaseProcesso, StatusProcesso, PoloProcesso, SistemaJuridico, GrauProcesso, OrgaoJulgadorTipo, RitoProcesso, ProcessoClienteIn, ProcessoJusbrPrefill } from '../api/processos'
 import { RITO_OPTS } from '../constants/pecas'
 import ClienteCombobox from '../components/ClienteCombobox'
+import ComboBox from '../components/ComboBox'
+import { usePersistentState } from '../utils/usePersistentState'
 import ProcessoChat from '../components/ProcessoChat'
 import MemoriaEstrategica from '../components/MemoriaEstrategica'
 import FontesContexto from '../components/FontesContexto'
@@ -95,19 +97,21 @@ export default function ProcessosPage() {
   const [showTokenModal, setShowTokenModal] = useState(false)
   const [prefillMsg, setPrefillMsg] = useState<string | null>(null)
   const [prefillErro, setPrefillErro] = useState<string | null>(null)
-  const [detalheAberto, setDetalheAberto] = useState<string | null>(null)
-  const [docsChatAberto, setDocsChatAberto] = useState<string | null>(null)
-  const [andamentosAberto, setAndamentosAberto] = useState<string | null>(null)
+  // Persistidos por aba: se o navegador recarregar a página (ex.: ao voltar de um
+  // arquivo aberto em outra aba), o processo que estava aberto e os filtros voltam.
+  const [detalheAberto, setDetalheAberto] = usePersistentState<string | null>('processos:detalhe', null)
+  const [docsChatAberto, setDocsChatAberto] = usePersistentState<string | null>('processos:docsChat', null)
+  const [andamentosAberto, setAndamentosAberto] = usePersistentState<string | null>('processos:andamentos', null)
   // Litisconsórcio state for create form
   const [createLitis, setCreateLitis] = useState<ProcessoClienteIn[]>([])
   // Litisconsórcio state for edit form
   const [editLitis, setEditLitis] = useState<ProcessoClienteIn[]>([])
   // Filters
-  const [filtroTribunal, setFiltroTribunal] = useState('')
-  const [filtroUltMov, setFiltroUltMov] = useState<'todos' | '7d' | '30d' | '90d' | 'sem'>('todos')
-  const [filtroPolo, setFiltroPolo] = useState('')
-  const [filtroCliente, setFiltroCliente] = useState('')
-  const [ordemAlfa, setOrdemAlfa] = useState(false)
+  const [filtroTribunal, setFiltroTribunal] = usePersistentState('processos:fTribunal', '')
+  const [filtroUltMov, setFiltroUltMov] = usePersistentState<'todos' | '7d' | '30d' | '90d' | 'sem'>('processos:fUltMov', 'todos')
+  const [filtroPolo, setFiltroPolo] = usePersistentState('processos:fPolo', '')
+  const [filtroCliente, setFiltroCliente] = usePersistentState('processos:fCliente', '')
+  const [ordemAlfa, setOrdemAlfa] = usePersistentState('processos:ordemAlfa', false)
 
   const { data: processos = [], isLoading } = useQuery({
     queryKey: ['processos'],
@@ -324,6 +328,29 @@ export default function ProcessosPage() {
     return Array.from(set).sort()
   }, [processos])
 
+  const opcoesFiltroCliente = useMemo(
+    () => [
+      { value: '', label: 'Todos os clientes' },
+      ...[...clientes]
+        .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' }))
+        .map((c) => ({ value: c.id, label: c.nome })),
+    ],
+    [clientes],
+  )
+
+  // Filtros restaurados da sessão podem apontar para algo que não existe mais
+  // (cliente apagado, tribunal sem processos): limpa em vez de mostrar lista vazia.
+  useEffect(() => {
+    if (clientes.length > 0 && filtroCliente && !clientes.some((c) => c.id === filtroCliente)) {
+      setFiltroCliente('')
+    }
+  }, [clientes, filtroCliente, setFiltroCliente])
+  useEffect(() => {
+    if (processos.length > 0 && filtroTribunal && !tribunaisUnicos.includes(filtroTribunal)) {
+      setFiltroTribunal('')
+    }
+  }, [processos, filtroTribunal, tribunaisUnicos, setFiltroTribunal])
+
   const processosFiltrados = useMemo(() => {
     let lista = [...processos]
     if (filtroTribunal) lista = lista.filter((p) => p.tribunal === filtroTribunal)
@@ -348,6 +375,19 @@ export default function ProcessosPage() {
     }
     return lista
   }, [processos, clientes, filtroTribunal, filtroUltMov, filtroPolo, filtroCliente, ordemAlfa])
+
+  // Ao restaurar a sessão, leva a tela até o processo que estava aberto (uma vez).
+  const rolouParaAberto = useRef(false)
+  useEffect(() => {
+    if (rolouParaAberto.current) return
+    const alvo = andamentosAberto ?? docsChatAberto ?? detalheAberto
+    if (!alvo || processosFiltrados.length === 0) return
+    const el = document.getElementById(`proc-${alvo}`)
+    if (el) {
+      rolouParaAberto.current = true
+      el.scrollIntoView({ block: 'start' })
+    }
+  }, [processosFiltrados, andamentosAberto, docsChatAberto, detalheAberto])
 
   const jusbrStatusLabel = useMemo(() => {
     if (!jusbrSession?.active) return 'jus.br: sessão inativa'
@@ -627,12 +667,13 @@ export default function ProcessosPage() {
       {/* Filtros */}
       {processos.length > 0 && (
         <div className={ps.filtros}>
-          <select className={ps.filtroSelect} value={filtroCliente} onChange={(e) => setFiltroCliente(e.target.value)}>
-            <option value="">Todos os clientes</option>
-            {[...clientes].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' })).map((c) => (
-              <option key={c.id} value={c.id}>{c.nome}</option>
-            ))}
-          </select>
+          <ComboBox
+            className={ps.filtroCombo}
+            value={filtroCliente}
+            onChange={setFiltroCliente}
+            placeholder="Todos os clientes"
+            options={opcoesFiltroCliente}
+          />
           <select className={ps.filtroSelect} value={filtroTribunal} onChange={(e) => setFiltroTribunal(e.target.value)}>
             <option value="">Todos os tribunais</option>
             {tribunaisUnicos.map((t) => <option key={t} value={t}>{t}</option>)}
@@ -666,7 +707,7 @@ export default function ProcessosPage() {
       ) : (
         <div className={ps.lista}>
           {processosFiltrados.map((p) => (
-            <div key={p.id} className={ps.card}>
+            <div key={p.id} id={`proc-${p.id}`} className={ps.card}>
               {/* Header do card */}
               <div className={ps.cardHeader}>
                 <div
