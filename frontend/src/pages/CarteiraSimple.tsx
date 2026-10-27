@@ -2555,7 +2555,7 @@ export default function CarteiraPage() {
               onSelect={c => setForm(f => ({ ...f, nome: c.nome ?? f.nome, cpf: c.cpf ?? f.cpf, email: c.email ?? f.email, telefone: c.telefone ?? f.telefone, tipo_pessoa: c.tipo_pessoa ?? f.tipo_pessoa, cliente_uuid: c.cliente_uuid ?? f.cliente_uuid }))}
             />
             {form.cliente_uuid && (
-              <div style={{ fontSize: 11, color: 'var(--teal)', marginTop: 4 }}>✓ Vinculado
+              <div style={{ fontSize: 11, color: 'var(--teal)', marginTop: 4 }}>✓ Vinculado a <strong>{nomeClienteSistema(form.cliente_uuid)}</strong>
                 <button style={{ marginLeft: 8, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gray-mid)', fontSize: 11 }} onClick={() => inp('cliente_uuid', '')}>remover</button>
               </div>
             )}
