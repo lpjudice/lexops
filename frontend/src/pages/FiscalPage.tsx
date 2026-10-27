@@ -923,7 +923,7 @@ function EmissaoModal({
                 {contratos.slice(0, 4).map((c) => (
                   <button key={c.id} className={cs.contratoChip}
                     type="button" onClick={() => aplicarContrato(c)}>
-                    <span>{c.descricao || (c as any).objeto_texto_livre || 'Contrato'}</span>
+                    <span>{c.descricao || c.titulo || (c as any).objeto_texto_livre || 'Contrato'}</span>
                     {(c as any).valor_honorarios_num != null && (
                       <span className={cs.contratoValor}>{fmtBRL((c as any).valor_honorarios_num)}</span>
                     )}
@@ -969,7 +969,7 @@ function EmissaoModal({
                     <option value="">— Nenhum —</option>
                     {contratos.map((c) => (
                       <option key={c.id} value={c.id}>
-                        {c.descricao || (c as any).objeto_texto_livre || 'Contrato'}
+                        {c.descricao || c.titulo || (c as any).objeto_texto_livre || 'Contrato'}
                         {(c as any).valor_honorarios_num != null ? ` — ${fmtBRL((c as any).valor_honorarios_num)}` : ''}
                       </option>
                     ))}
