@@ -28,6 +28,7 @@ from app.models.carteira import (
 from app.database import get_db
 from app.dependencies import get_optional_user
 from app.models.usuario import Usuario
+from app.models.financeiro import Honorario
 from app.services.carteira_ia import CarteiraIAService
 from app.services.carteira_relatorios import CarteiraRelatoriosService
 from app.services.carteira_drive import CarteiraDriveService
@@ -180,6 +181,58 @@ def atualizar_cliente(cliente_id: int, data: dict, db: Session = Depends(get_db)
     _commit_amigavel(db, "cliente")
     db.refresh(cliente)
     return cliente
+
+
+@router.post("/clientes/{cliente_id}/puxar-honorarios-financeiro")
+def puxar_honorarios_financeiro(cliente_id: int, db: Session = Depends(get_db), current_user: Optional[Usuario] = Depends(get_optional_user)):
+    """Ação pontual (não é sincronização contínua): ao linkar um contrato, puxa
+    pra cá o % de êxito e o fee fixo já cadastrados em Financeiro > Honorários
+    pra esse cliente — pra não ter que digitar o mesmo número duas vezes em
+    dois lugares que hoje não se falam. Prioriza o honorário do MESMO contrato
+    recém-linkado quando existir; senão usa qualquer honorário do cliente."""
+    import uuid as uuid_mod
+
+    cliente = db.query(CarteiraCliente).filter(CarteiraCliente.id == cliente_id).first()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+    if not cliente.cliente_uuid:
+        raise HTTPException(status_code=400, detail="Cliente não vinculado ao cadastro principal — não há como achar os honorários em Financeiro.")
+
+    try:
+        cliente_uuid = uuid_mod.UUID(cliente.cliente_uuid)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="cliente_uuid inválido")
+
+    honorarios = db.query(Honorario).filter(Honorario.cliente_id == cliente_uuid).all()
+    if cliente.contrato_vinculado_id:
+        try:
+            contrato_uuid = uuid_mod.UUID(cliente.contrato_vinculado_id)
+            do_contrato = [h for h in honorarios if h.contrato_id == contrato_uuid]
+            if do_contrato:
+                honorarios = do_contrato
+        except ValueError:
+            pass
+
+    campos: dict = {}
+    exito_h = next((h for h in honorarios if h.tipo == "exito" and h.percentual_exito is not None), None)
+    if exito_h:
+        cliente.percentual_sucesso_geral = float(exito_h.percentual_exito)
+        campos["percentual_sucesso_geral"] = float(exito_h.percentual_exito)
+
+    fixo_h = next((h for h in honorarios if h.tipo == "fixo"), None)
+    if fixo_h:
+        cliente.pro_labore_tipo = "fixo"
+        cliente.pro_labore_valor = float(fixo_h.valor_total)
+        campos["pro_labore_tipo"] = "fixo"
+        campos["pro_labore_valor"] = float(fixo_h.valor_total)
+
+    if not campos:
+        return {"puxado": False, "campos": {}, "cliente": cliente}
+
+    cliente.atualizado_por = _nome_usuario(current_user)
+    _commit_amigavel(db, "cliente")
+    db.refresh(cliente)
+    return {"puxado": True, "campos": campos, "cliente": cliente}
 
 
 @router.delete("/clientes/{cliente_id}")

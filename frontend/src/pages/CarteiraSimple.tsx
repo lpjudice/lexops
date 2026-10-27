@@ -1158,10 +1158,28 @@ export default function CarteiraPage() {
       api.put(`/carteira/clientes/${id}`, { cronologia_ids: ids }).then(r => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['carteira-clientes'] }),
   })
+  // Puxa (1x, não é sincronização contínua) o % de êxito e o fee fixo já
+  // cadastrados em Financeiro > Honorários pro cliente da Carteira — só
+  // dispara quando um contrato é recém-linkado (não em toda edição).
+  const puxarHonorariosFinanceiro = useMutation({
+    mutationFn: (clienteId: number) => api.post(`/carteira/clientes/${clienteId}/puxar-honorarios-financeiro`).then(r => r.data),
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ['carteira-clientes'] })
+      if (data.puxado) {
+        const partes: string[] = []
+        if (data.campos.percentual_sucesso_geral != null) partes.push(`êxito ${pct(data.campos.percentual_sucesso_geral)}`)
+        if (data.campos.pro_labore_valor != null) partes.push(`fee fixo ${brl(data.campos.pro_labore_valor)}`)
+        alert(`Honorários puxados do Financeiro pra este cliente: ${partes.join(', ')}.`)
+      }
+    },
+  })
   const patchContratoCliente = useMutation({
     mutationFn: ({ id, contratoId }: { id: number; contratoId: string | null }) =>
       api.put(`/carteira/clientes/${id}`, { contrato_vinculado_id: contratoId }).then(r => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['carteira-clientes'] }),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ['carteira-clientes'] })
+      if (variables.contratoId) puxarHonorariosFinanceiro.mutate(variables.id)
+    },
   })
   const patchCronologiaDeb = useMutation({
     mutationFn: ({ id, ids }: { id: number; ids: number[] }) =>
@@ -1334,7 +1352,7 @@ export default function CarteiraPage() {
       percentual_sucesso_geral: c.percentual_sucesso_geral ?? '',
       percentual_sucesso_imob: c.percentual_sucesso_imob ?? '', percentual_sucesso_fin: c.percentual_sucesso_fin ?? '',
       exito_split: !!(c.percentual_sucesso_imob || c.percentual_sucesso_fin),
-      cliente_uuid: c.cliente_uuid ?? '', observacoes: c.observacoes ?? '', ativo: c.ativo ?? true,
+      cliente_uuid: c.cliente_uuid ?? '', contrato_vinculado_id: c.contrato_vinculado_id ?? '', observacoes: c.observacoes ?? '', ativo: c.ativo ?? true,
       criado_por: c.criado_por, atualizado_por: c.atualizado_por,
       data_criacao: c.data_cadastro, data_atualizacao: c.data_atualizacao,
     })
@@ -2592,7 +2610,14 @@ export default function CarteiraPage() {
             ))}
           </div>
           {auditCaption(!!editandoClienteId)}
-          <button className={styles.btnPrimary} onClick={() => editandoClienteId ? atualizarCliente.mutate() : salvarCliente.mutate()} disabled={salvarCliente.isPending || atualizarCliente.isPending}>
+          <button className={styles.btnPrimary} onClick={() => {
+            if (!editandoClienteId) { salvarCliente.mutate(); return }
+            const contratoOriginal = clientes.find((c: any) => c.id === editandoClienteId)?.contrato_vinculado_id || null
+            const contratoNovo = form.contrato_vinculado_id || null
+            atualizarCliente.mutate(undefined, {
+              onSuccess: () => { if (contratoNovo && contratoNovo !== contratoOriginal) puxarHonorariosFinanceiro.mutate(editandoClienteId) },
+            })
+          }} disabled={salvarCliente.isPending || atualizarCliente.isPending}>
             {(salvarCliente.isPending || atualizarCliente.isPending) ? 'Salvando...' : 'Salvar'}
           </button>
         </Modal>
