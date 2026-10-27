@@ -1023,7 +1023,7 @@ export default function ContratosPage() {
                                   onChange={(e) => atualizar({ nome: e.target.value })} />
                               </div>
                               {og.tipo === 'PF' && (
-                                <div className={cs.twoCol} style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
+                                <div className={`${cs.twoCol} ${cs.threeCol}`}>
                                   <div className={styles.formRow}>
                                     <label className={styles.formLabel}>Nacionalidade</label>
                                     <input className={styles.input} value={og.nacionalidade}
@@ -1103,7 +1103,7 @@ export default function ContratosPage() {
 
                         <div className={cs.sectionTitle} style={{ fontSize: 12, marginTop: 12 }}>Outorgado(s) — advogado(s)</div>
                         {gerarProcForm.outorgados.map((adv, i) => (
-                          <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6, alignItems: 'center' }}>
+                          <div key={i} className={cs.outorgadoRow}>
                             <input className={styles.input} placeholder="Nome do advogado" style={{ flex: 2 }}
                               value={adv.nome}
                               onChange={(e) => {
@@ -1363,6 +1363,7 @@ export default function ContratosPage() {
                       )}
 
                       {c.signatarios.length > 0 && (
+                        <div className={cs.tabelaScroll}>
                         <table className={cs.sigTable}>
                           <thead>
                             <tr><th>Nome</th><th>Email</th><th>WhatsApp</th><th>Papel</th><th>Status</th><th></th></tr>
@@ -1396,7 +1397,8 @@ export default function ContratosPage() {
                                     </span>
                                   )}
                                 </td>
-                                <td style={{ display: 'flex', gap: 4 }}>
+                                <td>
+                                  <div style={{ display: 'flex', gap: 4 }}>
                                   {!s.clicksign_erro && s.status_assinatura === 'pendente' &&
                                     ['aguardando_assinatura', 'parcialmente_assinado'].includes(c.status) && (
                                     <button className={styles.btnTable} title="Reenviar e-mail de assinatura"
@@ -1411,11 +1413,13 @@ export default function ContratosPage() {
                                       ×
                                     </button>
                                   )}
+                                  </div>
                                 </td>
                               </tr>
                             ))}
                           </tbody>
                         </table>
+                        </div>
                       )}
 
                       {c.status === 'rascunho' && (

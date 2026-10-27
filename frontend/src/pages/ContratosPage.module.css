@@ -191,6 +191,22 @@
 }
 
 /* ─── Signatários ────────────────────────────────────────────────────── */
+/* A tabela de signatários é mais larga que a tela no celular: rola de lado dentro do card
+   (o .card corta o excedente com overflow:hidden). */
+.tabelaScroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 14px;
+}
+
+.tabelaScroll .sigTable {
+  min-width: 600px;
+  margin-bottom: 0;
+}
+
+.sigTable td { vertical-align: middle; }
+.tabelaScroll .sigTable td { white-space: nowrap; }
+
 .sigTable {
   width: 100%;
   border-collapse: collapse;
@@ -458,3 +474,33 @@
   transition: all 0.12s;
 }
 .btnAtalho:hover { background: #ccf0e8; }
+
+.threeCol {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.outorgadoRow {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+  align-items: center;
+}
+
+/* Celular: formulários de 2/3 colunas empilham (campos ficavam estreitos demais) */
+@media (max-width: 480px) {
+  .twoCol,
+  .threeCol {
+    grid-template-columns: 1fr;
+  }
+
+  /* nome do advogado ocupa a linha; OAB/UF/CPF vão abaixo */
+  .outorgadoRow {
+    flex-wrap: wrap;
+  }
+  .outorgadoRow > input:first-child {
+    flex: 1 1 100% !important;
+  }
+  .outorgadoRow > input {
+    min-width: 0;
+  }
+}
