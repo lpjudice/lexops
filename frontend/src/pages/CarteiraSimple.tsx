@@ -668,7 +668,7 @@ export default function CarteiraPage() {
   const [viewModeImob, setViewModeImob] = useState<'cliente' | 'ativo'>('cliente')
   const [confirmPctOverride, setConfirmPctOverride] = useState<{ tipo: 'fundo' | 'deb' | 'imob', mutateFn: () => void, confirmText: string } | null>(null)
 
-  const { isSuperAdmin } = useAuth()
+  const { isAdmin } = useAuth()
   const qc = useQueryClient()
   const inp = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }))
   const closeModal = () => {
@@ -1669,11 +1669,11 @@ export default function CarteiraPage() {
           <span className={cs.kpiLabel}>Fundos {expandFundos ? '▴' : '▾'}</span>
           <span className={cs.kpiValue}>{brl(kpiFundos)}</span>
         </div>
-        <div className={cs.kpiCard} style={{ cursor: isSuperAdmin ? 'pointer' : undefined }} onClick={() => isSuperAdmin && setDetalheKpi('fee')}>
-          <span className={cs.kpiLabel}>Fee Entrada (esp.)</span><span className={cs.kpiValue}>{isSuperAdmin ? brl(kpiFeeEntrada) : '🔒'}</span>
+        <div className={cs.kpiCard} style={{ cursor: isAdmin ? 'pointer' : undefined }} onClick={() => isAdmin && setDetalheKpi('fee')}>
+          <span className={cs.kpiLabel}>Fee Entrada (esp.)</span><span className={cs.kpiValue}>{isAdmin ? brl(kpiFeeEntrada) : '🔒'}</span>
         </div>
-        <div className={cs.kpiCard} style={{ cursor: isSuperAdmin ? 'pointer' : undefined }} onClick={() => isSuperAdmin && setDetalheKpi('exito')}>
-          <span className={cs.kpiLabel}>Expectativa Êxito</span><span className={cs.kpiValue}>{isSuperAdmin ? brl(kpiExito) : '🔒'}</span>
+        <div className={cs.kpiCard} style={{ cursor: isAdmin ? 'pointer' : undefined }} onClick={() => isAdmin && setDetalheKpi('exito')}>
+          <span className={cs.kpiLabel}>Expectativa Êxito</span><span className={cs.kpiValue}>{isAdmin ? brl(kpiExito) : '🔒'}</span>
         </div>
       </div>
 
@@ -1776,10 +1776,10 @@ export default function CarteiraPage() {
                       </span>
                       <span className={cs.clientePosicaoTotal}>
                         {brl(totalApl)} aplicado
-                        {isSuperAdmin && feeEntrada > 0 && ` · Fee: ${brl(feeEntrada)}`}
-                        {isSuperAdmin && exito > 0 && ` · Êxito esp.: ${brl(exito)}`}
+                        {isAdmin && feeEntrada > 0 && ` · Fee: ${brl(feeEntrada)}`}
+                        {isAdmin && exito > 0 && ` · Êxito esp.: ${brl(exito)}`}
                       </span>
-                      {isSuperAdmin && (() => {
+                      {isAdmin && (() => {
                         const customFnds = fnds.filter(f => f.faz_parte_honorarios && f.percentual_sucesso_honor != null && String(f.percentual_sucesso_honor) !== String(pctExitoFin(c.id)))
                         const customDebs = debs.filter(d => d.faz_parte_honorarios && d.percentual_sucesso_honor != null && String(d.percentual_sucesso_honor) !== String(pctExitoFin(c.id)))
                         if (!customFnds.length && !customDebs.length) return null
@@ -1800,7 +1800,7 @@ export default function CarteiraPage() {
                       <div className={cs.posicaoSecaoTitulo}>Debêntures ({debs.length}) · {brl(debs.reduce((s, d) => s + (d.valor_aplicado ?? 0), 0))}</div>
                       <table className={styles.table} style={{ marginBottom: 0 }}>
                         {colsDeb()}
-                        <thead><tr><th>Cautela</th><th>Emissão</th><th>RA</th>{thR('Aplicado')}{thR('Atual')}<th>Status</th><th>{isSuperAdmin ? 'Êxito%' : '🔒'}</th><th>Estratégia</th><th /></tr></thead>
+                        <thead><tr><th>Cautela</th><th>Emissão</th><th>RA</th>{thR('Aplicado')}{thR('Atual')}<th>Status</th><th>{isAdmin ? 'Êxito%' : '🔒'}</th><th>Estratégia</th><th /></tr></thead>
                         <tbody>
                           {debs.map(d => (
                             <tr key={d.id}>
@@ -1809,7 +1809,7 @@ export default function CarteiraPage() {
                               <td style={{ textAlign: 'right' }}>{brl(d.valor_aplicado)}</td>
                               <td style={{ textAlign: 'right' }}>{d.valor_atual_estimado ? brl(d.valor_atual_estimado) : '—'}</td>
                               <td>{resgateStatusBadge(d.status_resgate)}</td>
-                              <td>{isSuperAdmin ? (() => { if (!d.faz_parte_honorarios) return '—'; const ep = efetivoPctFin(d); return ep.val !== '' ? (ep.custom ? <span title="Personalizado p/ esta posição" style={{ color: '#d97706', fontWeight: 600 }}>{pct(ep.val)}*</span> : pct(ep.val)) : '—' })() : '🔒'}</td>
+                              <td>{isAdmin ? (() => { if (!d.faz_parte_honorarios) return '—'; const ep = efetivoPctFin(d); return ep.val !== '' ? (ep.custom ? <span title="Personalizado p/ esta posição" style={{ color: '#d97706', fontWeight: 600 }}>{pct(ep.val)}*</span> : pct(ep.val)) : '—' })() : '🔒'}</td>
                               <td><EstrategiaChips ids={d.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratDeb.mutate({ id: d.id, ids })} /></td>
                               <td style={{ whiteSpace: 'nowrap' }}>
                                 <button title="Detalhes" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#6b7280', padding: '0 3px' }} onClick={() => setDebInfoId(d.id)}>ⓘ</button>
@@ -1834,7 +1834,7 @@ export default function CarteiraPage() {
                       <div className={cs.posicaoSecaoTitulo}>Imobiliário ({imobs.length}) · {brl(imobs.reduce((s, i) => s + (i.valor_total_compromissado ?? 0), 0))}</div>
                       <table className={styles.table} style={{ marginBottom: 0 }}>
                         {colsImob()}
-                        <thead><tr><th>Empreendimento</th>{thR('Comprometido')}{thR('Investido')}<th>% Part.</th><th>{isSuperAdmin ? 'Êxito%' : '🔒'}</th><th>Estratégia</th><th /></tr></thead>
+                        <thead><tr><th>Empreendimento</th>{thR('Comprometido')}{thR('Investido')}<th>% Part.</th><th>{isAdmin ? 'Êxito%' : '🔒'}</th><th>Estratégia</th><th /></tr></thead>
                         <tbody>
                           {imobs.map(i => (
                             <tr key={i.id}>
@@ -1842,7 +1842,7 @@ export default function CarteiraPage() {
                               <td style={{ textAlign: 'right' }}>{brl(i.valor_total_compromissado)}</td>
                               <td style={{ textAlign: 'right' }}>{brl(i.valor_efetivamente_investido)}</td>
                               <td>{pct(i.percentual_participacao)}</td>
-                              <td>{isSuperAdmin ? (() => { if (!i.faz_parte_honorarios) return '—'; const ep = efetivoPctImob(i); return ep.val !== '' ? (ep.custom ? <span title="Personalizado p/ esta posição" style={{ color: '#d97706', fontWeight: 600 }}>{pct(ep.val)}*</span> : pct(ep.val)) : '—' })() : '🔒'}</td>
+                              <td>{isAdmin ? (() => { if (!i.faz_parte_honorarios) return '—'; const ep = efetivoPctImob(i); return ep.val !== '' ? (ep.custom ? <span title="Personalizado p/ esta posição" style={{ color: '#d97706', fontWeight: 600 }}>{pct(ep.val)}*</span> : pct(ep.val)) : '—' })() : '🔒'}</td>
                               <td><EstrategiaChips ids={i.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratImob.mutate({ id: i.id, ids })} /></td>
                               <td>{rowActions(() => abrirEdicaoImob(i), 'esta posição imobiliária', () => deletarImobPos.mutate(i.id), i)}</td>
                             </tr>
@@ -1863,7 +1863,7 @@ export default function CarteiraPage() {
                       <div className={cs.posicaoSecaoTitulo}>Fundos ({fnds.length}) · {brl(fnds.reduce((s, f) => s + (f.valor_aplicado ?? 0), 0))}</div>
                       <table className={styles.table} style={{ marginBottom: 0 }}>
                         {colsFundos()}
-                        <thead><tr><th>Fundo</th>{thR('Aplicado')}{thR('Atual')}<th>Data</th><th>Recompra</th><th>{isSuperAdmin ? 'Êxito%' : '🔒'}</th><th>Estratégia</th><th /></tr></thead>
+                        <thead><tr><th>Fundo</th>{thR('Aplicado')}{thR('Atual')}<th>Data</th><th>Recompra</th><th>{isAdmin ? 'Êxito%' : '🔒'}</th><th>Estratégia</th><th /></tr></thead>
                         <tbody>
                           {fnds.map(f => (
                             <tr key={f.id}>
@@ -1872,7 +1872,7 @@ export default function CarteiraPage() {
                               <td style={{ textAlign: 'right' }}>{f.valor_atual_estimado ? brl(f.valor_atual_estimado) : '—'}</td>
                               <td>{f.data_aplicacao ?? '—'}</td>
                               <td>{f.tem_direito_recompra ? <span className={`${styles.badge} ${styles.status_suspenso}`}>Sim</span> : '—'}</td>
-                              <td>{isSuperAdmin ? (() => { if (!f.faz_parte_honorarios) return '—'; const ep = efetivoPctFin(f); return ep.val !== '' ? (ep.custom ? <span title="Personalizado p/ esta posição" style={{ color: '#d97706', fontWeight: 600 }}>{pct(ep.val)}*</span> : pct(ep.val)) : '—' })() : '🔒'}</td>
+                              <td>{isAdmin ? (() => { if (!f.faz_parte_honorarios) return '—'; const ep = efetivoPctFin(f); return ep.val !== '' ? (ep.custom ? <span title="Personalizado p/ esta posição" style={{ color: '#d97706', fontWeight: 600 }}>{pct(ep.val)}*</span> : pct(ep.val)) : '—' })() : '🔒'}</td>
                               <td><EstrategiaChips ids={f.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratFundo.mutate({ id: f.id, ids })} /></td>
                               <td>{rowActions(() => abrirEdicaoFundo(f), 'esta posição em fundo', () => deletarFundoPos.mutate(f.id), f)}</td>
                             </tr>
@@ -2058,7 +2058,7 @@ export default function CarteiraPage() {
               </div>
               <table className={styles.table} style={{ marginBottom: 0 }}>
                 {colsDeb()}
-                <thead><tr><th>Cautela</th><th>Emissão</th><th>RA</th>{thR('Aplicado')}{thR('Atual')}<th>Status</th><th>{isSuperAdmin ? 'Êxito%' : '🔒'}</th><th>Estratégia</th><th /></tr></thead>
+                <thead><tr><th>Cautela</th><th>Emissão</th><th>RA</th>{thR('Aplicado')}{thR('Atual')}<th>Status</th><th>{isAdmin ? 'Êxito%' : '🔒'}</th><th>Estratégia</th><th /></tr></thead>
                 <tbody>
                   {g.posicoes.map((d: any) => (
                     <tr key={d.id}>
@@ -2067,7 +2067,7 @@ export default function CarteiraPage() {
                       <td style={{ textAlign: 'right' }}>{brl(d.valor_aplicado)}</td>
                       <td style={{ textAlign: 'right' }}>{d.valor_atual_estimado ? brl(d.valor_atual_estimado) : '—'}</td>
                       <td>{resgateStatusBadge(d.status_resgate)}</td>
-                      <td>{isSuperAdmin ? (d.faz_parte_honorarios ? pct(d.percentual_sucesso_honor) : '—') : '🔒'}</td>
+                      <td>{isAdmin ? (d.faz_parte_honorarios ? pct(d.percentual_sucesso_honor) : '—') : '🔒'}</td>
                       <td><EstrategiaChips ids={d.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratDeb.mutate({ id: d.id, ids })} /></td>
                       <td style={{ whiteSpace: 'nowrap' }}>
                         <button title="Detalhes" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#6b7280', padding: '0 3px' }} onClick={() => setDebInfoId(d.id)}>ⓘ</button>
@@ -2139,7 +2139,7 @@ export default function CarteiraPage() {
               </div>
               <table className={styles.table} style={{ marginBottom: 0 }}>
                 {colsImob()}
-                <thead><tr><th>Empreendimento</th>{thR('Comprometido')}{thR('Investido')}<th>% Part.</th><th>{isSuperAdmin ? 'Êxito%' : '🔒'}</th><th>Estratégia</th><th /></tr></thead>
+                <thead><tr><th>Empreendimento</th>{thR('Comprometido')}{thR('Investido')}<th>% Part.</th><th>{isAdmin ? 'Êxito%' : '🔒'}</th><th>Estratégia</th><th /></tr></thead>
                 <tbody>
                   {g.posicoes.map((i: any) => (
                     <tr key={i.id}>
@@ -2147,7 +2147,7 @@ export default function CarteiraPage() {
                       <td style={{ textAlign: 'right' }}>{brl(i.valor_total_compromissado)}</td>
                       <td style={{ textAlign: 'right' }}>{brl(i.valor_efetivamente_investido)}</td>
                       <td>{pct(i.percentual_participacao)}</td>
-                      <td>{isSuperAdmin ? (i.faz_parte_honorarios ? pct(i.percentual_sucesso_honorario) : '—') : '🔒'}</td>
+                      <td>{isAdmin ? (i.faz_parte_honorarios ? pct(i.percentual_sucesso_honorario) : '—') : '🔒'}</td>
                       <td><EstrategiaChips ids={i.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratImob.mutate({ id: i.id, ids })} /></td>
                       <td>{rowActions(() => abrirEdicaoImob(i), 'esta posição imobiliária', () => deletarImobPos.mutate(i.id), i)}</td>
                     </tr>
@@ -2219,7 +2219,7 @@ export default function CarteiraPage() {
               </div>
               <table className={styles.table} style={{ marginBottom: 0 }}>
                 {colsFundos()}
-                <thead><tr><th>Fundo</th>{thR('Aplicado')}{thR('Atual')}<th>Data</th><th>Recompra</th><th>{isSuperAdmin ? 'Êxito%' : '🔒'}</th><th>Estratégia</th><th /></tr></thead>
+                <thead><tr><th>Fundo</th>{thR('Aplicado')}{thR('Atual')}<th>Data</th><th>Recompra</th><th>{isAdmin ? 'Êxito%' : '🔒'}</th><th>Estratégia</th><th /></tr></thead>
                 <tbody>
                   {g.posicoes.map((f: any) => (
                     <tr key={f.id}>
@@ -2236,7 +2236,7 @@ export default function CarteiraPage() {
                       <td style={{ textAlign: 'right' }}>{f.valor_atual_estimado ? brl(f.valor_atual_estimado) : '—'}</td>
                       <td>{f.data_aplicacao ?? '—'}</td>
                       <td>{f.tem_direito_recompra ? <span className={`${styles.badge} ${styles.status_suspenso}`}>Sim</span> : '—'}</td>
-                      <td>{isSuperAdmin ? (() => { if (!f.faz_parte_honorarios) return '—'; const ep = efetivoPctFin(f); return ep.val !== '' ? (ep.custom ? <span title="Personalizado p/ esta posição" style={{ color: '#d97706', fontWeight: 600 }}>{pct(ep.val)}*</span> : pct(ep.val)) : '—' })() : '🔒'}</td>
+                      <td>{isAdmin ? (() => { if (!f.faz_parte_honorarios) return '—'; const ep = efetivoPctFin(f); return ep.val !== '' ? (ep.custom ? <span title="Personalizado p/ esta posição" style={{ color: '#d97706', fontWeight: 600 }}>{pct(ep.val)}*</span> : pct(ep.val)) : '—' })() : '🔒'}</td>
                       <td><EstrategiaChips ids={f.estrategia_ids ?? []} estrategias={estrategias} onUpdate={ids => patchEstratFundo.mutate({ id: f.id, ids })} /></td>
                       <td>{rowActions(() => abrirEdicaoFundo(f), 'esta posição em fundo', () => deletarFundoPos.mutate(f.id), f)}</td>
                     </tr>
@@ -2320,7 +2320,7 @@ export default function CarteiraPage() {
           <div className={styles.tableCard}>
             <table className={styles.table}>
               <colgroup><col /><col style={{ width: 60 }} /><col style={{ width: 140 }} /><col style={{ width: 160 }} /><col style={{ width: 150 }} /><col style={{ width: 150 }} /><col style={{ width: 80 }} /><col style={{ width: 150 }} /><col style={{ width: 36 }} /><col style={{ width: 36 }} /><col style={{ width: 60 }} /></colgroup>
-              <thead><tr><th>Nome</th><th>Tipo</th><th>CPF/CNPJ</th><th>{isSuperAdmin ? 'Fee entrada' : '🔒 Fee'}</th>{thR(isSuperAdmin ? 'Fee (R$ esp.)' : '🔒')}{thR(isSuperAdmin ? 'Êxito (R$ esp.)' : '🔒')}<th>Status</th><th>Contrato</th><th /><th title="Drive" /></tr></thead>
+              <thead><tr><th>Nome</th><th>Tipo</th><th>CPF/CNPJ</th><th>{isAdmin ? 'Fee entrada' : '🔒 Fee'}</th>{thR(isAdmin ? 'Fee (R$ esp.)' : '🔒')}{thR(isAdmin ? 'Êxito (R$ esp.)' : '🔒')}<th>Status</th><th>Contrato</th><th /><th title="Drive" /></tr></thead>
               <tbody>
                 {clientesFiltradosRef.length === 0
                   ? <tr><td colSpan={11} style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>Nenhum registro</td></tr>
@@ -2335,9 +2335,9 @@ export default function CarteiraPage() {
                         <td><strong>{clienteNome(c.id)}</strong></td>
                         <td><span className={styles.badge}>{c.tipo_pessoa ?? 'PF'}</span></td>
                         <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{c.cpf ?? '—'}</td>
-                        <td>{isSuperAdmin ? feeLbl : '🔒'}</td>
-                        <td style={{ textAlign: 'right' }}>{isSuperAdmin ? (feeEntrada > 0 ? brl(feeEntrada) : '—') : '🔒'}</td>
-                        <td style={{ textAlign: 'right' }}>{isSuperAdmin ? (exito > 0 ? brl(exito) : '—') : '🔒'}</td>
+                        <td>{isAdmin ? feeLbl : '🔒'}</td>
+                        <td style={{ textAlign: 'right' }}>{isAdmin ? (feeEntrada > 0 ? brl(feeEntrada) : '—') : '🔒'}</td>
+                        <td style={{ textAlign: 'right' }}>{isAdmin ? (exito > 0 ? brl(exito) : '—') : '🔒'}</td>
                         <td>{statusBadge(c.ativo)}</td>
                         <td>
                           <ContratoLink
@@ -2582,7 +2582,7 @@ export default function CarteiraPage() {
           )}
           {fl('E-mail', fi('email', 'email'))}
           {fl('Telefone', fi('telefone'))}
-          {isSuperAdmin && (
+          {isAdmin && (
             <div style={{ borderTop: '1px solid var(--gray-border)', margin: '12px 0 0', paddingTop: 12 }}>
               <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 10 }}>Fee de entrada</div>
               {fl('Tipo de fee', fs('pro_labore_tipo', [{ value: '', label: 'Sem fee de entrada' }, { value: 'fixo', label: 'Valor fixo (R$)' }, { value: 'percentual', label: 'Percentual do investimento (%)' }]))}
@@ -2593,7 +2593,7 @@ export default function CarteiraPage() {
               )}
             </div>
           )}
-          {isSuperAdmin && (
+          {isAdmin && (
             <div style={{ borderTop: '1px solid var(--gray-border)', margin: '12px 0 0', paddingTop: 12 }}>
               <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 10 }}>Honorários de êxito</div>
               <div className={styles.formRow}>
@@ -2837,7 +2837,7 @@ export default function CarteiraPage() {
             ]))}
             {form.resgate_antecipado_cautela && fl('Cláusulas do termo de cautela', fta('clausulas_resgate_cautela', 3))}
           </div>
-          {isSuperAdmin && (
+          {isAdmin && (
             <div style={{ borderTop: '1px solid var(--gray-border)', margin: '10px 0', paddingTop: 10 }}>
               <div className={styles.formRow}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
