@@ -14,7 +14,7 @@ from app.models.usuario import Usuario
 from app.schemas.financeiro import (
     HonorarioCreate, HonorarioOut, HonorarioUpdate,
     ParcelaInput, ParcelaOut, ParcelaPagar, ParcelaPagarResultado, ParcelaUpdate,
-    RecebimentoCreate, RecebimentoOut,
+    RecebimentoCreate, RecebimentoOut, RecebimentoUpdate,
     ResumoCliente, ResumoExitoItem, ResumoFinanceiro, ResumoMensal,
 )
 from app.services.carteira_honorarios import calcular_expectativa_exito_carteira
@@ -160,13 +160,32 @@ def adicionar_recebimento(
     db.add(rec)
     db.flush()
     db.refresh(h)
+    _recalc_status_honorario(h)
 
-    # Atualiza status automaticamente
-    total_rec = sum(float(r.valor) for r in h.recebimentos)
-    if total_rec >= float(h.valor_total):
-        h.status = "pago"
-    elif total_rec > 0:
-        h.status = "parcial"
+    db.commit()
+    db.refresh(rec)
+    return rec
+
+
+@router.patch("/recebimentos/{rec_id}", response_model=RecebimentoOut)
+def atualizar_recebimento(
+    rec_id: uuid.UUID, data: RecebimentoUpdate, db: Session = Depends(get_db)
+):
+    """Corrige um recebimento já lançado (valor, data, forma, observação) — por exemplo
+    quando um pagamento via NF foi gravado com valor errado. Recalcula o status do
+    honorário em seguida."""
+    rec = db.query(Recebimento).filter(Recebimento.id == rec_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Recebimento não encontrado")
+
+    for campo, valor in data.model_dump(exclude_unset=True).items():
+        setattr(rec, campo, valor)
+    db.flush()
+
+    h = db.query(Honorario).filter(Honorario.id == rec.honorario_id).first()
+    if h:
+        db.refresh(h)
+        _recalc_status_honorario(h)
 
     db.commit()
     db.refresh(rec)
@@ -187,16 +206,10 @@ def remover_recebimento(
     db.delete(rec)
     db.flush()
 
-    # Recalcula status
     h = db.query(Honorario).filter(Honorario.id == honorario_id).first()
     if h:
-        total_rec = sum(float(r.valor) for r in h.recebimentos if r.id != rec_id)
-        if total_rec <= 0:
-            h.status = "pendente"
-        elif total_rec < float(h.valor_total):
-            h.status = "parcial"
-        else:
-            h.status = "pago"
+        db.refresh(h)
+        _recalc_status_honorario(h)
 
     db.commit()
 
@@ -585,10 +598,13 @@ def resumo_financeiro(db: Session = Depends(get_db)):
         float(r.total) for r in reembolsos if r.status == "pago"
     )
 
-    # Projeção de êxito: sum(valor_causa × percentual_exito/100) para honorários tipo "exito"
+    # Projeção de êxito: sum(valor_causa × percentual_exito/100) para honorários tipo "exito".
+    # exito_conta_financeiro=False fica de fora de propósito — cliente já é acompanhado
+    # pela Carteira (evita contar o mesmo êxito nos dois cards).
     honorarios_exito = [
         h for h in honorarios
         if h.tipo == "exito"
+        and h.exito_conta_financeiro
         and h.valor_causa is not None
         and h.percentual_exito is not None
         and h.status not in ("cancelado", "pago")
@@ -609,6 +625,15 @@ def resumo_financeiro(db: Session = Depends(get_db)):
         ResumoExitoItem(nome=nomes_exito.get(cid, "—"), valor=valor)
         for cid, valor in sorted(projecao_exito_por_cliente_map.items(), key=lambda x: x[1], reverse=True)
     ]
+    # Honorários de êxito que deveriam contar no Financeiro mas faltam valor_causa ou
+    # percentual_exito — ficam fora silenciosamente hoje; conta pra avisar na tela.
+    projecao_exito_sem_dados = sum(
+        1 for h in honorarios
+        if h.tipo == "exito"
+        and h.exito_conta_financeiro
+        and h.status not in ("cancelado", "pago")
+        and (h.valor_causa is None or h.percentual_exito is None)
+    )
 
     # Expectativa de êxito da Carteira (Apex) — especulativa, calculada à parte
     # (posições por ativo, com % próprio por tipo e incerteza bem maior do que
@@ -628,6 +653,7 @@ def resumo_financeiro(db: Session = Depends(get_db)):
         total_reembolsos_pagos=total_reembolsos_pagos,
         projecao_exito=projecao_exito,
         projecao_exito_detalhe=projecao_exito_detalhe,
+        projecao_exito_sem_dados=projecao_exito_sem_dados,
         carteira_expectativa_exito=carteira_exito["total"],
         carteira_expectativa_exito_detalhe=carteira_expectativa_exito_detalhe,
         a_vencer_30=a_vencer_30,

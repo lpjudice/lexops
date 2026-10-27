@@ -768,8 +768,12 @@ function EmissaoModal({
                           onChange={(e) => {
                             const h = honorariosBenef.find(x => x.id === e.target.value)
                             set('honorario_compensacao_id', e.target.value || undefined)
-                            // sugere o valor da compensação = menor entre valor da NF e saldo do recebível
-                            if (h) set('valor_compensacao', Math.min(Number(form.valor_servicos) || h.saldo_pendente, h.saldo_pendente))
+                            // Sugere o valor da compensação = menor entre valor da NF e saldo do
+                            // recebível. Se "Valor dos Serviços" ainda não foi preenchido, NÃO cai
+                            // pro saldo pendente inteiro (bug: já aconteceu de virar "pago" um
+                            // honorário que só recebeu 1 de 3 parcelas) — fica 0, forçando a
+                            // preencher o valor real da NF antes.
+                            if (h) set('valor_compensacao', Math.min(Number(form.valor_servicos) || 0, h.saldo_pendente))
                           }}>
                           <option value="">— escolha o recebível —</option>
                           {honorariosBenef
@@ -794,6 +798,11 @@ function EmissaoModal({
                         Ao marcar esta NF como paga, será lançado um recebimento de {fmtBRL(Number(form.valor_compensacao) || 0)}{' '}
                         no recebível do beneficiário (aparece no Financeiro e no cadastro do cliente).
                       </p>
+                      {Number(form.valor_servicos) > 0 && Number(form.valor_compensacao) !== Number(form.valor_servicos) && (
+                        <p className={cs.fieldHint} style={{ marginTop: 2, fontSize: 12, color: '#b45309', fontWeight: 600 }}>
+                          ⚠ Esse valor é diferente do Valor dos Serviços ({fmtBRL(Number(form.valor_servicos))}). Confirme que é intencional antes de marcar como paga.
+                        </p>
+                      )}
                     </div>
                   )}
                 </>

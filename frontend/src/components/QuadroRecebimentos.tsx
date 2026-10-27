@@ -27,6 +27,9 @@ export default function QuadroRecebimentos() {
   const [sentido, setSentido] = useState<SentidoQuadro>('futuro')
   const [meses, setMeses] = useState(6)
   const [baixando, setBaixando] = useState<string | null>(null)
+  // Fechado por padrão: a tabela cliente×mês pode ficar bem longa e essa seção vem
+  // depois de vários outros cards na mesma página.
+  const [aberto, setAberto] = useState(false)
 
   const { data: q, isLoading } = useQuery({
     queryKey: ['financeiro-quadro', sentido, meses],
@@ -56,10 +59,10 @@ export default function QuadroRecebimentos() {
   const tdNum: React.CSSProperties = { textAlign: 'right', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }
 
   return (
-    <div className={styles.form} style={{ marginBottom: 24 }}>
+    <div className={styles.form} style={{ marginBottom: 24, maxWidth: 'none' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
-        <div className={cs.sectionTitle} style={{ margin: 0 }}>
-          {futuro ? 'Recebimentos programados' : 'Recebimentos realizados'}
+        <div className={cs.sectionTitle} style={{ margin: 0, cursor: 'pointer' }} onClick={() => setAberto((v) => !v)}>
+          {futuro ? 'Recebimentos programados' : 'Recebimentos realizados'} {aberto ? '▲' : '▼'}
         </div>
         <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 6 }}>
@@ -78,7 +81,7 @@ export default function QuadroRecebimentos() {
         </div>
       </div>
 
-      {isLoading || !q ? (
+      {!aberto ? null : isLoading || !q ? (
         <div style={{ fontSize: 13, color: '#6b7280' }}>Carregando…</div>
       ) : q.clientes.length === 0 ? (
         <div style={{ fontSize: 13, color: '#6b7280' }}>

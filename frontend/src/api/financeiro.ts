@@ -56,6 +56,7 @@ export interface Honorario {
   valor_causa?: number
   percentual_exito?: number
   data_estimada_sentenca?: string
+  exito_conta_financeiro?: boolean
   contrato_id?: string | null
   pendente_assinatura?: boolean
   contrato_orfao?: boolean
@@ -81,6 +82,7 @@ export interface HonorarioCreate {
   valor_causa?: number
   percentual_exito?: number
   data_estimada_sentenca?: string
+  exito_conta_financeiro?: boolean
   contrato_id?: string | null
   cobranca_ativa?: boolean
   cobranca_emails?: string[]
@@ -108,6 +110,7 @@ export interface ResumoFinanceiro {
   total_reembolsos_pagos: number
   projecao_exito: number
   projecao_exito_detalhe: ResumoExitoItem[]
+  projecao_exito_sem_dados: number
   carteira_expectativa_exito: number
   carteira_expectativa_exito_detalhe: ResumoExitoItem[]
   a_vencer_30: number
@@ -170,6 +173,9 @@ export const financeiroApi = {
 
   removerRecebimento: (honorarioId: string, recId: string) =>
     api.delete(`/financeiro/honorarios/${honorarioId}/recebimentos/${recId}`),
+
+  editarRecebimento: (recId: string, data: Partial<Pick<RecebimentoCreate, 'valor' | 'data_recebimento' | 'forma_pagamento' | 'observacao'>>) =>
+    api.patch<Recebimento>(`/financeiro/recebimentos/${recId}`, data).then((r) => r.data),
 
   // ── Parcelas ──
   adicionarParcela: (honorarioId: string, data: ParcelaInput) =>

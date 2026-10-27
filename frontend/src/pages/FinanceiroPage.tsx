@@ -46,6 +46,10 @@ export default function FinanceiroPage() {
   const qc = useQueryClient()
   const comprovanteRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const [aba, setAba] = useState<'recebiveis' | 'fluxo'>('recebiveis')
+  // Cards de êxito começam fechados — a lista de ocorrências por cliente pode ser longa
+  // e esses dois números não são o que a maioria das visitas à página precisa ver.
+  const [exitoAberto, setExitoAberto] = useState(false)
+  const [carteiraExitoAberto, setCarteiraExitoAberto] = useState(false)
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<HonorarioCreate>(EMPTY_H)
   const [expandido, setExpandido] = useState<string | null>(null)
@@ -70,6 +74,8 @@ export default function FinanceiroPage() {
   // Correção do valor de uma parcela JÁ paga (ajusta também o recebimento que a quitou)
   const [pagaEdit, setPagaEdit] = useState<{ id: string; valor: number } | null>(null)
   const [pagarModal, setPagarModal] = useState<{ id: string; numero: number; valor: number } | null>(null)
+  // Correção de um recebimento já lançado (ex.: valor errado vindo de NF/compensação)
+  const [recEdit, setRecEdit] = useState<{ id: string; valor: number; data_recebimento: string; observacao: string } | null>(null)
 
   const { data: honorarios = [], isLoading } = useQuery({
     queryKey: ['honorarios', filtroStatus],
@@ -273,6 +279,16 @@ export default function FinanceiroPage() {
     },
   })
 
+  const editarRec = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<Pick<RecebimentoCreate, 'valor' | 'data_recebimento' | 'forma_pagamento' | 'observacao'>> }) =>
+      financeiroApi.editarRecebimento(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['honorarios'] })
+      qc.invalidateQueries({ queryKey: ['financeiro-resumo'] })
+      setRecEdit(null)
+    },
+  })
+
   const uploadComprovante = useMutation({
     mutationFn: ({ recId, file }: { recId: string; file: File }) =>
       financeiroApi.uploadComprovante(recId, file),
@@ -426,16 +442,29 @@ export default function FinanceiroPage() {
           {/* Card de projeção de êxito */}
           {resumo.projecao_exito > 0 && (
             <>
-              <div className={cs.sectionTitle} style={{ margin: '12px 0 6px' }}>Projeção de Êxito</div>
-              <div className={cs.exitoCard} style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
+              <div className={cs.exitoCard} style={{ flexDirection: 'column', alignItems: 'stretch', marginTop: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, cursor: 'pointer' }}
+                  onClick={() => setExitoAberto((v) => !v)}>
                   <div className={cs.exitoDesc}>
-                    Soma dos honorários de êxito esperados (valor da causa × % êxito), excluindo pagos e cancelados.
-                    Este valor <strong>não</strong> compõe o total de honorários contratados.
+                    <strong>Projeção de Êxito</strong> {exitoAberto ? '▲' : '▼'}
+                    {exitoAberto && (
+                      <>
+                        <br />Soma dos honorários de êxito esperados (valor da causa × % êxito), excluindo pagos e cancelados.
+                        Este valor <strong>não</strong> compõe o total de honorários contratados.
+                      </>
+                    )}
+                    {resumo.projecao_exito_sem_dados > 0 && (
+                      <>
+                        <br />
+                        <span style={{ color: '#b45309', fontWeight: 600 }}>
+                          ⚠ {resumo.projecao_exito_sem_dados} honorário(s) de êxito fora dessa soma por falta de Valor da Causa ou % Êxito.
+                        </span>
+                      </>
+                    )}
                   </div>
                   <div className={cs.exitoValor}>{fmtVal(resumo.projecao_exito)}</div>
                 </div>
-                {resumo.projecao_exito_detalhe.length > 0 && (
+                {exitoAberto && resumo.projecao_exito_detalhe.length > 0 && (
                   <div className={cs.exitoDetalheList}>
                     {resumo.projecao_exito_detalhe.map((item) => (
                       <div key={item.nome} className={cs.exitoDetalheItem}>
@@ -452,17 +481,22 @@ export default function FinanceiroPage() {
           {/* Card de expectativa de êxito da Carteira (Apex) — especulativo, à parte */}
           {resumo.carteira_expectativa_exito > 0 && (
             <>
-              <div className={cs.sectionTitle} style={{ margin: '12px 0 6px' }}>Expectativa Êxito — Carteira (especulativo)</div>
-              <div className={cs.carteiraExitoCard}>
-                <div className={cs.carteiraExitoHeader}>
+              <div className={cs.carteiraExitoCard} style={{ marginTop: 12 }}>
+                <div className={cs.carteiraExitoHeader} style={{ cursor: 'pointer' }}
+                  onClick={() => setCarteiraExitoAberto((v) => !v)}>
                   <div className={cs.carteiraExitoDesc}>
-                    Êxito esperado das posições da Carteira (debêntures, fundos e imobiliário) com % próprios por ativo.
-                    Incerteza bem maior do que um honorário de êxito padrão — por isso fica <strong>fora</strong> da
-                    Projeção de Êxito acima, em vez de somado numa nota só.
+                    <strong>Expectativa Êxito — Carteira (especulativo)</strong> {carteiraExitoAberto ? '▲' : '▼'}
+                    {carteiraExitoAberto && (
+                      <>
+                        <br />Êxito esperado das posições da Carteira (debêntures, fundos e imobiliário) com % próprios por ativo.
+                        Incerteza bem maior do que um honorário de êxito padrão — por isso fica <strong>fora</strong> da
+                        Projeção de Êxito acima, em vez de somado numa nota só.
+                      </>
+                    )}
                   </div>
                   <div className={cs.carteiraExitoValor}>{fmtVal(resumo.carteira_expectativa_exito)}</div>
                 </div>
-                {resumo.carteira_expectativa_exito_detalhe.length > 0 && (
+                {carteiraExitoAberto && resumo.carteira_expectativa_exito_detalhe.length > 0 && (
                   <div className={cs.carteiraExitoDetalheList}>
                     {resumo.carteira_expectativa_exito_detalhe.map((item) => (
                       <div key={item.nome} className={cs.carteiraExitoDetalheItem}>
@@ -643,6 +677,18 @@ export default function FinanceiroPage() {
                   value={form.data_estimada_sentenca ?? ''}
                   onChange={(e) => setForm({ ...form, data_estimada_sentenca: e.target.value || undefined })}
                 />
+              </div>
+              <div className={styles.formRow}>
+                <label className={styles.formLabel}>
+                  <input type="checkbox"
+                    checked={form.exito_conta_financeiro ?? true}
+                    onChange={(e) => setForm({ ...form, exito_conta_financeiro: e.target.checked })}
+                    style={{ marginRight: 6 }} />
+                  Contar na Projeção de Êxito do Financeiro
+                </label>
+                <p className={cs.fieldHint} style={{ fontSize: 12, marginTop: 2 }}>
+                  Desmarque se este cliente já é acompanhado pelo menu Carteira — evita somar o mesmo êxito nos dois lugares.
+                </p>
               </div>
             </>
           )}
@@ -1072,6 +1118,25 @@ export default function FinanceiroPage() {
                             </div>
                           </div>
                         )}
+                        {(editForm.tipo ?? h.tipo) === 'exito' && (
+                          <div className={styles.formRow}>
+                            <label className={styles.formLabel}>
+                              <input type="checkbox"
+                                checked={editForm.exito_conta_financeiro ?? h.exito_conta_financeiro}
+                                onChange={(e) => setEditForm({ ...editForm, exito_conta_financeiro: e.target.checked })}
+                                style={{ marginRight: 6 }} />
+                              Contar na Projeção de Êxito do Financeiro
+                            </label>
+                            <p className={cs.fieldHint} style={{ fontSize: 12, marginTop: 2 }}>
+                              Desmarque se este cliente já é acompanhado pelo menu Carteira — evita somar o mesmo êxito nos dois lugares.
+                            </p>
+                            {!(editForm.valor_causa ?? h.valor_causa) || !(editForm.percentual_exito ?? h.percentual_exito) ? (
+                              <p className={cs.fieldHint} style={{ fontSize: 12, marginTop: 2, color: '#b45309', fontWeight: 600 }}>
+                                ⚠ Falta Valor da Causa ou % Êxito — mesmo marcado, este honorário não entra na projeção até preencher os dois.
+                              </p>
+                            ) : null}
+                          </div>
+                        )}
                         <div className={styles.formRow}>
                           <label className={styles.formLabel}>Valor Total (R$)</label>
                           <CurrencyInput className={styles.input}
@@ -1266,10 +1331,33 @@ export default function FinanceiroPage() {
                         <tbody>
                           {h.recebimentos.map((rec) => (
                             <tr key={rec.id}>
-                              <td>{fmtData(rec.data_recebimento)}</td>
-                              <td style={{ textTransform: 'uppercase', fontSize: 11 }}>{rec.forma_pagamento}</td>
-                              <td>{rec.observacao || '—'}</td>
-                              <td className={cs.tdValor}>{fmtVal(rec.valor)}</td>
+                              {recEdit?.id === rec.id ? (
+                                <>
+                                  <td>
+                                    <input type="date" className={styles.input} style={{ padding: '3px 6px' }}
+                                      value={recEdit.data_recebimento}
+                                      onChange={(e) => setRecEdit({ ...recEdit, data_recebimento: e.target.value })} />
+                                  </td>
+                                  <td style={{ textTransform: 'uppercase', fontSize: 11 }}>{rec.forma_pagamento}</td>
+                                  <td>
+                                    <input className={styles.input} style={{ padding: '3px 6px', width: '100%' }}
+                                      value={recEdit.observacao}
+                                      onChange={(e) => setRecEdit({ ...recEdit, observacao: e.target.value })} />
+                                  </td>
+                                  <td className={cs.tdValor}>
+                                    <CurrencyInput className={styles.input} style={{ padding: '3px 6px', width: 120 }}
+                                      value={recEdit.valor}
+                                      onChange={(v) => setRecEdit({ ...recEdit, valor: v })} />
+                                  </td>
+                                </>
+                              ) : (
+                                <>
+                                  <td>{fmtData(rec.data_recebimento)}</td>
+                                  <td style={{ textTransform: 'uppercase', fontSize: 11 }}>{rec.forma_pagamento}</td>
+                                  <td>{rec.observacao || '—'}</td>
+                                  <td className={cs.tdValor}>{fmtVal(rec.valor)}</td>
+                                </>
+                              )}
                               <td>
                                 {rec.comprovante_filename ? (
                                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -1303,21 +1391,43 @@ export default function FinanceiroPage() {
                                 )}
                               </td>
                               <td style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                                <button
-                                  className={styles.btnTable}
-                                  title="Emitir NFS-e para este recebimento"
-                                  onClick={() =>
-                                    navigate(`/fiscal?honorario=${h.id}&recebimento=${rec.id}`)
-                                  }
-                                >
-                                  🧾 NFS-e
-                                </button>
-                                <button
-                                  className={styles.btnDanger}
-                                  onClick={() => removerRec.mutate({ hid: h.id, rid: rec.id })}
-                                >
-                                  ×
-                                </button>
+                                {recEdit?.id === rec.id ? (
+                                  <>
+                                    <button className={styles.btnTable} title="Salvar correção"
+                                      onClick={() => editarRec.mutate({ id: rec.id, data: recEdit })}>
+                                      💾
+                                    </button>
+                                    <button className={styles.btnTable} title="Cancelar" onClick={() => setRecEdit(null)}>✕</button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <button
+                                      className={styles.btnTable}
+                                      title="Corrigir este recebimento (valor, data ou observação)"
+                                      onClick={() => setRecEdit({
+                                        id: rec.id, valor: rec.valor,
+                                        data_recebimento: rec.data_recebimento, observacao: rec.observacao ?? '',
+                                      })}
+                                    >
+                                      ✎
+                                    </button>
+                                    <button
+                                      className={styles.btnTable}
+                                      title="Emitir NFS-e para este recebimento"
+                                      onClick={() =>
+                                        navigate(`/fiscal?honorario=${h.id}&recebimento=${rec.id}`)
+                                      }
+                                    >
+                                      🧾 NFS-e
+                                    </button>
+                                    <button
+                                      className={styles.btnDanger}
+                                      onClick={() => removerRec.mutate({ hid: h.id, rid: rec.id })}
+                                    >
+                                      ×
+                                    </button>
+                                  </>
+                                )}
                               </td>
                             </tr>
                           ))}
