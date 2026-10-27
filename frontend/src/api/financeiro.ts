@@ -4,6 +4,7 @@ export type TipoHonorario = 'fixo' | 'percentual' | 'exito'
 export type StatusHonorario = 'pendente' | 'parcial' | 'pago' | 'cancelado'
 export type FormaPagamento = 'pix' | 'ted' | 'boleto' | 'cheque' | 'dinheiro' | 'outro'
 export type StatusParcela = 'pendente' | 'pago' | 'cancelado'
+export type ExitoStatus = 'estimado' | 'certo'
 
 export interface Recebimento {
   id: string
@@ -57,6 +58,7 @@ export interface Honorario {
   percentual_exito?: number
   data_estimada_sentenca?: string
   exito_conta_financeiro?: boolean
+  exito_status?: ExitoStatus
   contrato_id?: string | null
   pendente_assinatura?: boolean
   contrato_orfao?: boolean
@@ -83,6 +85,7 @@ export interface HonorarioCreate {
   percentual_exito?: number
   data_estimada_sentenca?: string
   exito_conta_financeiro?: boolean
+  exito_status?: ExitoStatus
   contrato_id?: string | null
   cobranca_ativa?: boolean
   cobranca_emails?: string[]

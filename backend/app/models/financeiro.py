@@ -48,6 +48,10 @@ class Honorario(Base):
     # quando o cliente já é acompanhado pelo menu Carteira (evita contar o mesmo
     # êxito nos dois lugares — ver card "Expectativa Êxito — Carteira").
     exito_conta_financeiro: Mapped[bool] = mapped_column(default=True, server_default="true")
+    # 'estimado' = projeção (entra só na Projeção de Êxito); 'certo' = já deve ser
+    # pago de fato (vira honorário contratado normal — entra em total_contratado e
+    # some da Projeção de Êxito, que é só pra valor ainda incerto).
+    exito_status: Mapped[str] = mapped_column(String(20), nullable=False, default="estimado", server_default="estimado")
     # Vinculação ao contrato + status de assinatura
     contrato_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True

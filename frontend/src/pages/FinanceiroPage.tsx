@@ -690,6 +690,15 @@ export default function FinanceiroPage() {
                   Desmarque se este cliente já é acompanhado pelo menu Carteira — evita somar o mesmo êxito nos dois lugares.
                 </p>
               </div>
+              <div className={styles.formRow}>
+                <label className={styles.formLabel}>Êxito é</label>
+                <select className={styles.input}
+                  value={form.exito_status ?? 'estimado'}
+                  onChange={(e) => setForm({ ...form, exito_status: e.target.value as 'estimado' | 'certo' })}>
+                  <option value="estimado">Estimado (projeção — não entra no Total Contratado)</option>
+                  <option value="certo">Certo (já tem que ser pago — entra no Total Contratado)</option>
+                </select>
+              </div>
             </>
           )}
 
@@ -1135,6 +1144,13 @@ export default function FinanceiroPage() {
                                 ⚠ Falta Valor da Causa ou % Êxito — mesmo marcado, este honorário não entra na projeção até preencher os dois.
                               </p>
                             ) : null}
+                            <label className={styles.formLabel} style={{ marginTop: 10, display: 'block' }}>Êxito é</label>
+                            <select className={styles.input}
+                              value={editForm.exito_status ?? h.exito_status}
+                              onChange={(e) => setEditForm({ ...editForm, exito_status: e.target.value as 'estimado' | 'certo' })}>
+                              <option value="estimado">Estimado (projeção — não entra no Total Contratado)</option>
+                              <option value="certo">Certo (já tem que ser pago — entra no Total Contratado)</option>
+                            </select>
                           </div>
                         )}
                         <div className={styles.formRow}>
