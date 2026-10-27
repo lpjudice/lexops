@@ -525,6 +525,7 @@ function ContratoLink({
   onUpdate: (id: string | null) => void
 }) {
   const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
   const [dropStyle, setDropStyle] = useState<React.CSSProperties>({})
   const btnRef = useRef<HTMLButtonElement>(null)
 
@@ -533,12 +534,17 @@ function ContratoLink({
   // de outra pessoa do mesmo grupo — ex.: sócio no mesmo contrato da empresa).
   const doCliente = clienteUuid ? contratos.filter((c: any) => c.cliente_id === clienteUuid) : []
   const outros = clienteUuid ? contratos.filter((c: any) => c.cliente_id !== clienteUuid) : []
-  const disponiveis = [...doCliente, ...outros]
+  const disponiveis = search.length > 0
+    ? [...doCliente, ...outros].filter((c: any) =>
+        c.titulo.toLowerCase().includes(search.toLowerCase()) ||
+        nomeClienteSistema(c.cliente_id).toLowerCase().includes(search.toLowerCase()))
+    : [...doCliente, ...outros]
 
   const abrir = () => {
     if (!btnRef.current) return
     const rect = btnRef.current.getBoundingClientRect()
     setDropStyle({ position: 'fixed', top: rect.bottom + 2, left: rect.left, minWidth: 220, maxWidth: 320, zIndex: 9999, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 6, maxHeight: 260, overflowY: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,0.12)' })
+    setSearch('')
     setOpen(o => !o)
   }
 
@@ -565,9 +571,23 @@ function ContratoLink({
           <div style={dropStyle}>
             {!clienteUuid ? (
               <div style={{ padding: '10px 14px', color: '#9ca3af', fontSize: 12 }}>Cliente não vinculado ao cadastro principal — vincule-o primeiro (campo "Pré-preencher de cliente existente" na edição do cliente) para poder linkar um contrato.</div>
-            ) : disponiveis.length === 0 ? (
+            ) : [...doCliente, ...outros].length === 0 ? (
               <div style={{ padding: '10px 14px', color: '#9ca3af', fontSize: 12 }}>Nenhum contrato cadastrado em Contratos &amp; Procurações.</div>
             ) : (
+              <>
+                <input
+                  autoFocus
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder="Buscar contrato ou titular..."
+                  style={{ width: '100%', boxSizing: 'border-box', padding: '6px 10px', fontSize: 12, border: 'none', borderBottom: '1px solid #e5e7eb', outline: 'none', position: 'sticky', top: 0, background: '#fff' }}
+                />
+                {disponiveis.length === 0 && (
+                  <div style={{ padding: '10px 14px', color: '#9ca3af', fontSize: 12 }}>Nenhum contrato encontrado.</div>
+                )}
+              </>
+            )}
+            {disponiveis.length > 0 && (
               disponiveis.map((c: any) => (
                 <div key={c.id}
                   style={{ padding: '8px 14px', cursor: 'pointer', fontSize: 12, borderBottom: '1px solid #f3f4f6', background: c.id === contratoId ? '#f0fdfa' : undefined }}
@@ -2578,7 +2598,14 @@ export default function CarteiraPage() {
                 ...doCliente.map((ct: any) => ({ value: ct.id, label: `${ct.titulo} — ${STATUS_CONTRATO_LABEL[ct.status] ?? ct.status}` })),
                 ...outros.map((ct: any) => ({ value: ct.id, label: `${ct.titulo} (${nomeClienteSistema(ct.cliente_id)}) — ${STATUS_CONTRATO_LABEL[ct.status] ?? ct.status}` })),
               ]
-              return fs('contrato_vinculado_id', opts)
+              return (
+                <ComboSelect
+                  value={form.contrato_vinculado_id}
+                  onChange={v => inp('contrato_vinculado_id', v)}
+                  options={opts}
+                  placeholder="— Selecione ou busque um contrato —"
+                />
+              )
             })()}
             <p style={{ fontSize: 11, color: '#9ca3af', margin: '4px 0 0' }}>
               Contrato em nome de outra pessoa (ex.: sócio no mesmo contrato da empresa)? Está na lista — procure pelo nome do titular entre parênteses.
