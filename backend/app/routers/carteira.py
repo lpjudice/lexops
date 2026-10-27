@@ -32,7 +32,7 @@ from app.models.financeiro import Honorario
 from app.services.carteira_ia import CarteiraIAService
 from app.services.carteira_relatorios import CarteiraRelatoriosService
 from app.services.carteira_drive import CarteiraDriveService
-from app.services.carteira_honorarios import calcular_expectativa_exito_carteira
+from app.services.carteira_honorarios import calcular_expectativa_exito_carteira, rebalancear_fee_fixo_contrato
 
 router = APIRouter(prefix="/carteira", tags=["carteira"])
 
@@ -174,10 +174,19 @@ def atualizar_cliente(cliente_id: int, data: dict, db: Session = Depends(get_db)
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
 
+    contrato_antigo = cliente.contrato_vinculado_id
     data = _normalizar_cpf_vazio(_limpar_numericos_vazios(CarteiraCliente, data))
     data["atualizado_por"] = _nome_usuario(current_user)
     for key, value in data.items():
         setattr(cliente, key, value)
+
+    # Linkar/deslinkar/trocar o contrato muda quantas pessoas dividem o fee fixo
+    # daquele contrato — rebalanceia os dois grupos (o que perdeu e o que ganhou
+    # este cliente) pra ninguém ficar com a conta errada.
+    if "contrato_vinculado_id" in data and data["contrato_vinculado_id"] != contrato_antigo:
+        db.flush()
+        rebalancear_fee_fixo_contrato(db, contrato_antigo)
+        rebalancear_fee_fixo_contrato(db, cliente.contrato_vinculado_id)
 
     _commit_amigavel(db, "cliente")
     db.refresh(cliente)
@@ -220,8 +229,29 @@ def puxar_honorarios_financeiro(cliente_id: int, db: Session = Depends(get_db), 
         cliente.percentual_sucesso_geral = float(exito_h.percentual_exito)
         campos["percentual_sucesso_geral"] = float(exito_h.percentual_exito)
 
+    def _mesmo_contrato(h: Honorario) -> bool:
+        if not cliente.contrato_vinculado_id or not h.contrato_id:
+            return False
+        try:
+            return h.contrato_id == uuid_mod.UUID(cliente.contrato_vinculado_id)
+        except ValueError:
+            return False
+
     fixo_h = next((h for h in honorarios if h.tipo == "fixo"), None)
-    if fixo_h:
+    if fixo_h and _mesmo_contrato(fixo_h):
+        # Honorário fixo do MESMO contrato vinculado — pode estar compartilhado com
+        # outro(s) cliente(s) da Carteira (ex.: sócios); divide em partes iguais.
+        db.flush()
+        rebalancear_fee_fixo_contrato(db, cliente.contrato_vinculado_id)
+        db.refresh(cliente)
+        campos["pro_labore_tipo"] = "fixo"
+        campos["pro_labore_valor"] = cliente.pro_labore_valor
+        if (cliente.fee_contrato_qtd_pessoas or 1) > 1:
+            campos["fee_contrato_total"] = cliente.fee_contrato_total
+            campos["fee_contrato_qtd_pessoas"] = cliente.fee_contrato_qtd_pessoas
+    elif fixo_h:
+        # Honorário fixo de outro contrato do mesmo cliente (sem vínculo de contrato
+        # aqui, ou vínculo não bate) — não há o que dividir, usa o valor direto.
         cliente.pro_labore_tipo = "fixo"
         cliente.pro_labore_valor = float(fixo_h.valor_total)
         campos["pro_labore_tipo"] = "fixo"

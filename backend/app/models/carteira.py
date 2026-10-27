@@ -49,6 +49,13 @@ class CarteiraCliente(Base):
     # cliente_uuid preenchido antes, já que o Contrato pertence ao Cliente
     # canônico do sistema principal, não ao CarteiraCliente diretamente.
     contrato_vinculado_id = Column(String(36), nullable=True)
+    # Informativo — quando o contrato vinculado tem fee de entrada FIXO e está
+    # vinculado a mais de 1 cliente da Carteira (ex.: sócios no mesmo contrato),
+    # o valor é dividido em partes iguais; estes dois campos só documentam a
+    # conta (valor total do contrato e quantas pessoas dividem) — ver
+    # _rebalancear_fee_fixo_contrato em routers/carteira.py.
+    fee_contrato_total = Column(Float, nullable=True)
+    fee_contrato_qtd_pessoas = Column(Integer, nullable=True)
 
     # Honorários — fee de entrada (uma única vez por investimento)
     pro_labore_tipo = Column(String(50), nullable=True)      # 'fixo' | 'percentual' | null
