@@ -825,21 +825,25 @@ export default function CarteiraPage() {
 
       // Êxito: soma posição a posição, usando o % EFETIVO de cada uma (o
       // override "ALTERAR % DESSE FUNDO APENAS" daquela posição, ou — se não
-      // houver override — o % padrão do cliente).
+      // houver override — o % padrão do cliente). Só entram posições com
+      // "Faz parte de honorários de êxito" marcado — desmarcado = fora da conta.
       const pctFinPadrao = c.percentual_sucesso_fin ?? c.percentual_sucesso_geral ?? 0
       const pctImobPadrao = c.percentual_sucesso_imob ?? c.percentual_sucesso_geral ?? 0
       let exito = 0
       for (const d of debs) {
+        if (!d.faz_parte_honorarios) continue
         const pct = d.percentual_sucesso_honor ?? pctFinPadrao
         exito += (d.valor_aplicado ?? 0) * (pct / 100)
       }
       for (const f of fnds) {
+        if (!f.faz_parte_honorarios) continue
         const queda = fundoRefPorId.get(f.fundo_id)?.percentual_credito_recuperavel
         const base = (f.valor_aplicado ?? 0) * (queda != null ? (1 - queda / 100) : 1)
         const pct = f.percentual_sucesso_honor ?? pctFinPadrao
         exito += base * (pct / 100)
       }
       for (const i of imobs) {
+        if (!i.faz_parte_honorarios) continue
         const pct = i.percentual_sucesso_honorario ?? pctImobPadrao
         exito += (i.valor_total_compromissado ?? 0) * (pct / 100)
       }
@@ -862,12 +866,16 @@ export default function CarteiraPage() {
     const items: DetalheItem[] = []
 
     if (modo === 'exito') {
+      // Só entram posições com "Faz parte de honorários de êxito" marcado,
+      // igual ao agregado em honorariosPorCliente acima.
       for (const d of debs) {
+        if (!d.faz_parte_honorarios) continue
         const pct = d.percentual_sucesso_honor ?? pctFinPadrao
         const valor = d.valor_aplicado ?? 0
         items.push({ tipo: 'Financeiro · Debênture', nome: `${emissaoNome(d.emissao_id)} (${d.numero_cautela})`, valor, pct, resultado: valor * pct / 100 })
       }
       for (const f of fnds) {
+        if (!f.faz_parte_honorarios) continue
         const ref = fundosRef.find((r: any) => r.id === f.fundo_id)
         const queda = ref?.percentual_credito_recuperavel
         const base = (f.valor_aplicado ?? 0) * (queda != null ? (1 - queda / 100) : 1)
@@ -875,6 +883,7 @@ export default function CarteiraPage() {
         items.push({ tipo: 'Financeiro · Fundo', nome: fundoNome(f.fundo_id), valor: f.valor_aplicado ?? 0, pct, resultado: base * pct / 100 })
       }
       for (const i of imobs) {
+        if (!i.faz_parte_honorarios) continue
         const pct = i.percentual_sucesso_honorario ?? pctImobPadrao
         const valor = i.valor_total_compromissado ?? 0
         items.push({ tipo: 'Imobiliário', nome: empreendimentoNome(i.empreendimento_id), valor, pct, resultado: valor * pct / 100 })

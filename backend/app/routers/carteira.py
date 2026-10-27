@@ -32,6 +32,7 @@ from app.models.financeiro import Honorario
 from app.services.carteira_ia import CarteiraIAService
 from app.services.carteira_relatorios import CarteiraRelatoriosService
 from app.services.carteira_drive import CarteiraDriveService
+from app.services.carteira_honorarios import calcular_expectativa_exito_carteira
 
 router = APIRouter(prefix="/carteira", tags=["carteira"])
 
@@ -994,10 +995,10 @@ def dashboard(db: Session = Depends(get_db)):
 
     valor_atual_total = valor_atual_debentures + valor_atual_fundos
 
-    # Expectativa de honorários
-    posicoes_com_honorario = db.query(
-        func.sum(CarteiraDebenturePosicao.valor_atual_estimado * CarteiraDebenturePosicao.percentual_sucesso_honor / 100)
-    ).filter(CarteiraDebenturePosicao.faz_parte_honorarios == True).scalar() or 0
+    # Expectativa de honorários de êxito — mesma conta usada no card "Expectativa
+    # Êxito" da Carteira (só posições com faz_parte_honorarios=True; ver
+    # calcular_expectativa_exito_carteira para a lógica completa de % e fallback).
+    expectativa_exito = calcular_expectativa_exito_carteira(db)
 
     return {
         "total_clientes": total_clientes,
@@ -1005,7 +1006,8 @@ def dashboard(db: Session = Depends(get_db)):
         "carteira_total": carteira_total,
         "valor_atual_total": valor_atual_total,
         "variacao_total_percentual": ((valor_atual_total - carteira_total) / carteira_total * 100) if carteira_total > 0 else 0,
-        "expectativa_honorarios": posicoes_com_honorario,
+        "expectativa_honorarios": expectativa_exito["total"],
+        "expectativa_honorarios_por_cliente": expectativa_exito["por_cliente"],
         "breakdown": {
             "debentures": total_debentures,
             "imobiliario": total_imobiliario,

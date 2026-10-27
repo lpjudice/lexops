@@ -94,6 +94,11 @@ export interface RecebimentoCreate {
   observacao?: string
 }
 
+export interface ResumoExitoItem {
+  nome: string
+  valor: number
+}
+
 export interface ResumoFinanceiro {
   total_contratado: number
   total_recebido: number
@@ -102,6 +107,9 @@ export interface ResumoFinanceiro {
   total_reembolsos_pendentes: number
   total_reembolsos_pagos: number
   projecao_exito: number
+  projecao_exito_detalhe: ResumoExitoItem[]
+  carteira_expectativa_exito: number
+  carteira_expectativa_exito_detalhe: ResumoExitoItem[]
   a_vencer_30: number
   a_vencer_60: number
   a_vencer_90: number

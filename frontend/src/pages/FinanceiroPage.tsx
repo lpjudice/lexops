@@ -427,12 +427,51 @@ export default function FinanceiroPage() {
           {resumo.projecao_exito > 0 && (
             <>
               <div className={cs.sectionTitle} style={{ margin: '12px 0 6px' }}>Projeção de Êxito</div>
-              <div className={cs.exitoCard}>
-                <div className={cs.exitoDesc}>
-                  Soma dos honorários de êxito esperados (valor da causa × % êxito), excluindo pagos e cancelados.
-                  Este valor <strong>não</strong> compõe o total de honorários contratados.
+              <div className={cs.exitoCard} style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
+                  <div className={cs.exitoDesc}>
+                    Soma dos honorários de êxito esperados (valor da causa × % êxito), excluindo pagos e cancelados.
+                    Este valor <strong>não</strong> compõe o total de honorários contratados.
+                  </div>
+                  <div className={cs.exitoValor}>{fmtVal(resumo.projecao_exito)}</div>
                 </div>
-                <div className={cs.exitoValor}>{fmtVal(resumo.projecao_exito)}</div>
+                {resumo.projecao_exito_detalhe.length > 0 && (
+                  <div className={cs.exitoDetalheList}>
+                    {resumo.projecao_exito_detalhe.map((item) => (
+                      <div key={item.nome} className={cs.exitoDetalheItem}>
+                        <span>{item.nome}</span>
+                        <span>{fmtVal(item.valor)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* Card de expectativa de êxito da Carteira (Apex) — especulativo, à parte */}
+          {resumo.carteira_expectativa_exito > 0 && (
+            <>
+              <div className={cs.sectionTitle} style={{ margin: '12px 0 6px' }}>Expectativa Êxito — Carteira (especulativo)</div>
+              <div className={cs.carteiraExitoCard}>
+                <div className={cs.carteiraExitoHeader}>
+                  <div className={cs.carteiraExitoDesc}>
+                    Êxito esperado das posições da Carteira (debêntures, fundos e imobiliário) com % próprios por ativo.
+                    Incerteza bem maior do que um honorário de êxito padrão — por isso fica <strong>fora</strong> da
+                    Projeção de Êxito acima, em vez de somado numa nota só.
+                  </div>
+                  <div className={cs.carteiraExitoValor}>{fmtVal(resumo.carteira_expectativa_exito)}</div>
+                </div>
+                {resumo.carteira_expectativa_exito_detalhe.length > 0 && (
+                  <div className={cs.carteiraExitoDetalheList}>
+                    {resumo.carteira_expectativa_exito_detalhe.map((item) => (
+                      <div key={item.nome} className={cs.carteiraExitoDetalheItem}>
+                        <span>{item.nome}</span>
+                        <span>{fmtVal(item.valor)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </>
           )}

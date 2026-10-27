@@ -15,8 +15,9 @@ from app.schemas.financeiro import (
     HonorarioCreate, HonorarioOut, HonorarioUpdate,
     ParcelaInput, ParcelaOut, ParcelaPagar, ParcelaPagarResultado, ParcelaUpdate,
     RecebimentoCreate, RecebimentoOut,
-    ResumoCliente, ResumoFinanceiro, ResumoMensal,
+    ResumoCliente, ResumoExitoItem, ResumoFinanceiro, ResumoMensal,
 )
+from app.services.carteira_honorarios import calcular_expectativa_exito_carteira
 
 UPLOADS_DIR = Path("/app/uploads/financeiro")
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
@@ -585,14 +586,38 @@ def resumo_financeiro(db: Session = Depends(get_db)):
     )
 
     # Projeção de êxito: sum(valor_causa × percentual_exito/100) para honorários tipo "exito"
-    projecao_exito = sum(
-        float(h.valor_causa) * (float(h.percentual_exito) / 100)
-        for h in honorarios
+    honorarios_exito = [
+        h for h in honorarios
         if h.tipo == "exito"
         and h.valor_causa is not None
         and h.percentual_exito is not None
         and h.status not in ("cancelado", "pago")
+    ]
+    projecao_exito = sum(
+        float(h.valor_causa) * (float(h.percentual_exito) / 100) for h in honorarios_exito
     )
+
+    # Breakdown por cliente do projecao_exito acima (card não dizia a origem do total).
+    projecao_exito_por_cliente_map: dict[uuid.UUID, float] = defaultdict(float)
+    for h in honorarios_exito:
+        projecao_exito_por_cliente_map[h.cliente_id] += float(h.valor_causa) * (float(h.percentual_exito) / 100)
+    nomes_exito = {
+        c.id: c.nome
+        for c in db.query(Cliente).filter(Cliente.id.in_(list(projecao_exito_por_cliente_map.keys()))).all()
+    }
+    projecao_exito_detalhe = [
+        ResumoExitoItem(nome=nomes_exito.get(cid, "—"), valor=valor)
+        for cid, valor in sorted(projecao_exito_por_cliente_map.items(), key=lambda x: x[1], reverse=True)
+    ]
+
+    # Expectativa de êxito da Carteira (Apex) — especulativa, calculada à parte
+    # (posições por ativo, com % próprio por tipo e incerteza bem maior do que
+    # um honorário de êxito padrão). Não entra em projecao_exito.
+    carteira_exito = calcular_expectativa_exito_carteira(db)
+    carteira_expectativa_exito_detalhe = [
+        ResumoExitoItem(nome=item["nome"], valor=item["valor"])
+        for item in carteira_exito["por_cliente"]
+    ]
 
     return ResumoFinanceiro(
         total_contratado=total_contratado,
@@ -602,6 +627,9 @@ def resumo_financeiro(db: Session = Depends(get_db)):
         total_reembolsos_pendentes=total_reembolsos_pendentes,
         total_reembolsos_pagos=total_reembolsos_pagos,
         projecao_exito=projecao_exito,
+        projecao_exito_detalhe=projecao_exito_detalhe,
+        carteira_expectativa_exito=carteira_exito["total"],
+        carteira_expectativa_exito_detalhe=carteira_expectativa_exito_detalhe,
         a_vencer_30=a_vencer_30,
         a_vencer_60=a_vencer_60,
         a_vencer_90=a_vencer_90,

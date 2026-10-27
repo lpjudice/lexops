@@ -164,6 +164,11 @@ class ResumoMensal(BaseModel):
     total_recebido: float
 
 
+class ResumoExitoItem(BaseModel):
+    nome: str
+    valor: float
+
+
 class ResumoFinanceiro(BaseModel):
     total_contratado: float
     total_recebido: float
@@ -172,6 +177,10 @@ class ResumoFinanceiro(BaseModel):
     total_reembolsos_pendentes: float  # reembolsos aguardando pagamento
     total_reembolsos_pagos: float      # reembolsos já pagos
     projecao_exito: float             # soma dos êxitos esperados (valor_causa × percentual)
+    projecao_exito_detalhe: list[ResumoExitoItem] = []  # breakdown por cliente do projecao_exito
+    # Expectativa de êxito da Carteira (Apex) — especulativa, NÃO soma em projecao_exito.
+    carteira_expectativa_exito: float = 0.0
+    carteira_expectativa_exito_detalhe: list[ResumoExitoItem] = []
     a_vencer_30: float                # saldo pendente que vence em até 30 dias
     a_vencer_60: float                # saldo pendente que vence entre 31-60 dias
     a_vencer_90: float                # saldo pendente que vence entre 61-90 dias
