@@ -9,6 +9,7 @@ import type { ComentarioPrazoDoProcesso } from '../api/prazos'
 import InstrucoesJusBRModal from './InstrucoesJusBRModal'
 import ConectarGovBrModal from './ConectarGovBrModal'
 import { JUSBR_VERSION } from '../jusbrVersion'
+import { usePersistentState } from '../utils/usePersistentState'
 import styles from './AndamentosSection.module.css'
 import {
   clearStoredJusbrToken,
@@ -103,8 +104,10 @@ function SyncBanner({ result, ultimoAndamentoPre }: {
 
 export default function AndamentosSection({ processoId, ultimoAndamentoData, ultimoCheck, novosLoteCount = 0 }: Props) {
   const qc = useQueryClient()
-  const [fonte, setFonte] = useState<Fonte>('jusbr')
-  const [offset, setOffset] = useState(0)
+  // Persistidos por processo (por aba): voltar à "página 2" depois de abrir um
+  // arquivo e a página recarregar não joga o usuário de volta para a página 1.
+  const [fonte, setFonte] = usePersistentState<Fonte>(`andamentos:${processoId}:fonte`, 'jusbr')
+  const [offset, setOffset] = usePersistentState<number>(`andamentos:${processoId}:offset`, 0)
   const [showTokenModal, setShowTokenModal] = useState(false)
   const [showPkceModal, setShowPkceModal] = useState(false)
   const [ultimoAndamentoPre, setUltimoAndamentoPre] = useState<string | null | undefined>(ultimoAndamentoData)
