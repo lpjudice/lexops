@@ -44,6 +44,10 @@ class Honorario(Base):
     valor_causa: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
     percentual_exito: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     data_estimada_sentenca: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Se este honorário de êxito entra na Projeção de Êxito do Financeiro. Desmarcar
+    # quando o cliente já é acompanhado pelo menu Carteira (evita contar o mesmo
+    # êxito nos dois lugares — ver card "Expectativa Êxito — Carteira").
+    exito_conta_financeiro: Mapped[bool] = mapped_column(default=True, server_default="true")
     # Vinculação ao contrato + status de assinatura
     contrato_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True

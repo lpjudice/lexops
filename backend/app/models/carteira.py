@@ -43,8 +43,12 @@ class CarteiraCliente(Base):
     qualificacao_id = Column(Integer, nullable=True)
 
     # Vinculações Legais
-    contrato_principal_id = Column(Integer, nullable=True)
+    contrato_principal_id = Column(Integer, nullable=True)  # legado — nunca usado, tipo errado (Integer vs UUID do Contrato)
     procuracao_id = Column(Integer, nullable=True)
+    # Contrato (tabela `contratos`, id UUID) vinculado a este cliente — pede
+    # cliente_uuid preenchido antes, já que o Contrato pertence ao Cliente
+    # canônico do sistema principal, não ao CarteiraCliente diretamente.
+    contrato_vinculado_id = Column(String(36), nullable=True)
 
     # Honorários — fee de entrada (uma única vez por investimento)
     pro_labore_tipo = Column(String(50), nullable=True)      # 'fixo' | 'percentual' | null

@@ -1797,6 +1797,8 @@ def _run_migrations() -> None:
             "ALTER TABLE carteira_imobiliario_posicao ADD COLUMN IF NOT EXISTS cronologia_ids JSONB DEFAULT '[]'",
             "ALTER TABLE carteira_fundo_posicao ADD COLUMN IF NOT EXISTS cronologia_ids JSONB DEFAULT '[]'",
             "ALTER TABLE carteira_estrategia ADD COLUMN IF NOT EXISTS cronologia_ids JSONB DEFAULT '[]'",
+            # Vínculo com um contrato já cadastrado (tabela `contratos`, id UUID)
+            "ALTER TABLE carteira_cliente ADD COLUMN IF NOT EXISTS contrato_vinculado_id VARCHAR(36)",
         ]:
             conn.execute(text(_col))
 

@@ -18,6 +18,13 @@ class RecebimentoCreate(BaseModel):
     parcela_id: uuid.UUID | None = None
 
 
+class RecebimentoUpdate(BaseModel):
+    valor: float | None = None
+    data_recebimento: date | None = None
+    forma_pagamento: FormaPagamento | None = None
+    observacao: str | None = None
+
+
 class RecebimentoOut(BaseModel):
     id: uuid.UUID
     honorario_id: uuid.UUID
@@ -91,6 +98,7 @@ class HonorarioCreate(BaseModel):
     valor_causa: float | None = None
     percentual_exito: float | None = None
     data_estimada_sentenca: date | None = None
+    exito_conta_financeiro: bool = True
     # Vínculo com contrato existente + cobrança
     contrato_id: uuid.UUID | None = None
     cobranca_ativa: bool = False
@@ -111,6 +119,7 @@ class HonorarioUpdate(BaseModel):
     valor_causa: float | None = None
     percentual_exito: float | None = None
     data_estimada_sentenca: date | None = None
+    exito_conta_financeiro: bool | None = None
     contrato_orfao: bool | None = None
     contrato_id: uuid.UUID | None = None
     cobranca_ativa: bool | None = None
@@ -133,6 +142,7 @@ class HonorarioOut(BaseModel):
     valor_causa: float | None = None
     percentual_exito: float | None = None
     data_estimada_sentenca: date | None = None
+    exito_conta_financeiro: bool = True
     contrato_id: uuid.UUID | None = None
     pendente_assinatura: bool = False
     contrato_orfao: bool = False
@@ -164,6 +174,11 @@ class ResumoMensal(BaseModel):
     total_recebido: float
 
 
+class ResumoExitoItem(BaseModel):
+    nome: str
+    valor: float
+
+
 class ResumoFinanceiro(BaseModel):
     total_contratado: float
     total_recebido: float
@@ -172,6 +187,11 @@ class ResumoFinanceiro(BaseModel):
     total_reembolsos_pendentes: float  # reembolsos aguardando pagamento
     total_reembolsos_pagos: float      # reembolsos já pagos
     projecao_exito: float             # soma dos êxitos esperados (valor_causa × percentual)
+    projecao_exito_detalhe: list[ResumoExitoItem] = []  # breakdown por cliente do projecao_exito
+    projecao_exito_sem_dados: int = 0  # honorários de êxito ativos sem valor_causa/percentual_exito (fora da soma)
+    # Expectativa de êxito da Carteira (Apex) — especulativa, NÃO soma em projecao_exito.
+    carteira_expectativa_exito: float = 0.0
+    carteira_expectativa_exito_detalhe: list[ResumoExitoItem] = []
     a_vencer_30: float                # saldo pendente que vence em até 30 dias
     a_vencer_60: float                # saldo pendente que vence entre 31-60 dias
     a_vencer_90: float                # saldo pendente que vence entre 61-90 dias
