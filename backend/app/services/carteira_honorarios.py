@@ -1,3 +1,4 @@
+import uuid as uuid_mod
 from collections import defaultdict
 
 from sqlalchemy.orm import Session
@@ -9,6 +10,49 @@ from app.models.carteira import (
     CarteiraFundoReferencia,
     CarteiraImobiliarioPosicao,
 )
+from app.models.financeiro import Honorario
+
+
+def rebalancear_fee_fixo_contrato(db: Session, contrato_vinculado_id: str | None) -> None:
+    """Um mesmo Contrato pode estar vinculado a VÁRIOS clientes da Carteira (ex.: os
+    sócios de uma empresa, cada um com sua própria posição investida, mas o fee de
+    entrada do contrato é um valor fixo só — não um por sócio). Quando o honorário
+    fixo do Financeiro ligado a esse contrato existe, divide o valor em partes
+    IGUAIS entre todos os clientes ativos hoje vinculados a ele, e grava
+    fee_contrato_total/fee_contrato_qtd_pessoas em cada um só para exibição (ex.:
+    "R$ 10.000 — 1/3 de R$ 30.000"). Honorário do tipo "percentual" não entra aqui:
+    esse já é individualizado por cliente (% sobre o valor investido de cada um).
+    Chamado toda vez que contrato_vinculado_id muda (linkar/deslinkar/trocar) —
+    tanto pro grupo antigo quanto pro novo — pra manter os % sempre corretos.
+    """
+    if not contrato_vinculado_id:
+        return
+
+    grupo = db.query(CarteiraCliente).filter(
+        CarteiraCliente.contrato_vinculado_id == contrato_vinculado_id,
+        CarteiraCliente.ativo == True,
+    ).all()
+    if not grupo:
+        return
+
+    try:
+        contrato_uuid = uuid_mod.UUID(contrato_vinculado_id)
+    except ValueError:
+        return
+
+    fixo_h = (db.query(Honorario)
+              .filter(Honorario.contrato_id == contrato_uuid, Honorario.tipo == "fixo")
+              .first())
+    if not fixo_h:
+        return
+
+    n = len(grupo)
+    por_cabeca = float(fixo_h.valor_total) / n
+    for c in grupo:
+        c.pro_labore_tipo = "fixo"
+        c.pro_labore_valor = por_cabeca
+        c.fee_contrato_total = float(fixo_h.valor_total)
+        c.fee_contrato_qtd_pessoas = n
 
 
 def calcular_expectativa_exito_carteira(db: Session) -> dict:

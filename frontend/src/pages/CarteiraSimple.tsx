@@ -516,11 +516,12 @@ const STATUS_CONTRATO_LABEL: Record<string, string> = {
 // estratégia/cronologia). Sem vínculo mostra alerta — não dá pra saber se o
 // cliente tem contrato sem abrir a aba de Contratos cliente por cliente. ──
 function ContratoLink({
-  clienteUuid, contratoId, contratos, onUpdate,
+  clienteUuid, contratoId, contratos, nomeClienteSistema, onUpdate,
 }: {
   clienteUuid: string | null | undefined
   contratoId: string | null | undefined
   contratos: any[]
+  nomeClienteSistema: (id: string) => string
   onUpdate: (id: string | null) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -528,7 +529,11 @@ function ContratoLink({
   const btnRef = useRef<HTMLButtonElement>(null)
 
   const linked = contratoId ? contratos.find((c: any) => c.id === contratoId) : null
-  const disponiveis = clienteUuid ? contratos.filter((c: any) => c.cliente_id === clienteUuid) : []
+  // Contratos do próprio cliente primeiro; depois TODOS os outros (podem estar em nome
+  // de outra pessoa do mesmo grupo — ex.: sócio no mesmo contrato da empresa).
+  const doCliente = clienteUuid ? contratos.filter((c: any) => c.cliente_id === clienteUuid) : []
+  const outros = clienteUuid ? contratos.filter((c: any) => c.cliente_id !== clienteUuid) : []
+  const disponiveis = [...doCliente, ...outros]
 
   const abrir = () => {
     if (!btnRef.current) return
@@ -561,13 +566,16 @@ function ContratoLink({
             {!clienteUuid ? (
               <div style={{ padding: '10px 14px', color: '#9ca3af', fontSize: 12 }}>Cliente não vinculado ao cadastro principal — vincule-o primeiro (campo "Pré-preencher de cliente existente" na edição do cliente) para poder linkar um contrato.</div>
             ) : disponiveis.length === 0 ? (
-              <div style={{ padding: '10px 14px', color: '#9ca3af', fontSize: 12 }}>Nenhum contrato cadastrado para este cliente em Contratos &amp; Procurações.</div>
+              <div style={{ padding: '10px 14px', color: '#9ca3af', fontSize: 12 }}>Nenhum contrato cadastrado em Contratos &amp; Procurações.</div>
             ) : (
               disponiveis.map((c: any) => (
                 <div key={c.id}
                   style={{ padding: '8px 14px', cursor: 'pointer', fontSize: 12, borderBottom: '1px solid #f3f4f6', background: c.id === contratoId ? '#f0fdfa' : undefined }}
                   onMouseDown={() => { onUpdate(c.id); setOpen(false) }}>
                   <strong>{c.titulo}</strong>
+                  {c.cliente_id !== clienteUuid && (
+                    <span style={{ marginLeft: 6, fontSize: 10, color: '#9ca3af' }}>({nomeClienteSistema(c.cliente_id)})</span>
+                  )}
                   <span style={{ marginLeft: 6, fontSize: 10, color: '#6b7280' }}>{STATUS_CONTRATO_LABEL[c.status] ?? c.status}</span>
                 </div>
               ))
@@ -711,6 +719,9 @@ export default function CarteiraPage() {
   const { data: cronologiasRes = [] } = useQuery({ queryKey: ['carteira-cronologias'], queryFn: () => api.get('/carteira/cronologias').then(r => r.data) })
   const { data: atosRes } = useQuery({ queryKey: ['carteira-atos'], queryFn: () => api.get('/carteira/atos', { params: { limit: 1000 } }).then(r => r.data) })
   const { data: contratosRes = [] } = useQuery({ queryKey: ['contratos-todos'], queryFn: () => api.get('/contratos/').then(r => r.data) })
+  // Nome do cliente-sistema titular de cada contrato — necessário pra achar um contrato
+  // que está em nome de OUTRA pessoa (ex.: sócios no mesmo contrato da empresa).
+  const { data: clientesSistemaRes = [] } = useQuery({ queryKey: ['clientes-sistema-todos'], queryFn: () => api.get('/clientes/').then(r => r.data) })
 
   const clientes: any[] = clientesRes?.data ?? []
   const debentures: any[] = debenturesRes?.data ?? []
@@ -723,6 +734,8 @@ export default function CarteiraPage() {
   const cronologias: any[] = Array.isArray(cronologiasRes) ? cronologiasRes : []
   const atos: any[] = atosRes?.data ?? []
   const contratos: any[] = Array.isArray(contratosRes) ? contratosRes : []
+  const clientesSistema: any[] = Array.isArray(clientesSistemaRes) ? clientesSistemaRes : []
+  const nomeClienteSistema = (id: string) => clientesSistema.find((c: any) => c.id === id)?.nome ?? '—'
 
   // ── Lookups ───────────────────────────────────────────────────────
   const clienteNome = (id: number) => {
@@ -1177,7 +1190,14 @@ export default function CarteiraPage() {
       if (data.puxado) {
         const partes: string[] = []
         if (data.campos.percentual_sucesso_geral != null) partes.push(`êxito ${pct(data.campos.percentual_sucesso_geral)}`)
-        if (data.campos.pro_labore_valor != null) partes.push(`fee fixo ${brl(data.campos.pro_labore_valor)}`)
+        if (data.campos.pro_labore_valor != null) {
+          const qtd = data.campos.fee_contrato_qtd_pessoas
+          partes.push(
+            qtd > 1
+              ? `fee fixo ${brl(data.campos.pro_labore_valor)} (1/${qtd} de ${brl(data.campos.fee_contrato_total)} — contrato dividido com mais ${qtd - 1} cliente(s) da Carteira)`
+              : `fee fixo ${brl(data.campos.pro_labore_valor)}`
+          )
+        }
         alert(`Honorários puxados do Financeiro pra este cliente: ${partes.join(', ')}.`)
       }
     },
@@ -2336,7 +2356,14 @@ export default function CarteiraPage() {
                         <td><span className={styles.badge}>{c.tipo_pessoa ?? 'PF'}</span></td>
                         <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{c.cpf ?? '—'}</td>
                         <td>{isAdmin ? feeLbl : '🔒'}</td>
-                        <td style={{ textAlign: 'right' }}>{isAdmin ? (feeEntrada > 0 ? brl(feeEntrada) : '—') : '🔒'}</td>
+                        <td style={{ textAlign: 'right' }}>
+                          {isAdmin ? (feeEntrada > 0 ? brl(feeEntrada) : '—') : '🔒'}
+                          {isAdmin && (c.fee_contrato_qtd_pessoas ?? 1) > 1 && (
+                            <div style={{ fontSize: 10, color: '#9ca3af' }}>
+                              1/{c.fee_contrato_qtd_pessoas} de {brl(c.fee_contrato_total)}
+                            </div>
+                          )}
+                        </td>
                         <td style={{ textAlign: 'right' }}>{isAdmin ? (exito > 0 ? brl(exito) : '—') : '🔒'}</td>
                         <td>{statusBadge(c.ativo)}</td>
                         <td>
@@ -2344,6 +2371,7 @@ export default function CarteiraPage() {
                             clienteUuid={c.cliente_uuid || null}
                             contratoId={c.contrato_vinculado_id || null}
                             contratos={contratos}
+                            nomeClienteSistema={nomeClienteSistema}
                             onUpdate={contratoId => patchContratoCliente.mutate({ id: c.id, contratoId })}
                           />
                         </td>
@@ -2536,12 +2564,25 @@ export default function CarteiraPage() {
             <label style={{ fontSize: 12, color: 'var(--gray-mid)', display: 'block', marginBottom: 4 }}>Contrato vinculado</label>
             {!form.cliente_uuid ? (
               <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>Vincule este cliente ao cadastro principal (campo acima) antes de linkar um contrato.</p>
+            ) : contratos.length === 0 ? (
+              <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>Nenhum contrato cadastrado em Contratos &amp; Procurações.</p>
             ) : (() => {
+              // Lista TODOS os contratos, não só os em nome do cliente-sistema vinculado —
+              // o contrato pode estar em nome de outra pessoa do mesmo grupo (ex.: o
+              // contrato é da empresa, mas o sócio também é cliente aqui na Carteira).
+              // Os do próprio cliente vêm primeiro; os demais mostram o nome do titular
+              // pra dar pra achar (ex.: digitando "Serpenge" já pula pro contrato certo).
               const doCliente = contratos.filter((ct: any) => ct.cliente_id === form.cliente_uuid)
-              return doCliente.length === 0
-                ? <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>Nenhum contrato cadastrado para este cliente em Contratos &amp; Procurações.</p>
-                : fs('contrato_vinculado_id', doCliente.map((ct: any) => ({ value: ct.id, label: `${ct.titulo} — ${STATUS_CONTRATO_LABEL[ct.status] ?? ct.status}` })))
+              const outros = contratos.filter((ct: any) => ct.cliente_id !== form.cliente_uuid)
+              const opts = [
+                ...doCliente.map((ct: any) => ({ value: ct.id, label: `${ct.titulo} — ${STATUS_CONTRATO_LABEL[ct.status] ?? ct.status}` })),
+                ...outros.map((ct: any) => ({ value: ct.id, label: `${ct.titulo} (${nomeClienteSistema(ct.cliente_id)}) — ${STATUS_CONTRATO_LABEL[ct.status] ?? ct.status}` })),
+              ]
+              return fs('contrato_vinculado_id', opts)
             })()}
+            <p style={{ fontSize: 11, color: '#9ca3af', margin: '4px 0 0' }}>
+              Contrato em nome de outra pessoa (ex.: sócio no mesmo contrato da empresa)? Está na lista — procure pelo nome do titular entre parênteses.
+            </p>
           </div>
           <div style={{ marginBottom: 12 }}>
             <label style={{ fontSize: 12, color: 'var(--gray-mid)', display: 'block', marginBottom: 4 }}>Preencher via documento (IA) — contrato de honorários, procuração, doc pessoal:</label>
