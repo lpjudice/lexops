@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 TipoHonorario = Literal["fixo", "percentual", "exito"]
 StatusHonorario = Literal["pendente", "parcial", "pago", "cancelado"]
+ExitoStatus = Literal["estimado", "certo"]
 FormaPagamento = Literal["pix", "ted", "boleto", "cheque", "dinheiro", "outro"]
 StatusParcela = Literal["pendente", "pago", "cancelado"]
 
@@ -99,6 +100,7 @@ class HonorarioCreate(BaseModel):
     percentual_exito: float | None = None
     data_estimada_sentenca: date | None = None
     exito_conta_financeiro: bool = True
+    exito_status: ExitoStatus = "estimado"
     # Vínculo com contrato existente + cobrança
     contrato_id: uuid.UUID | None = None
     cobranca_ativa: bool = False
@@ -120,6 +122,7 @@ class HonorarioUpdate(BaseModel):
     percentual_exito: float | None = None
     data_estimada_sentenca: date | None = None
     exito_conta_financeiro: bool | None = None
+    exito_status: ExitoStatus | None = None
     contrato_orfao: bool | None = None
     contrato_id: uuid.UUID | None = None
     cobranca_ativa: bool | None = None
@@ -143,6 +146,7 @@ class HonorarioOut(BaseModel):
     percentual_exito: float | None = None
     data_estimada_sentenca: date | None = None
     exito_conta_financeiro: bool = True
+    exito_status: ExitoStatus = "estimado"
     contrato_id: uuid.UUID | None = None
     pendente_assinatura: bool = False
     contrato_orfao: bool = False

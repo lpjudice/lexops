@@ -521,10 +521,18 @@ def resumo_financeiro(db: Session = Depends(get_db)):
     d60 = hoje + timedelta(days=60)
     d90 = hoje + timedelta(days=90)
 
-    # Pendente de assinatura: não entra nos totais (mostrado separado na UI)
-    total_contratado = sum(float(h.valor_total) for h in honorarios if not h.pendente_assinatura)
-    total_recebido = sum(h.total_recebido for h in honorarios if not h.pendente_assinatura)
-    total_pendente = sum(h.saldo_pendente for h in honorarios if h.status != "pago" and not h.pendente_assinatura)
+    # Honorário de êxito "estimado" é projeção, não valor contratado de fato — só entra
+    # em total_contratado/pendente/vencido/a_vencer quando exito_status="certo" (o
+    # êxito efetivamente tem que ser pago). exito_conta_financeiro=False fica fora
+    # sempre (cliente acompanhado pela Carteira). Honorário fixo/percentual não é afetado.
+    def _conta_contratado(h: Honorario) -> bool:
+        return h.tipo != "exito" or (h.exito_conta_financeiro and h.exito_status == "certo")
+
+    honorarios_contratado = [h for h in honorarios if not h.pendente_assinatura and _conta_contratado(h)]
+
+    total_contratado = sum(float(h.valor_total) for h in honorarios_contratado)
+    total_recebido = sum(h.total_recebido for h in honorarios_contratado)
+    total_pendente = sum(h.saldo_pendente for h in honorarios_contratado if h.status != "pago")
     # Vencido / a vencer: com cronograma vale a data de cada parcela EM ABERTO (o
     # vencimento do recebível fica na 1ª parcela e já passou quando ela foi paga);
     # sem cronograma, o vencimento do próprio recebível sobre o saldo pendente.
@@ -535,7 +543,7 @@ def resumo_financeiro(db: Session = Depends(get_db)):
             return [(p.data_vencimento, float(p.valor)) for p in h.parcelas if p.status == "pendente"]
         return [(h.data_vencimento, h.saldo_pendente)] if h.data_vencimento else []
 
-    itens = [it for h in honorarios for it in _itens_a_receber(h)]
+    itens = [it for h in honorarios if _conta_contratado(h) for it in _itens_a_receber(h)]
     total_vencido = sum(v for d, v in itens if d < hoje)
 
     # A vencer por faixa (vencimento futuro)
@@ -547,9 +555,7 @@ def resumo_financeiro(db: Session = Depends(get_db)):
     por_cliente_map: dict[uuid.UUID, dict] = defaultdict(lambda: {
         "total_contratado": 0.0, "total_recebido": 0.0
     })
-    for h in honorarios:
-        if h.pendente_assinatura:
-            continue
+    for h in honorarios_contratado:
         por_cliente_map[h.cliente_id]["total_contratado"] += float(h.valor_total)
         por_cliente_map[h.cliente_id]["total_recebido"] += h.total_recebido
 
@@ -598,13 +604,15 @@ def resumo_financeiro(db: Session = Depends(get_db)):
         float(r.total) for r in reembolsos if r.status == "pago"
     )
 
-    # Projeção de êxito: sum(valor_causa × percentual_exito/100) para honorários tipo "exito".
-    # exito_conta_financeiro=False fica de fora de propósito — cliente já é acompanhado
-    # pela Carteira (evita contar o mesmo êxito nos dois cards).
+    # Projeção de êxito: sum(valor_causa × percentual_exito/100) para honorários tipo "exito"
+    # ainda "estimado". exito_conta_financeiro=False fica de fora de propósito (cliente já
+    # acompanhado pela Carteira). exito_status="certo" também fica fora daqui — já conta
+    # em total_contratado acima, não é mais só projeção.
     honorarios_exito = [
         h for h in honorarios
         if h.tipo == "exito"
         and h.exito_conta_financeiro
+        and h.exito_status == "estimado"
         and h.valor_causa is not None
         and h.percentual_exito is not None
         and h.status not in ("cancelado", "pago")
@@ -631,6 +639,7 @@ def resumo_financeiro(db: Session = Depends(get_db)):
         1 for h in honorarios
         if h.tipo == "exito"
         and h.exito_conta_financeiro
+        and h.exito_status == "estimado"
         and h.status not in ("cancelado", "pago")
         and (h.valor_causa is None or h.percentual_exito is None)
     )
