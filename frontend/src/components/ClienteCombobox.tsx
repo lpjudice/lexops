@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { Cliente } from '../api/clientes'
 import styles from './ClienteCombobox.module.css'
 
@@ -16,24 +17,49 @@ export default function ClienteCombobox({ value, onChange, clientes, onCreateCli
   const [nomeNovo, setNomeNovo] = useState('')
   const [tipoNovo, setTipoNovo] = useState<'PF' | 'PJ'>('PF')
   const [saving, setSaving] = useState(false)
+  // Posição do dropdown (portal em position:fixed, para não ser cortado por overflow).
+  const [coords, setCoords] = useState<{ left: number; top: number; width: number } | null>(null)
   const ref = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLDivElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
 
   const selected = clientes.find((c) => c.id === value)
-
   const filtered = clientes.filter((c) =>
     c.nome.toLowerCase().includes(query.toLowerCase())
   )
 
+  const atualizarPos = () => {
+    const el = triggerRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    setCoords({ left: r.left, top: r.bottom + 4, width: r.width })
+  }
+
+  const abrir = () => { atualizarPos(); setOpen(true); setQuery('') }
+
   useEffect(() => {
     const handle = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false)
-        setCreating(false)
-      }
+      const t = e.target as Node
+      if (ref.current?.contains(t)) return
+      if (dropdownRef.current?.contains(t)) return
+      setOpen(false)
+      setCreating(false)
     }
     document.addEventListener('mousedown', handle)
     return () => document.removeEventListener('mousedown', handle)
   }, [])
+
+  // Reposiciona em scroll/resize enquanto aberto (capture pega scrolls internos).
+  useEffect(() => {
+    if (!open) return
+    const h = () => atualizarPos()
+    window.addEventListener('scroll', h, true)
+    window.addEventListener('resize', h)
+    return () => {
+      window.removeEventListener('scroll', h, true)
+      window.removeEventListener('resize', h)
+    }
+  }, [open])
 
   const select = (id: string) => {
     onChange(id)
@@ -45,7 +71,6 @@ export default function ClienteCombobox({ value, onChange, clientes, onCreateCli
     if (!nomeNovo.trim()) return
     setSaving(true)
     try {
-      // Pass nome|tipo — parent handles API call; incompleto is set by parent
       const id = await onCreateCliente(nomeNovo.trim() + '|' + tipoNovo)
       select(id)
       setCreating(false)
@@ -58,8 +83,9 @@ export default function ClienteCombobox({ value, onChange, clientes, onCreateCli
   return (
     <div className={styles.root} ref={ref}>
       <div
+        ref={triggerRef}
         className={`${styles.trigger} ${open ? styles.triggerOpen : ''} ${!value ? styles.triggerEmpty : ''}`}
-        onClick={() => { setOpen(!open); setQuery('') }}
+        onClick={() => { if (open) { setOpen(false) } else { abrir() } }}
       >
         <span className={styles.triggerText}>
           {selected ? selected.nome : 'Selecione ou pesquise...'}
@@ -67,8 +93,12 @@ export default function ClienteCombobox({ value, onChange, clientes, onCreateCli
         <span className={styles.arrow}>{open ? '▲' : '▼'}</span>
       </div>
 
-      {open && (
-        <div className={styles.dropdown}>
+      {open && coords && createPortal(
+        <div
+          ref={dropdownRef}
+          className={styles.dropdown}
+          style={{ position: 'fixed', left: coords.left, top: coords.top, width: coords.width, right: 'auto', zIndex: 3000 }}
+        >
           <input
             className={styles.search}
             autoFocus
@@ -137,7 +167,8 @@ export default function ClienteCombobox({ value, onChange, clientes, onCreateCli
               </div>
             </div>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )

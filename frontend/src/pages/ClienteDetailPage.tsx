@@ -6,6 +6,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { clientesApi, type Cliente, type EmailCliente } from '../api/clientes'
 import { ClienteVinculos } from '../components/VinculosEditor'
 import { isoParaBr } from '../utils/masks'
+import ClienteFormFields, { comDataIso } from '../components/ClienteFormFields'
+import type { ClienteCreate } from '../api/clientes'
 import { useAuth } from '../contexts/AuthContext'
 import { processosApi } from '../api/processos'
 import { anotacoesApi } from '../api/anotacoes'
@@ -1093,6 +1095,33 @@ function DadosCadastraisAba({ cliente }: { cliente: Cliente }) {
     qc.invalidateQueries({ queryKey: ['clientes'] })
     return c.id
   }
+
+  // Edição inline de todos os dados cadastrais, direto na aba Dados.
+  const [editando, setEditando] = useState(false)
+  const [editForm, setEditForm] = useState<Partial<ClienteCreate>>({})
+  const salvar = useMutation({
+    mutationFn: () => clientesApi.atualizar(cliente.id, comDataIso({ ...editForm, incompleto: false })),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['cliente', cliente.id] })
+      qc.invalidateQueries({ queryKey: ['clientes'] })
+      setEditando(false)
+    },
+  })
+  function abrirEdicao() {
+    setEditForm({
+      nome: cliente.nome, tipo: cliente.tipo, cpf_cnpj: cliente.cpf_cnpj, email: cliente.email,
+      telefone: cliente.telefone, whatsapp: cliente.whatsapp, observacoes: cliente.observacoes,
+      cep: cliente.cep, logradouro: cliente.logradouro, numero: cliente.numero, complemento: cliente.complemento,
+      bairro: cliente.bairro, cidade: cliente.cidade, uf: cliente.uf,
+      data_nascimento: isoParaBr(cliente.data_nascimento), rg: cliente.rg, nacionalidade: cliente.nacionalidade,
+      estado_civil: cliente.estado_civil, profissao: cliente.profissao,
+      nome_fantasia: cliente.nome_fantasia, responsavel_nome: cliente.responsavel_nome,
+      responsavel_cpf: cliente.responsavel_cpf, responsavel_email: cliente.responsavel_email,
+      responsavel_telefone: cliente.responsavel_telefone,
+    })
+    setEditando(true)
+  }
+
   const endereco = [
     cliente.logradouro,
     cliente.numero,
@@ -1127,7 +1156,30 @@ function DadosCadastraisAba({ cliente }: { cliente: Cliente }) {
 
   return (
     <div style={{ padding: '8px 0' }}>
-      {visiveis.length === 0 ? (
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        {editando ? (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className={styles.btnTable} onClick={() => setEditando(false)} disabled={salvar.isPending}>
+              Cancelar
+            </button>
+            <button className={styles.btnPrimary} onClick={() => salvar.mutate()}
+              disabled={salvar.isPending || !(editForm.nome ?? '').trim()}>
+              {salvar.isPending ? 'Salvando...' : 'Salvar dados'}
+            </button>
+          </div>
+        ) : (
+          <button className={styles.btnTable} onClick={abrirEdicao}>✏️ Editar dados</button>
+        )}
+      </div>
+
+      {editando ? (
+        <div className={styles.form}>
+          <ClienteFormFields
+            form={editForm as ClienteCreate}
+            onChange={(f) => setEditForm(f)}
+          />
+        </div>
+      ) : visiveis.length === 0 ? (
         <p style={{ color: '#94a3b8', fontSize: 14 }}>Nenhum dado cadastral preenchido ainda.</p>
       ) : (
         <div style={{ display: 'grid', gap: 1, background: 'var(--border, #e2e8f0)', borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border, #e2e8f0)' }}>
